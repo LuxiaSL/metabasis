@@ -1,0 +1,24 @@
+# ── Repo policy: git tracks CODE ONLY (+ eventually paper/tex, by explicit
+# ── decision). Results, banks, docs, and research logs live in the working
+# ── tree but never on the remote.
+outputs/
+docs/
+research/
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+dist/
+build/
+
+# Env / secrets — never committed, values live in the local off-repo runbook
+.env
+*.key
+
+# Editor / OS noise
+.vscode/
+.idea/
+.DS_Store
