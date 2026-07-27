@@ -22,3 +22,6 @@ build/
 .vscode/
 .idea/
 .DS_Store
+
+# Session tooling (local-only)
+CLAUDE.md
