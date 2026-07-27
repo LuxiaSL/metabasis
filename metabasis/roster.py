@@ -96,7 +96,23 @@ class RosterNode(BaseModel):
     checkpoint_identity: Literal["instruct", "base"]
     config_sha256: str | None = Field(
         default=None, description="sha256 of the config.json these numbers came from")
+    max_position_embeddings: int | None = Field(
+        default=None,
+        description="the checkpoint's positional capacity. For LEARNED absolute "
+                    "position embeddings (GPT-2 lineage) this is a HARD ceiling: a "
+                    "longer sequence indexes past the `wpe` table. Recorded so the "
+                    "job preflight's corpus-length check is mechanical, not folklore.")
+    blocked_reason: str | None = Field(
+        default=None,
+        description="non-None => this node MUST NOT be collected. Set when a "
+                    "verified, non-negotiable blocker exists (e.g. the frozen corpus "
+                    "does not fit the architecture). Job preflights assert this is "
+                    "None; the desk clears it only with an explicit ruling.")
     notes: str = ""
+
+    @property
+    def is_blocked(self) -> bool:
+        return self.blocked_reason is not None
 
     @field_validator("arms")
     @classmethod
@@ -177,7 +193,78 @@ WAVE1: tuple[RosterNode, ...] = (
               "agree, which is what the arm-consistency rule cares about."),
 )
 
-ROSTER: dict[str, RosterNode] = {n.key: n for n in WAVE1}
+# Hub rungs 2 (2026-07-27): three more pairs to firm the star constants before the
+# first prediction batch. Architecture facts read from each checkpoint's own
+# config.json on 2026-07-27 (shas below), on the collection node, in the collection
+# venv (transformers 5.3.0); checkpoint identity verified per rake M9 — eos ids +
+# generation_config + chat-template sha, NEVER the directory name.
+HUB_RUNGS_2: tuple[RosterNode, ...] = (
+    RosterNode(
+        key="pythia-6.9b", model_id="EleutherAI/pythia-6.9b",
+        roster_row=16, arms=("raw",), num_hidden_layers=32, hidden_size=4096,
+        weights_dirname="pythia-6.9b", checkpoint_identity="base",
+        config_sha256="d7f2d0bbfa279e3324423a2882d8fd1e1276fce7806a152cf5f5648733fdccab",
+        max_position_embeddings=2048,
+        notes="GPTNeoXForCausalLM — the FIRST non-`.model.layers` architecture on the "
+              "roster; resolves as `.gpt_neox.layers` via base_model_prefix (hooks.py "
+              "fallback added 2026-07-27, CPU-verified against output_hidden_states). "
+              "BASE: no chat template, no generation_config, bos == eos == 0 — raw arm "
+              "only, per prereg row 16. Rotary (rotary_pct=0.25), so 2048 is a soft "
+              "context, but the corpus tops out at 1526 raw tokens anyway (headroom "
+              "522, all 780 texts fit). NAMED DTYPE NOTE: config torch_dtype is "
+              "float16 (Pythia was trained fp16) while the collector forwards in "
+              "bfloat16 like every other node — uniform campaign treatment, and the "
+              "bitwise spot-replay gate certifies determinism, but bf16 has 3 fewer "
+              "mantissa bits than fp16, so this is a real (if uniform) cast."),
+    RosterNode(
+        key="gpt2-xl", model_id="openai-community/gpt2-xl",
+        roster_row=17, arms=("raw",), num_hidden_layers=48, hidden_size=1600,
+        weights_dirname="gpt2-xl", checkpoint_identity="base",
+        config_sha256="be48115d52314bc27327e160bf10197760db02ea689d10adb24db4102edf7a8a",
+        max_position_embeddings=1024,
+        blocked_reason=(
+            "THE FROZEN CORPUS DOES NOT FIT GPT-2. GPT-2 uses LEARNED absolute "
+            "position embeddings (`wpe`, n_positions=1024) — a hard ceiling, not a "
+            "soft one. Tokenized with GPT-2's own BPE, 148 of the 780 frozen corpus "
+            "texts exceed 1024 tokens on the raw arm (max 1565, i.e. 541 past the "
+            "limit; min 2, mean 643.9). Every one of those 148 forwards would raise "
+            "or index garbage. There is no in-scope fix: the corpus, seed and split "
+            "are FROZEN (prereg §4, n_train=600), so dropping the 148 over-length "
+            "texts would break the frozen split, and truncating them would change "
+            "the banked object. This is an ARCHITECTURE-level blocker, not a "
+            "checkpoint one — every GPT-2 variant ships n_positions=1024. Requires a "
+            "desk/Luxia ruling: drop row 17, amend the prereg, or take the "
+            "reallocation the prereg already contemplates for pair leg 12 "
+            "(\"judged only if its entropy-write column shows any signal, else leg "
+            "reallocated\"). DO NOT COLLECT until cleared."),
+        notes="GPT2LMHeadModel — resolves as `.transformer.h` (the GPT-2 lineage names "
+              "its decoder stack `h`, not `layers`); hooks.py fallback covers it and "
+              "the capture was CPU-verified bit-identical to output_hidden_states, so "
+              "the hook path is READY if the corpus question is ever resolved. Row 17 "
+              "is the deliberate floor-stress rung (d=1600, oldest diet). BASE: no "
+              "chat template, bos == eos == 50256. Weights are fp32 on disk (config "
+              "carries no torch_dtype); the collector would forward bf16."),
+    RosterNode(
+        key="llama-3.1-70b-instruct", model_id="meta-llama/Llama-3.1-70B-Instruct",
+        roster_row=11, arms=("native", "raw"), num_hidden_layers=80, hidden_size=8192,
+        weights_dirname="llama-3.1-70b-instruct", checkpoint_identity="instruct",
+        config_sha256="fa6e9124e4621df77aecf96fbfaf7975814013d2d5ab1c972e965000588a9749",
+        max_position_embeddings=131072,
+        notes="The scale ceiling of the lineage-matched ladder, and the first node "
+              "collected through the SHARDED path (`--shard-across 2 "
+              "--assert-multi-device`; cert PASSED 2026-07-27, ledger "
+              "collection/shard-cert). ~140 GiB bf16 does not fit one card beside the "
+              "~66 GiB foreign resident. NEVER --allow-offload (standing desk ruling). "
+              "IDENTITY (rake M9, verified independently of the dirname): eos ids "
+              "[128001, 128008, 128009] and generation_config temperature 0.6 / "
+              "top_p 0.9 — the instruct signature; chat-template sha e10ca381… is "
+              "IDENTICAL to the banked 8B hub, so the native arm is lineage-matched to "
+              "the hub by construction. NOT to be confused with the sibling BASE "
+              "`Llama-3.1-70B` directory on the shared store, which is QUARANTINED "
+              "(rake M9: another user's hand-written chat template)."),
+)
+
+ROSTER: dict[str, RosterNode] = {n.key: n for n in WAVE1 + HUB_RUNGS_2}
 
 #: model key -> its 12-site scan grid. This is what `--sites` should carry for a
 #: scan collection, and what `--tgt-sites` should carry for the scan fit.
@@ -185,17 +272,36 @@ SCAN_GRIDS: dict[str, tuple[int, ...]] = {k: n.scan_grid for k, n in ROSTER.item
 
 
 def scan_grid_table() -> str:
-    """The desk-ratification table: model · row · n_layers · grid."""
+    """The desk-ratification table: model · row · arms · n_layers · grid."""
     w = max(len(k) for k in ROSTER)
-    head = (f"{'model key':<{w}}  row  n_layers  scan grid "
+    head = (f"{'model key':<{w}}  row  arms         n_layers  scan grid "
             f"({SCAN_N_SITES} sites, depth {SCAN_DEPTH_LO}–{SCAN_DEPTH_HI})")
     rows = [head, "-" * len(head)]
     for key, node in sorted(ROSTER.items()):
         g = node.scan_grid
-        rows.append(f"{key:<{w}}  {node.roster_row:>3}  {node.num_hidden_layers:>8}  "
+        rows.append(f"{key:<{w}}  {node.roster_row:>3}  "
+                    f"{'+'.join(node.arms):<12} {node.num_hidden_layers:>8}  "
                     f"{','.join(str(s) for s in g)}"
-                    + ("" if len(g) == SCAN_N_SITES else f"   [DEDUPED to {len(g)}]"))
+                    + ("" if len(g) == SCAN_N_SITES else f"   [DEDUPED to {len(g)}]")
+                    + ("   ** BLOCKED **" if node.is_blocked else ""))
+    blocked = blocked_nodes()
+    if blocked:
+        rows.append("")
+        for key, reason in sorted(blocked.items()):
+            rows.append(f"BLOCKED {key}: {reason}")
     return "\n".join(rows)
+
+
+def blocked_nodes() -> dict[str, str]:
+    """key -> blocker, for every node that must not be collected. Job preflights
+    call this and refuse to run; empty dict means the whole roster is clear."""
+    return {k: n.blocked_reason for k, n in ROSTER.items() if n.blocked_reason}
+
+
+def collectable(keys: tuple[str, ...] | None = None) -> tuple[str, ...]:
+    """The subset of `keys` (default: the whole roster) that is safe to collect."""
+    return tuple(sorted(k for k in (keys or tuple(ROSTER))
+                        if not ROSTER[k].is_blocked))
 
 
 def fiat_grid_problems(fixed_grids: Mapping[str, tuple[int, ...]]) -> list[str]:
@@ -320,3 +426,4 @@ if __name__ == "__main__":                                   # desk convenience
     print(f"registry audit: {'OK' if audit.ok else 'FATAL — fix before fitting'}")
     print(f"\nfixed fit grids (SITES): {sorted(SITES)}")
     print(f"scan grids (SCAN_GRIDS): {sorted(SCAN_GRIDS)}")
+    print(f"collectable now:          {list(collectable())}")
