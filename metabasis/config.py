@@ -120,4 +120,100 @@ MODEL_PRESETS: dict[str, ModelPreset] = {
         temperature=0.3,           # generation_config.json = 0.3 (native top_p 0.95)
         eos_token_ids=[100001],
     ),
+    # ------------------------------------------------------------------ wave 1
+    # Collection-phase wave 1 (the seven cheap new roster nodes). Every number
+    # below was read from the checkpoint's own config.json / generation_config.json
+    # on 2026-07-26 (config shas in metabasis/roster.py). `head_dim` is computed
+    # (hidden_dim / num_attention_heads) wherever config.json leaves it null.
+    # These nodes have NO fixed fit grid yet — their 12-site scan grids live in
+    # metabasis.roster.SCAN_GRIDS, not in fit_transport_maps.SITES.
+    #
+    # ⚠ temperature caveat: only `torch_dtype` is load-bearing for collection
+    # (forced replay never samples). Where generation_config.json carries no
+    # temperature the value below is transformers' default 1.0 and is marked —
+    # the desk should pin real native temperatures before any GENERATION probe
+    # uses these presets.
+    "olmo2-7b-instruct": ModelPreset(
+        # INSTRUCT sibling of the banked BASE "olmo2-7b" — same pretrain, chat
+        # template added (prereg roster row 7, the O-14 discriminator). Runs
+        # native+raw; the base sibling stays raw-only. Full MHA, bos == eos.
+        model_id="allenai/OLMo-2-1124-7B-Instruct",
+        torch_dtype="bfloat16",
+        num_layers=32,
+        hidden_dim=4096,
+        num_attention_heads=32,
+        num_kv_heads=32,
+        head_dim=128,
+        temperature=1.0,           # generation_config.json silent → default
+        eos_token_ids=[100257],
+    ),
+    "qwen2.5-3b-instruct": ModelPreset(
+        # tie_word_embeddings=True (the only wave-1 node that ties).
+        model_id="Qwen/Qwen2.5-3B-Instruct",
+        torch_dtype="bfloat16",
+        num_layers=36,
+        hidden_dim=2048,
+        num_attention_heads=16,
+        num_kv_heads=2,
+        head_dim=128,
+        temperature=0.7,
+        eos_token_ids=[151645, 151643],
+    ),
+    "qwen2.5-14b-instruct": ModelPreset(
+        model_id="Qwen/Qwen2.5-14B-Instruct",
+        torch_dtype="bfloat16",
+        num_layers=48,
+        hidden_dim=5120,
+        num_attention_heads=40,
+        num_kv_heads=8,
+        head_dim=128,
+        temperature=0.7,
+        eos_token_ids=[151645, 151643],
+    ),
+    "qwen2.5-32b-instruct": ModelPreset(
+        model_id="Qwen/Qwen2.5-32B-Instruct",
+        torch_dtype="bfloat16",
+        num_layers=64,
+        hidden_dim=5120,
+        num_attention_heads=40,
+        num_kv_heads=8,
+        head_dim=128,
+        temperature=0.7,
+        eos_token_ids=[151645, 151643],
+    ),
+    "mistral-7b-instruct-v0.3": ModelPreset(
+        model_id="mistralai/Mistral-7B-Instruct-v0.3",
+        torch_dtype="bfloat16",
+        num_layers=32,
+        hidden_dim=4096,
+        num_attention_heads=32,
+        num_kv_heads=8,
+        head_dim=128,
+        temperature=1.0,           # generation_config.json silent → default
+        eos_token_ids=[2],
+    ),
+    "phi-4": ModelPreset(
+        # Phi3ForCausalLM architecture; im_start / im_sep / im_end template.
+        model_id="microsoft/phi-4",
+        torch_dtype="bfloat16",
+        num_layers=40,
+        hidden_dim=5120,
+        num_attention_heads=40,
+        num_kv_heads=10,
+        head_dim=128,
+        temperature=1.0,           # generation_config.json silent → default
+        eos_token_ids=[100257, 100265],
+    ),
+    "phi-3.5-mini-instruct": ModelPreset(
+        # head_dim 96 — the only wave-1 node off the 128 convention.
+        model_id="microsoft/Phi-3.5-mini-instruct",
+        torch_dtype="bfloat16",
+        num_layers=32,
+        hidden_dim=3072,
+        num_attention_heads=32,
+        num_kv_heads=32,
+        head_dim=96,
+        temperature=1.0,           # generation_config.json silent → default
+        eos_token_ids=[32007, 32001, 32000],
+    ),
 }

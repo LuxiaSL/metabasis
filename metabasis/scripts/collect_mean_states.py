@@ -62,7 +62,8 @@ from typing import Any, Optional, Union
 import numpy as np
 
 from metabasis.scripts.fit_transport_maps import (
-    ARMS, DEFAULT_ARM_ROOT, SITES, StateBank, load_state_bank, save_state_bank)
+    ARMS, DEFAULT_ARM_ROOT, MODEL_KEYS, SITES, StateBank, load_state_bank,
+    save_state_bank)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("collect_mean_states")
@@ -778,7 +779,9 @@ def cp1_summary(arm_root: Path, models: list[str]) -> int:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--arm-root", type=Path, default=DEFAULT_ARM_ROOT)
-    ap.add_argument("--model", choices=sorted(SITES), help="one model per invocation")
+    ap.add_argument("--model", choices=MODEL_KEYS, help="one model per invocation; "
+                    "keys outside the fixed-grid registry (SITES) are scan-registry "
+                    "models (metabasis.roster) and REQUIRE --sites")
     ap.add_argument("--model-path", help="local weights dir (node-side)")
     ap.add_argument("--arms", default="native,raw",
                     help="comma list; strata/arms never mixed in banks")
@@ -860,13 +863,13 @@ def main() -> int:
     if args.spot_replay is not None:
         if args.spot_replay < 3:
             raise SystemExit("CP-1 gate requires K >= 3")
-        # --sites is honoured on the SHARDED branch only: wiring it into the single-card
-        # spot-replay would change that path's behaviour, which this enactment is not
-        # allowed to do (it is a pre-existing gap — --sites + --spot-replay has always
-        # read SITES[model] and would KeyError on an overridden bank; flagged to the desk).
+        # --sites forwards on BOTH paths (desk unification, 2026-07-26): a bank
+        # collected with an overridden grid must spot-replay against that same
+        # grid; the historical SITES[model] lookup stays the default when --sites
+        # is absent, so banked-model replays are unchanged.
         return spot_replay(args.arm_root, args.model, args.model_path, arms,
                            args.device, args.spot_replay,
-                           sites_override=(sites_override if shard is not None else None),
+                           sites_override=sites_override,
                            shard=shard)
     raise SystemExit("pick a mode: --collect / --spot-replay K / --cp1-summary")
 

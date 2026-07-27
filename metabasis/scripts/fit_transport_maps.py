@@ -44,6 +44,8 @@ from typing import Literal, Optional
 import numpy as np
 from pydantic import BaseModel
 
+from metabasis.roster import SCAN_GRIDS
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("fit_transport_maps")
 
@@ -65,6 +67,15 @@ SITES = {"3b": (13, 14, 18), "8b": (14, 16, 18), "qwen-7b": (19, 21, 23),
          # the sites are a mid-depth BAND and the site of record is picked from the
          # fit's own alignment curve afterwards — never by fiat (baton item 1).
          "olmo2-7b": (12, 16, 20, 24)}
+
+# Every model key the CLIs will accept. SITES = models whose FIT grid is fixed;
+# metabasis.roster.SCAN_GRIDS = models still on their 12-site alignment-curve
+# scan (prereg §4, "sites from curves, never fiat"). A scan node moves from the
+# second registry into SITES only when the desk ratifies its site of record —
+# so scan runs must always pass their grid explicitly (`--sites` on the
+# collector, `--src-sites` / `--tgt-sites` here), which also puts the grid in
+# the command line where the stamp and the shell history can both see it.
+MODEL_KEYS: tuple[str, ...] = tuple(sorted(set(SITES) | set(SCAN_GRIDS)))
 ARMS = ("native", "raw")
 STRATA = ("S1", "S2", "S3")
 DEFAULT_ARM_ROOT = Path("outputs/battery/arms/A8_conjugation")
@@ -689,8 +700,12 @@ def selftest() -> int:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--arm-root", type=Path, default=DEFAULT_ARM_ROOT)
-    ap.add_argument("--source-model", default="3b", choices=sorted(SITES))
-    ap.add_argument("--target-model", default="8b", choices=sorted(SITES))
+    ap.add_argument("--source-model", default="3b", choices=MODEL_KEYS,
+                    help="scan-registry models (metabasis.roster) are accepted but "
+                         "have no fixed grid — pass --src-sites for them")
+    ap.add_argument("--target-model", default="8b", choices=MODEL_KEYS,
+                    help="scan-registry models (metabasis.roster) are accepted but "
+                         "have no fixed grid — pass --tgt-sites for them")
     ap.add_argument("--n-null", type=int, default=N_NULL_REPS)
     ap.add_argument("--fit-strata", default=None,
                     help="comma list, e.g. S1,S2 — fit/gate g on these strata only "
@@ -719,6 +734,16 @@ def main() -> int:
     bad = [a for a in arms if a not in ARMS]
     if bad:
         raise SystemExit(f"unknown arms {bad}; valid: {ARMS}")
+    # scan-registry models have no fixed grid — say so here rather than dying on a
+    # bare KeyError inside run_grid.
+    for role, model, override in (("--source-model", args.source_model, args.src_sites),
+                                  ("--target-model", args.target_model, args.tgt_sites)):
+        if model not in SITES and not override:
+            raise SystemExit(
+                f"{role} {model!r} has no fixed fit grid (it is a scan-registry "
+                f"model; its 12-site scan grid is {SCAN_GRIDS.get(model)}). Pass "
+                f"{'--src-sites' if role.startswith('--source') else '--tgt-sites'} "
+                f"explicitly — sites from curves, never fiat.")
     run_grid(args.arm_root, args.source_model, args.target_model, n_null=args.n_null,
              fit_strata=strata, fits_dirname=args.fits_dirname, arms=arms,
              k_grid=(tuple(int(k) for k in args.k_grid.split(","))
