@@ -312,3 +312,66 @@ orders of magnitude; this is the only check that catches it.
 corrects a rationale and names the construction for an already-frozen
 deviation. The frozen body's sha (`33ba8290…`) remains valid at the tag;
 the working file's post-addendum sha is recorded in the desk ledger.*
+
+### ADDENDUM 2026-07-27-B — GPT-2-XL position-ceiling deviation (roster, §4) — ratified by Luxia 2026-07-27
+
+Collection-phase discovery (registry-extension enactment, desk report of
+record REPORT-hub-rungs-2): GPT-2 carries **learned absolute position
+embeddings with a hard n_positions=1024 ceiling** — architecture-level,
+every GPT-2 variant. Under GPT-2's own BPE, 148 of the 780 frozen corpus
+texts exceed 1024 tokens on the raw arm (max 1565, mean 643.9). The frozen
+corpus/seed/split cannot be resampled (§4), so the node cannot see the
+banked object as written.
+
+**Ruling (Luxia, 2026-07-27): GPT-2-XL collects with per-text truncation
+to its first 1024 tokens** — identical truncation applied to every use of
+the node (collection, spot-replay, target build if any, behavioral reads),
+recorded in every stamp (`truncation: first-1024`). The 632 unaffected
+texts are byte-identical to the frozen objects. **Named caveat, frozen with
+the deviation:** for the 148 truncated texts, any pair involving gpt2-xl
+compares full-text mean states (other model) against truncated-text mean
+states (gpt2-xl) — a per-pair measurement-basis mismatch confined to this
+node; any gpt2-xl result that hinges on those texts is flagged at scoring.
+This addendum changes no prediction, band, gate, or roster membership.
+
+### ADDENDUM 2026-07-27-C — scoring hardening (G-star-hit context rows, directional fallback, 6-pair rule) — ratified by Luxia 2026-07-27
+
+Filed in response to an outside methodological review (desk record
+OUTSIDE-REVIEW-2026-07-27) BEFORE any of the 190 predictions is filed and
+before any non-hub pair is fit. All four items are append-only: no
+prediction, band, gate threshold, or roster membership moves.
+
+1. **Null baselines beside G-star-hit.** The 190-prediction scoring read
+   reports, beside the star's in-band fraction and against the SAME frozen
+   ±.05 bands: (a) a **constant grand-mean predictor** (the mean of all
+   190 observed â, applied to every pair); (b) a **shuffled-star null** —
+   the c_M assignment permuted across models, all 190 products recomputed
+   and scored; n=1000 permutations, reporting the permutation-rank of the
+   true star's in-band count. Interpretive rule, frozen now: the star
+   factorization is claimed as DEMONSTRATED only if G-star-hit passes AND
+   the true star exceeds both baselines decisively (constant predictor by
+   ≥15 percentage points; permutation rank ≥ 99th percentile). Passing the
+   gate without beating the baselines is scored "consistent with, not
+   demonstrated."
+2. **Pre-named directional fallback.** If the asymmetry analysis (§5.5)
+   finds systematic direction effects, the DESIGNATED refinement is the
+   directional star **â(A→B) = c_A^out · c_B^in** (2n parameters,
+   hub-derivable from both fit directions) — named now as the single
+   pre-registered alternative model, so any post-hoc adoption is model
+   selection between two pre-named candidates, not a patch. Its adoption
+   would be scored on not-yet-filed predictions only; filed bands never
+   move.
+3. **The 6-pair selection rule, frozen.** Wherever the frozen text says
+   "6 chosen pairs spanning easy/hard" (§5.3 mapping-flexibility, §5.10
+   class-split): after all 20 hub fits are banked, rank the 20 hub pairs
+   by â (native k128; raw where the pair has no native row); the six pairs
+   are those at **ranks 1, 4, 8, 12, 16, and 20**. If a selected pair is
+   operationally unavailable (blocked node), its neighbor rank (±1,
+   preferring the harder side) substitutes, with the substitution recorded.
+   The choice is arithmetic; no judgment enters after data exists.
+4. **Per-model failure accounting.** The scoring read reports out-of-band
+   failures as a per-model count table (failures in which model's rows,
+   both as source and target) beside the aggregate — the 190 predictions
+   share 20 fitted constants and their failures correlate; the table makes
+   the effective sample size inspectable. G-star-structure (§3) is scored
+   from this table.
