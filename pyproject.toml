@@ -17,6 +17,9 @@ dependencies = [
 gpu = [
     "torch>=2.1",
     "transformers>=4.36",
+    # device_map dispatch for the sharded (>=70B) collection path; lazily
+    # imported, so single-card collection runs without it.
+    "accelerate>=0.26",
 ]
 # Corpus building (one parquet source format, lazy import).
 corpus = ["pyarrow"]

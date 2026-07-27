@@ -24,6 +24,13 @@ ids — fresh tokenization is the defined object for cross-replay, and Leg-0's s
 tokenizer guarantees both models see IDENTICAL token sequences per (text, arm).
 Cross-tokenizer legs (Leg 1+) revisit this explicitly.
 
+Sharded path (prereg §4, big-rung engineering): models too large for one card
+(70B/405B class) load across the node with an accelerate `device_map` instead of
+`.to(device)`. OPT-IN ONLY — `--device-map` / `--shard-across` unset reproduces the
+single-card path byte for byte (same loader, same hooks, same reductions, same
+stamp keys). The realized sharding layout goes into the trunk stamp; cross-layout
+determinism is certified by the collect+spot-replay-in-one-job gate, never assumed.
+
 Modes (one model per invocation; run once per model on the assigned card):
   --collect              full pass over the corpus, both arms (or --arms native)
   --spot-replay K        FRESH-PROCESS re-run of K stratified texts per arm, byte-
@@ -35,6 +42,10 @@ Launch template (node-side, after venv activation, from the deploy root):
   OMP_NUM_THREADS=1 python -m metabasis.scripts.collect_mean_states --collect \
     --model 3b --model-path <LOCAL_WEIGHTS_DIR> --arm-root <ARM_ROOT>
   python -m metabasis.scripts.collect_mean_states --spot-replay 3 --model 3b ...
+  # big rung, whole node (CUDA_VISIBLE_DEVICES left unpinned):
+  OMP_NUM_THREADS=1 python -m metabasis.scripts.collect_mean_states --collect \
+    --model 70b --model-path <LOCAL_WEIGHTS_DIR> --arm-root <ARM_ROOT> \
+    --device-map auto --max-memory 0=170GiB,1=170GiB,...,cpu=0GiB
 """
 from __future__ import annotations
 
@@ -44,8 +55,9 @@ import json
 import logging
 import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional, Union
 
 import numpy as np
 
@@ -174,36 +186,454 @@ def load_model_and_tok(model_path: str, device: str):
     return model, tok
 
 
-def trunk_stamp(model_path: str, tok, device: str) -> dict:
+# ---------------------------------------------------------------- sharded load (big rungs)
+# Prereg §4 (big-rung engineering): ">=70B-class nodes collect via the collector's
+# sharded path (device_map across the 8-GPU node; determinism certified by the same
+# collect+spot-replay-in-one-job gate — sharding layout recorded in the trunk stamp)".
+#
+# Everything below is OPT-IN. With neither --device-map nor --shard-across the loader,
+# the capture hooks and compute_means are the byte-identical single-card path that
+# banked the smalls. The sharded branch changes exactly two things: HOW weights are
+# placed (accelerate device_map, never `.to(device)` on a dispatched model) and WHERE
+# the input id tensor is built (the input-embedding execution device instead of
+# --device). SiteCapture and compute_means are untouched; nothing is pre-normalized.
+#
+# Hook ordering (VERIFIED against accelerate 1.14 hooks.py + torch nn/modules/module.py,
+# not assumed): accelerate does NOT dispatch via torch forward hooks. add_hook_to_module()
+# REPLACES `module.forward` with a wrapper that runs hook.pre_forward() (weight on-load +
+# send_to_device of args/kwargs) and only then the original forward. torch's
+# nn.Module._call_impl resolves `forward_call = self.forward` and runs
+# `self._forward_pre_hooks` BEFORE invoking it. So SiteCapture's forward_pre_hook fires
+# FIRST and sees the real hidden_states exactly as decoder layer L-1 emitted them — on
+# L-1's card, before accelerate's cross-card copy. Device-to-device `.to()` is a bit-exact
+# copy for bf16, so the captured values equal what layer L consumes; and our hook returns
+# None, so it never perturbs the args accelerate subsequently dispatches. (The only torch
+# forward_pre_hook accelerate registers anywhere is _attach_context_parallel_hooks, which
+# is context-parallel-only and never fires on a device_map load.)
+#
+# Layout-dependence, stated precisely: under a pure pipeline-parallel device_map every
+# module — hence every matmul and every norm reduction — stays WHOLE on one card, so no
+# reduction is split or re-ordered by sharding; only which card runs it changes. The
+# per-text reductions in compute_means (`h.mean(dim=0)`, `h.norm(dim=-1).median()`) run on
+# whatever card holds the site layer's input, i.e. sharding can move a reduction from card
+# a to card b. Identical GPU model + identical kernels => expected bitwise identical, but
+# EXPECTED IS NOT CERTIFIED: the sharded-vs-single-device byte compare in one job is what
+# certifies it. Tensor-parallel / split-module maps WOULD change reduction order and are
+# out of scope here (device_map is pipeline-parallel by construction: no_split_module_classes
+# keeps each decoder layer whole).
+
+
+class ShardedLoadError(RuntimeError):
+    """Base class for every failure specific to the sharded (device_map) load path."""
+
+
+class AccelerateUnavailableError(ShardedLoadError):
+    """A sharded load was requested but `accelerate` is not importable."""
+
+
+class DeviceMapSpecError(ShardedLoadError):
+    """--device-map / --shard-across / --max-memory could not be parsed or is inconsistent."""
+
+
+class ShardLayoutError(ShardedLoadError):
+    """The realized layout is unusable: weights spilled to cpu/disk (model too big for the
+    given --max-memory), or a single device where a multi-device layout was required."""
+
+
+class SiteLayerUnresolvableError(ShardedLoadError):
+    """A requested site has no decoder layer, or its device is not resolvable in the layout."""
+
+
+DeviceKey = Union[int, str]
+
+
+@dataclass(frozen=True)
+class ShardSpec:
+    """The opt-in sharded-load request, fully resolved from the CLI.
+
+    Exactly one of `device_map` / `shard_across` is set. `device_map` is either an
+    accelerate strategy string ("auto" | "balanced" | "balanced_low_0" | "sequential")
+    or an explicit {module_name: device} dict. `shard_across` is a device list from
+    which an explicit EVEN decoder-layer split is built (the forced multi-device layout
+    the certification gate needs on a model that would otherwise fit one card).
+    """
+
+    device_map: Optional[Union[str, dict[str, DeviceKey]]] = None
+    shard_across: Optional[list[DeviceKey]] = None
+    max_memory: Optional[dict[DeviceKey, Union[int, str]]] = None
+    offload_folder: Optional[str] = None
+    allow_offload: bool = False
+    require_multi_device: bool = False
+    spec_echo: str = ""
+
+    def __post_init__(self) -> None:
+        if (self.device_map is None) == (self.shard_across is None):
+            raise DeviceMapSpecError(
+                "ShardSpec needs exactly one of device_map / shard_across")
+
+
+def _normalize_device(dev: Any) -> str:
+    """int | str | torch.device -> canonical torch device string; 'disk' passes through."""
+    import torch
+    if isinstance(dev, str) and dev.strip().lower() == "disk":
+        return "disk"
+    try:
+        return str(dev if isinstance(dev, torch.device) else torch.device(dev))
+    except (TypeError, ValueError, RuntimeError) as exc:
+        raise DeviceMapSpecError(f"unusable device {dev!r} in a device map") from exc
+
+
+def _device_key(tokenstr: str) -> DeviceKey:
+    """'0' -> 0 (accelerate's GPU-ordinal form); 'cpu'/'disk'/'cuda:1' stay strings.
+    Mixing int 0 and 'cuda:0' in ONE map would look like two devices to accelerate's
+    `len(set(device_map.values())) > 1` dispatch test, so the two forms are never mixed."""
+    t = tokenstr.strip()
+    if not t:
+        raise DeviceMapSpecError("empty device token")
+    return int(t) if t.isdigit() else t
+
+
+def _json_arg(spec: str, flag: str) -> Any:
+    """A CLI value that is either '@path/to.json' or an inline JSON document."""
+    raw = spec.strip()
+    try:
+        if raw.startswith("@"):
+            return json.loads(Path(raw[1:]).read_text())
+        return json.loads(raw)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise DeviceMapSpecError(f"{flag}: cannot read {spec!r} as JSON ({exc})") from exc
+
+
+ACCELERATE_STRATEGIES = ("auto", "balanced", "balanced_low_0", "sequential")
+
+
+def parse_device_map(spec: str) -> Union[str, dict[str, DeviceKey]]:
+    """--device-map: an accelerate strategy name, or '@map.json' / inline JSON dict."""
+    if spec in ACCELERATE_STRATEGIES:
+        return spec
+    payload = _json_arg(spec, "--device-map")
+    if not isinstance(payload, dict) or not payload:
+        raise DeviceMapSpecError(
+            f"--device-map: expected one of {ACCELERATE_STRATEGIES} or a non-empty "
+            f"{{module: device}} JSON object, got {type(payload).__name__}")
+    return {str(k): (v if isinstance(v, int) else _device_key(str(v)))
+            for k, v in payload.items()}
+
+
+def parse_shard_across(spec: str) -> list[DeviceKey]:
+    """--shard-across: 'N' (=> GPU ordinals 0..N-1) or an explicit comma device list
+    ('0,1,2,3' | 'cuda:0,cuda:1' | 'cpu,disk' for the no-GPU smoke)."""
+    s = spec.strip()
+    if s.isdigit():
+        n = int(s)
+        if n < 1:
+            raise DeviceMapSpecError("--shard-across N: need N >= 1")
+        return list(range(n))
+    devices = [_device_key(t) for t in s.split(",") if t.strip()]
+    if not devices:
+        raise DeviceMapSpecError(f"--shard-across: no devices parsed from {spec!r}")
+    if len(set(map(str, devices))) != len(devices):
+        raise DeviceMapSpecError(f"--shard-across: duplicate devices in {spec!r}")
+    return devices
+
+
+def parse_max_memory(spec: str) -> dict[DeviceKey, Union[int, str]]:
+    """--max-memory: '0=170GiB,1=170GiB,cpu=0GiB' (accelerate size strings), or
+    '@mm.json' / inline JSON. cpu=0GiB is the usual way to forbid silent CPU offload."""
+    s = spec.strip()
+    if s.startswith("@") or s.startswith("{"):
+        payload = _json_arg(s, "--max-memory")
+        if not isinstance(payload, dict) or not payload:
+            raise DeviceMapSpecError("--max-memory: expected a non-empty JSON object")
+        return {_device_key(str(k)): v for k, v in payload.items()}
+    out: dict[DeviceKey, Union[int, str]] = {}
+    for item in s.split(","):
+        if not item.strip():
+            continue
+        if "=" not in item:
+            raise DeviceMapSpecError(
+                f"--max-memory: {item!r} is not DEVICE=SIZE (e.g. 0=170GiB, cpu=0GiB)")
+        key, _, val = item.partition("=")
+        out[_device_key(key)] = val.strip()
+    if not out:
+        raise DeviceMapSpecError(f"--max-memory: nothing parsed from {spec!r}")
+    return out
+
+
+def build_even_layer_device_map(model_path: str, devices: list[DeviceKey]
+                                ) -> dict[str, DeviceKey]:
+    """Explicit device_map splitting the decoder layers EVENLY over `devices`.
+
+    Built on a meta-device skeleton (no weights read), so it is architecture-generic:
+    the decoder-layer container is resolved with the same `decoder_layers()` the capture
+    hooks use, and every non-layer tensor (embeddings, rotary buffers, final norm, head)
+    goes to devices[0]. Placement order is irrelevant to correctness — accelerate moves
+    activations between cards as needed — but keeping the whole layer list contiguous
+    and each layer WHOLE on one card is what makes the map pipeline-parallel (no split
+    matmuls, no changed reduction order).
+
+    This is the "forced multi-device layout" the certification gate runs a small model
+    through; `--device-map auto` would put an 8B on a single card and certify nothing.
+    """
+    _require_accelerate()
+    from accelerate import init_empty_weights
+    from transformers import AutoConfig, AutoModelForCausalLM
+
+    from metabasis.extraction.hooks import decoder_layers
+
+    try:
+        cfg = AutoConfig.from_pretrained(model_path)
+        with init_empty_weights():
+            skeleton = AutoModelForCausalLM.from_config(cfg)
+    except Exception as exc:                       # arch/config we cannot instantiate
+        raise DeviceMapSpecError(
+            f"--shard-across: cannot build a meta skeleton for {model_path!r} ({exc}); "
+            "pass an explicit map with --device-map @map.json instead") from exc
+
+    layers = decoder_layers(skeleton)
+    prefix = next((name for name, mod in skeleton.named_modules() if mod is layers), None)
+    if prefix is None:
+        raise DeviceMapSpecError(
+            "--shard-across: decoder-layer container has no module path; "
+            "pass --device-map @map.json instead")
+    n_layers = len(layers)
+    if len(devices) > n_layers:
+        raise DeviceMapSpecError(
+            f"--shard-across: {len(devices)} devices for {n_layers} decoder layers")
+
+    dmap: dict[str, DeviceKey] = {
+        f"{prefix}.{i}": devices[(i * len(devices)) // n_layers] for i in range(n_layers)}
+    # Cover every remaining state_dict tensor at its owning-module path (accelerate's
+    # check_device_map raises on any parameter no key covers).
+    tensors = list(skeleton.named_parameters(remove_duplicate=False))
+    tensors += list(skeleton.named_buffers(remove_duplicate=False))
+    for name, _ in tensors:
+        if name.startswith(f"{prefix}."):
+            continue
+        dmap.setdefault(name.rsplit(".", 1)[0] if "." in name else name, devices[0])
+    logger.info("forced shard map: %d decoder layers over %s (+%d non-layer modules)",
+                n_layers, [str(d) for d in devices], len(dmap) - n_layers)
+    return dmap
+
+
+def _require_accelerate() -> str:
+    """Returns the accelerate version; raises the named error if it is not importable."""
+    try:
+        import accelerate
+    except ImportError as exc:                     # noqa: TRY003 - message is the point
+        raise AccelerateUnavailableError(
+            "the sharded path needs `accelerate` (device_map dispatch). Install it into "
+            "the node venv (`uv pip install accelerate`) — the single-card path does not "
+            "need it, so this import is deliberately lazy.") from exc
+    return str(accelerate.__version__)
+
+
+def _module_device(module: Any) -> Optional[str]:
+    """Where a submodule's compute actually happens, or None if unresolvable.
+
+    Prefers a real (non-meta) tensor device; falls back to the accelerate hook's
+    `execution_device`, which is the truth for modules whose weights are offloaded
+    (their parameters sit on meta between forwards)."""
+    for tensor in list(module.parameters(recurse=True)) + list(module.buffers(recurse=True)):
+        if tensor.device.type != "meta":
+            return str(tensor.device)
+    hook = getattr(module, "_hf_hook", None)
+    candidates = [hook, *getattr(hook, "hooks", ())] if hook is not None else []
+    for h in candidates:
+        exec_dev = getattr(h, "execution_device", None)
+        if exec_dev is not None:
+            return _normalize_device(exec_dev)
+    return None
+
+
+def input_device_of(model: Any) -> str:
+    """The device the input id tensor must be built on: the input embedding's execution
+    device. NEVER `.to(device)` a dispatched model — accelerate wraps `.to` with a warning
+    and raises outright once anything is offloaded."""
+    emb = model.get_input_embeddings()
+    if emb is None:
+        raise ShardLayoutError(
+            "model exposes no input embedding; cannot place inputs for the sharded path")
+    dev = _module_device(emb)
+    if dev is None or dev == "disk":
+        raise ShardLayoutError(f"input embedding device unresolvable (got {dev!r})")
+    return dev
+
+
+def describe_shard_layout(model: Any, sites: tuple[int, ...], spec: ShardSpec,
+                          accelerate_version: str, resolved_map: Any) -> dict:
+    """The sharding record the prereg requires in the trunk stamp.
+
+    `hf_device_map` is accelerate's own map — present only when it actually dispatched
+    (transformers skips dispatch when the map resolves to one device), so the layout is
+    ALSO derived from the live module tree, which is always true and version-independent.
+    """
+    import torch
+
+    from metabasis.extraction.hooks import decoder_layers
+
+    layers = decoder_layers(model)
+    layer_devices: dict[str, str] = {}
+    for i, layer in enumerate(layers):
+        dev = _module_device(layer)
+        if dev is None:
+            raise ShardLayoutError(f"decoder layer {i}: device unresolvable in the layout")
+        layer_devices[str(i)] = dev            # COMPUTE device (offloaded weights report
+    for s in sites:                            # their accelerate execution_device, not
+        if not 0 <= s < len(layers):           # the meta/cpu/disk they are stored on)
+            raise SiteLayerUnresolvableError(
+                f"site L{s} out of range: model has {len(layers)} decoder layers")
+        if layer_devices[str(s)] == "disk":
+            raise SiteLayerUnresolvableError(
+                f"site L{s} resolves to 'disk'; its capture would have no compute device")
+
+    compute_devices = sorted(set(layer_devices.values()))
+    # An EXPLICIT map that misses part of the model is silently completed with "cpu" by
+    # transformers (and, if it resolves to one device, never reaches accelerate's own
+    # coverage check because dispatch is skipped) — so run that check ourselves.
+    if isinstance(resolved_map, dict):
+        from accelerate.utils import check_device_map
+        try:
+            check_device_map(model, resolved_map)
+        except ValueError as exc:
+            raise DeviceMapSpecError(f"device map does not cover the model: {exc}") from exc
+    # STORAGE spill is a different question from compute placement, and it is the one
+    # "model too big for max_memory" actually asks: read it off the map accelerate used.
+    # Fold in any decoder layer whose COMPUTE landed on cpu — that is the same failure
+    # wearing a different hat (a card ran out of room, or the map named a device wrong).
+    hf_map = getattr(model, "hf_device_map", None)
+    storage_map: dict[str, str] = {}
+    if isinstance(hf_map, dict):
+        storage_map = {k: _normalize_device(v) for k, v in hf_map.items()}
+    elif isinstance(resolved_map, dict):
+        storage_map = {k: _normalize_device(v) for k, v in resolved_map.items()}
+    spilled = sorted({d for d in storage_map.values()
+                      if d == "disk" or d.startswith("cpu")}
+                     | {d for d in compute_devices if d.startswith("cpu")})
+    if spilled and not spec.allow_offload:
+        raise ShardLayoutError(
+            f"weights spilled to {spilled} — the model does not fit the given "
+            "--max-memory on the requested devices. Raise --max-memory / add devices, or "
+            "pass --allow-offload to accept the (slow, compute-still-on-device) spill.")
+    if spec.require_multi_device and len(compute_devices) < 2:
+        raise ShardLayoutError(
+            f"--assert-multi-device: realized layout computes on {compute_devices} — a "
+            "single-device layout certifies nothing about sharding.")
+
+    return {
+        "mode": "sharded",
+        "spec": spec.spec_echo,
+        "device_map_requested": (resolved_map if isinstance(resolved_map, str)
+                                 else {k: str(v) for k, v in resolved_map.items()}),
+        "max_memory_requested": ({str(k): str(v) for k, v in spec.max_memory.items()}
+                                 if spec.max_memory else None),
+        "hf_device_map": ({k: str(v) for k, v in hf_map.items()}
+                          if isinstance(hf_map, dict) else None),
+        "accelerate_dispatched": isinstance(hf_map, dict),
+        "decoder_layer_devices": layer_devices,
+        "site_layer_devices": {f"L{s}": layer_devices[str(s)] for s in sites},
+        "input_embedding_device": input_device_of(model),
+        "compute_devices": compute_devices,
+        "storage_spilled_to": spilled,
+        "n_compute_devices": len(compute_devices),
+        "offload_allowed": spec.allow_offload,
+        "offload_folder": spec.offload_folder,
+        "accelerate": accelerate_version,
+        "cuda_device_names": {str(i): torch.cuda.get_device_name(i)
+                              for i in range(torch.cuda.device_count())},
+        "parallelism": "pipeline (device_map; each decoder layer whole on one device)",
+    }
+
+
+def load_model_and_tok_sharded(model_path: str, spec: ShardSpec, sites: tuple[int, ...]
+                               ) -> tuple[Any, Any, str, dict]:
+    """The opt-in twin of load_model_and_tok: same dtype/attn/eval, device_map placement.
+
+    Returns (model, tokenizer, input_device, sharding_record). Everything downstream —
+    SiteCapture, compute_means, save_state_bank — is the unchanged single-card machinery.
+    """
+    import torch
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+
+    accelerate_version = _require_accelerate()
+    resolved_map: Union[str, dict[str, DeviceKey]]
+    if spec.shard_across is not None:
+        resolved_map = build_even_layer_device_map(model_path, spec.shard_across)
+    else:
+        assert spec.device_map is not None       # guarded in ShardSpec.__post_init__
+        resolved_map = spec.device_map
+
+    needs_offload_dir = (not isinstance(resolved_map, str)
+                         and any(str(v) == "disk" for v in resolved_map.values()))
+    if needs_offload_dir and not spec.offload_folder:
+        raise DeviceMapSpecError(
+            "the requested device map offloads to 'disk' but --offload-folder is unset")
+
+    kwargs: dict[str, Any] = {"dtype": torch.bfloat16,
+                              "attn_implementation": "eager",
+                              "device_map": resolved_map}
+    if spec.max_memory is not None:
+        kwargs["max_memory"] = spec.max_memory
+    if spec.offload_folder is not None:
+        kwargs["offload_folder"] = spec.offload_folder
+    try:
+        model = AutoModelForCausalLM.from_pretrained(model_path, **kwargs)
+    except (ValueError, RuntimeError, OSError) as exc:
+        raise ShardedLoadError(
+            f"sharded load of {model_path!r} failed ({type(exc).__name__}: {exc}); "
+            "check --device-map / --max-memory against the visible devices") from exc
+    model.eval()                                   # NOT .to(device): the model is dispatched
+
+    sharding = describe_shard_layout(model, sites, spec, accelerate_version, resolved_map)
+    device = sharding["input_embedding_device"]
+    logger.info("sharded load: %d compute device(s) %s; inputs on %s; layer map %s",
+                sharding["n_compute_devices"], sharding["compute_devices"], device,
+                json.dumps(sharding["site_layer_devices"]))
+    return model, AutoTokenizer.from_pretrained(model_path), device, sharding
+
+
+def trunk_stamp(model_path: str, tok, device: str,
+                sharding: Optional[dict] = None) -> dict:
     import torch
     import transformers
     cfg = Path(model_path) / "config.json"
     tpl = tok.chat_template or ""
     dev_name = (torch.cuda.get_device_name(0)
                 if torch.cuda.is_available() else "cpu")
-    return {"model_path": str(model_path),
-            "config_sha256": hashlib.sha256(cfg.read_bytes()).hexdigest()
-            if cfg.exists() else None,
-            "chat_template_sha256": hashlib.sha256(tpl.encode()).hexdigest(),
-            "transformers": transformers.__version__,
-            "torch": torch.__version__,
-            "dtype_forward": "bfloat16", "dtype_banked": "float32",
-            "attn_implementation": "eager", "device": device,
-            "cuda_device_name": dev_name,
-            "cuda_visible_devices":
-                __import__("os").environ.get("CUDA_VISIBLE_DEVICES", "(unset)")}
+    stamp = {"model_path": str(model_path),
+             "config_sha256": hashlib.sha256(cfg.read_bytes()).hexdigest()
+             if cfg.exists() else None,
+             "chat_template_sha256": hashlib.sha256(tpl.encode()).hexdigest(),
+             "transformers": transformers.__version__,
+             "torch": torch.__version__,
+             "dtype_forward": "bfloat16", "dtype_banked": "float32",
+             "attn_implementation": "eager", "device": device,
+             "cuda_device_name": dev_name,
+             "cuda_visible_devices":
+                 __import__("os").environ.get("CUDA_VISIBLE_DEVICES", "(unset)")}
+    # Single-card stamps keep EXACTLY the historical key set (the banked smalls compare
+    # against them); the sharding record is appended only on the opt-in sharded path.
+    if sharding is not None:
+        stamp["sharding"] = sharding
+    return stamp
 
 
 # ---------------------------------------------------------------- collect mode
 def collect(arm_root: Path, model: str, model_path: str, arms: list[str],
-            device: str, sites_override: tuple[int, ...] | None = None) -> None:
+            device: str, sites_override: tuple[int, ...] | None = None,
+            shard: Optional[ShardSpec] = None) -> None:
     entries, manifest_sha = load_corpus(arm_root)
     sites = sites_override or SITES[model]
     states_dir = arm_root / "states"
     logs_dir = arm_root / "logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
-    model_obj, tok = load_model_and_tok(model_path, device)
-    trunk = trunk_stamp(model_path, tok, device)
+    if shard is None:                              # the unchanged single-card path
+        model_obj, tok = load_model_and_tok(model_path, device)
+        sharding = None
+    else:                                          # opt-in: device_map across the node
+        model_obj, tok, device, sharding = load_model_and_tok_sharded(
+            model_path, shard, sites)
+    trunk = trunk_stamp(model_path, tok, device, sharding)
     logger.info("trunk: %s", json.dumps(trunk)[:200])
 
     for arm in arms:
@@ -262,16 +692,23 @@ def pick_spot_ids(entries: list[dict], k: int) -> list[str]:
 
 
 def spot_replay(arm_root: Path, model: str, model_path: str, arms: list[str],
-                device: str, k: int) -> int:
+                device: str, k: int, sites_override: tuple[int, ...] | None = None,
+                shard: Optional[ShardSpec] = None) -> int:
     entries, _ = load_corpus(arm_root)
     by_id = {e["text_id"]: e for e in entries}
-    sites = SITES[model]
+    sites = sites_override or SITES[model]
     states_dir = arm_root / "states"
-    model_obj, tok = load_model_and_tok(model_path, device)
+    if shard is None:                              # the unchanged single-card path
+        model_obj, tok = load_model_and_tok(model_path, device)
+        sharding = None
+    else:                                          # opt-in: device_map across the node
+        model_obj, tok, device, sharding = load_model_and_tok_sharded(
+            model_path, shard, sites)
     spot_ids = pick_spot_ids(entries, k)
     ok_all = True
     report: dict = {"model": model, "k": k, "spot_ids": spot_ids,
-                    "trunk": trunk_stamp(model_path, tok, device), "results": {}}
+                    "trunk": trunk_stamp(model_path, tok, device, sharding),
+                    "results": {}}
     for arm in arms:
         bank = load_state_bank(states_dir, model, arm)
         idx = {t: i for i, t in enumerate(bank.text_ids)}
@@ -353,11 +790,64 @@ def main() -> int:
     ap.add_argument("--spot-replay", type=int, metavar="K", default=None)
     ap.add_argument("--cp1-summary", nargs="*", metavar="MODEL", default=None,
                     help="e.g. --cp1-summary 3b 8b (local, no GPU)")
+    # --- sharded path (prereg §4 big rungs); OPT-IN, none of these => single card ---
+    sh = ap.add_argument_group(
+        "sharded load (>=70B class)",
+        "opt-in accelerate device_map placement across the node. Unset => the unchanged "
+        "single-card path. --device is ignored when sharding (inputs go to the "
+        "input-embedding device). Certify with collect+spot-replay in ONE job, plus a "
+        "byte-compare against a fresh single-device collection of a small model.")
+    sh.add_argument("--device-map", default=None, metavar="SPEC",
+                    help=f"one of {ACCELERATE_STRATEGIES}, or '@map.json' / inline JSON "
+                         "{module: device}")
+    sh.add_argument("--shard-across", default=None, metavar="SPEC",
+                    help="build an EXPLICIT even decoder-layer split: 'N' (GPU ordinals "
+                         "0..N-1) or a device list ('0,1,2,3' | 'cpu,disk'). The forced "
+                         "multi-device layout the certification gate needs on a small "
+                         "model; mutually exclusive with --device-map")
+    sh.add_argument("--max-memory", default=None, metavar="SPEC",
+                    help="'0=170GiB,1=170GiB,cpu=0GiB' or '@mm.json'; cpu=0GiB forbids "
+                         "silent CPU offload")
+    sh.add_argument("--offload-folder", default=None, metavar="DIR",
+                    help="required if any device resolves to 'disk'")
+    sh.add_argument("--allow-offload", action="store_true",
+                    help="accept a layout that spills weights to cpu/disk instead of "
+                         "failing fast (slow; compute still runs on the execution device)")
+    sh.add_argument("--assert-multi-device", action="store_true",
+                    help="fail unless the realized layout computes on >=2 devices — set "
+                         "this on the certification run so it cannot pass vacuously")
     args = ap.parse_args()
     arms = [a.strip() for a in args.arms.split(",") if a.strip()]
     bad = [a for a in arms if a not in ARMS]
     if bad:
         raise SystemExit(f"unknown arms {bad}; valid: {ARMS}")
+    sites_override = (tuple(int(x) for x in args.sites.split(','))
+                      if args.sites else None)
+
+    shard: Optional[ShardSpec] = None
+    if args.device_map is not None and args.shard_across is not None:
+        raise SystemExit("--device-map and --shard-across are mutually exclusive")
+    if args.device_map is not None or args.shard_across is not None:
+        try:
+            shard = ShardSpec(
+                device_map=(parse_device_map(args.device_map)
+                            if args.device_map is not None else None),
+                shard_across=(parse_shard_across(args.shard_across)
+                              if args.shard_across is not None else None),
+                max_memory=(parse_max_memory(args.max_memory)
+                            if args.max_memory else None),
+                offload_folder=args.offload_folder,
+                allow_offload=args.allow_offload,
+                require_multi_device=args.assert_multi_device,
+                spec_echo=(f"--device-map {args.device_map}" if args.device_map
+                           else f"--shard-across {args.shard_across}")
+                + (f" --max-memory {args.max_memory}" if args.max_memory else ""))
+        except ShardedLoadError as exc:
+            raise SystemExit(f"{type(exc).__name__}: {exc}") from exc
+    elif any((args.max_memory, args.offload_folder, args.allow_offload,
+              args.assert_multi_device)):
+        raise SystemExit("--max-memory/--offload-folder/--allow-offload/"
+                         "--assert-multi-device need --device-map or --shard-across")
 
     if args.cp1_summary is not None:
         return cp1_summary(args.arm_root, args.cp1_summary or ["3b", "8b"])
@@ -365,14 +855,19 @@ def main() -> int:
         raise SystemExit("--model and --model-path required for GPU modes")
     if args.collect:
         collect(args.arm_root, args.model, args.model_path, arms, args.device,
-                sites_override=(tuple(int(x) for x in args.sites.split(','))
-                                if args.sites else None))
+                sites_override=sites_override, shard=shard)
         return 0
     if args.spot_replay is not None:
         if args.spot_replay < 3:
             raise SystemExit("CP-1 gate requires K >= 3")
+        # --sites is honoured on the SHARDED branch only: wiring it into the single-card
+        # spot-replay would change that path's behaviour, which this enactment is not
+        # allowed to do (it is a pre-existing gap — --sites + --spot-replay has always
+        # read SITES[model] and would KeyError on an overridden bank; flagged to the desk).
         return spot_replay(args.arm_root, args.model, args.model_path, arms,
-                           args.device, args.spot_replay)
+                           args.device, args.spot_replay,
+                           sites_override=(sites_override if shard is not None else None),
+                           shard=shard)
     raise SystemExit("pick a mode: --collect / --spot-replay K / --cp1-summary")
 
 
