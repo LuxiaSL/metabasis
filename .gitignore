@@ -2,7 +2,10 @@
 # ── decision). Results, banks, docs, and research logs live in the working
 # ── tree but never on the remote.
 outputs/
-docs/
+docs/*
+!docs/planning/
+docs/planning/*
+!docs/planning/PREREG-*.md
 research/
 *.log
 
