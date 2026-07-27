@@ -8,6 +8,9 @@ docs/planning/*
 !docs/planning/PREREG-*.md
 research/
 *.log
+# Enactor pull-backs awaiting desk integration into outputs/ (same policy as
+# outputs/: results never travel with a commit).
+staging/
 
 # Python
 __pycache__/
