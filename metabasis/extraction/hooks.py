@@ -8,7 +8,7 @@ pieces of that 937-line module the transport program needs:
     direct, Gemma-3 multimodal wrapper via `language_model`).
   * `ResidualWriteSpec` / `attach_residual_write` — one residual-stream
     injection hook, used by the behavioral-write probes
-    (`vmb_c3_entropy_replay`, the owl/needle probes).
+    (`entropy_write_probe`, the owl/needle probes).
 
 Nothing else travels: no k_proj/gate_proj pre-RoPE capture, no HookState, no
 LoadedModel, no eager-attention plumbing (charter §2f: "none of the anamnesis
