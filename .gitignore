@@ -28,3 +28,4 @@ build/
 
 # Session tooling (local-only)
 CLAUDE.md
+.claude/
