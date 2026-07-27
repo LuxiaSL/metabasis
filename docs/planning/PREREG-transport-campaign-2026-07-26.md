@@ -269,3 +269,46 @@ capstone bait-turn readout (~$10–15) draws from this cap at capstone time.
 *Everything is UNSTAMPED until the desk's first-read against this frozen
 text (C§8). The desk never writes experiment code. The star graduation stamp
 is HELD for the law-at-scale first-read (Luxia, 2026-07-26).*
+
+---
+
+## Addenda (dated; append-only — the frozen text above is never edited; verify the frozen body via the tag)
+
+### ADDENDUM 2026-07-26-A — DeepSeek-V3 dtype regime (roster row 21, §4) — ratified by Luxia 2026-07-26
+
+Design-phase source verification (transformers 5.3.0, the pinned collection
+version; full evidence in the desk report of record for the FP8 lane
+design) established two facts the frozen text did not have:
+
+1. **The row-21 parenthetical "bf16 does not fit the cluster" is corrected.**
+   bf16-resident DeepSeek-V3 is 1249.9 GiB = 87.3% of the collection node
+   (156.2 GiB/card of 179.1) — it fits, without usable headroom. FP8 is
+   43.8%. (n = exact parameter accounting from the checkpoint index,
+   reproducing the published 671.03B to 0.005%; desk spot-recomputed.)
+2. **§4's "input-gradient extraction with checkpointing" is not executable
+   in the FP8 regime as written.** The 5.3.0 FP8 forward carries no autograd
+   graph (raw Triton kernels, `is_trainable = False`); `autograd.grad`
+   does not error but returns a residual-highway-only gradient with every
+   attention/MLP block treated as constant — a silent wrong answer.
+
+**Ruling (Luxia, 2026-07-26): DeepSeek-V3 collects AND builds its native
+target in bf16** via dequantize-on-load (`FineGrainedFP8Config(dequantize=
+True)`), i.e. the standard roster regime: standard bitwise spot-replay
+gate, standard differentiable input-gradient path, whole-node scheduling.
+The named FP8 deviation of row 21 is **retained as fallback only**: if
+bf16 proves operationally unworkable, DSV3 runs the native-FP8 forward
+with a named differentiable-wrapper construction (forward = the unmodified
+FP8 kernels; backward = grad_output · dequant(W), straight-through on
+activation quantization), certified per-run by the bitwise spot-replay
+gate AND the finite-difference gate below.
+
+**Adopted roster-wide (desk, same date): the directional finite-difference
+gate on every entropy-gradient target build** — the extracted gradient g
+must satisfy |⟨g,v⟩ − (S(+εv) − S(−εv))/2ε| / |dS| < .05 on a random unit
+direction at the build site (two extra forwards). A severed graph fails by
+orders of magnitude; this is the only check that catches it.
+
+*This addendum changes no prediction, band, gate, or roster membership; it
+corrects a rationale and names the construction for an already-frozen
+deviation. The frozen body's sha (`33ba8290…`) remains valid at the tag;
+the working file's post-addendum sha is recorded in the desk ledger.*
