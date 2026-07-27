@@ -1,14 +1,23 @@
-"""Roster nodes and their site-SCAN grids — the registry for models whose fit
-grid is not fixed yet.
+"""Roster nodes and their site-SCAN grids — the registry of what was scanned.
 
-Two registries, deliberately separate (do not merge them):
+Two registries, deliberately separate (do not merge them), and they OVERLAP:
 
 - `fit_transport_maps.SITES` — the **fixed fit grid**. A model appears there
   only after the desk has ratified its site of record from an alignment-curve
   scan (or it is a carried, banked model). Membership means "we know where
-  this model's sites are".
-- `SCAN_GRIDS` here — the **12-site scan grid**, the thing a new roster node
-  gets *before* its fit grid exists. Membership means "we are still looking".
+  this model's sites are", and the fit CLIs will run it with no `--src-sites`
+  / `--tgt-sites` override.
+- `SCAN_GRIDS` here — the **12-site scan grid** each roster node was collected
+  and curve-scanned on. Membership means "this grid is what we looked at".
+
+Before ratification a node is in SCAN_GRIDS ONLY: "we are still looking", and
+every run must pass its grid explicitly. Ratification does not MOVE the node —
+it ADDS the key to `SITES` and leaves it here, so the scan that produced the
+site of record stays re-derivable from the same registry that drove it. The
+wave-1 seven (ratified by Luxia 2026-07-27) are in both. `audit_registries()`
+is the guard for that overlap: a key in both registries must have a fixed grid
+drawn FROM its own scan grid (sites from curves, never fiat), and prefix
+relations between bank keys stay flagged either way.
 
 The prereg (frozen, `PREREG-transport-campaign-2026-07-26.md` §4) says:
 *"Sites from curves, never fiat: every NEW model gets an alignment-curve site
@@ -29,6 +38,7 @@ is passed to the collector via `--model-path`.
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
@@ -188,30 +198,125 @@ def scan_grid_table() -> str:
     return "\n".join(rows)
 
 
-def check_key_collisions(existing_keys: set[str]) -> list[str]:
-    """Bank-naming collision guard — state banks are keyed by model key.
+def fiat_grid_problems(fixed_grids: Mapping[str, tuple[int, ...]]) -> list[str]:
+    """The ratification invariant: a graduated node's fixed fit grid is drawn
+    from its OWN scan grid (prereg §4, "sites from curves, never fiat").
 
-    Returns the offending keys (exact collisions, and prefix relations, which
-    are what break careless globs like `states_olmo2-7b*`).
+    A violation means one of two things, both fatal: the grid was typed in by
+    fiat, or a DIFFERENT model is wearing this bank key. Cheap enough to run at
+    import time, which is where `fit_transport_maps` runs it.
     """
     problems: list[str] = []
-    for key in ROSTER:
-        if key in existing_keys:
-            problems.append(f"{key}: EXACT collision with an existing bank key")
-        for other in existing_keys:
-            if key != other and (key.startswith(other) or other.startswith(key)):
-                problems.append(
-                    f"{key}: prefix relation with existing bank key {other!r} — "
-                    f"exact-name loads are safe, GLOBS are not")
+    for key, node in ROSTER.items():
+        fixed = fixed_grids.get(key)
+        if fixed is None or set(fixed).issubset(node.scan_grid):
+            continue
+        stray = sorted(set(fixed) - set(node.scan_grid))
+        problems.append(
+            f"{key}: fixed fit grid {tuple(fixed)} contains site(s) {stray} that "
+            f"its own scan grid {node.scan_grid} never visited — either a FIAT "
+            f"grid (prereg §4 forbids it) or a different model reusing this key")
     return problems
+
+
+def unexplained_collisions(existing_keys: set[str],
+                           ratified_grids: Mapping[str, tuple[int, ...]]) -> list[str]:
+    """EXACT bank-key collisions that ratification does not explain.
+
+    The key IS the bank identity, so a roster key equal to a key already in use
+    is only benign when the two are the SAME model — i.e. the node graduated
+    into the fixed-fit-grid registry. Pass that registry as `ratified_grids`
+    and graduations are excused here; `fiat_grid_problems()` is what checks
+    that an excused key really did take its grid from its own scan curve.
+    """
+    return [f"{key}: EXACT collision with an existing bank key"
+            for key in ROSTER if key in existing_keys and key not in ratified_grids]
+
+
+def prefix_hazards(existing_keys: set[str]) -> list[str]:
+    """Bank keys in a prefix relation — glob hazards, ratified or not.
+
+    Expected and permanent for the OLMo pair (`olmo2-7b` BASE beside
+    `olmo2-7b-instruct`): exact-name loads are safe, `states_olmo2-7b*` is not.
+    Reported so nobody writes that glob, never treated as a fault to fix.
+    """
+    return [f"{key}: prefix relation with existing bank key {other!r} — "
+            f"exact-name loads are safe, GLOBS are not"
+            for key in ROSTER for other in existing_keys
+            if key != other and (key.startswith(other) or other.startswith(key))]
+
+
+def check_key_collisions(existing_keys: set[str],
+                         ratified_grids: Mapping[str, tuple[int, ...]] | None = None
+                         ) -> list[str]:
+    """Bank-naming collision guard — every reportable line, in one list.
+
+    Fiat grids first, then unexplained exact collisions, then prefix hazards.
+    Callers that need to tell fatal from expected should use
+    `audit_registries()` instead of splitting these strings.
+    """
+    ratified = ratified_grids or {}
+    return (fiat_grid_problems(ratified)
+            + unexplained_collisions(existing_keys, ratified)
+            + prefix_hazards(existing_keys))
+
+
+class RegistryAudit(BaseModel):
+    """The state of the two registries at one moment, as data rather than prose."""
+
+    graduated: dict[str, tuple[int, ...]] = Field(
+        default_factory=dict,
+        description="roster key -> ratified fixed fit grid (in BOTH registries)")
+    still_scanning: tuple[str, ...] = Field(
+        default=(), description="roster keys with no fixed fit grid yet")
+    fatal: tuple[str, ...] = Field(
+        default=(), description="fiat grids + exact collisions ratification cannot "
+                                "explain — a build/naming bug, fix before fitting")
+    expected: tuple[str, ...] = Field(
+        default=(), description="prefix hazards — permanent facts about the bank "
+                                "namespace, reported so globs stay unwritten")
+
+    @property
+    def problems(self) -> tuple[str, ...]:
+        """Every reportable line, fatal first (display order)."""
+        return self.fatal + self.expected
+
+    @property
+    def ok(self) -> bool:
+        return not self.fatal
+
+
+def audit_registries(fixed_grids: Mapping[str, tuple[int, ...]]) -> RegistryAudit:
+    """Cross-check the scan registry here against a fixed-fit-grid registry.
+
+    `fixed_grids` is `fit_transport_maps.SITES` (passed in rather than imported,
+    so this module stays import-cycle-free and unit-testable against a stub).
+    """
+    keys = set(fixed_grids)
+    return RegistryAudit(
+        graduated={k: tuple(fixed_grids[k]) for k in sorted(ROSTER) if k in fixed_grids},
+        still_scanning=tuple(k for k in sorted(ROSTER) if k not in fixed_grids),
+        fatal=tuple(fiat_grid_problems(fixed_grids)
+                    + unexplained_collisions(keys, fixed_grids)),
+        expected=tuple(prefix_hazards(keys)))
 
 
 if __name__ == "__main__":                                   # desk convenience
     from metabasis.scripts.fit_transport_maps import SITES
 
     print(scan_grid_table())
+    audit = audit_registries(SITES)
+    print(f"\ngraduated (fixed fit grid ratified; in BOTH registries): "
+          f"{len(audit.graduated)}/{len(ROSTER)}")
+    for key, grid in audit.graduated.items():
+        print(f"  {key:<26} fit grid {grid}  <- scan grid {ROSTER[key].scan_grid}")
+    print(f"still scanning (no fixed grid; pass --src-sites/--tgt-sites): "
+          f"{list(audit.still_scanning)}")
     print()
-    for line in check_key_collisions(set(SITES)):
-        print(f"COLLISION-GUARD: {line}")
+    for line in audit.fatal:
+        print(f"COLLISION-GUARD [FATAL]: {line}")
+    for line in audit.expected:
+        print(f"COLLISION-GUARD [expected]: {line}")
+    print(f"registry audit: {'OK' if audit.ok else 'FATAL — fix before fitting'}")
     print(f"\nfixed fit grids (SITES): {sorted(SITES)}")
     print(f"scan grids (SCAN_GRIDS): {sorted(SCAN_GRIDS)}")
