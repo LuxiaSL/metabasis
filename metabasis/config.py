@@ -125,8 +125,10 @@ MODEL_PRESETS: dict[str, ModelPreset] = {
     # below was read from the checkpoint's own config.json / generation_config.json
     # on 2026-07-26 (config shas in metabasis/roster.py). `head_dim` is computed
     # (hidden_dim / num_attention_heads) wherever config.json leaves it null.
-    # These nodes have NO fixed fit grid yet — their 12-site scan grids live in
-    # metabasis.roster.SCAN_GRIDS, not in fit_transport_maps.SITES.
+    # All seven were scanned on the 12-site grids in metabasis.roster.SCAN_GRIDS
+    # and their fit grids ratified by Luxia 2026-07-27 — so they now appear in
+    # fit_transport_maps.SITES as well (the two registries overlap by design;
+    # SCAN_GRIDS stays the record of what was scanned).
     #
     # ⚠ temperature caveat: only `torch_dtype` is load-bearing for collection
     # (forced replay never samples). Where generation_config.json carries no

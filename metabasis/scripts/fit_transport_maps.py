@@ -44,7 +44,7 @@ from typing import Literal, Optional
 import numpy as np
 from pydantic import BaseModel
 
-from metabasis.roster import SCAN_GRIDS
+from metabasis.roster import SCAN_GRIDS, fiat_grid_problems
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("fit_transport_maps")
@@ -66,16 +66,44 @@ SITES = {"3b": (13, 14, 18), "8b": (14, 16, 18), "qwen-7b": (19, 21, 23),
          # olmo2-7b: NO banked site curve exists (A3/A5 were cut for this model), so
          # the sites are a mid-depth BAND and the site of record is picked from the
          # fit's own alignment curve afterwards — never by fiat (baton item 1).
-         "olmo2-7b": (12, 16, 20, 24)}
+         "olmo2-7b": (12, 16, 20, 24),
+         # --- wave-1 graduations (collection phase) ----------------------------
+         # Ratified by Luxia 2026-07-27 from the wave-1 12-site alignment-curve
+         # scans: `outputs/collection/<key>/fits_scan_<key>/cp2_summary.json`,
+         # held-out r² at proc_k128, NATIVE arm (the family of record), hub 8B.
+         # Each grid is the peak flanked by its two neighbouring scanned sites;
+         # ⋆ marks the site of record. These keys stay in metabasis.roster too —
+         # SCAN_GRIDS remains the record of what was scanned to get here.
+         "qwen2.5-3b-instruct": (24, 26, 28),          # ⋆ L26
+         "qwen2.5-14b-instruct": (26, 29, 32),         # ⋆ L29
+         "qwen2.5-32b-instruct": (42, 46, 50),         # ⋆ L46
+         "mistral-7b-instruct-v0.3": (13, 15, 17),     # ⋆ L15
+         "olmo2-7b-instruct": (13, 15, 17),            # ⋆ L15
+         "phi-4": (16, 19, 21),                        # ⋆ L19
+         # phi-3.5-mini-instruct: FOUR sites, Luxia-ratified — the native curve is
+         # double-humped (L13 .632 / L17 .630 twin peaks with an L15 dip), so both
+         # humps stay in the grid. Precedent for >3-site grids: olmo2-7b above.
+         "phi-3.5-mini-instruct": (11, 13, 15, 17)}    # ⋆ L13
 
 # Every model key the CLIs will accept. SITES = models whose FIT grid is fixed;
-# metabasis.roster.SCAN_GRIDS = models still on their 12-site alignment-curve
-# scan (prereg §4, "sites from curves, never fiat"). A scan node moves from the
-# second registry into SITES only when the desk ratifies its site of record —
-# so scan runs must always pass their grid explicitly (`--sites` on the
-# collector, `--src-sites` / `--tgt-sites` here), which also puts the grid in
-# the command line where the stamp and the shell history can both see it.
+# metabasis.roster.SCAN_GRIDS = the 12-site alignment-curve scan grids (prereg §4,
+# "sites from curves, never fiat"). The two registries OVERLAP by design: a scan
+# node that the desk has ratified is ADDED to SITES and KEPT in SCAN_GRIDS, so the
+# scan that produced its site of record stays re-derivable. Membership therefore
+# reads: in SITES => the fit grid is fixed, no --src-sites/--tgt-sites needed; in
+# SCAN_GRIDS only => still looking, pass the grid explicitly (`--sites` on the
+# collector, `--src-sites` / `--tgt-sites` here), which also puts the grid in the
+# command line where the stamp and the shell history can both see it.
 MODEL_KEYS: tuple[str, ...] = tuple(sorted(set(SITES) | set(SCAN_GRIDS)))
+
+# Import-time ratification invariant: every key in BOTH registries must have its
+# fixed grid drawn from its own 12-site scan grid. A fiat grid (or a foreign
+# model reusing a bank key) would otherwise fit silently — fail before any fit.
+_RATIFICATION_PROBLEMS = fiat_grid_problems(SITES)
+if _RATIFICATION_PROBLEMS:
+    raise ValueError("SITES violates the ratification invariant:\n  "
+                     + "\n  ".join(_RATIFICATION_PROBLEMS))
+
 ARMS = ("native", "raw")
 STRATA = ("S1", "S2", "S3")
 DEFAULT_ARM_ROOT = Path("outputs/battery/arms/A8_conjugation")
@@ -701,11 +729,11 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--arm-root", type=Path, default=DEFAULT_ARM_ROOT)
     ap.add_argument("--source-model", default="3b", choices=MODEL_KEYS,
-                    help="scan-registry models (metabasis.roster) are accepted but "
-                         "have no fixed grid — pass --src-sites for them")
+                    help="un-ratified scan-registry models (metabasis.roster) are "
+                         "accepted but have no fixed grid — pass --src-sites for them")
     ap.add_argument("--target-model", default="8b", choices=MODEL_KEYS,
-                    help="scan-registry models (metabasis.roster) are accepted but "
-                         "have no fixed grid — pass --tgt-sites for them")
+                    help="un-ratified scan-registry models (metabasis.roster) are "
+                         "accepted but have no fixed grid — pass --tgt-sites for them")
     ap.add_argument("--n-null", type=int, default=N_NULL_REPS)
     ap.add_argument("--fit-strata", default=None,
                     help="comma list, e.g. S1,S2 — fit/gate g on these strata only "
@@ -734,13 +762,14 @@ def main() -> int:
     bad = [a for a in arms if a not in ARMS]
     if bad:
         raise SystemExit(f"unknown arms {bad}; valid: {ARMS}")
-    # scan-registry models have no fixed grid — say so here rather than dying on a
-    # bare KeyError inside run_grid.
+    # A model with no fixed grid (still on its scan, not yet ratified) needs its
+    # grid on the command line — say so here rather than dying on a bare KeyError
+    # inside run_grid. Ratified models are in SITES and pass straight through.
     for role, model, override in (("--source-model", args.source_model, args.src_sites),
                                   ("--target-model", args.target_model, args.tgt_sites)):
         if model not in SITES and not override:
             raise SystemExit(
-                f"{role} {model!r} has no fixed fit grid (it is a scan-registry "
+                f"{role} {model!r} has no fixed fit grid (un-ratified scan-registry "
                 f"model; its 12-site scan grid is {SCAN_GRIDS.get(model)}). Pass "
                 f"{'--src-sites' if role.startswith('--source') else '--tgt-sites'} "
                 f"explicitly — sites from curves, never fiat.")
