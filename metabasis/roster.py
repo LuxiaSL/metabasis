@@ -342,7 +342,43 @@ HUB_RUNGS_2: tuple[RosterNode, ...] = (
               "(rake M9: another user's hand-written chat template)."),
 )
 
-ROSTER: dict[str, RosterNode] = {n.key: n for n in WAVE1 + HUB_RUNGS_2}
+# The MoE chat rung (2026-07-28): roster row 18. Architecture facts read from the
+# checkpoint's own config.json on the collection node; checkpoint identity verified
+# per rake M9 — eos ids + generation_config + HUB CROSS-CHECK of the config sha,
+# NEVER the directory name (the sibling `Qwen3-30B-A3B-Base` directory on the same
+# shared store is a DIFFERENT checkpoint and does not satisfy row 18).
+MOE_CHAT: tuple[RosterNode, ...] = (
+    RosterNode(
+        key="qwen3-30b-a3b", model_id="Qwen/Qwen3-30B-A3B",
+        roster_row=18, arms=("native", "raw"), num_hidden_layers=48, hidden_size=2048,
+        weights_dirname="Qwen3-30B-A3B", checkpoint_identity="instruct",
+        config_sha256="2850ddb3bf7aecad20b611e2d44f3077fc8193f4827c93beddd4c02ad63c2297",
+        max_position_embeddings=40960,
+        notes="The MoE rung: Qwen3MoeForCausalLM, 128 experts, top-8 routing "
+              "(num_experts_per_tok=8), moe_intermediate_size 768, decoder_sparse_step=1 "
+              "(EVERY layer is an MoE layer, mlp_only_layers=[]). 30.5B total params / "
+              "~3.3B active — 56.87 GiB bf16 on disk, which is why it collects "
+              "single-card despite the 30B nameplate. hidden_size 2048 is the SMALLEST "
+              "residual width on the roster above gpt2-xl, and it is the width the "
+              "transport map sees: a 30B-nameplate node with a 2048-d residual stream "
+              "is the sharpest available test of whether the exchange rate tracks "
+              "capability or width. "
+              "IDENTITY (rake M9, verified independently of the dirname): config.json "
+              "sha 2850ddb3… is byte-identical to the hub's Qwen/Qwen3-30B-A3B, while "
+              "the sibling BASE repo's config hashes 7e414215… — different object. "
+              "eos_token_id 151645 (<|im_end|>) is the CHAT signature; the Base "
+              "checkpoint carries 151643 (<|endoftext|>). generation_config ships the "
+              "chat sampling defaults (temperature 0.6 / top_k 20 / top_p 0.95, eos "
+              "[151645, 151643]). Chat template present in tokenizer_config — recorded, "
+              "but per rake M9 template presence proves NOTHING on its own (Qwen ships "
+              "templates on Base checkpoints too); the eos id + config sha are the "
+              "discriminators of record. This closes the wave-1 audit finding that "
+              "the sibling Base directory on the shared weight store does not satisfy roster row 18. "
+              "Note the roster row asks for native+raw, i.e. a chat model — satisfied "
+              "by this checkpoint and by no other Qwen3-30B-A3B directory on the node."),
+)
+
+ROSTER: dict[str, RosterNode] = {n.key: n for n in WAVE1 + HUB_RUNGS_2 + MOE_CHAT}
 
 #: model key -> the grid it was actually collected and curve-scanned on. This is
 #: what `--sites` should carry for a scan collection, and what `--tgt-sites`
