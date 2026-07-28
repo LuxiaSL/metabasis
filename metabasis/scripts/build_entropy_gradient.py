@@ -71,6 +71,24 @@ Node-side run (one card, pinned; the trunk stamp records `cuda_visible_devices`)
     python -m metabasis.scripts.build_entropy_gradient \
         --model phi-4 --model-path <LOCAL_WEIGHTS_DIR> --arm-root <ARM_ROOT> \
         --site 19 --arm native --out-dir <ARM_ROOT>/staging/phi-4/vectors
+
+Three opt-in flags exist for nodes that cannot take the default path; each is a
+no-op when unset, so every historical build is reproduced byte-for-byte without it:
+
+  * `--max-seq-len N [--assert-n-truncated K]` — prereg ADDENDUM 2026-07-27-B. A node
+    whose registry row carries `max_seq_len` (gpt2-xl: 1024) MUST build under the same
+    per-text truncation it collected under, or its vector lives in a different space
+    than the transport maps were fit in. The corpus-wide truncation count is re-derived
+    from this node's own tokenizer BEFORE any forward pass and, with
+    `--assert-n-truncated`, must reproduce the ratified number or the build refuses.
+  * `--out-name STEM` — bank BESIDE an existing vector of the same model instead of
+    over it (the 8bL16 construction-lineage rebuild). Moves the FILENAMES only; the npz
+    KEY stays canonical, which is what the readout resolves on.
+  * `--shard-across 0,1` — the collector's certified sharded loader (prereg §4; the
+    sharding gate PASSED 2026-07-27 byte-identical to single-device). For a model whose
+    weights plus the retained autograd graph do not fit one card. The layer activations
+    of every layer >= site are retained for the leaf gradient, and eager attention is
+    O(n^2) per layer, so the peak is well above the weights alone.
 """
 from __future__ import annotations
 
@@ -132,6 +150,10 @@ class CorpusSelectionError(EntropyGradientBuildError):
     """The corpus cannot supply the requested number of texts."""
 
 
+class TruncationAuditError(EntropyGradientBuildError):
+    """The position-ceiling truncation audit did not reproduce the ratified count."""
+
+
 class LeafHookError(EntropyGradientBuildError):
     """The leaf-substitution hook did not fire exactly once for a forward pass."""
 
@@ -168,6 +190,41 @@ class BuildRequest(BaseModel):
     entropy_chunk: int = Field(ge=0, default=0,
                                description="0 = the precedent's whole-sequence log_softmax; "
                                            ">0 chunks it (OOM fallback, same algebra)")
+    max_seq_len: Optional[int] = Field(
+        default=None, ge=2,
+        description="prereg ADDENDUM 2026-07-27-B position-ceiling deviation: truncate "
+                    "every text to its FIRST `max_seq_len` tokens. MUST match the value "
+                    "the node's registry row carries (`RosterNode.max_seq_len`), because "
+                    "the addendum requires ONE truncation across collection, spot-replay, "
+                    "target builds and behavioral reads — a build that truncates "
+                    "differently from the collection would live in a different space "
+                    "than the transport maps were fit in.")
+    expect_n_truncated: Optional[int] = Field(
+        default=None, ge=0,
+        description="ratified corpus-wide truncation count (148 for gpt2-xl). When set, "
+                    "the build re-derives the count from THIS node's tokenizer over the "
+                    "WHOLE frozen corpus and refuses to run if it disagrees — the "
+                    "deviation is then a verified fact of the build, not a claim.")
+    out_stem: Optional[str] = Field(
+        default=None, min_length=1,
+        description="filename stem for the banked vector/stamp/FD-gate trio; defaults to "
+                    "`entropy_gradient_<model_key>` (the convention the readout probes "
+                    "first). Overridden only when a build must sit BESIDE an existing "
+                    "vector of the same model — e.g. the 8bL16 construction-lineage "
+                    "rebuild, which must not overwrite the legacy L16 bank.")
+
+    @property
+    def stem(self) -> str:
+        """The banked filename stem (never the npz KEY, which is always canonical)."""
+        return self.out_stem or f"entropy_gradient_{self.model_key}"
+
+    @field_validator("out_stem")
+    @classmethod
+    def _stem_is_a_bare_filename(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and ("/" in v or "\\" in v or v.endswith(".npz")):
+            raise ValueError(
+                f"--out-name must be a bare filename STEM (no directory, no .npz), got {v!r}")
+        return v
 
     @field_validator("arm")
     @classmethod
@@ -249,6 +306,71 @@ class FDGateResult(BaseModel):
     passed: bool
 
 
+class TruncationAudit(BaseModel):
+    """Prereg ADDENDUM 2026-07-27-B, re-derived on this node from this tokenizer.
+
+    Counted over the WHOLE frozen corpus (not just the build's 80 texts), because the
+    ratified number the addendum names — 148 of 780 for gpt2-xl — is a corpus-wide fact,
+    and re-deriving it here is what proves this build applies the SAME truncation the
+    collection applied. The subset actually consumed by this build is recorded beside it.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    prereg: str = "ADDENDUM 2026-07-27-B"
+    max_length: int
+    arm: str
+    n_corpus_texts: int
+    n_truncated: int
+    truncated_text_ids: list[str]
+    n_truncated_in_build: int
+    truncated_in_build_ids: list[str]
+    expected_n_truncated: Optional[int] = None
+
+
+def audit_truncation(tok: Any, entries: Sequence[dict], arm: str, date_string: str,
+                     max_length: int, build_text_ids: Sequence[str],
+                     expected: Optional[int] = None) -> TruncationAudit:
+    """Which frozen-corpus texts the position ceiling actually truncates, exactly.
+
+    Mirrors `collect_mean_states.compute_means`'s rule verbatim so the two counts are
+    comparable by construction: hitting the ceiling is NECESSARY but not SUFFICIENT (a
+    text whose natural length is exactly `max_length` was not truncated), so the rare
+    boundary case is re-tokenized without the ceiling rather than assumed.
+
+    Tokenizer-only: no weights, no GPU. Runs BEFORE the first forward pass so a
+    mismatched deviation costs zero GPU time.
+    """
+    from metabasis.scripts.collect_mean_states import build_ids
+
+    truncated: list[str] = []
+    for e in entries:
+        ids, _ = build_ids(tok, e, arm, date_string, max_length=max_length)
+        if len(ids) == max_length:
+            if len(build_ids(tok, e, arm, date_string)[0]) > max_length:
+                truncated.append(e["text_id"])
+    in_build = [t for t in truncated if t in set(build_text_ids)]
+    audit = TruncationAudit(
+        max_length=max_length, arm=arm, n_corpus_texts=len(entries),
+        n_truncated=len(truncated), truncated_text_ids=truncated,
+        n_truncated_in_build=len(in_build), truncated_in_build_ids=in_build,
+        expected_n_truncated=expected)
+    if expected is not None and len(truncated) != expected:
+        raise TruncationAuditError(
+            f"position-ceiling audit disagrees with the ratified deviation: this "
+            f"tokenizer truncates {len(truncated)} of {len(entries)} corpus texts at "
+            f"first-{max_length} on the {arm} arm, but ADDENDUM 2026-07-27-B ratified "
+            f"{expected}. Either the checkpoint/tokenizer is not the collected one or "
+            f"the corpus is not the frozen one — refusing to build a vector that would "
+            f"not live in the collected node's space.")
+    logger.info("truncation audit (first-%d, %s arm): %d/%d corpus texts truncated%s; "
+                "%d of them are among this build's %d texts", max_length, arm,
+                len(truncated), len(entries),
+                f" (ratified {expected}: MATCH)" if expected is not None else "",
+                len(in_build), len(build_text_ids))
+    return audit
+
+
 class ConstructionDiagnostics(BaseModel):
     """Construction-internal health of the direction (needs no external axis bank)."""
 
@@ -293,6 +415,8 @@ class BuildResult(BaseModel):
     sigma_text_ids: list[str]
     grad_text_ids: list[str]
     wall_seconds: float
+    #: None on every node without a ruled position ceiling (the historical key set).
+    truncation: Optional[TruncationAudit] = None
 
 
 # ---------------------------------------------------------------- text selection
@@ -436,13 +560,23 @@ def build_entropy_gradient(model: Any, tok: Any, entries: Sequence[dict],
                 request.model_key, site, n_layers, hidden_dim,
                 len(sigma_entries), len(grad_entries), request.arm)
 
+    # ADDENDUM 2026-07-27-B: audited BEFORE the first forward, so a truncation that
+    # disagrees with the collection's costs no GPU time at all.
+    truncation: Optional[TruncationAudit] = None
+    if request.max_seq_len is not None:
+        truncation = audit_truncation(
+            tok, entries, request.arm, date_string, request.max_seq_len,
+            [e["text_id"] for e in sigma_entries] + [e["text_id"] for e in grad_entries],
+            expected=request.expect_n_truncated)
+
     hook = _LeafSubstitution(layers[site])
     try:
         # ── covariance pass: residual rows at the site over completion positions ──
         rows: list[np.ndarray] = []
         tok_norms: list[float] = []
         for i, e in enumerate(sigma_entries):
-            ids_list, p = build_ids(tok, e, request.arm, date_string)
+            ids_list, p = build_ids(tok, e, request.arm, date_string,
+                                   max_length=request.max_seq_len)
             n = len(ids_list)
             if n - p <= 0:
                 raise CorpusSelectionError(f"{e['text_id']}: no completion positions")
@@ -480,7 +614,8 @@ def build_entropy_gradient(model: Any, tok: Any, entries: Sequence[dict],
         entropies: list[float] = []
         n_grad_positions = 0
         for i, e in enumerate(grad_entries):
-            ids_list, p = build_ids(tok, e, request.arm, date_string)
+            ids_list, p = build_ids(tok, e, request.arm, date_string,
+                                   max_length=request.max_seq_len)
             n = len(ids_list)
             if n - p <= 0:
                 raise CorpusSelectionError(f"{e['text_id']}: no completion positions")
@@ -592,7 +727,8 @@ def build_entropy_gradient(model: Any, tok: Any, entries: Sequence[dict],
         sigma_mean=mu.astype(np.float64), diagnostics=diagnostics, fd_gate=fd_gate,
         sigma_text_ids=[e["text_id"] for e in sigma_entries],
         grad_text_ids=[e["text_id"] for e in grad_entries],
-        wall_seconds=round(time.time() - t0, 1))
+        wall_seconds=round(time.time() - t0, 1),
+        truncation=truncation)
 
 
 def _run_fd_gate(*, model: Any, request: BuildRequest, layers: Any,
@@ -739,11 +875,12 @@ def bank(result: BuildResult, trunk: dict, corpus_sha: str, date_string: str,
     out.mkdir(parents=True, exist_ok=True)
     site = req.site
     key = req.model_key
+    stem = req.stem                       # == f"entropy_gradient_{key}" unless overridden
 
     vectors = {CANONICAL_VECTOR_KEY.format(site=site): result.vector}
     for i, r in enumerate(result.random_band, start=1):
         vectors[CANONICAL_RANDOM_KEY.format(i=i, site=site)] = r
-    vec_path = out / f"entropy_gradient_{key}.npz"
+    vec_path = out / f"{stem}.npz"
     np.savez(vec_path, **vectors)
 
     sigma_path = out / f"sigma_L{site}_{key}.npz"
@@ -751,7 +888,7 @@ def bank(result: BuildResult, trunk: dict, corpus_sha: str, date_string: str,
              mean=result.sigma_mean, ridge=np.float64(result.diagnostics.sigma_ridge),
              n_positions=np.int64(result.diagnostics.n_sigma_positions))
 
-    fd_path = out / f"entropy_gradient_{key}_fd_gate.json"
+    fd_path = out / f"{stem}_fd_gate.json"
     fd_path.write_text(json.dumps(
         {"model": key, "site": site, "arm": req.arm,
          "PASSES_FD_GATE": result.fd_gate.passed,
@@ -811,9 +948,20 @@ def bank(result: BuildResult, trunk: dict, corpus_sha: str, date_string: str,
         "wall_seconds": result.wall_seconds,
         "trunk": trunk,
     }
+    # ADDENDUM 2026-07-27-B: recorded in EVERY stamp of a truncated node, with the same
+    # key names the collector uses so a build stamp and a collection stamp can be
+    # compared field-for-field. Absent on every other node, so the historical key set is
+    # untouched (same discipline as the collector's `sharding` record).
+    if result.truncation is not None:
+        t = result.truncation
+        stamp["truncation"] = f"first-{t.max_length}"
+        stamp["truncation_prereg"] = t.prereg
+        stamp["n_truncated"] = t.n_truncated
+        stamp["truncated_text_ids"] = t.truncated_text_ids
+        stamp["truncation_audit"] = t.model_dump(exclude={"truncated_text_ids"})
     if saboteur_used:
         stamp["SELFTEST_SABOTEUR_APPLIED"] = True
-    stamp_path = out / f"entropy_gradient_{key}_stamps.json"
+    stamp_path = out / f"{stem}_stamps.json"
     stamp_path.write_text(json.dumps(stamp, indent=1))
     return {"vector": vec_path, "sigma": sigma_path, "fd_gate": fd_path,
             "stamp": stamp_path}
@@ -971,6 +1119,91 @@ def selftest() -> int:
     check("stride rule matches the precedent's _grad_gids",
           stride_indices(780, 20, True)[:4] == [19, 58, 97, 136])
 
+    # ---------------- ADDENDUM 2026-07-27-B: the position-ceiling truncation --------
+    # Five texts whose NATIVE-arm lengths are 13/23/33/43/53 tokens under the toy
+    # tokenizer (3-token prompt prefix + 10/20/30/40/50 completion tokens). At a
+    # ceiling of 33 exactly two are truncated, and the third sits EXACTLY on the
+    # ceiling — the boundary case the collector re-tokenizes rather than assumes,
+    # and the one a naive `len(ids) == max_length` count gets wrong.
+    from metabasis.scripts.collect_mean_states import build_ids as _build_ids
+    trunc_entries = [{"text_id": f"X{i:03d}", "stratum": "S1", "system_prompt": "",
+                      "user_prompt": f"p{i}", "text": "a" * (10 + 10 * i)}
+                     for i in range(5)]
+    lens = [len(_build_ids(tok, e, "native", "12 Jul 2026")[0]) for e in trunc_entries]
+    check("toy truncation fixture has the intended lengths", lens == [13, 23, 33, 43, 53],
+          str(lens))
+    aud = audit_truncation(tok, trunc_entries, "native", "12 Jul 2026", 33,
+                           [e["text_id"] for e in trunc_entries])
+    check("truncation audit counts only texts that actually lost tokens",
+          aud.n_truncated == 2 and aud.truncated_text_ids == ["X003", "X004"],
+          f"{aud.n_truncated}: {aud.truncated_text_ids}")
+    check("a text sitting EXACTLY on the ceiling is not counted as truncated",
+          "X002" not in aud.truncated_text_ids)
+    aud_sub = audit_truncation(tok, trunc_entries, "native", "12 Jul 2026", 33,
+                               ["X000", "X004"])
+    check("audit separates the corpus-wide count from this build's subset",
+          aud_sub.n_truncated == 2 and aud_sub.n_truncated_in_build == 1
+          and aud_sub.truncated_in_build_ids == ["X004"],
+          f"corpus {aud_sub.n_truncated} / build {aud_sub.n_truncated_in_build}")
+    try:
+        audit_truncation(tok, trunc_entries, "native", "12 Jul 2026", 33,
+                         [e["text_id"] for e in trunc_entries], expected=148)
+        check("a truncation count disagreeing with the ratified one is REJECTED", False)
+    except TruncationAuditError as exc:
+        check("a truncation count disagreeing with the ratified one is REJECTED",
+              "148" in str(exc))
+    check("the ratified count is accepted when it holds",
+          audit_truncation(tok, trunc_entries, "native", "12 Jul 2026", 33,
+                           [], expected=2).expected_n_truncated == 2)
+    # end to end: the ceiling must actually reach the forward passes, not just the audit
+    trunc_corpus = _toy_corpus(24)
+    for i, e in enumerate(trunc_corpus):
+        e["text"] = "a" * (10 + 4 * i)                 # 13..105 native-arm tokens
+    req_trunc = req.model_copy(update={"max_seq_len": 40, "n_sigma": 12, "n_grad": 6})
+    res_trunc = build_entropy_gradient(model, tok, trunc_corpus, req_trunc,
+                                       "12 Jul 2026", "cpu")
+    cap_positions = sum(
+        min(len(_build_ids(tok, e, "native", "12 Jul 2026")[0]), 40)
+        - _build_ids(tok, e, "native", "12 Jul 2026")[1]
+        for e in [trunc_corpus[i] for i in stride_indices(24, 6, True)])
+    check("the ceiling reaches the GPU passes (gradient positions are capped)",
+          res_trunc.diagnostics.n_grad_positions == cap_positions,
+          f"{res_trunc.diagnostics.n_grad_positions} == {cap_positions}")
+    check("a truncated build carries its audit into the result",
+          res_trunc.truncation is not None and res_trunc.truncation.max_length == 40
+          and res_trunc.truncation.n_truncated > 0,
+          f"n_truncated={res_trunc.truncation.n_truncated if res_trunc.truncation else None}")
+    check("an untruncated build carries NO truncation record (historical key set)",
+          res.truncation is None)
+    with tempfile.TemporaryDirectory() as td:
+        paths_t = bank(res_trunc.model_copy(
+            update={"request": req_trunc.model_copy(update={"out_dir": Path(td)})}),
+            {"device": "cpu", "cuda_visible_devices": "(unset)"}, "0" * 64, "12 Jul 2026")
+        st = json.loads(paths_t["stamp"].read_text())
+        check("truncated stamp carries the collector's own key names",
+              st["truncation"] == "first-40" and st["truncation_prereg"] ==
+              "ADDENDUM 2026-07-27-B" and st["n_truncated"] ==
+              res_trunc.truncation.n_truncated
+              and len(st["truncated_text_ids"]) == st["n_truncated"],
+              st["truncation"])
+
+    # ---------------- --out-name: banking BESIDE an existing vector -----------------
+    try:
+        req.model_copy(update={"out_stem": "a/b"})
+        BuildRequest(model_key="x", model_path="p", arm_root=Path("."), out_dir=Path("."),
+                     site=0, arm="native", out_stem="dir/name")
+        check("--out-name rejects a path", False)
+    except Exception as exc:
+        check("--out-name rejects a path", "STEM" in str(exc) or "stem" in str(exc))
+    try:
+        BuildRequest(model_key="x", model_path="p", arm_root=Path("."), out_dir=Path("."),
+                     site=0, arm="native", out_stem="name.npz")
+        check("--out-name rejects a .npz suffix", False)
+    except Exception as exc:
+        check("--out-name rejects a .npz suffix", "STEM" in str(exc) or "stem" in str(exc))
+    check("default stem is the readout's first-probed convention",
+          req.stem == "entropy_gradient_toy", req.stem)
+
     # Banking round-trip through the canonical keys, read back by the READOUT's loader.
     with tempfile.TemporaryDirectory() as td:
         banked_req = req.model_copy(update={"out_dir": Path(td)})
@@ -994,6 +1227,29 @@ def selftest() -> int:
         check("stamp carries cuda_visible_devices",
               "cuda_visible_devices" in stamp["trunk"])
         check("stamp records the FD verdict", stamp["fd_gate"]["PASSES"] is True)
+
+        # The 8bL16 deconfound's shape: a SECOND vector for the same model at a site
+        # the legacy bank already holds. The stem must move the files while the npz
+        # KEY stays canonical — otherwise the rebuild either clobbers the legacy bank
+        # (same stem) or becomes unreadable by the readout (moved key).
+        stem2 = "entropy_gradient_toy_L2rebuild"
+        paths2 = bank(res.model_copy(update={
+            "request": banked_req.model_copy(update={"out_stem": stem2})}),
+            {"device": "cpu", "cuda_visible_devices": "(unset)"}, "0" * 64, "12 Jul 2026")
+        check("--out-name moves the vector/stamp/FD-gate trio",
+              paths2["vector"].name == f"{stem2}.npz"
+              and paths2["stamp"].name == f"{stem2}_stamps.json"
+              and paths2["fd_gate"].name == f"{stem2}_fd_gate.json",
+              paths2["vector"].name)
+        check("--out-name does NOT overwrite the default-stem bank beside it",
+              paths["vector"].exists() and paths2["vector"] != paths["vector"])
+        with np.load(paths2["vector"]) as z2:
+            check("--out-name keeps the CANONICAL npz key (the readout's contract)",
+                  "entropy_gradient_L2" in z2.files, str(sorted(z2.files)))
+        v2, spec2 = load_entropy_gradient(paths2["vector"], "toy", 2)
+        check("readout loads a renamed bank by the same canonical key",
+              spec2.key == "entropy_gradient_L2"
+              and float(np.max(np.abs(v2 - v))) == 0.0)
 
     n_miss = sum(1 for _, ok, _ in checks if not ok)
     print(json.dumps({"checks": len(checks), "misses": n_miss,
@@ -1036,6 +1292,26 @@ def main(argv: Optional[list[str]] = None) -> int:
                     help="comma list of eps / median-residual-norm ratios for the ladder")
     ap.add_argument("--fd-n-probe", type=int, default=FD_N_PROBE)
     ap.add_argument("--fd-rel-tol", type=float, default=FD_REL_TOL)
+    ap.add_argument("--max-seq-len", type=int, default=None,
+                    help="prereg ADDENDUM 2026-07-27-B position ceiling: truncate every "
+                         "text to its FIRST N tokens. MUST equal the node's registry "
+                         "`max_seq_len` (gpt2-xl: 1024) — the addendum requires one "
+                         "truncation across every use of the node")
+    ap.add_argument("--assert-n-truncated", type=int, default=None,
+                    help="refuse to build unless the corpus-wide truncation audit "
+                         "reproduces exactly this many truncated texts (gpt2-xl: 148)")
+    ap.add_argument("--out-name", default=None,
+                    help="filename STEM for the vector/stamp/FD-gate trio (no dir, no "
+                         ".npz); default entropy_gradient_<model>. Use only to bank "
+                         "BESIDE an existing vector of the same model (the 8bL16 "
+                         "construction-lineage rebuild)")
+    ap.add_argument("--shard-across", default=None,
+                    help="comma list of devices (e.g. '0,1') to split the decoder stack "
+                         "across, via the COLLECTOR's certified sharded loader. Same "
+                         "layout the >=70B rungs collected under (prereg §4; sharding "
+                         "gate PASSED 2026-07-27 — forced 8-way sharding was byte-"
+                         "identical to fresh single-device). Use when the weights plus "
+                         "the retained autograd graph do not fit one card")
     ap.add_argument("--entropy-chunk", type=int, default=0,
                     help="OOM fallback: compute the entropy in position blocks of this "
                          "size (same algebra, different fp32 summation order)")
@@ -1061,12 +1337,17 @@ def main(argv: Optional[list[str]] = None) -> int:
             band_hi=args.band_hi, ridge_rel=args.ridge_rel, device=args.device,
             fd_eps_fractions=_parse_fractions(args.fd_eps_fractions),
             fd_n_probe=args.fd_n_probe, fd_rel_tol=args.fd_rel_tol,
-            entropy_chunk=args.entropy_chunk)
+            entropy_chunk=args.entropy_chunk, max_seq_len=args.max_seq_len,
+            expect_n_truncated=args.assert_n_truncated, out_stem=args.out_name)
     except ValueError as exc:
         raise SystemExit(f"invalid build request: {exc}") from exc
+    if args.assert_n_truncated is not None and args.max_seq_len is None:
+        raise SystemExit("--assert-n-truncated is meaningless without --max-seq-len")
 
     from metabasis.scripts.collect_mean_states import (
-        VMB_CANONICAL_DATE, load_corpus, load_model_and_tok, trunk_stamp)
+        VMB_CANONICAL_DATE, DeviceMapSpecError, ShardSpec, ShardedLoadError,
+        _device_key, load_corpus, load_model_and_tok, load_model_and_tok_sharded,
+        trunk_stamp)
 
     try:
         entries, corpus_sha = load_corpus(request.arm_root)
@@ -1074,9 +1355,23 @@ def main(argv: Optional[list[str]] = None) -> int:
         raise SystemExit(f"corpus unreadable under {request.arm_root}: {exc}") from exc
     logger.info("corpus: %d texts, manifest sha256 %s", len(entries), corpus_sha[:12])
 
+    # `device` is where the INPUT ids tensor is built. On the single-card path that is
+    # --device; on the sharded path accelerate decides, so the loader reports it and the
+    # forward passes must follow it (exactly the collector's rule).
+    sharding: Optional[dict] = None
     try:
-        model, tok = load_model_and_tok(request.model_path, request.device)
-    except (OSError, ValueError, RuntimeError) as exc:
+        if args.shard_across:
+            spec = ShardSpec(
+                shard_across=[_device_key(t) for t in args.shard_across.split(",")],
+                require_multi_device=True,
+                spec_echo=f"--shard-across {args.shard_across}")
+            model, tok, device, sharding = load_model_and_tok_sharded(
+                request.model_path, spec, (request.site,))
+        else:
+            model, tok = load_model_and_tok(request.model_path, request.device)
+            device = request.device
+    except (OSError, ValueError, RuntimeError, DeviceMapSpecError,
+            ShardedLoadError) as exc:
         raise SystemExit(
             f"cannot load {request.model_key} from {request.model_path}: "
             f"{type(exc).__name__}: {exc}") from exc
@@ -1084,12 +1379,12 @@ def main(argv: Optional[list[str]] = None) -> int:
     # (the difference between ~20 GB peak and OOM on a 32B). The gradient still flows
     # THROUGH the frozen weights to reach the leaf; the vector is unchanged.
     model.requires_grad_(False)
-    trunk = trunk_stamp(request.model_path, tok, request.device)
+    trunk = trunk_stamp(request.model_path, tok, device, sharding=sharding)
     logger.info("trunk: %s", json.dumps(trunk))
 
     try:
         result = build_entropy_gradient(model, tok, entries, request,
-                                        VMB_CANONICAL_DATE, request.device)
+                                        VMB_CANONICAL_DATE, device)
     except EntropyGradientBuildError as exc:
         logger.error("%s: %s", type(exc).__name__, exc)
         print(f"ENTROPY-GRADIENT-BUILD-INCOMPLETE model={request.model_key} "
@@ -1100,8 +1395,11 @@ def main(argv: Optional[list[str]] = None) -> int:
         if isinstance(exc, torch.cuda.OutOfMemoryError):
             logger.error("CUDA OOM: %s", exc)
             print(f"ENTROPY-GRADIENT-BUILD-INCOMPLETE model={request.model_key} "
-                  "reason=OOM — retry with --entropy-chunk 256 (same algebra, "
-                  "chunked log_softmax); never shard, never touch other processes")
+                  "reason=OOM — nothing was banked. Retry with --entropy-chunk 256 "
+                  "(same algebra, chunked log_softmax) if the logits are the pressure, "
+                  "or with --shard-across (the certified sharded loader) if the weights "
+                  "plus the retained per-layer autograd graph simply exceed one card. "
+                  "NEVER free memory by touching another process.")
             return 4
         raise
 
@@ -1128,6 +1426,14 @@ def main(argv: Optional[list[str]] = None) -> int:
         "wall_seconds": result.wall_seconds,
         "cuda_visible_devices": trunk["cuda_visible_devices"],
     }
+    if result.truncation is not None:
+        summary["truncation"] = f"first-{result.truncation.max_length}"
+        summary["n_truncated"] = result.truncation.n_truncated
+        summary["n_truncated_in_build"] = result.truncation.n_truncated_in_build
+    if sharding is not None:
+        summary["n_compute_devices"] = sharding["n_compute_devices"]
+        summary["compute_devices"] = sharding["compute_devices"]
+    summary["banked_stem"] = request.stem
     print(json.dumps(summary, indent=1))
     if not g.passed:
         logger.error("FD gate did not pass: median rel.err %.4g at eps_frac %.3g "
