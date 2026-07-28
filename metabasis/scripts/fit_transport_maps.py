@@ -107,7 +107,32 @@ SITES = {"3b": (13, 14, 18), "8b": (14, 16, 18), "qwen-7b": (19, 21, 23),
          #      predictable without being geometrically aligned.
          #  (c) STANDING DESK THREAD on that predictability-without-geometry gap;
          #      any pythia result leaning on transported geometry cites this.
-         "pythia-6.9b": (29, 30, 31)}                  # ⋆ L31
+         "pythia-6.9b": (29, 30, 31),                  # ⋆ L31
+         # gpt2-xl: ratified by Luxia 2026-07-27 from the COMPLETED 25-site curve
+         # (computed 12 + ruled both-edge extension L0–L6, L42–L47).
+         # NO SITE OF RECORD YET — deliberately. The curve is a BATHTUB, not a
+         # peak: it rises L0→L7, falls off a cliff (L7 .449 → L10 .110), troughs
+         # at L13–16 (≈.05), then climbs monotonically to L47 and is still
+         # climbing there (L47 = n_layer-1, an edge by architecture exhaustion).
+         # The two ends are degenerate and the winner FLIPS with the hub source
+         # (8bL14/8bL16 → L7 by .007/.002; 8bL18 → L47 by .011), all inside the
+         # edge nulls (q95 .02–.066). Picking either end would be fiat wearing a
+         # curve's clothes.
+         # THREE EXPERIMENT SITES, ratified together: L7 (low end), L26 (middle
+         # probe), L47 (high end); L6 and L46 flank the two ends as the usual
+         # neighbours. The site of record is DEFERRED to their â evidence —
+         # Luxia's rationale: injecting into the ends is likely weak whatever the
+         # r², so a middle site is extra evidence even if its fit is poor.
+         # L26 is picked MECHANICALLY, not by eye: the scanned site nearest 50%
+         # depth (L24.0 of 48). L22 and L26 tie at |Δ|=2.0; the tie breaks on
+         # higher r² (L26 .127/.110/.113 vs L22 .088/.076/.077 — L26 higher from
+         # all three hub sources). Its geometry is poor (cka_after ≈ .10 against
+         # ≈ .64 at the ends), which is the point of probing it.
+         # TRUNCATION CAVEAT RIDES EVERY USE (prereg ADDENDUM 2026-07-27-B): this
+         # node's states are collected with per-text truncation to the first 1024
+         # tokens, so for the 148 affected texts any gpt2-xl pair compares
+         # full-text against truncated-text mean states. Flagged at scoring.
+         "gpt2-xl": (6, 7, 26, 46, 47)}                # ⋆ DEFERRED (L7|L26|L47)
 
 # Every model key the CLIs will accept. SITES = models whose FIT grid is fixed;
 # metabasis.roster.SCAN_GRIDS = the 12-site alignment-curve scan grids (prereg §4,
