@@ -378,7 +378,119 @@ MOE_CHAT: tuple[RosterNode, ...] = (
               "by this checkpoint and by no other Qwen3-30B-A3B directory on the node."),
 )
 
-ROSTER: dict[str, RosterNode] = {n.key: n for n in WAVE1 + HUB_RUNGS_2 + MOE_CHAT}
+# The big-chain single-card rungs (2026-07-28): roster rows 12 and 19, the two
+# members of the big-chain pull that fit ONE card. Architecture facts read from
+# each checkpoint's own config.json on the shared weight store; identity verified
+# per rake M9 — config.json sha CROSS-CHECKED AGAINST THE HUB, plus eos ids and
+# generation_config, NEVER the directory name and never template presence.
+# The other two big-chain repos (rows 20 and 21, Llama-3.1-405B-Instruct and
+# DeepSeek-V3) are downloaded and M9-verified but DELIBERATELY ABSENT here: both
+# are multicard-only, and the multicard scan design is held for a ruling. Adding
+# a key here is what makes a node collectable, so their absence is the block.
+BIG_CHAIN_SINGLE_CARD: tuple[RosterNode, ...] = (
+    RosterNode(
+        key="llama-3.3-70b-instruct", model_id="meta-llama/Llama-3.3-70B-Instruct",
+        roster_row=12, arms=("native", "raw"), num_hidden_layers=80, hidden_size=8192,
+        weights_dirname="Llama-3.3-70B-Instruct", checkpoint_identity="instruct",
+        config_sha256="95ef9768e4741543dbfaf0c274f101855883ff338b235c99eca2b6a4f4abee12",
+        max_position_embeddings=131072,
+        notes="THE POST-TRAINING-VINTAGE ROW. Row 12 exists to be compared against "
+              "row 11 (llama-3.1-70b-instruct), and the comparison is unusually clean: "
+              "the two checkpoints are architecturally IDENTICAL — LlamaForCausalLM, "
+              "80 layers, hidden_size 8192, 64 heads, head_dim 128, intermediate 28672, "
+              "vocab 128256, the same llama3 rope_scaling (factor 8.0, original "
+              "max_position_embeddings 8192) — so the ONLY variable between them is the "
+              "RLHF era. Because both are 80 layers the computed 12-site scan grids are "
+              "the SAME grid, and the two alignment curves are therefore comparable "
+              "site-for-site rather than only in shape. The chat-template sha "
+              "e10ca381… is identical to the banked 8B hub AND to row 11, so the native "
+              "arm is template-matched as well as lineage-matched: a native-arm "
+              "difference cannot be a templating difference. "
+              "IDENTITY (rake M9, verified independently of the dirname): config.json "
+              "sha 95ef9768… is BYTE-IDENTICAL to the hub's "
+              "meta-llama/Llama-3.3-70B-Instruct at hub revision 6f6073b4…; "
+              "generation_config (sha 2fff3b8b…), model.safetensors.index.json and "
+              "tokenizer_config.json are byte-identical to the hub as well. "
+              "eos_token_id [128001, 128008, 128009] with generation_config "
+              "temperature 0.6 / top_p 0.9 is the Llama-3 INSTRUCT signature (the base "
+              "checkpoints carry the bare eos and no sampling defaults); tokenizer "
+              "eos_token_id 128009 (<|eot_id|>). Template presence is recorded and is "
+              "NOT a discriminator. "
+              "WEIGHTS: 30 shards over 723 tensors, index-complete, 131.42 GiB bf16, "
+              "loaded READ-ONLY from the shared weight store. The upstream repo's "
+              "original/*.pth consolidated checkpoints were excluded by the trimmed "
+              "pull — they are redundant with the safetensors set the collector reads, "
+              "and the index verifies complete without them. "
+              "SINGLE-CARD, BUT ONLY ON AN EMPTY CARD: 131.42 GiB against the job "
+              "preflight's weights x1.25 allowance needs ~164 GiB, which fits a free "
+              "card with roughly 14 GiB to spare and does NOT fit beside a substantial "
+              "foreign resident — which is exactly why row 11 was collected through the "
+              "sharded path. The fit is MEASURED by the job preflight at fire time, "
+              "never assumed; if the card is occupied the job blocks rather than "
+              "spilling. NEVER --allow-offload (standing desk ruling). "
+              "CORPUS: all 780 frozen-corpus texts template on BOTH arms; longest "
+              "sequence 1198 tokens native / 1095 raw against capacity 131072, so the "
+              "position ceiling is nowhere near binding. Raw-arm specials prefix is "
+              "[128000] (<|begin_of_text|>)."),
+    RosterNode(
+        key="mixtral-8x7b-instruct-v0.1",
+        model_id="mistralai/Mixtral-8x7B-Instruct-v0.1",
+        roster_row=19, arms=("native", "raw"), num_hidden_layers=32, hidden_size=4096,
+        weights_dirname="Mixtral-8x7B-Instruct-v0.1", checkpoint_identity="instruct",
+        config_sha256="9d56d04b36d0fd12ff54ae4c5bac769cc176e254e64ff71144614b6318b40793",
+        max_position_embeddings=32768,
+        notes="THE THIRD MoE (external legibility): MixtralForCausalLM, 8 local experts, "
+              "top-2 routing (num_experts_per_tok=2, num_local_experts=8), every layer "
+              "an MoE layer, intermediate_size 14336. ~46.7B total / ~12.9B active — "
+              "86.99 GiB bf16, comfortably single-card. Its value is that it sits at the "
+              "OPPOSITE END of the sparsity design space from row 18's Qwen3-30B-A3B "
+              "(128 experts, top-8, moe_intermediate_size 768) at a similar order of "
+              "active parameters: few-wide-experts vs many-narrow-experts. With the "
+              "carried DSV2-Lite that makes three MoE points spanning the design axis, "
+              "so the MoE-vs-dense read is a panel rather than an anecdote. "
+              "At 32 layers and hidden_size 4096 it shares BOTH its computed scan grid "
+              "and its residual width with olmo2-7b-instruct and mistral-7b-instruct-"
+              "v0.3, so the sparse rung can be read site-for-site against dense rungs of "
+              "the same width — including its own family-mate. "
+              "IDENTITY (rake M9, verified independently of the dirname): config.json "
+              "sha 9d56d04b… is BYTE-IDENTICAL to the hub's "
+              "mistralai/Mixtral-8x7B-Instruct-v0.1 at hub revision eba92302…; "
+              "generation_config (sha 40e6ecbc…), model.safetensors.index.json and "
+              "tokenizer_config.json are byte-identical to the hub as well. "
+              "M9 FINDING, AND IT MATTERS: on this lineage the config sha is NOT a "
+              "base-vs-instruct discriminator. mistralai/Mixtral-8x7B-v0.1 (the BASE "
+              "repo) ships a config.json that is BYTE-IDENTICAL to the instruct repo's "
+              "— same 9d56d04b… — and an identical generation_config (40e6ecbc…, a bare "
+              "`_from_model_config` stub with eos 2 / bos 1 and no sampling defaults, so "
+              "there is no temperature/top_p signature to check either). Even the "
+              "shard sizes agree. A config-sha check alone therefore proves only "
+              "'some Mixtral-8x7B-v0.1-lineage checkpoint', never WHICH ONE, and the "
+              "usual Llama/Qwen discriminator set silently degenerates here. What DOES "
+              "separate them: tokenizer_config.json (475361…instruct vs 747ec9…base) "
+              "and, inside it, the chat template — the base repo carries NONE, the "
+              "instruct repo carries the 1058-char v0.1 [INST] template, sha 79685317… "
+              "(itself distinct from the Mistral-7B-v0.3 template row 13 uses). This is "
+              "the ONE rung where template presence is load-bearing rather than merely "
+              "recorded, which is the exact inverse of the Qwen3 case, so the general "
+              "rake M9 rule ('presence proves nothing') must be applied per-lineage and "
+              "not as a reflex. Weights-level backstop, the discriminator of last "
+              "resort: the first shard's sha256 is 54669c5a… on the instruct repo vs "
+              "b43400ce… on the base repo, and the checkpoint of record matches the "
+              "former. "
+              "WEIGHTS: 19 shards over 995 tensors, index-complete, loaded READ-ONLY "
+              "from the shared weight store. The upstream repo's consolidated.*.pt "
+              "torch checkpoints were excluded by the trimmed pull — redundant with the "
+              "safetensors set, and the index verifies complete without them. "
+              "CORPUS: all 780 frozen-corpus texts template on BOTH arms — VERIFIED, "
+              "not assumed, because the older Mistral-lineage templates reject a "
+              "standalone system turn and this node's template is the v0.1 one, not the "
+              "v0.3 one that row 13 relies on. Longest sequence 1679 tokens native / "
+              "1612 raw against capacity 32768. Raw-arm specials prefix is [1] (<s>), "
+              "the same as row 13."),
+)
+
+ROSTER: dict[str, RosterNode] = {
+    n.key: n for n in WAVE1 + HUB_RUNGS_2 + MOE_CHAT + BIG_CHAIN_SINGLE_CARD}
 
 #: model key -> the grid it was actually collected and curve-scanned on. This is
 #: what `--sites` should carry for a scan collection, and what `--tgt-sites`
