@@ -587,3 +587,53 @@ pre-fit). What graduates, if this survives 183 held-out filings, is the
 claim that *transport between any two models in the class is determined
 by each model's single relationship to a common hub* — the atlas claim,
 at map order.
+
+### ADDENDUM 2026-07-28-F — frozen-corpus repair (corpus-v2) — ratified by Luxia 2026-07-28
+
+**Background on record.** The frozen collection corpus (manifest sha
+`a6712ca0…`, "v1") contains 3 corrupted entries — n_tokens 2, 7, 26,
+n_words = 1, truncated mid-word (desk record
+`REPORT-pull-qwen3-2026-07-28` §finding; reproduction recipe in its
+diary). On Qwen-lineage raw arms they explode to ~100× median state
+norm; one sits in held-out topic 0 carrying 97.9% of the raw test
+set's squared norm. Llama/Mistral lineages absorb them; the native
+arm is statistically unharmed everywhere.
+
+1. **The repair (deterministic, no judgment):** the 3 entries are
+   REMOVED. Corpus-v2 = v1 minus exactly those 3 text_ids (780 → 777
+   texts; every other entry byte-identical). The v2 manifest sha is
+   computed once, recorded here at ratification, and becomes the
+   collection basis of record. No entry is edited or substituted —
+   exclusion only, so no new content enters the frozen apparatus.
+2. **What STANDS, permanently:** every filed prediction, every frozen
+   band, every scored verdict, and every stamped result to date —
+   all scored on v1 banks, all immutable. v1 banks and fits are
+   RETAINED on disk, labeled by their corpus sha; nothing is deleted.
+3. **What RE-DERIVES on v2 (the re-bank):** state banks for every
+   banked model (collect + bitwise spot-replay gate, per job — the
+   standing discipline); hub maps; the â column; the c_M constants
+   (native and raw, same solve chain, same anchor procedure); the
+   composed-path maps. Steering vectors re-derive only if their build
+   recipe consumes the corpus (per each build's own stamp); otherwise
+   they carry over unchanged, stated per model. The split of record
+   re-computes deterministically on 777 (same seed, same topic-group
+   rule; new split_sha recorded).
+4. **The v1↔v2 comparison table (mandatory, filed before any v2
+   filing):** every re-derived quantity of record side-by-side, with
+   pre-stated expectations: (a) native-arm quantities move ≲ .01 in
+   â-units (the 3 rows are benign in native); (b) Qwen-lineage raw
+   clouds recover (effective rank ≳ 20 at mid-depth, from ~1.1);
+   (c) the composed predictor retrodicts the v2 â of the already-fit
+   pairs within ±.05 using v2 maps (the mechanism claim is
+   corpus-robust or we want to know). Any expectation violated is a
+   named finding, not silently absorbed.
+5. **Go-forward rule:** from the first v2 filing onward, predictions
+   file on v2-derived constants and maps, and every filing record
+   carries the v2 corpus sha. The raw-arm quotability holding lifts
+   for models whose v2 raw clouds verify healthy. G-star-hit,
+   G-comp-hit, budgets, and all frozen gates continue uninterrupted —
+   they are properties of filed-vs-observed, not of the corpus
+   vintage, and both predictors race on across the repair.
+6. **Data baseline:** `manifests/outputs.sha256` regenerates at the
+   v2 freeze point (desk-only, standing rule), covering v1 and v2
+   trees side by side.
