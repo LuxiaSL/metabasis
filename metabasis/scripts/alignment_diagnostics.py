@@ -14,9 +14,9 @@ outcomes, next session):
   - raw vs whitened target-frame reads where a banked analog exists:
     L22: cos(u, V7_L22) and cos(w, V7_L22), envelope from transported nulls
     L18: cos(u, {V3_L18 (dir0), Vtemp_L18}) — Σ_L18 NOT banked (baton item)
-  - Mahalanobis-form m = sqrt(uᵀΣ⁻¹u) reported with the CONVENTION CAVEAT flagged in
-    the koto ferry (koto d 1.5–2.5 vs dense 60–160 — suspected convention mismatch,
-    unresolved; number filed, not interpreted)
+  - Mahalanobis-form m = sqrt(uᵀΣ⁻¹u) reported with the CONVENTION CAVEAT from a
+    prior private-checkpoint ferry (its d estimates ran ~40x below dense baselines —
+    suspected convention mismatch, unresolved; number filed, not interpreted)
 
 PREP-DIAGNOSTIC GRADE: envelope-only (no top-PC control here — the scoring session
 runs full Rosetta discipline). Output readouts_prep/leg2_diagnostics.{json,md}.
@@ -152,8 +152,9 @@ def main() -> int:
         "pair": f"{args.source_model}->{args.target_model}",
         "sigma_source": str(SIGMA_L22),
         "mahalanobis_convention_caveat":
-            "ferry 2026-07-18ff: koto d 1.5-2.5 vs dense 60-160 — suspected "
-            "convention mismatch, unresolved; filed not interpreted",
+            "ferry 2026-07-18ff: a private checkpoint's d estimates ran ~40x "
+            "below dense baselines — suspected convention mismatch, unresolved; "
+            "filed not interpreted",
         "decision_rule_context": "banked: cos>~.3 raw-ok / <~.2 whiten (2-D caveat)",
         "rows": rows, "envelopes": envelopes,
     }
