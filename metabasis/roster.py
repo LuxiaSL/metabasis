@@ -41,7 +41,7 @@ is held-out r² at `proc_k128` per site-pair, with `r2_null_shuffled_q95` beside
 and `cka_after` secondary. OLMo-2-7B (base) peaked at L16, r²=.6445 from 8bL14.
 
 Weights paths are NEVER hardcoded here: `weights_dirname` is the *basename*
-convention (`/models/<Name>` on the collection node), and the actual directory
+convention (a fixed weights root on the collection node), and the actual directory
 is passed to the collector via `--model-path`.
 """
 from __future__ import annotations
