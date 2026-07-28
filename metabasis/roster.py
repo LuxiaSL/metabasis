@@ -489,8 +489,130 @@ BIG_CHAIN_SINGLE_CARD: tuple[RosterNode, ...] = (
               "the same as row 13."),
 )
 
+# The big-chain MULTICARD rungs (2026-07-28): roster rows 20 and 21, the two
+# members of the big-chain pull that exceed one card and therefore collect
+# through the certified sharded path (prereg §4; ledger collection/shard-cert,
+# where a forced 8-way sharded 8B collection came out byte-identical to a fresh
+# single-device one). Architecture facts read from each checkpoint's own
+# config.json on the shared weight store; identity verified per rakes M9 AND
+# M17 — the discriminator is chosen per lineage and SHOWN to separate the
+# confusable siblings before it is trusted.
+#
+# Both nodes are sharded-only by arithmetic, not by preference: 755.96 GiB
+# (row 20) and 1249.88 GiB (row 21) of bf16 weights against a 179.06 GiB card.
+BIG_CHAIN_MULTICARD: tuple[RosterNode, ...] = (
+    RosterNode(
+        key="llama-3.1-405b-instruct", model_id="meta-llama/Llama-3.1-405B-Instruct",
+        roster_row=20, arms=("native", "raw"), num_hidden_layers=126, hidden_size=16384,
+        weights_dirname="Llama-3.1-405B-Instruct", checkpoint_identity="instruct",
+        config_sha256="a55a4fc4b5b6194a1571f435bdc15fe61fe59eddf4c28c1540a79eb89596d345",
+        max_position_embeddings=131072,
+        notes="THE DENSE SCALE CEILING. Row 20 completes the lineage-matched ladder "
+              "3B -> 8B -> 70B (rows 11/12) -> 405B: two orders of magnitude inside ONE "
+              "pretrain family, which is what makes the scale read a ladder rather than "
+              "a scatter. It is also the prereg's SCALE-PROBE AUDIT HUB (§3 quad-hub): "
+              "the direct test of the larger-hubs-transfer-better conjecture, so its "
+              "constants are re-derived for the audit set once its fits are banked. "
+              "LlamaForCausalLM, 126 layers, hidden_size 16384 (the widest residual "
+              "stream on the roster by 2x), 128 heads, intermediate 53248, vocab 128256, "
+              "the same llama3 rope_scaling (factor 8.0, original max_position_embeddings "
+              "8192) as rows 11/12 and the banked 8B hub. 126 layers is NOT 80, so unlike "
+              "the 11-vs-12 pair the scan grid differs from the 70B rungs' and the "
+              "comparison is by fractional depth, not site-for-site. "
+              "IDENTITY (rake M9, verified independently of the dirname): config.json "
+              "sha a55a4fc4... is BYTE-IDENTICAL to the hub's "
+              "meta-llama/Llama-3.1-405B-Instruct; generation_config (sha ececd938...), "
+              "model.safetensors.index.json and tokenizer_config.json are byte-identical "
+              "to the hub as well. eos_token_id [128001, 128008, 128009] with "
+              "generation_config temperature 0.6 / top_p 0.9 is the Llama-3 INSTRUCT "
+              "signature; tokenizer eos_token_id 128009 (<|eot_id|>); chat-template sha "
+              "e10ca381... is IDENTICAL to the banked 8B hub and to rows 11/12, so the "
+              "native arm is template-matched as well as lineage-matched. Weights-level "
+              "backstop (rake M17's universal discriminator): the first shard's sha256 is "
+              "04160c8e... and matches the hub's LFS digest. "
+              "WEIGHTS: 191 shards over 1137 tensors, index-complete, 755.96 GiB bf16 "
+              "(405.85B params), loaded READ-ONLY from the shared weight store. "
+              "SHARDED, 8 cards: 748.13 GiB of that is the 126 decoder layers at a "
+              "UNIFORM 5.94 GiB each, so the certified even-layer split "
+              "(--shard-across 8 --assert-multi-device) lands at most 102.8 GiB on any "
+              "card (card 0, which also carries the 7.83 GiB of embeddings/head/norm) "
+              "against a 179.06 GiB card — 76 GiB of headroom. NEVER --allow-offload "
+              "(standing desk ruling). "
+              "CORPUS: capacity 131072 against a corpus whose longest sequence on the "
+              "shared Llama-3 tokenizer is ~1200 tokens, so the position ceiling is "
+              "nowhere near binding. Raw-arm specials prefix is [128000] "
+              "(<|begin_of_text|>), as on every Llama-3 rung."),
+    RosterNode(
+        key="dsv3", model_id="deepseek-ai/DeepSeek-V3",
+        roster_row=21, arms=("native", "raw"), num_hidden_layers=61, hidden_size=7168,
+        weights_dirname="DeepSeek-V3", checkpoint_identity="instruct",
+        config_sha256="cbf0b95dc614de208a109bb5fd4e7eed11385e9c68411d2c17db5319443035d9",
+        max_position_embeddings=163840,
+        notes="THE FRONTIER MoE (671B, cross-lab), and the fourth MoE point on the "
+              "roster beside the carried DSV2-Lite, row 18's Qwen3-30B-A3B and row 19's "
+              "Mixtral. DeepseekV3ForCausalLM, 61 decoder layers, hidden_size 7168, "
+              "256 routed experts + 1 shared, top-8 routing, first_k_dense_replace=3 "
+              "(layers 0-2 are dense MLP, layers 3-60 are MoE), moe_intermediate_size "
+              "2048, MLA attention (q_lora_rank 1536, kv_lora_rank 512, qk_rope_head_dim "
+              "64), yarn rope. The checkpoint also ships an MTP layer 61 "
+              "(num_nextn_predict_layers=1) which transformers does not build — the model "
+              "is 61 layers, indices 0..60, and the scan grid tops out at L52. "
+              "DTYPE REGIME — prereg ADDENDUM 2026-07-26-A, BINDING: the checkpoint is "
+              "native FP8 (e4m3, block [128,128], 641.30 GiB on disk), but row 21's named "
+              "FP8 deviation is RETAINED AS FALLBACK ONLY. DSV3 collects and builds in "
+              "bf16 via dequantize-on-load, FineGrainedFP8Config(dequantize=True) — the "
+              "standard roster regime, standard bitwise spot-replay gate, standard "
+              "differentiable input-gradient path. The collector reaches this through "
+              "its opt-in --dequantize-fp8 flag; without the flag transformers would load "
+              "the native FP8 forward, which is a DIFFERENT object and (per the FP8 lane "
+              "design) not differentiable. "
+              "IDENTITY — THE RAKE-M17 CASE IN ITS PUREST FORM. On this lineage the "
+              "ENTIRE metadata surface degenerates: deepseek-ai/DeepSeek-V3 (chat) and "
+              "deepseek-ai/DeepSeek-V3-Base ship a BYTE-IDENTICAL config.json (both "
+              "cbf0b95d...), a BYTE-IDENTICAL tokenizer_config.json (both 637bcd1a...), "
+              "hence the identical chat template (3b8267e5..., so template presence is "
+              "not merely uninformative here but actively misleading), and NEITHER repo "
+              "ships a generation_config.json at all — there is no eos/sampling signature "
+              "to check. Config sha, template sha, tokenizer sha and eos ids ALL fail to "
+              "discriminate. The discriminator of record is therefore the WEIGHTS "
+              "themselves (M17 rule (b), the universal fallback): the first shard's "
+              "sha256 is b933b099... on the checkpoint of record and matches "
+              "deepseek-ai/DeepSeek-V3's hub LFS digest, while the BASE checkpoint's "
+              "first shard hashes 3f4e5fce... — SHOWN to separate them (M17 rule (a)), "
+              "not merely assumed to. DeepSeek-V3.1 is separately "
+              "refuted by config (sha 3e5d192d..., and its quantization_config carries "
+              "scale_fmt 'ue8m0', which the pinned transformers does not know — the "
+              "scales would be mis-read). The row-21 requirement of native+raw arms is "
+              "what makes the CHAT checkpoint the only admissible one (the "
+              "arm-consistency rule), and the weights check is what proves we have it. "
+              "WEIGHTS: 163 shards over 91991 tensors (45808 of them weight_scale_inv), "
+              "index-complete, loaded READ-ONLY from the shared weight store. The index's "
+              "total_size (1275.04 GiB) is a bf16-ASSUMED figure — it counts 2 bytes per "
+              "element regardless of dtype — and must never be quoted as a disk size. "
+              "SHARDED, 8 cards, and this is the tightest node on the roster BY DESIGN: "
+              "bf16-resident is 1249.88 GiB (671.03B params) = 87.2% of the 8-card node. "
+              "The layers are HETEROGENEOUS — 3 dense at 1.09 GiB and 58 MoE at 21.43 GiB "
+              "— and 58 MoE layers over 8 cards forces at least two cards to hold 8 of "
+              "them, so 8 x 21.43 = 171.5 GiB is the arithmetic FLOOR for any map that "
+              "keeps each decoder layer whole (which pipeline-parallel device_map does, "
+              "and which is what the sharding certification covers). The certified even "
+              "split (--shard-across 8) realizes exactly that floor: per-card "
+              "[113.9, 171.5, 150.0, 171.5, 171.5, 150.0, 171.5, 150.0] GiB against a "
+              "179.06 GiB card, i.e. 7.6 GiB of headroom on the worst card, and no "
+              "byte-balanced alternative does better. The job preflight MEASURES free "
+              "memory and the load transient rather than assuming this. NEVER "
+              "--allow-offload (standing desk ruling). "
+              "ARMS: capacity 163840, so the position ceiling is not binding. Per the "
+              "FP8 lane design the raw arm carries NO specials prefix (p=0) — the "
+              "tokenizer_config's add_bos_token is discarded by the pinned transformers "
+              "when tokenizer.json exists — which the carried DSV2-Lite anchor shares. "
+              "The native template has no strftime_now, so build_ids' date_string is "
+              "accepted-and-ignored rather than raising; the branch taken is recorded."),
+)
+
 ROSTER: dict[str, RosterNode] = {
-    n.key: n for n in WAVE1 + HUB_RUNGS_2 + MOE_CHAT + BIG_CHAIN_SINGLE_CARD}
+    n.key: n for n in WAVE1 + HUB_RUNGS_2 + MOE_CHAT + BIG_CHAIN_SINGLE_CARD
+    + BIG_CHAIN_MULTICARD}
 
 #: model key -> the grid it was actually collected and curve-scanned on. This is
 #: what `--sites` should carry for a scan collection, and what `--tgt-sites`

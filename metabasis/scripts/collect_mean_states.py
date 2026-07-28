@@ -31,6 +31,14 @@ single-card path byte for byte (same loader, same hooks, same reductions, same
 stamp keys). The realized sharding layout goes into the trunk stamp; cross-layout
 determinism is certified by the collect+spot-replay-in-one-job gate, never assumed.
 
+Dtype regime (prereg ADDENDUM 2026-07-26-A, roster row 21): a checkpoint whose own
+config carries a block-wise FP8 `quantization_config` would load its NATIVE FP8
+forward — a different object from every other bank, and not differentiable. The
+addendum rules DeepSeek-V3 into the standard bf16 regime via dequantize-on-load;
+`--dequantize-fp8` is that, OPT-IN, with a post-load witness (no FP8 modules survive,
+every float parameter is bfloat16) asserted and banked in the trunk stamp. Unset =
+the historical from_pretrained call, byte for byte.
+
 Modes (one model per invocation; run once per model on the assigned card):
   --collect              full pass over the corpus, both arms (or --arms native)
   --spot-replay K        FRESH-PROCESS re-run of K stratified texts per arm, byte-
@@ -218,13 +226,18 @@ def compute_means(model, tok, entries: list[dict], sites: tuple[int, ...], arm: 
             {s: v for s, v in tok_norms.items()}, seq_lens, truncated)
 
 
-def load_model_and_tok(model_path: str, device: str):
+def load_model_and_tok(model_path: str, device: str, dequantize_fp8: bool = False):
+    """The single-card loader. `dequantize_fp8=False` (the default) reproduces the
+    historical call byte for byte — `_fp8_kwargs` contributes NO kwargs at all."""
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
     model = AutoModelForCausalLM.from_pretrained(
         model_path, dtype=torch.bfloat16, attn_implementation="eager",
+        **_fp8_kwargs(dequantize_fp8),
     ).to(device).eval()
+    if dequantize_fp8:
+        assert_dequantized(model, model_path)
     tok = AutoTokenizer.from_pretrained(model_path)
     return model, tok
 
@@ -264,6 +277,108 @@ def load_model_and_tok(model_path: str, device: str):
 # certifies it. Tensor-parallel / split-module maps WOULD change reduction order and are
 # out of scope here (device_map is pipeline-parallel by construction: no_split_module_classes
 # keeps each decoder layer whole).
+
+
+# ---------------------------------------------------------------- dtype regime (row 21)
+# Prereg ADDENDUM 2026-07-26-A, BINDING for roster row 21 (DeepSeek-V3): a checkpoint
+# whose own config.json carries `quantization_config: {quant_method: "fp8", ...}` would
+# otherwise load through the native-FP8 forward, which is a DIFFERENT object from every
+# other bank (raw Triton block-wise kernels) and — per the FP8 lane design report — is
+# not differentiable, so the entropy-gradient target build would silently return a
+# residual-highway-only vector. The ruling is that DSV3 collects and builds in bf16 via
+# dequantize-on-load, i.e. the standard roster regime.
+#
+# OPT-IN ONLY, exactly like the sharded path: with --dequantize-fp8 unset, from_pretrained
+# is called with the identical kwargs it has always been called with, so every existing
+# bank's loader path is untouched byte for byte. The flag is also a no-op-with-a-loud-
+# failure on a checkpoint that carries no FP8 quantization_config: passing it there is a
+# staging error, and `assert_dequantized` surfaces it rather than banking a surprise.
+DEQUANTIZED_STAMP_KEY = "fp8_dequantize"
+
+
+class Fp8RegimeError(RuntimeError):
+    """The requested FP8 dtype regime could not be established — never a silent fallback.
+
+    Raised when --dequantize-fp8 is asked for and transformers cannot provide it, or
+    when the LOADED model still carries FP8 modules/dtypes after the request. Both are
+    fatal by construction: banking states from the wrong forward is exactly the silent
+    wrong answer ADDENDUM 2026-07-26-A exists to prevent.
+    """
+
+
+def fp8_dequantize_config() -> Any:
+    """`FineGrainedFP8Config(dequantize=True)`, or a loud refusal.
+
+    Imported lazily and by name so the single-card/no-FP8 paths never depend on the
+    quantization stack being present in the environment.
+    """
+    try:
+        from transformers import FineGrainedFP8Config
+    except ImportError as exc:                      # noqa: TRY003 — message is the point
+        raise Fp8RegimeError(
+            "--dequantize-fp8 needs transformers' FineGrainedFP8Config (the "
+            "dequantize-on-load path of prereg ADDENDUM 2026-07-26-A); this "
+            "transformers build does not expose it") from exc
+    try:
+        cfg = FineGrainedFP8Config(dequantize=True)
+    except TypeError as exc:
+        raise Fp8RegimeError(
+            "FineGrainedFP8Config in this transformers build has no `dequantize` "
+            "parameter — the addendum's regime cannot be established here") from exc
+    if not getattr(cfg, "dequantize", False):
+        raise Fp8RegimeError(
+            "FineGrainedFP8Config(dequantize=True) did not set dequantize — refusing "
+            "to load, because the difference is a native-FP8 forward vs a bf16 one")
+    return cfg
+
+
+# The module types transformers substitutes for `nn.Linear` / fused expert containers
+# when a block-wise FP8 checkpoint is loaded NATIVELY. Their ABSENCE after a
+# dequantize-on-load is the post-load witness that the regime really is bf16 — checked
+# by name (not by import) so a transformers reorganization degrades to "no witness
+# found", which `assert_dequantized` treats as a failure, not a pass.
+FP8_MODULE_TYPE_NAMES = ("FP8Linear", "FP8Expert")
+
+
+def assert_dequantized(model: Any, model_path: str) -> dict:
+    """Post-load certification that the FP8 checkpoint really loaded as bf16.
+
+    Returns the witness record banked in the trunk stamp. Raises `Fp8RegimeError` on
+    any surviving FP8 module or non-bf16 floating parameter — the design report's
+    "post-load certification assertions", as code rather than as a checklist.
+    """
+    import torch
+
+    offenders = sorted({type(m).__name__ for m in model.modules()
+                        if type(m).__name__ in FP8_MODULE_TYPE_NAMES})
+    if offenders:
+        raise Fp8RegimeError(
+            f"{model_path}: {offenders} modules survived a --dequantize-fp8 load — the "
+            "forward is still native FP8, which is NOT the regime ADDENDUM "
+            "2026-07-26-A ruled for this node")
+    dtypes: dict[str, int] = {}
+    bad: list[str] = []
+    for name, p in list(model.named_parameters()) + list(model.named_buffers()):
+        key = str(p.dtype)
+        dtypes[key] = dtypes.get(key, 0) + 1
+        if p.is_floating_point() and p.dtype is not torch.bfloat16 and len(bad) < 8:
+            bad.append(f"{name}:{p.dtype}")
+    if bad:
+        raise Fp8RegimeError(
+            f"{model_path}: floating parameters that are not bfloat16 after "
+            f"--dequantize-fp8: {bad} (dtype census {dtypes})")
+    qcfg = getattr(getattr(model, "config", None), "quantization_config", None)
+    return {"requested": "FineGrainedFP8Config(dequantize=True)",
+            "prereg": "ADDENDUM 2026-07-26-A",
+            "fp8_modules_remaining": 0,
+            "param_dtype_census": dtypes,
+            "config_quantization_config": (dict(qcfg.to_dict())
+                                           if hasattr(qcfg, "to_dict") else str(qcfg))}
+
+
+def _fp8_kwargs(dequantize_fp8: bool) -> dict[str, Any]:
+    """The from_pretrained kwargs the dtype regime adds — EMPTY unless opted in."""
+    return {"quantization_config": fp8_dequantize_config()} if dequantize_fp8 else {}
 
 
 class ShardedLoadError(RuntimeError):
@@ -588,12 +703,18 @@ def describe_shard_layout(model: Any, sites: tuple[int, ...], spec: ShardSpec,
     }
 
 
-def load_model_and_tok_sharded(model_path: str, spec: ShardSpec, sites: tuple[int, ...]
+def load_model_and_tok_sharded(model_path: str, spec: ShardSpec, sites: tuple[int, ...],
+                               dequantize_fp8: bool = False
                                ) -> tuple[Any, Any, str, dict]:
     """The opt-in twin of load_model_and_tok: same dtype/attn/eval, device_map placement.
 
     Returns (model, tokenizer, input_device, sharding_record). Everything downstream —
     SiteCapture, compute_means, save_state_bank — is the unchanged single-card machinery.
+
+    `dequantize_fp8` is the row-21 dtype regime (ADDENDUM 2026-07-26-A) and is
+    orthogonal to placement: it changes what the weights ARE (bf16 reconstructed from
+    the block-wise FP8 checkpoint), never where they go. The `fp8_dequantize` witness
+    is folded into the sharding record so one stamp carries both facts.
     """
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -614,7 +735,8 @@ def load_model_and_tok_sharded(model_path: str, spec: ShardSpec, sites: tuple[in
 
     kwargs: dict[str, Any] = {"dtype": torch.bfloat16,
                               "attn_implementation": "eager",
-                              "device_map": resolved_map}
+                              "device_map": resolved_map,
+                              **_fp8_kwargs(dequantize_fp8)}
     if spec.max_memory is not None:
         kwargs["max_memory"] = spec.max_memory
     if spec.offload_folder is not None:
@@ -626,6 +748,8 @@ def load_model_and_tok_sharded(model_path: str, spec: ShardSpec, sites: tuple[in
             f"sharded load of {model_path!r} failed ({type(exc).__name__}: {exc}); "
             "check --device-map / --max-memory against the visible devices") from exc
     model.eval()                                   # NOT .to(device): the model is dispatched
+    if dequantize_fp8:                             # fail at LOAD, not after a 26-min pass
+        assert_dequantized(model, model_path)
 
     sharding = describe_shard_layout(model, sites, spec, accelerate_version, resolved_map)
     device = sharding["input_embedding_device"]
@@ -636,7 +760,8 @@ def load_model_and_tok_sharded(model_path: str, spec: ShardSpec, sites: tuple[in
 
 
 def trunk_stamp(model_path: str, tok, device: str,
-                sharding: Optional[dict] = None) -> dict:
+                sharding: Optional[dict] = None,
+                fp8: Optional[dict] = None) -> dict:
     import torch
     import transformers
     cfg = Path(model_path) / "config.json"
@@ -655,9 +780,14 @@ def trunk_stamp(model_path: str, tok, device: str,
              "cuda_visible_devices":
                  __import__("os").environ.get("CUDA_VISIBLE_DEVICES", "(unset)")}
     # Single-card stamps keep EXACTLY the historical key set (the banked smalls compare
-    # against them); the sharding record is appended only on the opt-in sharded path.
+    # against them); the sharding record is appended only on the opt-in sharded path,
+    # and the dtype-regime witness only on the opt-in --dequantize-fp8 path. Same
+    # discipline as `truncation` in the collection stamp: an absent key means the
+    # deviation was not taken, so historical stamps stay comparable key-for-key.
     if sharding is not None:
         stamp["sharding"] = sharding
+    if fp8 is not None:
+        stamp[DEQUANTIZED_STAMP_KEY] = fp8
     return stamp
 
 
@@ -665,19 +795,21 @@ def trunk_stamp(model_path: str, tok, device: str,
 def collect(arm_root: Path, model: str, model_path: str, arms: list[str],
             device: str, sites_override: tuple[int, ...] | None = None,
             shard: Optional[ShardSpec] = None,
-            max_length: int | None = None) -> None:
+            max_length: int | None = None,
+            dequantize_fp8: bool = False) -> None:
     entries, manifest_sha = load_corpus(arm_root)
     sites = sites_override or sites_for(model)
     states_dir = arm_root / "states"
     logs_dir = arm_root / "logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
     if shard is None:                              # the unchanged single-card path
-        model_obj, tok = load_model_and_tok(model_path, device)
+        model_obj, tok = load_model_and_tok(model_path, device, dequantize_fp8)
         sharding = None
     else:                                          # opt-in: device_map across the node
         model_obj, tok, device, sharding = load_model_and_tok_sharded(
-            model_path, shard, sites)
-    trunk = trunk_stamp(model_path, tok, device, sharding)
+            model_path, shard, sites, dequantize_fp8)
+    fp8 = assert_dequantized(model_obj, model_path) if dequantize_fp8 else None
+    trunk = trunk_stamp(model_path, tok, device, sharding, fp8)
     logger.info("trunk: %s", json.dumps(trunk)[:200])
 
     for arm in arms:
@@ -747,21 +879,23 @@ def pick_spot_ids(entries: list[dict], k: int) -> list[str]:
 def spot_replay(arm_root: Path, model: str, model_path: str, arms: list[str],
                 device: str, k: int, sites_override: tuple[int, ...] | None = None,
                 shard: Optional[ShardSpec] = None,
-                max_length: int | None = None) -> int:
+                max_length: int | None = None,
+                dequantize_fp8: bool = False) -> int:
     entries, _ = load_corpus(arm_root)
     by_id = {e["text_id"]: e for e in entries}
     sites = sites_override or sites_for(model)
     states_dir = arm_root / "states"
     if shard is None:                              # the unchanged single-card path
-        model_obj, tok = load_model_and_tok(model_path, device)
+        model_obj, tok = load_model_and_tok(model_path, device, dequantize_fp8)
         sharding = None
     else:                                          # opt-in: device_map across the node
         model_obj, tok, device, sharding = load_model_and_tok_sharded(
-            model_path, shard, sites)
+            model_path, shard, sites, dequantize_fp8)
+    fp8 = assert_dequantized(model_obj, model_path) if dequantize_fp8 else None
     spot_ids = pick_spot_ids(entries, k)
     ok_all = True
     report: dict = {"model": model, "k": k, "spot_ids": spot_ids,
-                    "trunk": trunk_stamp(model_path, tok, device, sharding),
+                    "trunk": trunk_stamp(model_path, tok, device, sharding, fp8),
                     "results": {}}
     if max_length is not None:                 # ADDENDUM 2026-07-27-B, per-use record
         report["truncation"] = f"first-{max_length}"
@@ -832,6 +966,131 @@ def cp1_summary(arm_root: Path, models: list[str]) -> int:
     return 0
 
 
+# ---------------------------------------------------------------- selftest (CPU)
+def selftest() -> int:
+    """CPU-only gates on the OPT-IN dtype regime and its wiring.
+
+    Everything here is about one property: with `--dequantize-fp8` unset the loader
+    call is byte-identical to the one that produced every banked node, and with it set
+    the bf16 regime is either established or the run DIES. No GPU, no weights.
+    """
+    import torch
+    import torch.nn as nn
+
+    fails: list[str] = []
+
+    def check(name: str, ok: bool, detail: str = "") -> None:
+        print(f"  [{'ok ' if ok else 'FAIL'}] {name}{(' — ' + detail) if detail else ''}")
+        if not ok:
+            fails.append(name)
+
+    print("== selftest 1: the historical loader call is untouched when opted out ==")
+    check("_fp8_kwargs(False) contributes NO kwargs", _fp8_kwargs(False) == {},
+          repr(_fp8_kwargs(False)))
+
+    print("== selftest 2: opting in produces FineGrainedFP8Config(dequantize=True) ==")
+    kw = _fp8_kwargs(True)
+    check("exactly one kwarg, named quantization_config", list(kw) == ["quantization_config"],
+          str(list(kw)))
+    check("dequantize is True", getattr(kw.get("quantization_config"), "dequantize", None) is True)
+
+    print("== selftest 3: stamp key sets — absent deviation means absent key ==")
+
+    class _Tok:
+        chat_template = "{{ 'x' }}"
+
+    base = trunk_stamp(".", _Tok(), "cpu")
+    with_fp8 = trunk_stamp(".", _Tok(), "cpu", None, {"requested": "probe"})
+    check("plain stamp carries no fp8 key", DEQUANTIZED_STAMP_KEY not in base)
+    check("fp8 stamp adds exactly that one key",
+          set(with_fp8) - set(base) == {DEQUANTIZED_STAMP_KEY},
+          str(sorted(set(with_fp8) - set(base))))
+
+    print("== selftest 4: the post-load witness passes on a clean bf16 model ==")
+
+    class _Clean(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.lin = nn.Linear(4, 4).to(torch.bfloat16)
+
+    rec = assert_dequantized(_Clean(), "<stub>")
+    check("witness records zero surviving FP8 modules", rec["fp8_modules_remaining"] == 0)
+    check("dtype census is bf16-only",
+          set(rec["param_dtype_census"]) == {"torch.bfloat16"},
+          str(rec["param_dtype_census"]))
+
+    print("== selftest 5: a surviving FP8 module is FATAL, not a warning ==")
+
+    class FP8Linear(nn.Module):            # name is the witness, per FP8_MODULE_TYPE_NAMES
+        pass
+
+    class _Native(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.q = FP8Linear()
+
+    try:
+        assert_dequantized(_Native(), "<stub>")
+        check("raises Fp8RegimeError on a surviving FP8Linear", False, "no raise")
+    except Fp8RegimeError as exc:
+        check("raises Fp8RegimeError on a surviving FP8Linear", True, str(exc)[:60])
+
+    print("== selftest 6: a non-bf16 float parameter is FATAL ==")
+
+    class _Mixed(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.a = nn.Linear(4, 4).to(torch.bfloat16)
+            self.b = nn.Linear(4, 4).to(torch.float16)
+
+    try:
+        assert_dequantized(_Mixed(), "<stub>")
+        check("raises Fp8RegimeError on an fp16 parameter", False, "no raise")
+    except Fp8RegimeError as exc:
+        check("raises Fp8RegimeError on an fp16 parameter", True, str(exc)[:60])
+
+    print("== selftest 7: CLI wiring — the flag reaches BOTH modes, and only if passed ==")
+    real_collect, real_spot, real_argv = collect, spot_replay, sys.argv
+    seen: dict = {}
+    try:
+        globals()["collect"] = lambda *a, **kw: seen.update(collect_fp8=kw.get("dequantize_fp8"))
+        globals()["spot_replay"] = lambda *a, **kw: (
+            seen.update(spot_fp8=kw.get("dequantize_fp8"), spot_shard=kw.get("shard")), 0)[1]
+        for mode in (["--collect"], ["--spot-replay", "3"]):
+            sys.argv = ["collect_mean_states", "--model", "8b", "--model-path", ".",
+                        "--arm-root", "/nonexistent-selftest", "--sites", "1",
+                        *mode, "--dequantize-fp8", "--shard-across", "2"]
+            main()
+            sys.argv = ["collect_mean_states", "--model", "8b", "--model-path", ".",
+                        "--arm-root", "/nonexistent-selftest", "--sites", "1", *mode]
+            main()
+            key = "collect_fp8" if mode[0] == "--collect" else "spot_fp8"
+            check(f"{mode[0]}: default is False", seen.get(key) is False, repr(seen.get(key)))
+        sys.argv = ["collect_mean_states", "--model", "8b", "--model-path", ".",
+                    "--arm-root", "/nonexistent-selftest", "--sites", "1",
+                    "--collect", "--dequantize-fp8"]
+        main()
+        check("--collect: flag forwarded", seen.get("collect_fp8") is True)
+        sys.argv = ["collect_mean_states", "--model", "8b", "--model-path", ".",
+                    "--arm-root", "/nonexistent-selftest", "--sites", "1",
+                    "--spot-replay", "3", "--dequantize-fp8",
+                    "--shard-across", "2", "--assert-multi-device"]
+        main()
+        check("--spot-replay: flag forwarded", seen.get("spot_fp8") is True)
+        sh = seen.get("spot_shard")
+        check("--spot-replay: shard spec survives beside it",
+              sh is not None and sh.shard_across == [0, 1] and sh.require_multi_device,
+              str(sh))
+    finally:
+        globals()["collect"], globals()["spot_replay"] = real_collect, real_spot
+        sys.argv = real_argv
+
+    print(f"\nselftest: {len(fails)} failures")
+    for f in fails:
+        print(f"  FAILED: {f}")
+    return 1 if fails else 0
+
+
 # ---------------------------------------------------------------- main
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
@@ -858,6 +1117,8 @@ def main() -> int:
     ap.add_argument("--spot-replay", type=int, metavar="K", default=None)
     ap.add_argument("--cp1-summary", nargs="*", metavar="MODEL", default=None,
                     help="e.g. --cp1-summary 3b 8b (local, no GPU)")
+    ap.add_argument("--selftest", action="store_true",
+                    help="CPU-only gates on the --dequantize-fp8 regime and its wiring")
     # --- sharded path (prereg §4 big rungs); OPT-IN, none of these => single card ---
     sh = ap.add_argument_group(
         "sharded load (>=70B class)",
@@ -884,7 +1145,21 @@ def main() -> int:
     sh.add_argument("--assert-multi-device", action="store_true",
                     help="fail unless the realized layout computes on >=2 devices — set "
                          "this on the certification run so it cannot pass vacuously")
+    # --- dtype regime (prereg ADDENDUM 2026-07-26-A, roster row 21); OPT-IN ---------
+    ap.add_argument("--dequantize-fp8", action="store_true",
+                    help="load a block-wise-FP8 checkpoint as bf16 via "
+                         "FineGrainedFP8Config(dequantize=True) — prereg ADDENDUM "
+                         "2026-07-26-A, BINDING for roster row 21 (DeepSeek-V3). Unset "
+                         "= the historical call, byte for byte, and an FP8 checkpoint "
+                         "would load its NATIVE FP8 forward instead (a different object, "
+                         "and not differentiable). MUST be passed identically to "
+                         "--collect and --spot-replay, or the replay compares different "
+                         "objects and the bitwise gate fails for the wrong reason. The "
+                         "post-load witness (no FP8 modules, every float parameter "
+                         "bfloat16) is asserted and banked in the trunk stamp.")
     args = ap.parse_args()
+    if args.selftest:
+        return selftest()
     arms = [a.strip() for a in args.arms.split(",") if a.strip()]
     bad = [a for a in arms if a not in ARMS]
     if bad:
@@ -927,7 +1202,8 @@ def main() -> int:
     if args.collect:
         collect(args.arm_root, args.model, args.model_path, arms, args.device,
                 sites_override=sites_override, shard=shard,
-                max_length=args.max_seq_len)
+                max_length=args.max_seq_len,
+                dequantize_fp8=args.dequantize_fp8)
         return 0
     if args.spot_replay is not None:
         if args.spot_replay < 3:
@@ -940,7 +1216,8 @@ def main() -> int:
         return spot_replay(args.arm_root, args.model, args.model_path, arms,
                            args.device, args.spot_replay,
                            sites_override=sites_override,
-                           shard=shard, max_length=args.max_seq_len)
+                           shard=shard, max_length=args.max_seq_len,
+                           dequantize_fp8=args.dequantize_fp8)
     raise SystemExit("pick a mode: --collect / --spot-replay K / --cp1-summary")
 
 
