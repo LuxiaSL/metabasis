@@ -375,3 +375,39 @@ prediction, band, gate threshold, or roster membership moves.
    share 20 fitted constants and their failures correlate; the table makes
    the effective sample size inspectable. G-star-structure (§3) is scored
    from this table.
+
+### ADDENDUM 2026-07-27-D — the constant-α companion baseline — ratified by Luxia 2026-07-27
+
+Filed in response to outside review 2 (desk record
+`OUTSIDE-REVIEW-2-2026-07-27`) BEFORE any α-gauge or directional-star
+prediction is filed. Append-only; no filed prediction, band, or gate
+moves. Background finding on record: the canary miss diagnostic
+(`REPORT-miss-diag-mistral-phi4-2026-07-27`) showed â pays a projection
+cost at the target endpoint only, so target-role-identified constants
+carry a per-node ceiling term — i.e. c_M(target-role) = α_M · ceil_M,
+where α := â/ceiling is the in-subspace alignment.
+
+1. **Scope trigger.** This addendum activates if and when any
+   ceiling-aware gauge (the Addendum-C directional star c_A^out·c_B^in,
+   or any explicitly ratified α-based refinement) is adopted for
+   not-yet-filed predictions.
+2. **The third baseline.** The aggregate scoring read then reports,
+   beside Addendum C's two baselines and against the SAME frozen bands:
+   the **constant-α predictor** — â(A→B) = ᾱ · [the same
+   ceiling/calibration terms the adopted gauge uses], where ᾱ is the
+   grand mean of the fitted per-model (or per-role) α values across the
+   scored set, with NO per-model α structure.
+3. **Frozen interpretive rule.** The per-model-structure claim —
+   "models carry intrinsic, role-specific portability beyond measurement
+   calibration" — is claimed as DEMONSTRATED only if the adopted star
+   beats the constant-α predictor decisively under the Addendum-C
+   margins: in-band count ≥ 15 percentage points higher, AND an
+   α-permutation null (per-model α assignments permuted across models,
+   n = 1000 permutations) placing the true star's in-band count at
+   ≥ the 99th percentile. Passing G-star-hit while failing this
+   companion is scored "calibration-driven; per-model structure not
+   demonstrated."
+4. **Rationale on record.** The ceiling correction helps every
+   predictor, including structureless ones; ceilings are measurement
+   calibration, not model property. The graduation-relevant content is
+   per-model α structure beating constant-α under matched ceilings.
