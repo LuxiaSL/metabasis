@@ -637,3 +637,73 @@ arm is statistically unharmed everywhere.
 6. **Data baseline:** `manifests/outputs.sha256` regenerates at the
    v2 freeze point (desk-only, standing rule), covering v1 and v2
    trees side by side.
+
+### ADDENDUM 2026-07-28-G — corpus-v2.1 · the â vintage rule · the DSV3 loading mechanism — ratified by Luxia 2026-07-28
+
+Execution note of record (Luxia, at ratification): the v2.1 build +
+re-bank does NOT fire until the currently in-flight wave (405B scan +
+fits, DSV3 materialization + scan + fits, SSM downloads) has landed
+and been verified — one clean starting point, no collisions. The
+whitened-bank builds (3b/8b/qwen-7b) ride the same next wave.
+
+Three dated items, each append-only; no filed band or scored verdict
+moves.
+
+**G1. Corpus-v2.1 (completing F's repair).** F§1's exclusion criterion
+was a symptom threshold (M21): it removed the 3 shortest corrupt
+entries and missed two 512-token exact repetition loops of the same
+disease (`S3-dsv2-lite-contrastive-t00-r0`, `S3-dsv2-lite-socratic-
+t12-r0`), both in held-out topics; on v2 one alone carries 98.99% of
+qwen2.5-32b's raw test squared norm. Corpus-v2.1 = v2 minus every
+entry that is an exact repetition of a cycle ≤ 64 characters
+(deterministic detector; census: exactly 2 such entries remain) —
+775 texts, exclusion-only, byte-preserving, same two-sided
+construction gate as F§1 (builder refuses unless its round-trip
+reproduces the v2 manifest sha `6c4d65ba…`). The v2.1 manifest sha and
+split sha are recorded in the ledger at construction. Re-derivation
+per F§3–4 (same comparison-table obligations; expectation revised per
+G2). **The 282 byte-BPE-encoded entries REMAIN by ruling**: they are
+consistent shared inputs (every model saw identical bytes); the
+corruption that harms is degeneracy, not encoding; decoding would
+change content of 36% of the corpus for no demonstrated benefit.
+Go-forward basis for all future filings = v2.1 (ruled); every filing
+carries its corpus sha.
+
+**G2. The â vintage rule (the F§4(a) finding, on record).** Removing 3
+of 780 corpus rows moved native â by median .035, max .092 (map term
+≤.078, vector term ≤.088; held-out r² static): **â at proc_k128 /
+n_train≈600 carries corpus-sampling variability of order ±.05–.09.**
+Rules, ratified: (a) every quoted â carries its corpus manifest sha
+(vintage-tagging); (b) within-vintage scoring is unaffected —
+predictions and fits ride the same banks, which is exactly what the
+frozen ceremony tests — so no band, gate, or budget changes; (c)
+cross-vintage â comparisons are calibration reads, never scored; (d)
+F§4(a)'s ±.01 expectation is retired as mis-calibrated (the violation
+was the expectation's, not the apparatus'); the v2→v2.1 comparison
+table expects native-â movement within the measured ±.09 envelope
+and flags beyond it; (e) growing the corpus (shrinking the wobble at
+source) is a named rolling item for a future collection phase.
+Context on record: the composed predictor retrodicted within .041 on
+BOTH vintages — the mechanism is corpus-robust; â is
+vintage-relative.
+
+**G3. DSV3 loading mechanism (correcting Addendum A's named
+mechanism).** Addendum A's regime — bf16 forward, standard bitwise
+spot-replay gate, differentiable target builds, fp32 banking — is
+UNCHANGED and is achieved. Its named mechanism
+(`FineGrainedFP8Config(dequantize=True)`) is **not executable on this
+checkpoint**: `kv_a_proj_with_mqa` ([576, 7168], present in all 61
+layers + dense layers) has a ragged final 128-block whose stored
+scales transformers' dequantizer hard-rejects. Mechanism of record
+becomes: a **streaming dequantizer** producing a bf16 mirror
+(`DeepSeek-V3-bf16` on the shared volume), verified bitwise against
+transformers' own `Fp8Dequantize.convert` on all 122 comparable
+tensors of the probe shard; ragged tensors use the unique consistent
+extension of the block rule (rows 512–575 → scale row 4, DeepSeek's
+own reference behavior), recorded per-tensor in the materialization
+manifest with the source checkpoint's shard shas. The scan collects
+the mirror as an ordinary bf16 sharded node; its preflight asserts
+the provenance chain (source config sha `cbf0b95d…`, first-shard
+`b933b099…`, manifest verification.failures == []) and measures the
+expert-fusion transient live, blocking on overrun. The mirror is
+reusable for the row-21 vector builds.
