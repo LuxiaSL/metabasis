@@ -62,8 +62,8 @@ from typing import Any, Optional, Union
 import numpy as np
 
 from metabasis.scripts.fit_transport_maps import (
-    ARMS, DEFAULT_ARM_ROOT, MODEL_KEYS, SITES, StateBank, load_state_bank,
-    save_state_bank)
+    ARMS, DEFAULT_ARM_ROOT, MODEL_KEYS, StateBank, load_state_bank,
+    save_state_bank, sites_for)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("collect_mean_states")
@@ -667,7 +667,7 @@ def collect(arm_root: Path, model: str, model_path: str, arms: list[str],
             shard: Optional[ShardSpec] = None,
             max_length: int | None = None) -> None:
     entries, manifest_sha = load_corpus(arm_root)
-    sites = sites_override or SITES[model]
+    sites = sites_override or sites_for(model)
     states_dir = arm_root / "states"
     logs_dir = arm_root / "logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
@@ -750,7 +750,7 @@ def spot_replay(arm_root: Path, model: str, model_path: str, arms: list[str],
                 max_length: int | None = None) -> int:
     entries, _ = load_corpus(arm_root)
     by_id = {e["text_id"]: e for e in entries}
-    sites = sites_override or SITES[model]
+    sites = sites_override or sites_for(model)
     states_dir = arm_root / "states"
     if shard is None:                              # the unchanged single-card path
         model_obj, tok = load_model_and_tok(model_path, device)
@@ -934,8 +934,9 @@ def main() -> int:
             raise SystemExit("CP-1 gate requires K >= 3")
         # --sites forwards on BOTH paths (desk unification, 2026-07-26): a bank
         # collected with an overridden grid must spot-replay against that same
-        # grid; the historical SITES[model] lookup stays the default when --sites
-        # is absent, so banked-model replays are unchanged.
+        # grid; the registry lookup (`sites_for(model)`, which refuses loudly for
+        # an un-ratified key) stays the default when --sites is absent, so
+        # banked-model replays are unchanged.
         return spot_replay(args.arm_root, args.model, args.model_path, arms,
                            args.device, args.spot_replay,
                            sites_override=sites_override,

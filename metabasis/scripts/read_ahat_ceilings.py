@@ -88,7 +88,8 @@ import numpy as np
 from pydantic import BaseModel, Field
 
 from metabasis.scripts.fit_transport_maps import (
-    A8_SEED, ARMS, TransportMap, load_transport_map)
+    A8_SEED, ARMS, FitGridError, TransportMap, load_transport_map, require_site,
+    sites_for)
 from metabasis.scripts.read_exchange_rates import (
     BANK_ROOT, COLLECTION_ROOT, FAMILIES, FAMILY_OF_RECORD, HUB_MODEL,
     ExchangeRateRow, MissingPiece, PairRequest, cos, exchange_rate,
@@ -305,18 +306,82 @@ _SIGN_KEYS: tuple[str, ...] = (
     "per_text_band_sign_consistency", "per_gen_band_sign_consistency")
 
 
-def read_build_diagnostics(stamps: Optional[Path]) -> BuildDiagnostics:
-    """Construction quality off a stamps json; absence is reported, not raised."""
+class StampsSiteMismatch(ValueError):
+    """The stamps json handed to a row does not describe that row's site.
+
+    RAKE M14. A merged multi-site vector npz has ONE canonical stamps stem, so
+    attaching build diagnostics by stem silently decorates a per-site row with
+    a DIFFERENT build's numbers — the 70B's L37/L43 ceiling rows carried the
+    L17 build's coherence .268 instead of the true .431/.432, and nothing
+    errored. This is that failure made impossible: the site the stamps record
+    must equal the site the vector was loaded at, or the row refuses.
+    """
+
+
+def stamps_path_for(vectors: Path, model: str, site: int) -> Optional[Path]:
+    """The stamps json that describes the vector at `site` — per-site FIRST.
+
+    RAKE M14, rule (a): when a model banks per-site out-name'd builds, row-level
+    diagnostics resolve through the PER-SITE file, never the canonical stem. The
+    stem is only accepted when it actually records this site, so the merged-npz
+    trap (one stem, many sites) cannot be walked into by accident.
+
+    Probe order:
+      1. ``<dir>/entropy_gradient_<model>_L<site>_stamps.json`` — the per-site
+         build's own stamps (the 70B L37/L43 and every gpt2-xl site).
+      2. ``<vectors-stem>_stamps.json`` — accepted ONLY if its ``site`` field is
+         this site (or the file records no site at all, e.g. very old banks).
+    Returns None when neither resolves; the caller reports that loudly rather
+    than quietly booking coherence as unknown.
+    """
+    per_site = vectors.parent / f"entropy_gradient_{model}_L{site}_stamps.json"
+    if per_site.exists():
+        return per_site
+    stem = vectors.name[: -len(".npz")] if vectors.name.endswith(".npz") \
+        else vectors.name
+    canonical = vectors.parent / f"{stem}_stamps.json"
+    if not canonical.exists():
+        return None
+    try:
+        recorded = json.loads(canonical.read_text()).get("site")
+    except (OSError, ValueError):
+        return canonical          # unreadable: let read_build_diagnostics say so
+    if recorded is None or int(recorded) == int(site):
+        return canonical
+    return None
+
+
+def read_build_diagnostics(stamps: Optional[Path], model: Optional[str] = None,
+                           site: Optional[int] = None) -> BuildDiagnostics:
+    """Construction quality off a stamps json; absence is reported, not raised.
+
+    A stamps json for the WRONG site is not an absence — it is the M14 rake, and
+    it raises `StampsSiteMismatch`. Pass `model`/`site` whenever the row knows
+    them (every roster path does); omitting them keeps the old, unchecked
+    behaviour for ad-hoc callers.
+    """
+    where = (f" for {model} L{site}" if model is not None and site is not None
+             else "")
     if stamps is None:
-        return BuildDiagnostics(note="no stamps path supplied for this vector")
+        return BuildDiagnostics(
+            note=f"no stamps json resolved{where} — coherence UNKNOWN "
+                 f"(no per-site stamps file, and the canonical stem describes a "
+                 f"different site; see rake M14)")
     if not stamps.exists():
         return BuildDiagnostics(stamps_path=str(stamps),
-                                note="stamps json absent — coherence UNKNOWN")
+                                note=f"stamps json absent{where} — coherence UNKNOWN")
     try:
         doc = json.loads(stamps.read_text())
     except (OSError, ValueError) as exc:
         return BuildDiagnostics(stamps_path=str(stamps),
                                 note=f"stamps json unreadable: {exc}")
+    recorded = doc.get("site")
+    if site is not None and recorded is not None and int(recorded) != int(site):
+        raise StampsSiteMismatch(
+            f"{model or doc.get('model') or '?'}: requested site L{site} but "
+            f"{stamps} records site L{int(recorded)} — attaching it would book "
+            f"another build's diagnostics on this row (rake M14). Resolve the "
+            f"per-site stamps file, or pass the right one explicitly.")
     diag = doc.get("diagnostics") or {}
     if not isinstance(diag, dict):
         return BuildDiagnostics(stamps_path=str(stamps),
@@ -434,7 +499,7 @@ def ceiling_row(hub: HubSource, tgt: TargetSpec, family: str,
     capture = projection_norm(src_basis, v_src)
 
     site_pair = f"{HUB_MODEL}L{hub.site}->{tgt.model}L{tgt.site}"
-    build = read_build_diagnostics(tgt.stamps)
+    build = read_build_diagnostics(tgt.stamps, model=tgt.model, site=tgt.site)
     fitq = read_fit_quality(tgt.summary_dir or tgt.fits_dir, site_pair, tgt.arm,
                             family)
     hint, why = bucket(base.a_hat, ceil, build.coherence, base.clears_null_floor)
@@ -517,12 +582,16 @@ def _node(model: str, site: int, arm: str, n_layers: int,
           vectors_name: Optional[str] = None) -> TargetSpec:
     root = COLLECTION_ROOT / model
     vec = root / "vectors" / (vectors_name or f"entropy_gradient_{model}.npz")
-    stem = vec.name[:-len(".npz")]
     return TargetSpec(
         model=model, site=site, arm=arm, vectors=vec,
         fits_dir=root / (fits_dirname or f"fits_scan_{model}"),
         summary_dir=(root / summary_dirname) if summary_dirname else None,
-        stamps=root / "vectors" / f"{stem}_stamps.json",
+        # RAKE M14: resolved per SITE, not per stem. The stem-derived path was
+        # right only while every model's canonical npz held exactly one site;
+        # merged multi-site banks (the 70B's L17+L37+L43, gpt2-xl's L7+L26+L47)
+        # made it attach the wrong build's diagnostics — or, for gpt2-xl, no
+        # diagnostics at all, since no stem-named stamps file was ever written.
+        stamps=stamps_path_for(vec, model, site),
         depth_fraction=round(site / n_layers, 4))
 
 
@@ -543,6 +612,19 @@ def roster_rungs2() -> list[TargetSpec]:
     """Hub rungs 2: the 70B, pythia, and all three gpt2-xl sites of evidence."""
     gpt2_fits = "fits_scan_gpt2-xl-25site"
     return [
+        # 70B sites of record, re-ratified 2026-07-27: L37 primary, L43
+        # robustness (SITES carries the same pair). Their vectors live in the
+        # 12-key MERGED canonical npz alongside the retired L17, so the stamps
+        # for these rows must come from the per-site files — coherence
+        # .431/.432, not the L17 build's .268 (rake M14). `_node` now resolves
+        # that per site; do not reintroduce a stem-derived stamps path.
+        _node("llama-3.1-70b-instruct", 37, "native", 80),
+        _node("llama-3.1-70b-instruct", 43, "native", 80),
+        # RETIRED SITE, kept as a row on purpose: L17 is the shallow-basin site
+        # artifact the chain-break read retired (rebuilt-column â .067, sub-null
+        # — never a valid c measurement), and this diagnostic table is where
+        # that case study is read. It is NOT a site of record and is absent
+        # from SITES, so no fit resolves it without an explicit --tgt-sites 17.
         _node("llama-3.1-70b-instruct", 17, "native", 80),
         # pythia's ruled L28–L31 extension banked its npz's in the original
         # fits dir and its MERGED 16-site cp2_summary.json in the sibling.
@@ -711,6 +793,54 @@ def selftest() -> int:
             (0.05, 0.85, None, False, "inconclusive")):
         got, _ = bucket(a, c, coh, clr)
         check(got == want, f"(â={a}, ceil={c}, coh={coh}, clears={clr}) → {got}")
+
+    print("== selftest 12: RAKE M14 — stamps resolve per SITE, never by stem ==")
+    import tempfile
+    with tempfile.TemporaryDirectory(prefix="m14_selftest_") as td:
+        vec_dir = Path(td) / "vectors"
+        vec_dir.mkdir()
+        # A merged multi-site bank: one canonical stem (recording site 17 only)
+        # plus a per-site build at site 37 — the exact 70B shape.
+        merged = vec_dir / "entropy_gradient_toy.npz"
+        merged.write_bytes(b"")                       # never opened by this path
+        (vec_dir / "entropy_gradient_toy_stamps.json").write_text(json.dumps(
+            {"site": 17, "diagnostics": {"per_text_band_pairwise_coherence": 0.268}}))
+        (vec_dir / "entropy_gradient_toy_L37_stamps.json").write_text(json.dumps(
+            {"site": 37, "diagnostics": {"per_text_band_pairwise_coherence": 0.431}}))
+
+        p37 = stamps_path_for(merged, "toy", 37)
+        check(p37 is not None and p37.name.endswith("_L37_stamps.json"),
+              f"site 37 resolves to the PER-SITE stamps file: {p37}")
+        check(read_build_diagnostics(p37, model="toy", site=37).coherence == 0.431,
+              "…and carries the per-site coherence .431, not the stem's .268")
+        p17 = stamps_path_for(merged, "toy", 17)
+        check(p17 is not None and p17.name == "entropy_gradient_toy_stamps.json",
+              f"site 17 still resolves to the stem, which records site 17: {p17}")
+        check(read_build_diagnostics(p17, model="toy", site=17).coherence == 0.268,
+              "…and carries .268, the build that stem actually describes")
+        check(stamps_path_for(merged, "toy", 43) is None,
+              "a site with neither a per-site file nor a matching stem resolves "
+              "to None (reported as UNKNOWN) rather than to the wrong build")
+        check(read_build_diagnostics(None, model="toy", site=43).coherence is None,
+              "…and that None yields coherence UNKNOWN with a named note")
+        try:                       # the trap itself, forced: wrong stamps, loudly
+            read_build_diagnostics(
+                vec_dir / "entropy_gradient_toy_stamps.json", model="toy", site=37)
+            check(False, "stem stamps on a site-37 row must RAISE")
+        except StampsSiteMismatch as exc:
+            check("L37" in str(exc) and "toy" in str(exc),
+                  f"stem stamps on a site-37 row raise, naming model+site: {exc!s:.72}")
+
+    print("== selftest 13: the 70B registry ruling is live ==")
+    check(sites_for("llama-3.1-70b-instruct") == (37, 43),
+          f"SITES['llama-3.1-70b-instruct'] = "
+          f"{sites_for('llama-3.1-70b-instruct')} (L37 primary, L43 robustness)")
+    try:
+        require_site("llama-3.1-70b-instruct", 17)
+        check(False, "the retired L17 must not resolve from the registry")
+    except FitGridError as exc:
+        check("L17" in str(exc) and "llama-3.1-70b-instruct" in str(exc),
+              f"retired L17 refuses, naming model+site: {exc!s:.72}")
 
     print(f"\nselftest: {len(failures)} failure(s)")
     return 1 if failures else 0

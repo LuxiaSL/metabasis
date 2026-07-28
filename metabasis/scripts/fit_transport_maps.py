@@ -37,6 +37,7 @@ import hashlib
 import json
 import logging
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, Optional
@@ -87,12 +88,33 @@ SITES = {"3b": (13, 14, 18), "8b": (14, 16, 18), "qwen-7b": (19, 21, 23),
          # --- hub-rungs-2 graduations (collection phase) -----------------------
          # Ratified by Luxia 2026-07-27 from the hub-rungs-2 scans; same read as
          # wave-1 (held-out r² at proc_k128, hub 8B, peak flanked by neighbours).
-         # llama-3.1-70b-instruct: the scale ceiling. Peak L17 UNANIMOUS across all
-         # six columns (3 hub sources × both arms), r²=.577–.626, cka_after .87–.93
-         # — a textbook interior peak. Note for the atlas: L17 is 21% depth of 80
-         # layers while the hub's own sites sit at 44–56% of 32, and the
-         # proportional-depth region (L43–48) is this curve's TROUGH.
-         "llama-3.1-70b-instruct": (12, 17, 22),       # ⋆ L17
+         # llama-3.1-70b-instruct: the scale ceiling. RE-RATIFIED 2026-07-27
+         # (Luxia, session 3) — the grid is the two DEEP sites, L37 primary and
+         # L43 robustness, and L17 is RETIRED from the fit grid.
+         # What changed and why, so nobody re-derives it from the r² curve alone:
+         #  · The alignment-curve scan picked L17 (peak UNANIMOUS across all six
+         #    columns, r²=.577–.626, cka_after .87–.93 — a textbook interior
+         #    peak), and the proportional-depth region L43–48 was that curve's
+         #    TROUGH. On r² alone L17 still looks like the answer.
+         #  · The 70B chain-break read (in-lineage star, session 3) settled it
+         #    the other way on the evidence that actually matters here: deep
+         #    â = .4557 (L37) / .4480 (L43), null-clearing ~5×, implied
+         #    c = .5441/.5349 — while the L17 rebuilt-column â (.067) is
+         #    SUB-NULL and was never a valid c measurement at all. L17 is a
+         #    shallow-basin SITE ARTIFACT; it retires to that case study.
+         #  · Two deep sites, not one, by explicit ruling: the pair is the
+         #    same-model robustness check behind "c_M ≠ representable fraction"
+         #    (â flat, coherence .431/.432 flat across L37→L43, while the
+         #    ceilings differ 4.5% the other way).
+         # Both sites are ON the model's own 12-site scan grid (…,32,37,43,48,…),
+         # so the ratification invariant is satisfied — this is a curve-visited
+         # pair re-ranked by â evidence, not a fiat grid. gpt2-xl below is the
+         # same shape of ruling (sites of evidence, record deferred to â).
+         # L17 is still fully banked (the canonical npz holds L17+L37+L43); any
+         # re-read of the site-artifact case study passes `--tgt-sites 17`
+         # EXPLICITLY, which is the point — the retired site never resolves by
+         # default again.
+         "llama-3.1-70b-instruct": (37, 43),           # ⋆ L37 primary, L43 robustness
          # pythia-6.9b: ⋆ L31, and the grid is drawn from the RULED 16-site
          # extension (L28–31), not the base 12 — the audit invariant checks the
          # extension-inclusive scan grid, which is why this is not a fiat grid.
@@ -152,6 +174,74 @@ _RATIFICATION_PROBLEMS = fiat_grid_problems(SITES)
 if _RATIFICATION_PROBLEMS:
     raise ValueError("SITES violates the ratification invariant:\n  "
                      + "\n  ".join(_RATIFICATION_PROBLEMS))
+
+
+class FitGridError(LookupError):
+    """A fit-grid lookup that must fail LOUDLY rather than resolve silently.
+
+    Covers both failure modes the campaign has actually hit:
+
+      * a model key with NO fixed grid (an un-ratified scan-registry node) —
+        historically a bare ``KeyError('gpt2-xl')`` raised from inside
+        ``run_grid``, which says nothing about what to do next;
+      * a site the model's fixed grid does not contain — historically no error
+        at all, because nothing checked.
+
+    Every message names the MODEL and the requested SITE/GRID. Silent
+    wrong-grid resolution is exactly the bug this class exists to prevent: the
+    70B carried the retired scan-era L17 grid after its site of record moved to
+    L37/L43, so any tool that did not pass ``--tgt-sites`` explicitly fit the
+    wrong sites without a word (session-3 ruling, 2026-07-27).
+
+    ``LookupError``, deliberately NOT ``KeyError``: callers that wrap a dict
+    lookup in ``except KeyError`` must not swallow this.
+    """
+
+
+def sites_for(model: str,
+              registry: Mapping[str, tuple[int, ...]] | None = None,
+              ) -> tuple[int, ...]:
+    """The fixed fit grid for `model` — or a loud refusal naming the model.
+
+    `registry` defaults to `SITES`; pass a merged map (`{**SITES, **override}`)
+    to resolve against command-line overrides without losing the diagnostics.
+    """
+    grids: Mapping[str, tuple[int, ...]] = SITES if registry is None else registry
+    grid = grids.get(model)
+    if grid is None:
+        scan = SCAN_GRIDS.get(model)
+        hint = (f"it IS in the scan registry with 12-site scan grid {scan} — "
+                f"pass those sites explicitly (--src-sites/--tgt-sites on the "
+                f"fit CLI, --sites on the collector); sites from curves, never "
+                f"fiat" if scan is not None else
+                "it is in NEITHER registry — check the bank key spelling")
+        raise FitGridError(
+            f"{model!r} has no fixed fit grid: {hint}. "
+            f"Known fixed-grid keys: {sorted(grids)}")
+    if not grid:
+        raise FitGridError(
+            f"{model!r}: fixed fit grid is EMPTY — a registry key with no sites "
+            f"cannot resolve; fix the registry or pass the grid explicitly")
+    return tuple(int(s) for s in grid)
+
+
+def require_site(model: str, site: int,
+                 registry: Mapping[str, tuple[int, ...]] | None = None) -> int:
+    """Assert `site` is in `model`'s fixed fit grid; return it, or refuse loudly.
+
+    For callers that carry a site of record around (readouts, ceiling rosters,
+    glue scripts) and would otherwise resolve a retired or mistyped site
+    against a bank that happily holds it.
+    """
+    grid = sites_for(model, registry)
+    if int(site) not in grid:
+        raise FitGridError(
+            f"{model!r}: requested site L{site} is NOT in its fixed fit grid "
+            f"{grid}. Either the site is retired (the 70B's L17 is — it stays "
+            f"banked but must be asked for explicitly) or the registry is stale; "
+            f"pass the grid explicitly if you mean to leave the registry")
+    return int(site)
+
 
 ARMS = ("native", "raw")
 STRATA = ("S1", "S2", "S3")
@@ -592,9 +682,16 @@ def run_grid(arm_root: Path, src_model: str, tgt_model: str,
     all_records: list[FitRecord] = []
     agreement: dict[str, dict] = {}
     split_info: dict = {}
+    # Resolve BOTH grids up front and loudly: a missing key here used to surface
+    # as a bare KeyError from the middle of the loop, and a stale registry entry
+    # surfaced as nothing at all (it just fit the wrong sites).
     sites_map = {**SITES, **(sites_override or {})}
-    for s_site in sites_map[src_model]:
-        for t_site in sites_map[tgt_model]:
+    src_sites = sites_for(src_model, sites_map)
+    tgt_sites = sites_for(tgt_model, sites_map)
+    logger.info("fit grid: %s %s -> %s %s", src_model, src_sites, tgt_model,
+                tgt_sites)
+    for s_site in src_sites:
+        for t_site in tgt_sites:
             maps_by_arm: dict[str, dict[str, TransportMap]] = {}
             for arm in arms:
                 src = load_state_bank(states_dir, src_model, arm)
