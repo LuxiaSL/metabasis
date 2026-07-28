@@ -41,7 +41,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 # ---------------------------------------------------------------- the scan rule
 SCAN_DEPTH_LO = 0.15
@@ -102,6 +102,14 @@ class RosterNode(BaseModel):
                     "position embeddings (GPT-2 lineage) this is a HARD ceiling: a "
                     "longer sequence indexes past the `wpe` table. Recorded so the "
                     "job preflight's corpus-length check is mechanical, not folklore.")
+    max_seq_len: int | None = Field(
+        default=None,
+        description="prereg ADDENDUM 2026-07-27-B: if set, every use of this node "
+                    "truncates each text to its FIRST `max_seq_len` tokens "
+                    "(`--max-seq-len`). Lives in the registry rather than in a job "
+                    "script so collection, spot-replay, target builds and behavioral "
+                    "reads cannot silently disagree — the addendum requires ONE "
+                    "truncation for all uses.")
     blocked_reason: str | None = Field(
         default=None,
         description="non-None => this node MUST NOT be collected. Set when a "
@@ -113,6 +121,23 @@ class RosterNode(BaseModel):
     @property
     def is_blocked(self) -> bool:
         return self.blocked_reason is not None
+
+    @property
+    def collector_args(self) -> list[str]:
+        """The deviation-carrying flags every invocation of this node MUST pass.
+        Job scripts splice this in rather than re-typing the numbers, so collection
+        and spot-replay cannot drift apart (they would compare different objects and
+        the bitwise gate would fail for the wrong reason)."""
+        return ["--max-seq-len", str(self.max_seq_len)] if self.max_seq_len else []
+
+    @model_validator(mode="after")
+    def _ceiling_is_respected(self) -> "RosterNode":
+        if (self.max_seq_len and self.max_position_embeddings
+                and self.max_seq_len > self.max_position_embeddings):
+            raise ValueError(
+                f"{self.key}: max_seq_len={self.max_seq_len} exceeds the "
+                f"architecture's positional capacity {self.max_position_embeddings}")
+        return self
 
     @field_validator("arms")
     @classmethod
@@ -222,28 +247,27 @@ HUB_RUNGS_2: tuple[RosterNode, ...] = (
         weights_dirname="gpt2-xl", checkpoint_identity="base",
         config_sha256="be48115d52314bc27327e160bf10197760db02ea689d10adb24db4102edf7a8a",
         max_position_embeddings=1024,
-        blocked_reason=(
-            "THE FROZEN CORPUS DOES NOT FIT GPT-2. GPT-2 uses LEARNED absolute "
-            "position embeddings (`wpe`, n_positions=1024) — a hard ceiling, not a "
-            "soft one. Tokenized with GPT-2's own BPE, 148 of the 780 frozen corpus "
-            "texts exceed 1024 tokens on the raw arm (max 1565, i.e. 541 past the "
-            "limit; min 2, mean 643.9). Every one of those 148 forwards would raise "
-            "or index garbage. There is no in-scope fix: the corpus, seed and split "
-            "are FROZEN (prereg §4, n_train=600), so dropping the 148 over-length "
-            "texts would break the frozen split, and truncating them would change "
-            "the banked object. This is an ARCHITECTURE-level blocker, not a "
-            "checkpoint one — every GPT-2 variant ships n_positions=1024. Requires a "
-            "desk/Luxia ruling: drop row 17, amend the prereg, or take the "
-            "reallocation the prereg already contemplates for pair leg 12 "
-            "(\"judged only if its entropy-write column shows any signal, else leg "
-            "reallocated\"). DO NOT COLLECT until cleared."),
-        notes="GPT2LMHeadModel — resolves as `.transformer.h` (the GPT-2 lineage names "
+        max_seq_len=1024,
+        notes="POSITION-CEILING DEVIATION, prereg ADDENDUM 2026-07-27-B (ratified by "
+              "Luxia 2026-07-27): GPT-2 uses LEARNED absolute position embeddings "
+              "(`wpe`, n_positions=1024) — a hard ceiling on every GPT-2 variant, not "
+              "a soft one — and 148 of the 780 frozen corpus texts exceed it under "
+              "GPT-2's own BPE (max 1565, mean 643.9). This node therefore collects "
+              "with per-text truncation to its FIRST 1024 tokens (`--max-seq-len "
+              "1024`), applied IDENTICALLY to every use of the node, recorded in every "
+              "stamp as `truncation: first-1024`. The other 632 texts are "
+              "byte-identical to the frozen objects (verified: suffix-drop only, and "
+              "collection is batch-1 so no text perturbs another). NAMED CAVEAT, "
+              "frozen with the deviation: for those 148 texts any gpt2-xl pair "
+              "compares full-text mean states against truncated-text mean states — a "
+              "measurement-basis mismatch confined to this node, flagged at scoring. "
+              "GPT2LMHeadModel — resolves as `.transformer.h` (the GPT-2 lineage names "
               "its decoder stack `h`, not `layers`); hooks.py fallback covers it and "
               "the capture was CPU-verified bit-identical to output_hidden_states, so "
-              "the hook path is READY if the corpus question is ever resolved. Row 17 "
-              "is the deliberate floor-stress rung (d=1600, oldest diet). BASE: no "
-              "chat template, bos == eos == 50256. Weights are fp32 on disk (config "
-              "carries no torch_dtype); the collector would forward bf16."),
+              "the hook path was CPU-verified bit-identical to output_hidden_states. "
+              "Row 17 is the deliberate floor-stress rung (d=1600, oldest diet). BASE: "
+              "no chat template, bos == eos == 50256, raw arm only. Weights are fp32 "
+              "on disk (config carries no torch_dtype); the collector forwards bf16."),
     RosterNode(
         key="llama-3.1-70b-instruct", model_id="meta-llama/Llama-3.1-70B-Instruct",
         roster_row=11, arms=("native", "raw"), num_hidden_layers=80, hidden_size=8192,
