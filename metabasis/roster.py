@@ -102,6 +102,15 @@ class RosterNode(BaseModel):
                     "position embeddings (GPT-2 lineage) this is a HARD ceiling: a "
                     "longer sequence indexes past the `wpe` table. Recorded so the "
                     "job preflight's corpus-length check is mechanical, not folklore.")
+    scan_grid_extension: tuple[int, ...] = Field(
+        default=(),
+        description="Ruled additional sites, appended to the computed 12-site grid. "
+                    "A DEVIATION FROM THE DEFAULT INSTRUMENT, only ever set by an "
+                    "explicit desk/Luxia ruling recorded in the ledger, and only for "
+                    "the reason the ruling names — the [0.15,0.85] 12-site rule stands "
+                    "as the default. Kept separate from the computed grid so the rule "
+                    "and the exception never blur: `scan_grid` is always re-derivable "
+                    "from num_hidden_layers alone.")
     max_seq_len: int | None = Field(
         default=None,
         description="prereg ADDENDUM 2026-07-27-B: if set, every use of this node "
@@ -154,9 +163,25 @@ class RosterNode(BaseModel):
         return scan_grid(self.num_hidden_layers)
 
     @property
+    def effective_scan_grid(self) -> tuple[int, ...]:
+        """The grid actually collected: the computed rule plus any ruled extension."""
+        return tuple(sorted(set(self.scan_grid) | set(self.scan_grid_extension)))
+
+    @property
     def sites_arg(self) -> str:
         """The `--sites` value for `collect_mean_states.py`."""
-        return ",".join(str(s) for s in self.scan_grid)
+        return ",".join(str(s) for s in self.effective_scan_grid)
+
+    @model_validator(mode="after")
+    def _extension_in_range(self) -> "RosterNode":
+        bad = [s for s in self.scan_grid_extension
+               if not 0 <= s < self.num_hidden_layers]
+        if bad:
+            raise ValueError(
+                f"{self.key}: extension sites {bad} outside [0, "
+                f"{self.num_hidden_layers - 1}] — site L is a hook on "
+                f"decoder_layers[L], so num_hidden_layers-1 is the valid maximum")
+        return self
 
 
 # Wave 1 of the collection phase: the seven cheap new nodes. Architecture facts
@@ -230,7 +255,17 @@ HUB_RUNGS_2: tuple[RosterNode, ...] = (
         weights_dirname="pythia-6.9b", checkpoint_identity="base",
         config_sha256="d7f2d0bbfa279e3324423a2882d8fd1e1276fce7806a152cf5f5648733fdccab",
         max_position_embeddings=2048,
-        notes="GPTNeoXForCausalLM — the FIRST non-`.model.layers` architecture on the "
+        scan_grid_extension=(28, 29, 30, 31),
+        notes="RULED GRID EXTENSION (Luxia 2026-07-27, ledger row: window-failed-to-"
+              "bracket). The computed 12-site [0.15,0.85] grid produced NO INTERIOR "
+              "PEAK on the record arm — held-out r2 rose monotonically from L5 to the "
+              "top site L27 from all three hub sources (8bL18->L27 r2=.1523, still "
+              "climbing), so the window failed to bracket the peak and 'sites from "
+              "curves, never fiat' could not be satisfied inside it. Extended by the "
+              "model's remaining depth L28-L31 (L31 = num_hidden_layers-1, the valid "
+              "maximum). The 12-site rule remains the DEFAULT instrument; this "
+              "extension is the named exception, not a new rule. "
+              "GPTNeoXForCausalLM — the FIRST non-`.model.layers` architecture on the "
               "roster; resolves as `.gpt_neox.layers` via base_model_prefix (hooks.py "
               "fallback added 2026-07-27, CPU-verified against output_hidden_states). "
               "BASE: no chat template, no generation_config, bos == eos == 0 — raw arm "
