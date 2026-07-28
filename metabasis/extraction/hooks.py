@@ -27,12 +27,33 @@ from torch import Tensor, nn
 logger = logging.getLogger("metabasis.hooks")
 
 
+#: Attribute names under which an HF base model may hold its decoder-layer
+#: ModuleList. `layers` is the modern convention (Llama/Qwen/OLMo-2/GPTNeoX);
+#: `h` is the original GPT-2 lineage (GPT2/GPT-J/GPT-NeoX-Japanese/Falcon).
+_LAYER_CONTAINER_ATTRS = ("layers", "h")
+
+
 def decoder_layers(model):
     """Decoder layer list across architectures.
 
     Llama/Qwen/OLMo-2: `model.model.layers`. Gemma-3 ships as
     Gemma3ForConditionalGeneration — a multimodal wrapper whose text decoder
     nests under `language_model`; hook paths must resolve through it.
+
+    Older lineages do NOT nest their base model under `.model` and do not
+    always call the list `layers` (verified on transformers 5.3.0, 2026-07-27):
+    GPTNeoXForCausalLM is `.gpt_neox.layers`, GPT2LMHeadModel is
+    `.transformer.h`. Those resolve through HF's own `base_model_prefix`, which
+    is the version-robust accessor (`PreTrainedModel.base_model` uses it) and
+    beats hardcoding attribute names per architecture.
+
+    ORDERING IS LOAD-BEARING: the two original checks run FIRST and are
+    untouched, so every architecture that already resolved still resolves via
+    the identical branch to the identical object. The fallback below is
+    reached ONLY where this function previously raised AttributeError — it can
+    therefore add support but can never change an existing result. (This
+    function is pure resolution with no side effects, so "same object returned"
+    is a complete byte-stability argument for everything downstream.)
     """
     inner = getattr(model, "model", model)
     if hasattr(inner, "layers"):
@@ -42,6 +63,22 @@ def decoder_layers(model):
         lm_inner = getattr(lm, "model", lm)
         if hasattr(lm_inner, "layers"):
             return lm_inner.layers
+
+    # --- fallback: previously an unconditional AttributeError ------------------
+    prefix = getattr(model, "base_model_prefix", "") or ""
+    for base in ((getattr(model, prefix, None) if prefix else None), inner, model):
+        if base is None:
+            continue
+        for attr in _LAYER_CONTAINER_ATTRS:
+            container = getattr(base, attr, None)
+            # Require a real, non-empty ModuleList: a stray tensor/property named
+            # `h` must never be mistaken for the decoder stack.
+            if isinstance(container, nn.ModuleList) and len(container) > 0:
+                logger.info(
+                    "decoder_layers: %s resolved via base_model_prefix=%r -> .%s "
+                    "(%d layers)", type(model).__name__, prefix, attr, len(container))
+                return container
+
     raise AttributeError(
         f"cannot locate decoder layers on {type(model).__name__} — extend "
         "decoder_layers() for this architecture"

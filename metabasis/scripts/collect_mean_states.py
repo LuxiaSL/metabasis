@@ -90,12 +90,29 @@ def load_corpus(arm_root: Path) -> tuple[list[dict], str]:
     return entries, h
 
 
-def build_ids(tok, entry: dict, arm: str, date_string: str) -> tuple[list[int], int]:
-    """Returns (ids, P) — full token ids and the completion start position."""
+def build_ids(tok, entry: dict, arm: str, date_string: str,
+              max_length: int | None = None) -> tuple[list[int], int]:
+    """Returns (ids, P) — full token ids and the completion start position.
+
+    `max_length` is the prereg ADDENDUM 2026-07-27-B position-ceiling deviation:
+    per-text truncation to the FIRST `max_length` tokens, for architectures whose
+    LEARNED absolute position embeddings cannot represent a longer sequence
+    (GPT-2: n_positions=1024, a hard ceiling on every variant). Default None =
+    the historical path, untouched.
+
+    Truncation is a pure suffix-drop applied AFTER the arm's ids are built, so:
+      * a text already at or under the ceiling is returned byte-identical to the
+        untruncated path (the slice never runs), and
+      * because collection is batch-1 with use_cache=False, truncating one text
+        cannot perturb any other text's forward — the unaffected texts stay
+        byte-identical to the frozen objects, per the addendum.
+    """
     text = entry["text"]
     comp = tok.encode(text, add_special_tokens=False)
     if not comp:
         raise RuntimeError(f"{entry['text_id']}: text tokenizes to nothing")
+    if max_length is not None and max_length < 2:
+        raise ValueError(f"max_length={max_length}: need room for a completion position")
     if arm == "native":
         msgs = []
         if entry.get("system_prompt"):
@@ -107,7 +124,7 @@ def build_ids(tok, entry: dict, arm: str, date_string: str) -> tuple[list[int], 
         except TypeError:      # date-free templates (e.g. Qwen) reject the kwarg
             res = tok.apply_chat_template(msgs, add_generation_prompt=True)
         prompt_ids = list(res["input_ids"] if hasattr(res, "keys") else res)
-        return prompt_ids + comp, len(prompt_ids)
+        return _truncate(prompt_ids + comp, len(prompt_ids), max_length, entry)
     if arm == "raw":
         ids = tok.encode(text, add_special_tokens=True)
         p = len(ids) - len(comp)
@@ -115,8 +132,23 @@ def build_ids(tok, entry: dict, arm: str, date_string: str) -> tuple[list[int], 
             # specials interleaved unexpectedly — fall back to explicit BOS prefix
             bos = [tok.bos_token_id] if tok.bos_token_id is not None else []
             ids, p = bos + comp, len(bos)
-        return ids, p
+        return _truncate(ids, p, max_length, entry)
     raise ValueError(f"unknown arm {arm!r}")
+
+
+def _truncate(ids: list[int], p: int, max_length: int | None,
+              entry: dict) -> tuple[list[int], int]:
+    """ADDENDUM 2026-07-27-B suffix-drop. No-op when the text already fits."""
+    if max_length is None or len(ids) <= max_length:
+        return ids, p
+    if p >= max_length:
+        raise RuntimeError(
+            f"{entry['text_id']}: truncating to {max_length} would leave no "
+            f"completion positions (prompt/specials prefix is {p} tokens). The "
+            "mean state is defined over completion positions only, so this text "
+            "has no banked object under the deviation — surface, do not silently "
+            "bank a prompt-only mean.")
+    return ids[:max_length], p
 
 
 # ---------------------------------------------------------------- state capture
@@ -142,21 +174,31 @@ class SiteCapture:
 
 
 def compute_means(model, tok, entries: list[dict], sites: tuple[int, ...], arm: str,
-                  date_string: str, device: str, log_every: int = 50
-                  ) -> tuple[dict[int, np.ndarray], dict[int, list[float]], list[int]]:
+                  date_string: str, device: str, log_every: int = 50,
+                  max_length: int | None = None
+                  ) -> tuple[dict[int, np.ndarray], dict[int, list[float]], list[int],
+                             list[str]]:
     """One forward per text; per-text fp32 mean over completion positions per site.
-    Also returns per-position residual norms (a5 dose-currency comparability) and
-    sequence lengths."""
+    Also returns per-position residual norms (a5 dose-currency comparability),
+    sequence lengths, and the ids of any texts the position ceiling truncated."""
     import torch
 
     cap = SiteCapture(model, sites)
     means: dict[int, list[np.ndarray]] = {s: [] for s in sites}
     tok_norms: dict[int, list[float]] = {s: [] for s in sites}
     seq_lens: list[int] = []
+    truncated: list[str] = []
     t0 = time.time()
     try:
         for i, e in enumerate(entries):
-            ids, p = build_ids(tok, e, arm, date_string)
+            ids, p = build_ids(tok, e, arm, date_string, max_length=max_length)
+            # Hitting the ceiling is *necessary* for truncation but not sufficient —
+            # a text whose natural length is exactly max_length was not truncated.
+            # Re-tokenize only in that rare boundary case, so the recorded count is
+            # exact rather than an upper bound.
+            if max_length is not None and len(ids) == max_length:
+                if len(build_ids(tok, e, arm, date_string)[0]) > max_length:
+                    truncated.append(e["text_id"])
             t = torch.tensor([ids], dtype=torch.long, device=device)
             with torch.no_grad():
                 model(t, use_cache=False, return_dict=True)
@@ -173,7 +215,7 @@ def compute_means(model, tok, entries: list[dict], sites: tuple[int, ...], arm: 
     finally:
         cap.close()
     return ({s: np.stack(v) for s, v in means.items()},
-            {s: v for s, v in tok_norms.items()}, seq_lens)
+            {s: v for s, v in tok_norms.items()}, seq_lens, truncated)
 
 
 def load_model_and_tok(model_path: str, device: str):
@@ -622,7 +664,8 @@ def trunk_stamp(model_path: str, tok, device: str,
 # ---------------------------------------------------------------- collect mode
 def collect(arm_root: Path, model: str, model_path: str, arms: list[str],
             device: str, sites_override: tuple[int, ...] | None = None,
-            shard: Optional[ShardSpec] = None) -> None:
+            shard: Optional[ShardSpec] = None,
+            max_length: int | None = None) -> None:
     entries, manifest_sha = load_corpus(arm_root)
     sites = sites_override or SITES[model]
     states_dir = arm_root / "states"
@@ -639,8 +682,9 @@ def collect(arm_root: Path, model: str, model_path: str, arms: list[str],
 
     for arm in arms:
         t0 = time.time()
-        means, tok_norms, seq_lens = compute_means(
-            model_obj, tok, entries, sites, arm, VMB_CANONICAL_DATE, device)
+        means, tok_norms, seq_lens, truncated = compute_means(
+            model_obj, tok, entries, sites, arm, VMB_CANONICAL_DATE, device,
+            max_length=max_length)
         text_ids = [e["text_id"] for e in entries]
         median_norms = {s: float(np.median(np.linalg.norm(means[s], axis=1)))
                         for s in sites}
@@ -668,6 +712,14 @@ def collect(arm_root: Path, model: str, model_path: str, arms: list[str],
                                   "(residual ENTERING layer L), completion "
                                   "positions >= P, fp32 mean; batch-1, no cache",
         }
+        # ADDENDUM 2026-07-27-B: the deviation is recorded in EVERY stamp of a
+        # truncated node. Absent on every other node, so historical stamps keep
+        # exactly their key set (same discipline as the `sharding` record).
+        if max_length is not None:
+            stamp["truncation"] = f"first-{max_length}"
+            stamp["truncation_prereg"] = "ADDENDUM 2026-07-27-B"
+            stamp["n_truncated"] = len(truncated)
+            stamp["truncated_text_ids"] = truncated
         stamp_path = states_dir / f"collection_stamp_{model}_{arm}.json"
         with open(stamp_path, "w") as f:
             json.dump(stamp, f, indent=1)
@@ -694,7 +746,8 @@ def pick_spot_ids(entries: list[dict], k: int) -> list[str]:
 
 def spot_replay(arm_root: Path, model: str, model_path: str, arms: list[str],
                 device: str, k: int, sites_override: tuple[int, ...] | None = None,
-                shard: Optional[ShardSpec] = None) -> int:
+                shard: Optional[ShardSpec] = None,
+                max_length: int | None = None) -> int:
     entries, _ = load_corpus(arm_root)
     by_id = {e["text_id"]: e for e in entries}
     sites = sites_override or SITES[model]
@@ -710,12 +763,16 @@ def spot_replay(arm_root: Path, model: str, model_path: str, arms: list[str],
     report: dict = {"model": model, "k": k, "spot_ids": spot_ids,
                     "trunk": trunk_stamp(model_path, tok, device, sharding),
                     "results": {}}
+    if max_length is not None:                 # ADDENDUM 2026-07-27-B, per-use record
+        report["truncation"] = f"first-{max_length}"
+        report["truncation_prereg"] = "ADDENDUM 2026-07-27-B"
     for arm in arms:
         bank = load_state_bank(states_dir, model, arm)
         idx = {t: i for i, t in enumerate(bank.text_ids)}
         sub = [by_id[t] for t in spot_ids]
-        means, _, _ = compute_means(model_obj, tok, sub, sites, arm,
-                                    VMB_CANONICAL_DATE, device, log_every=1000)
+        means, _, _, _ = compute_means(model_obj, tok, sub, sites, arm,
+                                       VMB_CANONICAL_DATE, device, log_every=1000,
+                                       max_length=max_length)
         res = {}
         for j, t in enumerate(spot_ids):
             per_site = {}
@@ -789,6 +846,14 @@ def main() -> int:
     ap.add_argument("--sites", default=None,
                     help="comma-separated site override (default = the model's SITES grid); "
                          "used by Leg-4F to bank Qwen L18, where Vdiverge lives")
+    ap.add_argument("--max-seq-len", type=int, default=None, metavar="N",
+                    help="prereg ADDENDUM 2026-07-27-B position-ceiling deviation: "
+                         "truncate every text to its FIRST N tokens. Required for "
+                         "architectures with learned absolute position embeddings "
+                         "(gpt2-xl: 1024). MUST be passed identically to --collect and "
+                         "--spot-replay, or the replay compares different objects and "
+                         "the bitwise gate fails. Unset = the historical untruncated "
+                         "path, byte for byte.")
     ap.add_argument("--collect", action="store_true")
     ap.add_argument("--spot-replay", type=int, metavar="K", default=None)
     ap.add_argument("--cp1-summary", nargs="*", metavar="MODEL", default=None,
@@ -856,9 +921,13 @@ def main() -> int:
         return cp1_summary(args.arm_root, args.cp1_summary or ["3b", "8b"])
     if not args.model or not args.model_path:
         raise SystemExit("--model and --model-path required for GPU modes")
+    if args.max_seq_len is not None and args.max_seq_len < 2:
+        raise SystemExit("--max-seq-len must be >= 2 (room for a completion position)")
+
     if args.collect:
         collect(args.arm_root, args.model, args.model_path, arms, args.device,
-                sites_override=sites_override, shard=shard)
+                sites_override=sites_override, shard=shard,
+                max_length=args.max_seq_len)
         return 0
     if args.spot_replay is not None:
         if args.spot_replay < 3:
@@ -870,7 +939,7 @@ def main() -> int:
         return spot_replay(args.arm_root, args.model, args.model_path, arms,
                            args.device, args.spot_replay,
                            sites_override=sites_override,
-                           shard=shard)
+                           shard=shard, max_length=args.max_seq_len)
     raise SystemExit("pick a mode: --collect / --spot-replay K / --cp1-summary")
 
 

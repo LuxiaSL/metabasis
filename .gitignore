@@ -2,6 +2,10 @@
 # ── decision). Results, banks, docs, and research logs live in the working
 # ── tree but never on the remote.
 outputs/
+# Enactor pull-back landing zone: banks/stamps/fits/logs rsynced off the
+# collection node, staged for desk verification before it integrates them into
+# outputs/. Same policy as outputs/ — results never push.
+staging/
 docs/*
 !docs/planning/
 docs/planning/*

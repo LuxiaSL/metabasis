@@ -83,7 +83,31 @@ SITES = {"3b": (13, 14, 18), "8b": (14, 16, 18), "qwen-7b": (19, 21, 23),
          # phi-3.5-mini-instruct: FOUR sites, Luxia-ratified — the native curve is
          # double-humped (L13 .632 / L17 .630 twin peaks with an L15 dip), so both
          # humps stay in the grid. Precedent for >3-site grids: olmo2-7b above.
-         "phi-3.5-mini-instruct": (11, 13, 15, 17)}    # ⋆ L13
+         "phi-3.5-mini-instruct": (11, 13, 15, 17),    # ⋆ L13
+         # --- hub-rungs-2 graduations (collection phase) -----------------------
+         # Ratified by Luxia 2026-07-27 from the hub-rungs-2 scans; same read as
+         # wave-1 (held-out r² at proc_k128, hub 8B, peak flanked by neighbours).
+         # llama-3.1-70b-instruct: the scale ceiling. Peak L17 UNANIMOUS across all
+         # six columns (3 hub sources × both arms), r²=.577–.626, cka_after .87–.93
+         # — a textbook interior peak. Note for the atlas: L17 is 21% depth of 80
+         # layers while the hub's own sites sit at 44–56% of 32, and the
+         # proportional-depth region (L43–48) is this curve's TROUGH.
+         "llama-3.1-70b-instruct": (12, 17, 22),       # ⋆ L17
+         # pythia-6.9b: ⋆ L31, and the grid is drawn from the RULED 16-site
+         # extension (L28–31), not the base 12 — the audit invariant checks the
+         # extension-inclusive scan grid, which is why this is not a fiat grid.
+         # THREE FLAGS travel with this node:
+         #  (a) EDGE BY ARCHITECTURE EXHAUSTION — the curve rises monotonically to
+         #      L31 = num_hidden_layers-1 and is still accelerating there
+         #      (L30→L31 is the largest step in the curve). There is no L32; the
+         #      window did not fail, the model ran out of layers.
+         #  (b) GEOMETRY-POOR EVERYWHERE — cka_after ≤ .19 at every site (against
+         #      the 70B's .87–.93), rising monotonically with r². Both criteria
+         #      select L31, so the pick is unambiguous, but this node is
+         #      predictable without being geometrically aligned.
+         #  (c) STANDING DESK THREAD on that predictability-without-geometry gap;
+         #      any pythia result leaning on transported geometry cites this.
+         "pythia-6.9b": (29, 30, 31)}                  # ⋆ L31
 
 # Every model key the CLIs will accept. SITES = models whose FIT grid is fixed;
 # metabasis.roster.SCAN_GRIDS = the 12-site alignment-curve scan grids (prereg §4,
