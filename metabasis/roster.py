@@ -7,8 +7,16 @@ Two registries, deliberately separate (do not merge them), and they OVERLAP:
   scan (or it is a carried, banked model). Membership means "we know where
   this model's sites are", and the fit CLIs will run it with no `--src-sites`
   / `--tgt-sites` override.
-- `SCAN_GRIDS` here — the **12-site scan grid** each roster node was collected
-  and curve-scanned on. Membership means "this grid is what we looked at".
+- `SCAN_GRIDS` here — the **scan grid** each roster node was collected and
+  curve-scanned on: the computed 12 sites, plus any ruled extension. Membership
+  means "this grid is what we looked at".
+
+A node may also carry deviations that travel with it wherever it is used:
+`max_seq_len` (a position-ceiling truncation, prereg ADDENDUM 2026-07-27-B),
+`scan_grid_extension` (ruled extra sites when the default window failed to
+bracket the peak), and `blocked_reason` (collection forbidden until a ruling).
+They live here, not in job scripts, because every use of a node — collection,
+spot-replay, target build, behavioral read — has to agree about them.
 
 Before ratification a node is in SCAN_GRIDS ONLY: "we are still looking", and
 every run must pass its grid explicitly. Ratification does not MOVE the node —
@@ -283,7 +291,18 @@ HUB_RUNGS_2: tuple[RosterNode, ...] = (
         config_sha256="be48115d52314bc27327e160bf10197760db02ea689d10adb24db4102edf7a8a",
         max_position_embeddings=1024,
         max_seq_len=1024,
-        notes="POSITION-CEILING DEVIATION, prereg ADDENDUM 2026-07-27-B (ratified by "
+        scan_grid_extension=(0, 1, 2, 3, 4, 5, 6, 42, 43, 44, 45, 46, 47),
+        notes="RULED BOTH-EDGE EXTENSION (Luxia 2026-07-27): the computed 12-site "
+              "curve peaked at L7, its LOWEST site (r²=.449/.423/.450 from the three "
+              "hub sources), collapsed to a trough at L13–16 (≈.055), then climbed "
+              "monotonically to L41 (≈.375) — i.e. it is edge-peaked at BOTH ends and "
+              "brackets nothing. Extended by L0–L6 and L42–L47 for the complete "
+              "25-site curve; L0 (the residual ENTERING layer 0, i.e. the embedding "
+              "output) is deliberately included — the question is where the "
+              "surface-alignment spike goes, and that cannot be answered by stopping "
+              "short of it. gpt2-xl STAYS SCAN-REGISTRY: no site is picked until the "
+              "desk reads the completed curve. "
+              "POSITION-CEILING DEVIATION, prereg ADDENDUM 2026-07-27-B (ratified by "
               "Luxia 2026-07-27): GPT-2 uses LEARNED absolute position embeddings "
               "(`wpe`, n_positions=1024) — a hard ceiling on every GPT-2 variant, not "
               "a soft one — and 148 of the 780 frozen corpus texts exceed it under "
@@ -325,9 +344,13 @@ HUB_RUNGS_2: tuple[RosterNode, ...] = (
 
 ROSTER: dict[str, RosterNode] = {n.key: n for n in WAVE1 + HUB_RUNGS_2}
 
-#: model key -> its 12-site scan grid. This is what `--sites` should carry for a
-#: scan collection, and what `--tgt-sites` should carry for the scan fit.
-SCAN_GRIDS: dict[str, tuple[int, ...]] = {k: n.scan_grid for k, n in ROSTER.items()}
+#: model key -> the grid it was actually collected and curve-scanned on. This is
+#: what `--sites` should carry for a scan collection, and what `--tgt-sites`
+#: should carry for the scan fit. Normally the computed 12 sites; for a node with
+#: a ruled extension (pythia-6.9b) it is the EFFECTIVE grid, because that is what
+#: the bank holds and what reproduces the published curve.
+SCAN_GRIDS: dict[str, tuple[int, ...]] = {
+    k: n.effective_scan_grid for k, n in ROSTER.items()}
 
 
 def scan_grid_table() -> str:
@@ -338,10 +361,15 @@ def scan_grid_table() -> str:
     rows = [head, "-" * len(head)]
     for key, node in sorted(ROSTER.items()):
         g = node.scan_grid
+        # The computed grid is printed as the rule produced it; a ruled extension
+        # is printed SEPARATELY and labelled, so the instrument and the exception
+        # are never mistaken for one another at a glance.
         rows.append(f"{key:<{w}}  {node.roster_row:>3}  "
                     f"{'+'.join(node.arms):<12} {node.num_hidden_layers:>8}  "
                     f"{','.join(str(s) for s in g)}"
                     + ("" if len(g) == SCAN_N_SITES else f"   [DEDUPED to {len(g)}]")
+                    + (f"   + RULED {','.join(str(s) for s in node.scan_grid_extension)}"
+                       if node.scan_grid_extension else "")
                     + ("   ** BLOCKED **" if node.is_blocked else ""))
     blocked = blocked_nodes()
     if blocked:
@@ -374,12 +402,17 @@ def fiat_grid_problems(fixed_grids: Mapping[str, tuple[int, ...]]) -> list[str]:
     problems: list[str] = []
     for key, node in ROSTER.items():
         fixed = fixed_grids.get(key)
-        if fixed is None or set(fixed).issubset(node.scan_grid):
+        # EFFECTIVE grid, not the computed one: a ruled extension (registry-
+        # recorded, ledger-backed) is part of the curve we actually scanned, so a
+        # peak found there is still "from the curve". Checking against the bare
+        # computed grid would flag a legitimately-ratified extension site as fiat.
+        scanned = node.effective_scan_grid
+        if fixed is None or set(fixed).issubset(scanned):
             continue
-        stray = sorted(set(fixed) - set(node.scan_grid))
+        stray = sorted(set(fixed) - set(scanned))
         problems.append(
             f"{key}: fixed fit grid {tuple(fixed)} contains site(s) {stray} that "
-            f"its own scan grid {node.scan_grid} never visited — either a FIAT "
+            f"its own scan grid {scanned} never visited — either a FIAT "
             f"grid (prereg §4 forbids it) or a different model reusing this key")
     return problems
 
@@ -474,7 +507,8 @@ if __name__ == "__main__":                                   # desk convenience
     print(f"\ngraduated (fixed fit grid ratified; in BOTH registries): "
           f"{len(audit.graduated)}/{len(ROSTER)}")
     for key, grid in audit.graduated.items():
-        print(f"  {key:<26} fit grid {grid}  <- scan grid {ROSTER[key].scan_grid}")
+        print(f"  {key:<26} fit grid {grid}  <- scan grid "
+              f"{ROSTER[key].effective_scan_grid}")
     print(f"still scanning (no fixed grid; pass --src-sites/--tgt-sites): "
           f"{list(audit.still_scanning)}")
     print()
