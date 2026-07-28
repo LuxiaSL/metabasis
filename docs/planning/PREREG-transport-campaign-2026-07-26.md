@@ -411,3 +411,179 @@ where α := â/ceiling is the in-subspace alignment.
    predictor, including structureless ones; ceilings are measurement
    calibration, not model property. The graduation-relevant content is
    per-model α structure beating constant-α under matched ceilings.
+
+### ADDENDUM 2026-07-28-E — the composed-path predictor (racing design) — ratified by Luxia 2026-07-28
+
+Ratified ahead of outside review by explicit ruling (Luxia,
+2026-07-28): a BOUNDED first racing batch files under this addendum
+tonight; the remaining slots stay protected until the outside
+reviewer has seen this text, and any review feedback lands as further
+dated addenda affecting unfiled slots only. Contingency ruled with
+it: if the E1 implementation gate fails at filing time, the bounded
+batch files scalar-only under the frozen contract.
+
+Filed BEFORE any of the remaining 183 predictions is filed and before
+any further non-hub pair is fit. Append-only: no filed prediction, band,
+gate threshold, budget, or roster membership moves. The scalar star's
+frozen protocol (§3) continues UNCHANGED — this addendum adds a second,
+independently scored predictor beside it, plus the standing pre-filing
+gate adopted at session-3 close.
+
+**Background on record.** The worst-pair composition diagnostic
+(`REPORT-worstpair-composition-2026-07-27`) found: (a) the two-hop
+composed path through the hub frame recovers 94.4–103.2% of the directly
+fitted â on all five scored pairs, while the scalar product c_A·c_B
+under-predicts uniformly (composed-vs-product gap 1.33–3.00×) — a scalar
+constant is a lossy summary of a hub map; (b) the desk check showed the
+composed value retrodicts all five scored â within ±.05 (|e| = .0080 /
+.0083 / .0094 / .0346 / .0353) and is computable from banked hub maps
+alone, before the pair is ever fit; (c) one scored pair
+(qwen2.5-32b↔qwen2.5-14b) failed the prereg's own naive-transplant
+control (§5 item 6) — bare cosine +.7503 exceeds the fitted map's â —
+and was set aside as artifact-contaminated (Luxia, 2026-07-27).
+
+#### E1. Predictor definition
+
+For a non-hub pair (A, B) in its applicable arm:
+
+**â_comp(A→B) = cos( M_{hub→B}( M_{hub→A}^rev(v_A) ), v_B )**
+
+where M_{hub→M} is the BANKED primary-hub→M transport map (rebuilt-L16
+hub column; proc k128; the pair's applicable arm), M^rev is the reverse
+pass through the same map via the adjoint identity of record (Ω_MA =
+Ω_AMᵀ over the same PCA bases — the bit-exact identity established in
+the 8b↔3b closure), and v_M are the banked steering vectors at each
+model's site of record. The operationalization of record is the archived
+two-hop glue
+(`outputs/collection/enactment-archives/worstpair-diag/wp_composition.py`
+and its manifest shas): unit-normalized input, fp64 over fp32 fits,
+scale/norm handling exactly as archived. No pair-specific quantity of
+any kind enters — both maps and both vectors exist before the pair is
+touched.
+
+**Implementation gate (frozen):** before the FIRST composed prediction
+files, the repo filing tool implementing E1 must reproduce all five
+archived retrodictions to |Δ| < 1e-8 against the banked values above,
+with the comparison logged in the filing record. A tool that cannot
+reproduce the archive does not file.
+
+**Arm availability rule:** â_comp files only where BOTH hub maps exist
+banked in the pair's applicable arm at filing time. Where they do not
+(e.g. a raw-system pair whose raw hub map is not yet banked), the
+composed slot is recorded N/A-AT-FILING — never proxied from another
+arm, never backfilled after the pair is fit.
+
+#### E2. Filing structure and bands
+
+- Composed predictions file at the SAME ceremony step as the scalar
+  star's (§3 step 3), in the same dated prediction record, BEFORE the
+  pair is fit. IDs: `composed-prediction/<source>→<target>/<arm>-k128`.
+- **Scored band: â_comp ± .05 absolute** — identical to the scalar
+  star's, so the race is head-to-head on identical terms. Beside it,
+  the ±.04 hit-rate is reported DESCRIPTIVELY (recorded per pair at
+  scoring, never a scored gate) [Luxia ruling 2026-07-28].
+- Near-zero carve-out mirrors §3: |â_comp| < .08 is scored
+  MAGNITUDE-ONLY.
+- Bands never move after filing. The seven already-filed slots remain
+  scalar-only of record; their composed retrodictions stay descriptive.
+
+#### E3. The racing design
+
+- **Scope: all remaining 183 slots from ratification** [Luxia ruling
+  2026-07-28]. Every future filing record carries both predictions (or
+  the composed N/A-at-filing marker).
+- The scalar star's gates are UNTOUCHED: G-star-hit ≥80% of the 190,
+  failure budget 38, Addendum-C nulls and Addendum-D companion as
+  already frozen. The scalar record stands or falls on its own frozen
+  terms regardless of the race.
+- **G-comp-hit (frozen): ≥80% of composed-filed-and-scored slots
+  in-band; failure budget 20% of composed-filed slots** — structurally
+  identical to G-star-hit [Luxia ruling 2026-07-28].
+- **Head-to-head read (law-at-scale first-read):** the per-pair 2×2
+  (both hit / star-only / composed-only / both miss) with per-model
+  failure accounting (Addendum-C item 4 applied to both predictors).
+- **Superiority rule (frozen now):** "the composed predictor is
+  DEMONSTRATED SUPERIOR to the scalar star" is claimed only if, over
+  the slots where both were filed and scored, the composed in-band
+  fraction exceeds the scalar's by ≥15 percentage points AND a paired
+  sign-flip permutation over per-slot outcomes (n=1000) places the
+  observed hit-difference at ≥ the 99th percentile. Anything less is
+  scored descriptively ("composed ≥ scalar" or "no separation"), not
+  claimed.
+- **Pre-named outcome interpretations (so neither is post-hoc):**
+  G-star-hit fails + G-comp-hit passes → "scalar factorization refuted
+  at scale; hub-mediated transport demonstrated at map order." Both
+  pass → the superiority rule adjudicates. Both fail → hub-frame
+  sufficiency is refuted at scale; §5's per-mechanism sagas proceed on
+  the causal story regardless.
+
+#### E4. Null companions (the nulls move to the new gauge too)
+
+1. **Naive-transplant standing gate (per pair, BEFORE filing).** For
+   every candidate pair: bare cos(v_A, v_B) after zero-pad/truncate
+   coordinate identification (§5 item 6; operationalization of record =
+   archived `wp_naive_transplant.py`; the null reseeds PER CALL — sweep
+   finding F1 pins this against the phase-artifact alternative), beside
+   its seeded random-unit null q95 (A8_SEED=80, n=2000). **The column
+   is BANKED**: `naive_transplant_gate_2026-07-28.json` (66 candidate
+   pairs + 36 gpt2-xl supplement rows; BOTH directed reads per pair —
+   the read is orientation-dependent across unequal dims, the gate
+   takes the max ratio; sha `368e13bc…`; desk-verified by raw-npz
+   recompute). Pairs entering the roster later get their row banked
+   before filing under the same operationalization.
+   **Flag rule (frozen): a pair is ARTIFACT-EXPOSED iff |bare cos| >
+   q95 AND |bare cos| ≥ .10 absolute** [Luxia ruling 2026-07-28]. A
+   flagged pair still files and scores both predictors on the frozen
+   bands, with this pre-written clause attached at filing: *"shared
+   residual coordinate frame; a hit on this pair is not evidence of
+   transport beyond frame-sharing; excluded from mechanism aggregates,
+   retained in scored aggregates"* — the qwen2.5-32b↔qwen2.5-14b
+   set-aside precedent, now automatic. One flag covers both predictors.
+   *Calibration on record (why the two-condition rule):* a per-pair
+   95th-percentile floor lets ~5% of pairs clear by chance (expected
+   3.30 of 66; observed 6, five of them at 1.01–1.24× the floor —
+   chance-band, not signal). The ruled rule flags exactly ONE of the 66
+   banked pairs today (qwen2.5-14b↔qwen2.5-32b, |cos| .7503, 26.65×
+   floor — the pair already set aside) and zero supplement rows; the
+   magnitude condition is what separates shared-frame artifacts from
+   multiplicity noise.
+2. **Random-rotation composed null (per pair).** E1 recomputed with
+   each hub map's Ω replaced by a seeded Haar-random orthogonal matrix
+   of identical dims over the same PCA bases and scale handling
+   (n=1000, seeded). Reported per pair (q95 of |â_comp^rot|) and in
+   aggregate: the rotation-null's in-band count over the composed
+   slots, beside G-comp-hit.
+3. **Map-permutation null (aggregate; the C-item-1 analog at map
+   order).** The hub-map ASSIGNMENT permuted across models (pair (A,B)
+   scored with M_{hub→A'}, M_{hub→B'} for permuted A',B'), all composed
+   predictions recomputed and scored on the frozen bands; n=1000
+   permutations; report the permutation rank of the true assignment's
+   in-band count.
+4. **Frozen interpretive rule.** "Two hub maps determine every pair" is
+   claimed as DEMONSTRATED only if G-comp-hit passes AND the true
+   composed predictor beats the rotation-null in-band count by ≥15
+   percentage points AND the map-permutation rank is ≥ the 99th
+   percentile. Passing the gate without beating the nulls is scored
+   "consistent with, not demonstrated" — Addendum-C discipline at map
+   order. (Addendum D is untouched: its constant-α companion still
+   triggers if any scalar α-gauge is separately adopted; the composed
+   predictor's structureless companions are items 2–3 above, matched to
+   its own object class.)
+
+#### E5. The claim ladder (why this is the stronger claim)
+
+The scalar star claims fidelity FACTORIZES: 20 numbers predict 190
+pairs. The composed predictor claims the hub frame is SUFFICIENT: the
+20 banked hub MAPS contain all pairwise transport structure — no
+pair-specific fitting, at any order, is needed for any of the 190. The
+scalar is the rank-one shadow of the composed object (a product of
+projections); session 3 showed the shadow is what failed (uniform
+1.33–3.00× under-prediction) while the frame held (94–103% recovery,
+5/5). The composed claim is stronger in content — it predicts the full
+â, not a bound — while remaining hub-mediated universality: falsifiable
+per-pair at ±.05, refutable in aggregate by G-comp-hit, and cheaper
+than the scalar to run at scale (two banked maps, CPU-seconds,
+pre-fit). What graduates, if this survives 183 held-out filings, is the
+claim that *transport between any two models in the class is determined
+by each model's single relationship to a common hub* — the atlas claim,
+at map order.
