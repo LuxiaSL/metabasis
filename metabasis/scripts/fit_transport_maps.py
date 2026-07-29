@@ -199,6 +199,93 @@ SITES = {"3b": (13, 14, 18), "8b": (14, 16, 18), "qwen-7b": (19, 21, 23),
          # full-text against truncated-text mean states. Flagged at scoring.
          "gpt2-xl": (6, 7, 26, 46, 47),                # ⋆ DEFERRED (L7|L26|L47)
          # --- big-chain graduations (collection phase) -------------------------
+         # llama-3.1-405b-instruct (roster row 20, THE DENSE SCALE CEILING and
+         # the prereg §3 quad-hub SCALE-PROBE AUDIT HUB):
+         # RULED BY THE DESK 2026-07-29 UNDER LUXIA'S OVERNIGHT DELEGATION 2
+         # (ledgered) from the FIVE-SITE â EVIDENCE TABLE — readout of record
+         # `site_evidence_llama-3.1-405b-instruct_20260729-113819.json`,
+         # sha `04f2a2c4…`, 40 rows, strict (fit-local) norms, FROZEN-v1
+         # evidence basis (corpus `a6712ca0…`). This row was SCAN-REGISTRY ONLY
+         # until now; L99 is the site of record ⋆ and L107 is the robustness
+         # site. Sites of evidence: L19, L43, L91, L99, L107.
+         # THE EVIDENCE, so nobody re-derives this from the r² curve:
+         #  · UNANIMITY, TOP AND BOTTOM. Across ALL FOUR robustness columns —
+         #    native k128, native k32, raw k128 (all hub 8bL14) and the
+         #    rebuilt-L16 hub — the ranking opens L99 > L107 and closes on L19:
+         #      native/k128/L14   L99 > L107 > L43  > L91  > L19
+         #      native/k32 /L14   L99 > L107 > L91  > L43  > L19
+         #      raw   /k128/L14   L99 > L107 > L43  > L91  > L19
+         #      native/k128/L16   L99 > L107 > L91  > L43  > L19
+         #    rank-1, rank-2 and LAST are each unanimous; only the middle two
+         #    swap. L99 sits at fractional depth .786, L107 at .849.
+         #  · L19 IS THE SHALLOW r² TRAP IN ITS PUREST FORM. It holds the
+         #    SECOND-HIGHEST r² on the grid (.5246) and finishes DEAD LAST on â
+         #    in every column: â = −.0275 / +.0003 / −.0487 / −.0493, SUB-NULL
+         #    in BOTH hub columns (the only site sub-null in the L14 column at
+         #    all), coherence .109 against .32–.46 elsewhere. Its FD gate passes
+         #    but is the worst on the grid (best_median_rel_error .11571 against
+         #    .00719–.02847 at the other four sites), and it is the ONLY build
+         #    with `direction_specific = False` in ANY fd-gate artifact the
+         #    campaign holds — 21 builds over four models (gemma3-27b ×6,
+         #    3.3-70B ×5, qwen3-30b-a3b ×5, this node ×5), one False, and it is
+         #    this one. A high r² bought with a non-direction-specific gradient
+         #    is exactly the artifact â exists to catch.
+         #  · THE r²/â INVERSION, FOURTH INSTANCE — and the THIRD on the Llama
+         #    family. The r² PEAK is L43 (.5953, fractional depth .341); it
+         #    ranks only 3rd of 5 on â in the L14 column and 4th of 5 in the
+         #    rebuilt-L16 column, where it goes SUB-NULL (+.0795 against a q95
+         #    floor of .0890). Running tally: llama-3.1-70B L17, gemma3-27b L13,
+         #    llama-3.3-70B L17, and now this node's L43. NEVER CROWN A SITE
+         #    FROM r² ALONE.
+         #    DEPTH CAVEAT ON THAT TALLY: the first three all inverted at ~21%
+         #    fractional depth, which the 3.3-70B comment below calls a
+         #    campaign-wide signature. This node does NOT reproduce the 21%
+         #    number — its inverting peak is at .341 and its worst site at .151.
+         #    What generalizes is the SHALLOW HALF of the grid, not the specific
+         #    depth; do not read 21% as a constant.
+         #  · The correlation structure says it quantitatively: r(r², â) is
+         #    NEGATIVE in both hub columns (−.412 / −.776) while
+         #    r(coherence, â) = +.927 / +.990. Coherence is the reliable â
+         #    predictor on ALL THREE quartet nodes (405B +.93/+.99 · 3.3-70B
+         #    +.96/+.97 · qwen3-30b-a3b +.91/+.92); r² is not — it inverts here
+         #    and on the 3.3-70B, and only agrees on qwen3 (+.58/+.58).
+         #    Supporting: r(depth, coherence) = +.949, r(depth, â) = +.765,
+         #    r(ceiling, â) = +.844, r(â L14, â rebuiltL16) = +.887.
+         #  · MARGIN, STATED HONESTLY: L99 over L107 is NARROW — +.0152 /
+         #    +.0729 / +.0034 / +.0102 across the four columns, so the raw k128
+         #    column decides it by .0034 — but it is SIGN-CONSISTENT in all
+         #    four, never once flipping. L107 rides along as the robustness site
+         #    precisely because the margin is thin, the same two-site shape as
+         #    3.1-70B's L37 ⋆ / L43, gemma's L38 ⋆ / L41 and 3.3-70B's
+         #    L58 ⋆ / L63.
+         # THE SCALE CAVEAT, ON THE RECORD BECAUSE IT CUTS AGAINST THE ROW'S OWN
+         # PREMISE: the campaign's LARGEST model is its WEAKEST TRANSPORTER of
+         # the overnight quartet. Best â in the canonical native/k128/L14 cell
+         # is +.1453 here against +.3058 (3.3-70B L58) and +.3283 (qwen3-30b-a3b
+         # L35) — roughly HALF — and â/ceiling is .254 against .521 and .500.
+         # The CEILINGS are comparable (.573 vs .587 / .656), so what halves is
+         # the â, not the headroom. This FEEDS the scale/ρ reading (row 20 is
+         # the scale-probe audit hub; the larger-hubs-transfer-better
+         # conjecture is exactly what its audit set tests) and does NOT
+         # undermine the within-node site ruling, which is unanimous in all
+         # four columns regardless of the absolute level.
+         # ARCHITECTURE NOTE: LlamaConfig with NO `layer_types` — uniform full
+         # attention at every one of the 126 layers, confirmed per-site in the
+         # readout. As on rows 11/12 there is no local/global contrast to read,
+         # so depth and coherence are the only structure available.
+         # Both 99 and 107 are ON the model's own computed 12-site scan grid
+         # (19, 27, 35, 43, 51, 59, 67, 75, 83, 91, 99, 107 — 126 layers, so the
+         # rungs differ from the 80-layer 70Bs' and the comparison to them is by
+         # FRACTIONAL DEPTH, never site-for-site), so the ratification invariant
+         # is satisfied by construction — a curve-visited pair re-ranked by â
+         # evidence, never a fiat grid.
+         # THE VECTOR SIDE IS OPEN, AND IT GATES MORE THAN THIS ROW: the five
+         # site-evidence vectors are FROZEN-v1 SELECTION instruments and never
+         # file. A fresh FD-gated corpus-v2.1 L99 build is required before any
+         # 405B slot files — and the same re-bank gates the ρ-law ceremony's
+         # audit pairs (pre-statement `7542b377…`). See
+         # `read_composed_predictions.SITE_OF_RECORD`.
+         "llama-3.1-405b-instruct": (99, 107),         # ⋆ L99 primary, L107 robustness
          # llama-3.3-70b-instruct (roster row 12, the post-training-vintage row):
          # RULED BY THE DESK 2026-07-29 UNDER LUXIA'S OVERNIGHT DELEGATION 2
          # (ledgered) from the FIVE-SITE â EVIDENCE TABLE — readout of record

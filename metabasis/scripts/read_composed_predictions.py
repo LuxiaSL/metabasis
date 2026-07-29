@@ -466,6 +466,38 @@ SITE_OF_RECORD: dict[str, int] = {
     # of record is DEFERRED (Luxia 2026-07-27), so it has no candidate slot.
     "llama-3.1-70b-instruct": 37,
     "pythia-6.9b": 31,
+    # llama-3.1-405b-instruct: L99, RULED BY THE DESK 2026-07-29 UNDER LUXIA'S
+    # OVERNIGHT DELEGATION 2 (ledgered) from the five-site â evidence table —
+    # readout of record
+    # `site_evidence_llama-3.1-405b-instruct_20260729-113819.json`,
+    # sha `04f2a2c4…`, 40 rows, strict (fit-local) norms, frozen-v1 evidence
+    # basis. L99 ⋆ primary (fractional depth .786), L107 robustness (.849).
+    # Rank-1 (L99), rank-2 (L107) and LAST (L19) are each UNANIMOUS across all
+    # four robustness columns (native k128 / k32, raw k128, rebuilt-L16 hub);
+    # only the middle two sites swap. The r² peak L43 ranks 3rd/4th on â and
+    # goes SUB-NULL in the rebuilt-L16 column, and L19 — second-highest r² on
+    # the grid — is last everywhere, sub-null in both hub columns, coherence
+    # .109, and the only `direction_specific = False` build in any fd-gate
+    # artifact the campaign holds. That is the r²/â inversion's FOURTH instance
+    # and its third on the Llama family, so this site is never re-derivable from
+    # an r² curve; `fit_transport_maps.SITES` carries the full rationale, the
+    # correlation structure and the scale caveat, and the two registries must
+    # agree (cross-checked in selftest 7).
+    # SCALE CAVEAT, CARRIED FORWARD: the campaign's largest model is its weakest
+    # transporter — best â +.1453 against the 3.3-70B's +.3058 and
+    # qwen3-30b-a3b's +.3283, â/ceiling .254 against ~.52 — at a COMPARABLE
+    # ceiling. Any 405B number read downstream states this.
+    # ⚠ THE VECTOR GAP IS OPEN, AND IT IS THE BINDING ONE. NO corpus-v2.1
+    # entropy-gradient vector exists for this node at ANY site: the five
+    # site-evidence vectors are FROZEN-v1 SELECTION instruments that never file.
+    # Before ANY 405B slot files, a fresh FD-gated corpus-v2.1 L99 build +
+    # L99/L107 v2.1 state banks + their hub fits are REQUIRED. The re-bank is
+    # QUEUED, and it gates more than this row: the ρ-law ceremony's AUDIT PAIRS
+    # wait on the same build (pre-statement `7542b377…`). Until it lands
+    # `--resolution-sweep` reports this model as a NAMED GAP at L99 — the honest
+    # state, not a regression — and `--candidates` must NOT enumerate it (see
+    # also `vector_bank_paths`).
+    "llama-3.1-405b-instruct": 99,
     # llama-3.3-70b-instruct: L58, RULED BY THE DESK 2026-07-29 UNDER LUXIA'S
     # OVERNIGHT DELEGATION 2 (ledgered) from the five-site â evidence table —
     # readout of record
@@ -4520,6 +4552,17 @@ def selftest() -> int:                                   # noqa: C901 — a chec
           "2026-07-29 under Luxia's overnight delegation 2, five-site â "
           "evidence table `e6d584aa…`; L63 robustness). Its 3.1 vintage-mate "
           "rules to L37 from its own table — independent registrations")
+    #  No retired-site refusal check rides with the 405B either, and for the
+    #  same reason as the 3.3-70B directly above: it was SCAN-REGISTRY ONLY
+    #  before the ruling, so there is no prior registration to retire. The
+    #  refusal checks exist for gemma's L36 and the 3.1-70B's L17, which were
+    #  registered and then MOVED; a first registration has nothing to refuse.
+    check(site_of_record("llama-3.1-405b-instruct") == 99,
+          "llama-3.1-405b-instruct resolves at its RULED site L99 (desk "
+          "2026-07-29 under Luxia's overnight delegation 2, five-site â "
+          "evidence table `04f2a2c4…`; L107 robustness). Unanimous rank-1 in "
+          "all four robustness columns; the r² peak L43 ranks 3rd/4th on â and "
+          "goes sub-null on the rebuilt-L16 hub — never re-derive this from r²")
     check(site_of_record("phi-3.5-mini-instruct") == 13,
           "phi-3.5-mini site of record is L13 (double-humped curve, 4-site grid)")
     try:
