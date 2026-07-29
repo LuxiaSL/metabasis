@@ -707,3 +707,25 @@ the provenance chain (source config sha `cbf0b95d…`, first-shard
 `b933b099…`, manifest verification.failures == []) and measures the
 expert-fusion transient live, blocking on overrun. The mirror is
 reusable for the row-21 vector builds.
+
+**G3 correction (2026-07-28, later same day — ratified by Luxia):**
+the streaming dequantizer's probe-shard bitwise verification was
+real but structurally incomplete: it sampled only tensors whose
+block scales reside in the same source shard, while the tool's scale
+lookup resolved per-shard — so 155 tensors whose scale companions
+landed in an adjacent shard were written through as raw FP8 in the
+first materialized mirror (one per affected shard boundary, 59 of 62
+layers; a by-value bf16 load casts them ~7,250× too large). Found by
+the fused-build lane's added pre-gate BEFORE any DSV3 state was
+collected — no bank is contaminated, no filed or scored quantity is
+touched. The mechanism of record is unchanged; its implementation
+and acceptance gate are corrected: (a) scale companions resolve
+against the whole-checkpoint index, never one shard's key set;
+(b) a materialized mirror is accepted only on a full dtype census of
+the OUTPUT (zero FP8-typed tensors) plus an asserted identity
+between the manifest's own scales-consumed and tensors-dequantized
+counts, in addition to the existing per-shard sha chain. The
+defective first mirror is deleted by ruling; the corrected mirror
+re-materializes from the fp8 checkpoint under the corrected tool and
+becomes the dequantization of record (its manifest sha recorded in
+the desk ledger at acceptance).
