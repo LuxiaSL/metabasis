@@ -270,9 +270,19 @@ def load_axes(model: str) -> tuple[dict[str, Axis], dict[str, Axis], list[Axis]]
 
     if model == "gemma3-27b":
         # EXTENSION PAIR (A8-add-7). Everything lives at L36 — the site is not a
-        # choice, it is where the whole banked field roster was built (rake 26:
-        # banked-vector site MUST be inside the fit grid; the smalls grid is
-        # {34,36,38} for exactly this reason).
+        # choice, it is where the whole banked field roster was built. Rake 26
+        # (a banked-vector site MUST be inside the fit grid) is what the
+        # {34,36,38} region was scanned for, and that region is now SCAN
+        # HISTORY: the REGISTERED grid is `fit_transport_maps.SITES
+        # ['gemma3-27b']` = (38, 41), ⋆ L38, ruled by Luxia 2026-07-29, and L36
+        # retired with the region. That is harmless HERE because this reader
+        # resolves banked artifacts BY PATH and never through the registered
+        # grid: the site pairs come from cp2_summary's own records, and the axis
+        # objects from the per-key paths spelled out below, each naming its own
+        # `_L36` key outright (never a glob, rake M35). The historical L36 reads
+        # therefore still resolve, unchanged. What the ruling DOES change is
+        # elsewhere: a REFIT at L36 now needs an explicit `--tgt-sites 36`,
+        # because a retired site never resolves by default again.
         #
         # ⚠ TWO dir0 VINTAGES EXIST FOR THIS MODEL, UNDER DIFFERENT MODE PAIRS
         # (rake 33, the Leg-6 lesson applied prospectively rather than

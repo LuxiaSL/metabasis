@@ -754,9 +754,126 @@ CARRIED_BANKED: tuple[RosterNode, ...] = (
               "which is why a flat-root sweep does not find them (rake M35)."),
 )
 
+# The BEHAVIORAL TIER (2026-07-29): prereg roster row 22, and the first node on
+# the roster whose reason for existing is the TRANSPORTED-WRITE column rather
+# than the fit/star column. The tier is a ROLE, and the role is narrower than
+# every group above it: row 22 is a write TARGET only — NO native
+# entropy-gradient target is built for it, and it carries NO star row. It
+# therefore never acquires a site of record, never enters
+# `read_composed_predictions.SITE_OF_RECORD`, and never appears in the candidate
+# enumeration; a row here buys exactly one thing, which is the same one thing a
+# row buys anywhere in this module — SCAN_GRIDS gains the key, so
+# `collect_mean_states.py` will accept it (MODEL_KEYS = SITES ∪ SCAN_GRIDS).
+#
+# `RosterNode` HAS NO TIER FIELD and this group does not add one: the roster
+# models role distinctions with `arms`, `roster_row` and named deviations, and
+# states the rest in the row's own notes (row 16's "raw arm only, per prereg row
+# 16" is the precedent). The tier is therefore recorded in the notes, first line
+# and in the prereg's words, plus this header — not as a new column that only
+# one row would ever value.
+#
+# The other reason row 22 exists: falcon-mamba-7b-instruct is the FIRST
+# NON-TRANSFORMER on the roster — a pure state-space model, no attention layer
+# anywhere in the stack. Every other node's residual stream is produced with
+# attention in the loop; this one's is produced by a recurrence. A transported
+# write that lands here is evidence that the axis being transported is not an
+# artifact of the attention stack.
+#
+# zamba2-7b — the other SSM-lineage candidate from the same pull — is
+# DELIBERATELY ABSENT. It is hard-parked on an upstream transformers defect and
+# its row waits on Luxia's shim ruling. Adding a key here is what makes a node
+# collectable, so the absence IS the block (the BIG_CHAIN_MULTICARD precedent,
+# applied to a defect instead of to a scan design).
+#
+# Architecture, identity and corpus facts below are the SSM TOOLING GATE of
+# 2026-07-29 — measured on the checkpoint, not re-derived here.
+BEHAVIORAL_TIER: tuple[RosterNode, ...] = (
+    RosterNode(
+        key="falcon-mamba-7b-instruct",
+        model_id="tiiuae/falcon-mamba-7b-instruct",
+        roster_row=22, arms=("native", "raw"), num_hidden_layers=64,
+        hidden_size=4096,
+        weights_dirname="falcon-mamba-7b-instruct",
+        checkpoint_identity="instruct",
+        config_sha256="b588a09876a43945bbfb56aacfeadb23985def98925efa1a0d072ccdd0bc54c1",
+        # max_position_embeddings: DELIBERATELY UNSET — see the notes. A pure SSM
+        # HAS no positional ceiling to record (there is no position table and no
+        # attention window), and the config declares no `max_position_embeddings`
+        # at all. None here means ABSENT-VERIFIED, not un-read — the gemma3-27b
+        # precedent for an absent field, reached for a different reason.
+        notes="BEHAVIORAL TIER (frozen prereg roster row 22): TRANSPORTED-WRITE "
+              "COLUMN ONLY. No native entropy-gradient target is built for this "
+              "node and it carries NO star row, so it has no site of record and "
+              "no candidate slot — it is written INTO, never fitted FROM as a "
+              "star member. Everything below is the SSM TOOLING GATE of "
+              "2026-07-29, measured on the checkpoint. "
+              "ARCHITECTURE — THE FIRST NON-TRANSFORMER ON THE ROSTER: "
+              "FalconMambaForCausalLM, a PURE SSM with no attention layer at "
+              "all; 64 FalconMambaBlock layers in the container "
+              "`backbone.layers`, hidden_size 4096. The stack resolves through "
+              "`hooks.decoder_layers`'s base_model_prefix FALLBACK path "
+              "(base_model_prefix='backbone'; the two original checks miss "
+              "because this lineage neither nests under `.model` nor exposes "
+              "`.layers` on the LM head class) — the same fallback that already "
+              "covers GPTNeoX's `.gpt_neox.layers` and GPT-2's `.transformer.h`, "
+              "reached here for a third lineage without changing what it returns "
+              "for any of them. Site L keeps the campaign's meaning unchanged: a "
+              "forward_pre_hook on `backbone.layers[L]`, i.e. the residual "
+              "ENTERING block L, valid range [0, 63]. "
+              "⚠ NAMED LINEAGE FACT — RAKE M37, AND IT IS A TRAP FOR ANYONE "
+              "SPOT-CHECKING THIS NODE: on the Mamba lineage "
+              "`output_hidden_states` is OFF BY ONE against the transformer "
+              "convention — hidden_states[i] is block i's OUTPUT, not its input. "
+              "The collector's hook convention is the CORRECT one and was "
+              "verified BITWISE 64/64 at the SHIFTED reference; a check that "
+              "compares site L's capture against hidden_states[L] will disagree "
+              "on every layer and the capture is not what is wrong. "
+              "⚠ max_position_embeddings IS ABSENT FROM THE CONFIG, and unlike "
+              "gemma3-27b the absence is not a gap to be ruled on — a pure SSM "
+              "carries its context in a recurrent state, so there is NO "
+              "positional ceiling to declare and none is missing. Recorded as "
+              "None = absent-verified so no reader back-fills a plausible "
+              "number. NO TRUNCATION DEVIATION IS NEEDED OR TAKEN: the frozen "
+              "corpus fits AS WRITTEN on both arms and templates 780/780 clean "
+              "on both, so `max_seq_len` stays unset and this node compares "
+              "against the same frozen text objects as every other node (prereg "
+              "ADDENDUM 2026-07-27-B is for LEARNED-absolute-position ceilings "
+              "like gpt2-xl's, and does not reach here). "
+              "IDENTITY (rakes M9/M17, verified independently of the dirname) — "
+              "THE DISCRIMINATOR OF RECORD IS THE CONFIG SHA, and it is SHOWN to "
+              "separate rather than assumed to: config.json hashes b588a098… on "
+              "`-instruct` (this checkpoint) against 08ec4cda… on the sibling "
+              "BASE repo tiiuae/falcon-mamba-7b — they separate. CORROBORATORS, "
+              "recorded as the second and third independent passes, not as the "
+              "discriminator: generation_config eos [11, 10] here vs 11 on base, "
+              "bos 8 vs 0, pad 0 vs 11; chat-template sha "
+              "a805e50fed68938a076b07e2e602639611b50b1ced0e50f11eb92f1ba25be4dc "
+              "(template presence itself proves nothing — rake M9 — but the "
+              "differing eos/bos/pad triple does). "
+              "⚠ THE CONFIG'S OWN `_name_or_path` SAYS 'falcon-mamba-7b-chat' — "
+              "a THIRD name, matching neither the repo id nor the directory. It "
+              "is upstream's artifact and is present in the hub file too, so it "
+              "is not evidence of a swapped or mutated checkpoint; it is simply "
+              "a name, and names are never trusted here (M9). Recorded because a "
+              "later reader WILL find it and must not spend the discovery twice. "
+              "SCAN GRID: 64 layers, so the computed 12-site [0.15,0.85] grid is "
+              "(10,14,18,22,26,30,34,38,42,46,50,54) — DERIVED by `scan_grid`, "
+              "never typed here — which is the SAME grid as qwen2.5-32b-instruct "
+              "(row 10, also 64 layers), so the SSM can be read site-for-site "
+              "against a dense transformer of equal depth rather than only by "
+              "fractional depth. No ruled extension. hidden_size 4096 is shared "
+              "with olmo2-7b-instruct, mistral-7b-instruct-v0.3 and pythia-6.9b, "
+              "so the write target's residual width is not a new variable "
+              "either. "
+              "WEIGHTS: the flat weights root layout (a plain directory named by "
+              "`weights_dirname`, not an HF snapshot cache), 3 shards over 643 "
+              "tensors, index-complete. The full path is passed via --model-path "
+              "as always and is never hardcoded here."),
+)
+
 ROSTER: dict[str, RosterNode] = {
     n.key: n for n in WAVE1 + HUB_RUNGS_2 + MOE_CHAT + BIG_CHAIN_SINGLE_CARD
-    + BIG_CHAIN_MULTICARD + CARRIED_BANKED}
+    + BIG_CHAIN_MULTICARD + CARRIED_BANKED + BEHAVIORAL_TIER}
 
 #: model key -> the grid it was actually collected and curve-scanned on. This is
 #: what `--sites` should carry for a scan collection, and what `--tgt-sites`
