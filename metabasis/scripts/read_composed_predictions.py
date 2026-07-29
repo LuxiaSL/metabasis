@@ -191,6 +191,16 @@ SITE_OF_RECORD: dict[str, int] = {
     "3b": 14,
     "dsv2-lite": 22,
     "qwen-7b": 21,
+    # gemma3-27b's banked site is L36 — a CARRIED banked site, not a fresh
+    # ratification: the entire banked gemma object roster (the needle, field,
+    # temperature and repetition members) lives at L36, which is why L36 is the
+    # load-bearing member of its fixed fit grid (34, 36, 38), and the banked
+    # hub→gemma maps are keyed to it. Absent from this registry until
+    # 2026-07-28, which is what made the banked hub map unreachable from here
+    # (the needle-preview gap: a bit-identical hub chart the composed tool could
+    # not resolve). The vector side is a separate, still-open gap — see
+    # `vector_bank_dirs`.
+    "gemma3-27b": 36,
     # wave-1 graduations
     "qwen2.5-3b-instruct": 26,
     "qwen2.5-14b-instruct": 29,
@@ -204,6 +214,12 @@ SITE_OF_RECORD: dict[str, int] = {
     # of record is DEFERRED (Luxia 2026-07-27), so it has no candidate slot.
     "llama-3.1-70b-instruct": 37,
     "pythia-6.9b": 31,
+    # big-chain graduation (Luxia 2026-07-28). ⋆ L15, the same site and the same
+    # fractional depth as its dense family-mate mistral-7b-instruct-v0.3 — the
+    # MoE raises the ceiling, not the site (`fit_transport_maps.SITES` carries
+    # the full rationale; the two registries must agree and are cross-checked in
+    # selftest 7).
+    "mixtral-8x7b-instruct-v0.1": 15,
 }
 
 #: Checkpoint identity for models NOT in `metabasis.roster.ROSTER` (which holds
@@ -274,7 +290,37 @@ def hub_map_dirs(model: str) -> list[HubMapDir]:
         # land and the collection dir above starts resolving.
         dirs.append(HubMapDir(path=a8 / "leg1" / "fits", corpus="legacy",
                               note="carried node; battery leg1 — LEGACY-corpus fits"))
+    if model == "gemma3-27b":
+        # The banked hub→gemma maps live in the desk-smalls extension-pair tree.
+        # FROZEN-corpus, and that is checked rather than assumed: the smalls
+        # state banks both sides were fit against stamp
+        # `corpus_manifest_sha256 = a6712ca0…`, the frozen campaign corpus —
+        # the same bank family the hub→3b maps were desk-fit onto, and one of
+        # the two trees rake M12 names as matching the collection-phase corpus.
+        # `fits_gemma_modefree` beside it is a DIFFERENT fit lineage (as
+        # `fits_modefree` is for dsv2-lite) and is deliberately NOT probed.
+        dirs.append(HubMapDir(path=a8 / "smalls" / "fits_gemma", corpus="frozen",
+                              note="carried node; desk-smalls extension pair "
+                                   "(frozen-corpus smalls banks)"))
     return dirs
+
+
+def vector_bank_paths(model: str, site: int) -> list[Path]:
+    """Ordered candidate paths for `model`'s banked entropy-gradient vectors.
+
+    Deliberately NARROW. `read_exchange_rates.target_vector_candidates` probes
+    `a5_vectors.npz` banks too, which is right for a tool that knows which key
+    it wants — but here a near-miss is worse than a miss: an `a5_vectors` bank
+    holds the frozen-era object roster, NOT the entropy-gradient vector, and
+    loading one would produce a plausible number for a different estimand. Only
+    the entropy-gradient convention is probed (the merged bank first, then the
+    per-site build name used where sites were built separately), and an absent
+    bank is reported as data by `resolve_vector_bank` rather than resolved
+    sideways into a different object.
+    """
+    vectors = COLLECTION_ROOT / model / "vectors"
+    return [vectors / f"entropy_gradient_{model}.npz",
+            vectors / f"entropy_gradient_{model}_L{site}.npz"]
 
 
 def site_of_record(model: str) -> int:
@@ -347,6 +393,26 @@ class HubMapRef(BaseModel):
         return self.resolved is not None
 
 
+class VectorBankRef(BaseModel):
+    """One side's banked entropy-gradient bank, resolved or explicitly absent.
+
+    The vector is the OTHER half of a composed slot's backing. A hub map with
+    no vector to move is exactly as unfilable as a vector with no map, and the
+    absence is reported in the same shape so a roster sweep names the gap
+    instead of dying on a `FileNotFoundError` halfway through.
+    """
+    model: str
+    site: int
+    resolved: Optional[str] = Field(
+        default=None, description="the entropy-gradient npz actually used; None "
+                                  "=> the target build has not landed")
+    probed_paths: list[str] = []
+
+    @property
+    def available(self) -> bool:
+        return self.resolved is not None
+
+
 class ComposedPrediction(BaseModel):
     """One â_comp: a pair × arm × family, computed from banked hub maps ONLY."""
     prediction_id: str = Field(
@@ -376,7 +442,19 @@ class ComposedPrediction(BaseModel):
 
 
 class NotFilable(BaseModel):
-    """A candidate slot that is N/A-AT-FILING, and exactly which map is absent."""
+    """A candidate slot that is N/A-AT-FILING, and exactly which piece is absent.
+
+    `missing_sides` names the pieces in the vocabulary the resolver uses —
+    `"source hub map"`, `"target vector bank"`, … — so a reader never has to
+    guess whether "source" meant the map or the vector. Two DIFFERENT rules put
+    a slot here and `reason` names whichever applies:
+
+      * a missing HUB MAP is draft E1's arm-availability rule verbatim;
+      * a missing VECTOR BANK is the same shape of fact — nothing is banked, so
+        there is nothing to compute — but it is NOT an E1 clause. It is
+        reported rather than raised so a roster-wide sweep can name the gap;
+        the desk rules on whether such a slot files under the same heading.
+    """
     pair_id: str
     source_model: str
     source_site: int
@@ -389,10 +467,32 @@ class NotFilable(BaseModel):
     missing_sides: list[str]
     hub_map_source: HubMapRef
     hub_map_target: HubMapRef
+    vector_bank_source: Optional[VectorBankRef] = None
+    vector_bank_target: Optional[VectorBankRef] = None
     reason: str = (
         "draft E1 arm-availability rule: â_comp files only where BOTH hub maps "
         "exist banked in the pair's applicable arm. Never proxied from another "
         "arm, never backfilled after the pair is fit.")
+
+    @staticmethod
+    def reason_for(missing: Sequence[str]) -> str:
+        """The rule that put this slot here, named rather than assumed."""
+        maps = [m for m in missing if m.endswith("hub map")]
+        vectors = [m for m in missing if m.endswith("vector bank")]
+        parts: list[str] = []
+        if maps:
+            parts.append(
+                "draft E1 arm-availability rule: â_comp files only where BOTH "
+                "hub maps exist banked in the pair's applicable arm. Never "
+                "proxied from another arm, never backfilled after the pair is "
+                f"fit. Absent here: {', '.join(maps)}.")
+        if vectors:
+            parts.append(
+                "The entropy-gradient target build has not landed for "
+                f"{', '.join(vectors)}, so there is no vector to move — a "
+                "GPU-side gap, not an arm-availability one. Reported as data so "
+                "a roster sweep names it; never substituted from another bank.")
+        return " ".join(parts)
 
 
 class ComposedReadout(BaseModel):
@@ -587,6 +687,22 @@ def vector_bank(model: str) -> Path:
     return COLLECTION_ROOT / model / "vectors" / f"entropy_gradient_{model}.npz"
 
 
+def resolve_vector_bank(model: str, site: int) -> VectorBankRef:
+    """Find `model`'s banked entropy-gradient vectors, or report them absent.
+
+    Absent is data, not an exception: a node whose hub map is banked but whose
+    target build has not run yet (gemma3-27b today) must produce a NAMED gap
+    rather than a `FileNotFoundError` from inside the predictor.
+    """
+    probed: list[str] = []
+    for path in vector_bank_paths(model, site):
+        probed.append(str(path))
+        if path.exists():
+            return VectorBankRef(model=model, site=site, resolved=str(path),
+                                 probed_paths=probed)
+    return VectorBankRef(model=model, site=site, probed_paths=probed)
+
+
 # ---------------------------------------------------------------- the predictor
 def compose_pair(source_model: str, target_model: str,
                  family: str = FAMILY_OF_RECORD,
@@ -616,18 +732,26 @@ def compose_pair(source_model: str, target_model: str,
     pair_id = f"{source_model}L{s_site}->{target_model}L{t_site}"
     ref_src = resolve_hub_map(source_model, s_site, use_arm, family)
     ref_tgt = resolve_hub_map(target_model, t_site, use_arm, family)
-    missing = [side for side, ref in (("source", ref_src), ("target", ref_tgt))
+    vec_src = resolve_vector_bank(source_model, s_site)
+    vec_tgt = resolve_vector_bank(target_model, t_site)
+    missing = [label for label, ref in (("source hub map", ref_src),
+                                        ("target hub map", ref_tgt),
+                                        ("source vector bank", vec_src),
+                                        ("target vector bank", vec_tgt))
                if not ref.available]
     if missing:
         return NotFilable(
             pair_id=pair_id, source_model=source_model, source_site=s_site,
             target_model=target_model, target_site=t_site, arm=use_arm,
             arm_rule=arm_rule, family=family, missing_sides=missing,
-            hub_map_source=ref_src, hub_map_target=ref_tgt)
+            hub_map_source=ref_src, hub_map_target=ref_tgt,
+            vector_bank_source=vec_src, vector_bank_target=vec_tgt,
+            reason=NotFilable.reason_for(missing))
 
-    v_src, spec_src = load_entropy_gradient(vector_bank(source_model),
+    assert vec_src.resolved is not None and vec_tgt.resolved is not None
+    v_src, spec_src = load_entropy_gradient(Path(vec_src.resolved),
                                             source_model, s_site)
-    v_tgt, spec_tgt = load_entropy_gradient(vector_bank(target_model),
+    v_tgt, spec_tgt = load_entropy_gradient(Path(vec_tgt.resolved),
                                             target_model, t_site)
     assert ref_src.resolved is not None and ref_tgt.resolved is not None
     tm_src = load_transport_map(Path(ref_src.resolved))
@@ -740,6 +864,116 @@ def run_candidates(family: str = FAMILY_OF_RECORD,
                     "  MAGNITUDE-ONLY" if result.magnitude_only else "",
                     "  FLAGGED" if result.flags else "")
     return readout
+
+
+# ------------------------------------------------------- the resolution sweep
+class ResolutionRow(BaseModel):
+    """What this module's registries can reach for ONE model, and what they miss.
+
+    `on_disk_hub_maps` is found by SEARCHING the output tree for the hub-map
+    filename rather than by asking the registry where it should be — the whole
+    point is to answer rake M3's question ("what has no record") in the
+    resolution direction: which banked charts exist that the registry cannot
+    see. A hit the registry deliberately declines (a different fit lineage, e.g.
+    the `*_modefree` trees) is listed under `not_of_record` and is not a gap.
+    """
+    model: str
+    site: int
+    arm: str
+    family: str
+    hub_map: HubMapRef
+    vector_bank: VectorBankRef
+    on_disk_hub_maps: list[str] = []
+    not_of_record: list[str] = []
+    gap: Optional[str] = None
+
+    @property
+    def unreachable(self) -> bool:
+        """A banked chart exists on disk and the registry resolves NOTHING."""
+        return bool(self.on_disk_hub_maps) and not self.hub_map.available
+
+
+class ResolutionSweep(BaseModel):
+    """The registry-reachability record for every model with a site of record."""
+    STATUS: str = (
+        "registry reachability only — resolves paths, loads nothing, computes "
+        "no â_comp, writes nothing under outputs/.")
+    generated: str
+    hub: str = HUB_MODEL
+    hub_site: int = HUB_SITE_OF_RECORD
+    arm_note: str = (
+        "each model is probed in the arm its own checkpoint identity implies "
+        "for a same-identity pair (instruct -> native, base -> raw); a pair's "
+        "APPLICABLE arm is still resolved per pair by `applicable_arm`")
+    family: str
+    search_root: str = str(COLLECTION_ROOT.parent)
+    searched: bool = Field(
+        default=True,
+        description="False => the output tree is not present, so the on-disk "
+                    "leg was SKIPPED and this sweep proves reachability only")
+    rows: list[ResolutionRow] = []
+    unreachable: list[str] = []
+    gaps: list[str] = []
+
+    @property
+    def passed(self) -> bool:
+        """No model has a banked chart the registry cannot reach. Named gaps
+        (nothing banked yet) are a RESULT, not a failure."""
+        return not self.unreachable
+
+
+def _sweep_arm(model: str) -> str:
+    """The arm a same-identity pair of `model` with itself would resolve to."""
+    return applicable_arm(model, model)[0]
+
+
+def registry_resolution_sweep(family: str = FAMILY_OF_RECORD,
+                              search: bool = True) -> ResolutionSweep:
+    """Resolve every registered model's hub map + vector bank, and name the gaps.
+
+    This is the guard the gemma3-27b gap slipped through: a banked, bit-identical
+    hub chart sat in the desk-smalls tree while `SITE_OF_RECORD` had no key for
+    the model at all, so nothing in the tool could even ASK for it — and no
+    existing check compared what is banked against what is reachable.
+    """
+    root = COLLECTION_ROOT.parent
+    do_search = search and root.exists()
+    sweep = ResolutionSweep(generated=date.today().isoformat(), family=family,
+                            searched=do_search)
+    for model in sorted(SITE_OF_RECORD):
+        site = site_of_record(model)
+        arm = _sweep_arm(model)
+        hub_map = resolve_hub_map(model, site, arm, family)
+        vectors = resolve_vector_bank(model, site)
+        name = fit_path_for(Path(), HUB_MODEL, HUB_SITE_OF_RECORD, model, site,
+                            arm, family).name
+        on_disk = sorted(str(p) for p in root.rglob(name)) if do_search else []
+        row = ResolutionRow(model=model, site=site, arm=arm, family=family,
+                            hub_map=hub_map, vector_bank=vectors,
+                            on_disk_hub_maps=on_disk,
+                            not_of_record=[p for p in on_disk
+                                           if p != hub_map.resolved])
+        missing: list[str] = []
+        probed: list[str] = []
+        if not hub_map.available:
+            missing.append("hub map")
+            probed.extend(hub_map.probed_paths)
+        if not vectors.available:
+            missing.append("entropy-gradient vector bank")
+            probed.extend(vectors.probed_paths)
+        if missing:
+            row.gap = (f"{model} L{site} [{arm}::{family}]: no banked "
+                       + " and no banked ".join(missing)
+                       + f". Probed: {'; '.join(probed)}")
+            sweep.gaps.append(row.gap)
+        if row.unreachable:
+            sweep.unreachable.append(
+                f"{model} L{site} [{arm}::{family}]: {len(on_disk)} banked hub "
+                f"map(s) ON DISK that the registry cannot reach — "
+                f"{'; '.join(on_disk)}. Probed instead: "
+                f"{'; '.join(hub_map.probed_paths)}")
+        sweep.rows.append(row)
+    return sweep
 
 
 # ---------------------------------------------------------------- the gate
@@ -1032,6 +1266,27 @@ def selftest() -> int:                                   # noqa: C901 — a chec
         check("neither" in str(exc), f"unknown key refuses loudly: {exc!s:.66}")
 
     print("== selftest 7: site-of-record resolution is grid-validated ==")
+    #  EVERY key, not a sample: the two registries (this module's SITE_OF_RECORD
+    #  and fit_transport_maps.SITES) must agree, and `site_of_record` proves it
+    #  through `require_site`. A key added here whose site is off the model's
+    #  fixed fit grid fails the sweep at selftest time, not at filing time.
+    grid_problems: list[str] = []
+    for key in sorted(SITE_OF_RECORD):
+        try:
+            site_of_record(key)
+        except (ComposedPathError, FitGridError) as exc:
+            grid_problems.append(f"{key}: {exc}")
+    check(not grid_problems,
+          f"all {len(SITE_OF_RECORD)} registered sites of record are on their "
+          f"model's fixed fit grid" + ("" if not grid_problems
+                                       else f" — {grid_problems}"))
+    check(site_of_record("mixtral-8x7b-instruct-v0.1")
+          == site_of_record("mistral-7b-instruct-v0.3") == 15,
+          "the MoE rung and its dense family-mate share the site of record "
+          "(⋆L15 both) — the sparsity raises the ceiling, not the site")
+    check(site_of_record("gemma3-27b") == 36,
+          "gemma3-27b resolves at its carried banked site L36 (the site the "
+          "whole banked gemma object roster lives at)")
     check(site_of_record("llama-3.1-70b-instruct") == 37,
           "70B site of record is L37 (L43 robustness, L17 retired)")
     check(site_of_record("phi-3.5-mini-instruct") == 13,
@@ -1066,6 +1321,19 @@ def selftest() -> int:                                   # noqa: C901 — a chec
     check(hub_map_dirs("phi-4")[0].corpus == "frozen"
           and len(hub_map_dirs("phi-4")) == 1,
           "a collection-phase node has exactly one, frozen-corpus, candidate dir")
+    gemma_dirs = hub_map_dirs("gemma3-27b")
+    check(len(gemma_dirs) == 2 and gemma_dirs[1].path.name == "fits_gemma"
+          and gemma_dirs[1].corpus == "frozen",
+          f"gemma3-27b probes the collection convention first, then the "
+          f"frozen-corpus desk-smalls extension-pair tree "
+          f"({gemma_dirs[1].path})")
+    check(all("modefree" not in str(d.path) for d in gemma_dirs
+              + hub_map_dirs("dsv2-lite")),
+          "no `*_modefree` tree is ever a candidate — a different fit lineage "
+          "is never the map of record")
+    check(all("a5_vectors" not in str(p) for p in vector_bank_paths("3b", 14)),
+          "the vector-bank probe never reaches a frozen-era object-roster bank "
+          "(a different estimand would load without erroring)")
 
     print("== selftest 9: the gate comparator fails when it should ==")
     #  Exercise the pass/fail arithmetic itself on synthetic numbers, so a
@@ -1136,6 +1404,43 @@ def selftest() -> int:                                   # noqa: C901 — a chec
         except ArchiveIntegrityError as exc:
             check(True, f"absent artifact raises: {exc!s:.60}")
 
+    print("== selftest 12: every registered model's banked chart is REACHABLE ==")
+    #  The gemma3-27b regression: a banked, bit-identical hub chart that the
+    #  composed tool could not resolve because the model had no registry key at
+    #  all. The check is deliberately asymmetric — "nothing banked yet" is a
+    #  RESULT and is only required to be NAMED, while "banked on disk and
+    #  unreachable from the registry" is a FAILURE.
+    sweep = registry_resolution_sweep()
+    if not sweep.searched:
+        print(f"  [SKIP] the output tree is absent at {sweep.search_root!r} — "
+              f"the on-disk leg of this check needs the data tree and is "
+              f"NODE-OWED here, not silently passed")
+    for row in sweep.rows:
+        print(f"  {row.model:<28} L{row.site:<3} {row.arm:<7} "
+              f"map={'yes' if row.hub_map.available else 'NO ':<3} "
+              f"vec={'yes' if row.vector_bank.available else 'NO ':<3} "
+              f"on-disk={len(row.on_disk_hub_maps)}"
+              + (f"  ({len(row.not_of_record)} not of record)"
+                 if row.not_of_record else ""))
+    check(sweep.passed,
+          "no registered model has a banked hub map on disk that the registry "
+          "cannot reach" + ("" if sweep.passed else f" — {sweep.unreachable}"))
+    if sweep.searched:
+        gemma = next(r for r in sweep.rows if r.model == "gemma3-27b")
+        check(gemma.hub_map.available,
+              f"gemma3-27b's banked hub map RESOLVES (the needle-preview gap): "
+              f"{gemma.hub_map.resolved}")
+        check(bool(gemma.not_of_record),
+              f"and the sibling fit lineage beside it stays deliberately "
+              f"unprobed: {gemma.not_of_record}")
+    for gap in sweep.gaps:
+        print(f"  NAMED GAP: {gap[:150]}")
+    check(all(row.gap is not None or (row.hub_map.available
+                                      and row.vector_bank.available)
+              for row in sweep.rows),
+          "every model either fully resolves or carries a NAMED gap — no row "
+          "is silently incomplete")
+
     print(f"\nselftest: {len(failures)} failure(s)")
     return 1 if failures else 0
 
@@ -1153,6 +1458,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--candidates", action="store_true",
                     help="â_comp / N/A-AT-FILING for every current candidate "
                          "slot, read from the banked naive-gate enumeration")
+    ap.add_argument("--resolution-sweep", action="store_true",
+                    help="registry reachability for every registered model: "
+                         "hub map + entropy-gradient bank, against what is "
+                         "actually banked on disk. EXITS NONZERO if any banked "
+                         "hub map is unreachable from the registry.")
     ap.add_argument("--pairs-json", type=Path, default=CANDIDATE_PAIRS_JSON,
                     help=f"candidate-pair enumeration (default {CANDIDATE_PAIRS_JSON})")
     ap.add_argument("--archive-dir", type=Path, default=ARCHIVE_ROOT,
@@ -1172,9 +1482,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.selftest:
         return selftest()
 
-    if not (args.gate or args.candidates or args.source_model):
-        raise SystemExit("pass --selftest, --gate, --candidates, or "
-                         "--source-model/--target-model")
+    if not (args.gate or args.candidates or args.resolution_sweep
+            or args.source_model):
+        raise SystemExit("pass --selftest, --gate, --candidates, "
+                         "--resolution-sweep, or --source-model/--target-model")
 
     readout = ComposedReadout(generated=date.today().isoformat(), hub=HUB_MODEL,
                               hub_site=HUB_SITE_OF_RECORD, family=args.family)
@@ -1207,6 +1518,30 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         for failure in gate.failures:
             print(f"  FAILURE: {failure}")
         if not gate.passed:
+            status = 1
+
+    if args.resolution_sweep:
+        sweep = registry_resolution_sweep(args.family)
+        print(f"\n{'registered model':<28} {'site':>5} {'arm':<7} {'hub map':<8} "
+              f"{'vectors':<8} on-disk  resolved")
+        for row in sweep.rows:
+            print(f"{row.model:<28} {('L' + str(row.site)):>5} {row.arm:<7} "
+                  f"{('banked' if row.hub_map.available else 'ABSENT'):<8} "
+                  f"{('banked' if row.vector_bank.available else 'ABSENT'):<8} "
+                  f"{len(row.on_disk_hub_maps):>7}  "
+                  f"{row.hub_map.resolved or '—'}")
+        if not sweep.searched:
+            print(f"\nON-DISK LEG SKIPPED — no output tree at "
+                  f"{sweep.search_root!r}; reachability only")
+        for gap in sweep.gaps:
+            print(f"  NAMED GAP: {gap}")
+        for bad in sweep.unreachable:
+            print(f"  UNREACHABLE: {bad}")
+        print(f"\nresolution sweep: {len(sweep.rows)} model(s), "
+              f"{len(sweep.gaps)} named gap(s), {len(sweep.unreachable)} "
+              f"unreachable banked map(s) — "
+              f"{'PASSED' if sweep.passed else 'FAILED'}")
+        if not sweep.passed:
             status = 1
 
     if args.candidates:
