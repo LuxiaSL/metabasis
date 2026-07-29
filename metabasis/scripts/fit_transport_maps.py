@@ -60,10 +60,53 @@ N_PROBES = 50                 # random unit probes for the two-arm g-agreement r
 SITES = {"3b": (13, 14, 18), "8b": (14, 16, 18), "qwen-7b": (19, 21, 23),
          "dsv2-lite": (18, 22),
          # --- extension pairs (desk-smalls, authorized DESK-RULINGS-LEG6 §4) ---
-         # gemma3-27b: the WH6-stamped peak region {34,36,38}. L36 is load-bearing —
-         # the ENTIRE banked field roster (V7, Vrep⊥, Veos⊥, Vconf, Vtemp, V3) lives
-         # at L36, so L36 must be in the grid (rake 26).
-         "gemma3-27b": (34, 36, 38),
+         # gemma3-27b: RULED BY LUXIA 2026-07-29 (session-5 close) from the
+         # SIX-SITE â EVIDENCE TABLE — readout of record
+         # `site_evidence_gemma3-27b_20260729-055507.json`, sha `7f59af50…`,
+         # 48 rows, strict (fit-local) norms, both hub source columns.
+         # L38 is the site of record ⋆ and L41 is the robustness site; the
+         # carried-banked peak region (34, 36, 38) is HISTORY, and L36 is
+         # RETIRED to scanned-history with it.
+         # THE DECIDING STRUCTURE, so nobody re-derives this from the r² curve:
+         #  · The r² curve and the â column are INVERTED — r(r², â) = −.964 at
+         #    n=6. The r² PEAK L13 (.5274) is SUB-NULL on â (+.019/+.038 against
+         #    a q95 floor ~.09), build coherence .2334, bucket diffuse-target;
+         #    L17 (global) is the same story. NEVER CROWN A SITE FROM r² ALONE —
+         #    this is the 70B's retired-L17 case replicating at the same ~21%
+         #    depth, one model over.
+         #  · What DOES order the sites is the coherence-depth law (campaign
+         #    level r=.941 across 10 builds), and it reappears inside this one
+         #    model: r(depth, coherence) = .9946, r(coherence, â) = .997.
+         #    â ranking L38 > L41 > L35 ≈ L36 > L17 ≈ L13.
+         #  · L38 (local, â +.338/+.407, ceiling .627, coherence .724) DOMINATES
+         #    the incumbent L36 (+.2772/+.3725, ceiling .603, coherence .669) on
+         #    BOTH hub columns, +22.0% / +9.1%, with the higher ceiling and the
+         #    higher coherence. L36's number is legitimate and mid-pack — it is
+         #    retired for being dominated, not for being wrong.
+         #  · L41 is the robustness site (global, â +.324/+.389), the same
+         #    two-site shape as the 70B's L37 ⋆ / L43 pair. Global attention buys
+         #    nothing at matched depth in either column (L35-vs-L36: the two hub
+         #    columns disagree on the sign of a ≤.007 gap) — the ordering tracks
+         #    depth/coherence, not attention type.
+         # WHAT STAYS BANKED AS EVIDENCE (retired ≠ deleted): L36's 16-site
+         # alignment-curve cells and its FD-gated site-evidence vector remain
+         # banked and re-readable, as do the (34, 36, 38) fits — the whole
+         # frozen-era gemma object roster (V7, Vrep⊥, Veos⊥, Vconf, Vtemp, V3)
+         # lives at L36 and `read_transported_axes` still anchors there BY
+         # CONSTRUCTION — that reader resolves banked fits BY PATH from
+         # cp2_summary, so the historical reads are untouched by this grid. What
+         # DOES change is that a REFIT at L36 now needs `--tgt-sites 36` on the
+         # command line, which is the point: a retired site never resolves by
+         # default again (the 70B's L17 precedent).
+         # Both 38 and 41 are on the model's own effective scan grid (the ruled
+         # 15-site extension; 41 is in the computed 12), so the ratification
+         # invariant is satisfied — this is a curve-visited pair re-ranked by â
+         # evidence, not a fiat grid.
+         # THE VECTOR SIDE IS STILL OPEN: the six site-evidence vectors are
+         # FROZEN-v1 (`a6712ca0…`) SELECTION instruments and never file. A fresh
+         # FD-gated corpus-v2.1 (`5ae355bc…`) L38 build is required before any
+         # gemma slot files — see `read_composed_predictions.SITE_OF_RECORD`.
+         "gemma3-27b": (38, 41),                       # ⋆ L38 primary, L41 robustness
          # olmo2-7b: NO banked site curve exists (A3/A5 were cut for this model), so
          # the sites are a mid-depth BAND and the site of record is picked from the
          # fit's own alignment curve afterwards — never by fiat (baton item 1).

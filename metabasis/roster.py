@@ -650,9 +650,12 @@ BIG_CHAIN_MULTICARD: tuple[RosterNode, ...] = (
 # Adding a key here has one mechanical consequence worth stating: SCAN_GRIDS
 # gains the key, so `sites_for`/`scan_grid_table`/`collectable` start reporting
 # it. It changes NO site registration — `fit_transport_maps.SITES` and
-# `read_composed_predictions.SITE_OF_RECORD` are untouched by this row, and L36
-# remains the carried-provisional site of record pending Luxia's ruling on the
-# L35 global neighbour (see the interleave note below).
+# `read_composed_predictions.SITE_OF_RECORD` are set from RULINGS, never from a
+# roster row, and this row moved neither. gemma3-27b's carried-provisional L36
+# was subsequently RETIRED by Luxia's site ruling (2026-07-29): the registered
+# grid is now (38, 41), ⋆ L38, and the ruling is recorded where the
+# registrations live, not here (see the interleave note below for the
+# architecture facts the ruling consumed).
 CARRIED_BANKED: tuple[RosterNode, ...] = (
     RosterNode(
         key="gemma3-27b", model_id="google/gemma-3-27b-it",
@@ -706,21 +709,34 @@ CARRIED_BANKED: tuple[RosterNode, ...] = (
               "NOT contain 36; the WH6-stamped banked peak region {34,36,38} is "
               "where the ENTIRE banked gemma object roster lives, so the scan "
               "ceremony ran the effective 15-site grid (the additions were DERIVED "
-              "in-preflight from scan_grid(62) and re-added, never typed). +35 IS "
-              "PENDING the site-evidence pass and is deliberately NOT in this "
-              "tuple — see below. `fit_transport_maps.SITES['gemma3-27b']` = "
-              "(34, 36, 38) is a subset of the effective grid, so the ratification "
+              "in-preflight from scan_grid(62) and re-added, never typed). This "
+              "tuple is SCAN HISTORY — what the ceremony ran — and is deliberately "
+              "NOT moved by a site ruling; +35 is likewise NOT in it (the "
+              "site-evidence pass since ran a 16-site re-collect that measured "
+              "L35, reproducing all 15 original sites bitwise, so adding it is a "
+              "separate ruling on this field, not a consequence of the site one). "
+              "THE REGISTERED FIT GRID IS NOW `fit_transport_maps.SITES"
+              "['gemma3-27b']` = (38, 41), ⋆ L38 — RULED BY LUXIA 2026-07-29 from "
+              "the six-site â evidence table (readout `7f59af50…`), retiring the "
+              "carried-provisional L36 to scanned-history; L38 and L41 are both on "
+              "the effective grid (41 is in the computed 12), so the ratification "
               "invariant is satisfied by construction. "
               "ATTENTION INTERLEAVE, A NAMED ARCHITECTURE FACT THE SITE MACHINERY "
               "MAY CONSULT: gemma-3 is 5:1 LOCAL:GLOBAL interleaved — sliding "
               "window 1024, and layer i is GLOBAL iff (i+1) % 6 == 0, i.e. "
               "{5,11,17,23,29,35,41,47,53,59}. Consequences that are material to "
-              "the L36 ruling and must not be rediscovered: L36 IS A LOCAL "
-              "sliding-window layer, and its 1024-token window is MARGINALLY "
-              "BINDING against the longest templated corpus text (1134 tokens); "
-              "all three ruled additions (34, 36, 38) are local; L35 is L36's "
-              "GLOBAL neighbour and is UNMEASURED; of the effective 15-site grid "
-              "only {17, 29, 41, 53} are global. "
+              "the 2026-07-29 site ruling and must not be rediscovered: the ⋆ site "
+              "L38 IS A LOCAL sliding-window layer, and its 1024-token window is "
+              "MARGINALLY BINDING against the longest templated corpus text (1134 "
+              "tokens) — as is true of every one of the three ruled scan additions "
+              "(34, 36, 38); the robustness site L41 IS GLOBAL, so the ruled pair "
+              "straddles the interleave BY ACCIDENT, not by design. L35 (L36's "
+              "global neighbour, UNMEASURED when this row was written) has since "
+              "been measured by the site-evidence pass, and the answer is that "
+              "ATTENTION TYPE IS A NON-VARIABLE HERE: at matched depth L35-vs-L36 "
+              "differ by ≤.007 in â with the two hub columns disagreeing on the "
+              "sign, and the site ordering tracks depth/coherence instead. Of the "
+              "effective 15-site grid only {17, 29, 41, 53} are global. "
               "⚠ THE SLIDING WINDOW IS NOT A POSITION CEILING and must never be "
               "written as one: `max_seq_len` stays unset. Truncating the corpus to "
               "1024 would change the object every other node is compared against, "

@@ -433,16 +433,26 @@ SITE_OF_RECORD: dict[str, int] = {
     "3b": 14,
     "dsv2-lite": 22,
     "qwen-7b": 21,
-    # gemma3-27b's banked site is L36 — a CARRIED banked site, not a fresh
-    # ratification: the entire banked gemma object roster (the needle, field,
-    # temperature and repetition members) lives at L36, which is why L36 is the
-    # load-bearing member of its fixed fit grid (34, 36, 38), and the banked
-    # hub→gemma maps are keyed to it. Absent from this registry until
-    # 2026-07-28, which is what made the banked hub map unreachable from here
-    # (the needle-preview gap: a bit-identical hub chart the composed tool could
-    # not resolve). The vector side is a separate, still-open gap — see
-    # `vector_bank_dirs`.
-    "gemma3-27b": 36,
+    # gemma3-27b: L38, RULED BY LUXIA 2026-07-29 (session-5 close) from the
+    # six-site â evidence table — readout of record
+    # `site_evidence_gemma3-27b_20260729-055507.json`, sha `7f59af50…`, 48 rows,
+    # strict norms. L38 ⋆ primary, L41 robustness; the carried-provisional L36
+    # is RETIRED to scanned-history (legitimate, mid-pack, DOMINATED by L38
+    # +22.0% / +9.1% on both hub columns, with the higher ceiling and coherence).
+    # The r²/â INVERSION is the deciding structure — r(r², â) = −.964, and the
+    # r² peak L13 is SUB-NULL on â — so this site is never re-derivable from an
+    # r² curve; `fit_transport_maps.SITES` carries the full rationale and the two
+    # registries must agree (cross-checked in selftest 7).
+    # ⚠ THE VECTOR GAP REMAINS OPEN, AND IT IS THE BINDING ONE. There is no
+    # corpus-v2.1 entropy-gradient vector at ANY gemma site: the six site-
+    # evidence vectors (L13/L17/L35/L36/L38/L41) are FROZEN-v1 (`a6712ca0…`)
+    # SELECTION instruments that never file, and the banked hub→gemma maps this
+    # registry can reach are the same v1 vintage. Before ANY gemma slot files, a
+    # fresh FD-gated corpus-v2.1 (`5ae355bc…`) L38 build + L38/L41 v2.1 state
+    # banks + their hub fits are REQUIRED — the re-bank is QUEUED, and until it
+    # lands `--resolution-sweep` reports this model as a NAMED GAP at L38, which
+    # is the honest state and not a regression (see also `vector_bank_paths`).
+    "gemma3-27b": 38,
     # wave-1 graduations
     "qwen2.5-3b-instruct": 26,
     "qwen2.5-14b-instruct": 29,
@@ -4464,9 +4474,16 @@ def selftest() -> int:                                   # noqa: C901 — a chec
           == site_of_record("mistral-7b-instruct-v0.3") == 15,
           "the MoE rung and its dense family-mate share the site of record "
           "(⋆L15 both) — the sparsity raises the ceiling, not the site")
-    check(site_of_record("gemma3-27b") == 36,
-          "gemma3-27b resolves at its carried banked site L36 (the site the "
-          "whole banked gemma object roster lives at)")
+    check(site_of_record("gemma3-27b") == 38,
+          "gemma3-27b resolves at its RULED site L38 (Luxia 2026-07-29, six-site "
+          "â evidence table `7f59af50…`; L41 robustness, the carried-provisional "
+          "L36 retired)")
+    try:
+        compose_pair("gemma3-27b", "phi-4", source_site=36)
+        check(False, "gemma's retired L36 must refuse")
+    except FitGridError as exc:
+        check("NOT in its fixed fit grid" in str(exc),
+              f"gemma's retired L36 refuses: {exc!s:.60}")
     check(site_of_record("llama-3.1-70b-instruct") == 37,
           "70B site of record is L37 (L43 robustness, L17 retired)")
     check(site_of_record("phi-3.5-mini-instruct") == 13,
