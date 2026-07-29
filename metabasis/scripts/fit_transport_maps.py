@@ -199,6 +199,59 @@ SITES = {"3b": (13, 14, 18), "8b": (14, 16, 18), "qwen-7b": (19, 21, 23),
          # full-text against truncated-text mean states. Flagged at scoring.
          "gpt2-xl": (6, 7, 26, 46, 47),                # ⋆ DEFERRED (L7|L26|L47)
          # --- big-chain graduations (collection phase) -------------------------
+         # llama-3.3-70b-instruct (roster row 12, the post-training-vintage row):
+         # RULED BY THE DESK 2026-07-29 UNDER LUXIA'S OVERNIGHT DELEGATION 2
+         # (ledgered) from the FIVE-SITE â EVIDENCE TABLE — readout of record
+         # `site_evidence_llama-3.3-70b-instruct_20260729-075541.json`,
+         # sha `e6d584aa…`, 40 rows, strict (fit-local) norms, FROZEN-v1
+         # evidence basis. This row was SCAN-REGISTRY ONLY until now; L58 is the
+         # site of record ⋆ and L63 is the robustness site.
+         # THE EVIDENCE, so nobody re-derives this from the r² curve:
+         #  · UNANIMITY: rank-1 (L58) and rank-2 (L63) hold across ALL FOUR
+         #    robustness columns — native k128, native k32, raw k128, and the
+         #    rebuilt-L16 hub. The DEEP CLUSTER {58, 63, 68} dominates the table
+         #    outright; the pick is a within-cluster ordering, not a coin flip
+         #    between regions.
+         #  · THE r²/â INVERSION, THIRD INSTANCE. The r² PEAK L17 (.6237, at
+         #    fractional depth .212) is SUB-NULL on â in BOTH hub columns
+         #    (+.032 / +.019 against q95 floors .073 / .063). That is now three
+         #    independent models — llama-3.1-70B L17, gemma3-27b L13, and this
+         #    node's L17 — all inverting at ~21% FRACTIONAL DEPTH. NEVER CROWN A
+         #    SITE FROM r² ALONE; the shallow-basin r² peak is a site artifact
+         #    with a campaign-wide depth signature.
+         #  · The correlation structure says the same thing quantitatively:
+         #    r(r², â) = −.92 / −.95, r(coherence, â) = +.96 / +.97, and
+         #    r(depth, coherence) = +.98 — the coherence-depth law orders these
+         #    sites, the r² curve anti-orders them.
+         #  · MARGIN, STATED HONESTLY: L58 over L63 is NARROW (raw k128 +.0046)
+         #    but SIGN-CONSISTENT in all four columns. L63 is the robustness
+         #    site precisely because the margin is thin — the pair is the read,
+         #    the same two-site shape as 3.1-70B's L37 ⋆ / L43 and gemma's
+         #    L38 ⋆ / L41.
+         # ARCHITECTURE NOTE: LlamaConfig, UNIFORM FULL ATTENTION at every
+         # layer — no local/global contrast EXISTS on this lineage, so gemma's
+         # interleave question is not merely answered here, it is not askable.
+         # Depth and coherence are the only structure available, and they are
+         # what ordered the table.
+         # VINTAGE DISTINCTION, AND IT IS NOT AN ERROR: llama-3.1-70b-instruct
+         # (roster row 11) is the SAME PRETRAIN FAMILY at a DIFFERENT
+         # POST-TRAINING VINTAGE — architecturally identical, 80 layers, and
+         # therefore the SAME computed 12-site scan grid — and its ruled grid is
+         # (37, 43) ⋆ L37, MID-DEPTH. These are two INDEPENDENT evidence-based
+         # registrations, each read off its own â table; their DISAGREEMENT
+         # (3.1: 37/43 mid-depth · 3.3: 58/63 deep) is a RECORDED OBSERVATION
+         # about what RLHF vintage moves, not a bug in either ruling. Nothing
+         # here is inherited from row 11 and nothing here should be reconciled
+         # against it by hand.
+         # Both 58 and 63 are ON the model's own computed 12-site scan grid
+         # (12, 17, 22, 27, 32, 37, 43, 48, 53, 58, 63, 68), so the ratification
+         # invariant is satisfied by construction — a curve-visited pair
+         # re-ranked by â evidence, never a fiat grid.
+         # THE VECTOR SIDE IS OPEN: the five site-evidence vectors are FROZEN-v1
+         # SELECTION instruments and never file. A fresh FD-gated corpus-v2.1
+         # L58 build is required before any 3.3-70b slot files — see
+         # `read_composed_predictions.SITE_OF_RECORD`.
+         "llama-3.3-70b-instruct": (58, 63),           # ⋆ L58 primary, L63 robustness
          # mixtral-8x7b-instruct-v0.1 (roster row 19, the few-wide-experts MoE):
          # ratified by Luxia 2026-07-28 from its own 12-site scan — held-out r² at
          # proc_k128, hub 8B, same read as wave-1 — peak L15 r²=.7092, clean and

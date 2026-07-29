@@ -466,6 +466,32 @@ SITE_OF_RECORD: dict[str, int] = {
     # of record is DEFERRED (Luxia 2026-07-27), so it has no candidate slot.
     "llama-3.1-70b-instruct": 37,
     "pythia-6.9b": 31,
+    # llama-3.3-70b-instruct: L58, RULED BY THE DESK 2026-07-29 UNDER LUXIA'S
+    # OVERNIGHT DELEGATION 2 (ledgered) from the five-site â evidence table —
+    # readout of record
+    # `site_evidence_llama-3.3-70b-instruct_20260729-075541.json`,
+    # sha `e6d584aa…`, 40 rows, strict (fit-local) norms, frozen-v1
+    # evidence basis. L58 ⋆ primary, L63 robustness; rank-1 and rank-2 are
+    # UNANIMOUS across all four robustness columns (native k128 / k32, raw k128,
+    # rebuilt-L16 hub) and the deep cluster {58, 63, 68} dominates. The r² peak
+    # L17 is SUB-NULL on â in BOTH hub columns — the r²/â inversion's THIRD
+    # instance (3.1-70B L17, gemma L13, 3.3-70B L17), all at ~21% fractional
+    # depth — so this site is never re-derivable from an r² curve;
+    # `fit_transport_maps.SITES` carries the full rationale and the two
+    # registries must agree (cross-checked in selftest 7).
+    # NOT INHERITED FROM ROW 11: llama-3.1-70b-instruct is the same pretrain
+    # family at a different post-training vintage and rules to (37, 43) ⋆ L37.
+    # The two registrations are independent, and their disagreement is a
+    # recorded observation, not an error in either.
+    # ⚠ THE VECTOR GAP IS OPEN, AND IT IS THE BINDING ONE. NO corpus-v2.1
+    # entropy-gradient vector exists for this node at ANY site: the five
+    # site-evidence vectors are FROZEN-v1 SELECTION instruments that never file.
+    # Before ANY 3.3-70b slot files, a fresh FD-gated corpus-v2.1 L58 build +
+    # L58/L63 v2.1 state banks + their hub fits are REQUIRED — the re-bank is
+    # QUEUED, and until it lands `--resolution-sweep` reports this model as a
+    # NAMED GAP at L58, which is the honest state and not a regression (see also
+    # `vector_bank_paths`).
+    "llama-3.3-70b-instruct": 58,
     # big-chain graduation (Luxia 2026-07-28). ⋆ L15, the same site and the same
     # fractional depth as its dense family-mate mistral-7b-instruct-v0.3 — the
     # MoE raises the ceiling, not the site (`fit_transport_maps.SITES` carries
@@ -4486,6 +4512,14 @@ def selftest() -> int:                                   # noqa: C901 — a chec
               f"gemma's retired L36 refuses: {exc!s:.60}")
     check(site_of_record("llama-3.1-70b-instruct") == 37,
           "70B site of record is L37 (L43 robustness, L17 retired)")
+    #  No retired-site refusal check rides with the 3.3-70B: this node was
+    #  SCAN-REGISTRY ONLY before the ruling, so it has no prior registration to
+    #  retire — unlike gemma's L36 and the 3.1-70B's L17 above.
+    check(site_of_record("llama-3.3-70b-instruct") == 58,
+          "llama-3.3-70b-instruct resolves at its RULED site L58 (desk "
+          "2026-07-29 under Luxia's overnight delegation 2, five-site â "
+          "evidence table `e6d584aa…`; L63 robustness). Its 3.1 vintage-mate "
+          "rules to L37 from its own table — independent registrations")
     check(site_of_record("phi-3.5-mini-instruct") == 13,
           "phi-3.5-mini site of record is L13 (double-humped curve, 4-site grid)")
     try:
