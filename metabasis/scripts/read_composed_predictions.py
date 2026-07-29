@@ -190,6 +190,24 @@ BANKED_JSON_TOLERANCE = 5e-7
 #: The draft quotes 4-dp display figures; they must round-trip exactly.
 DISPLAY_DECIMALS = 4
 
+#: The primary hub's OWN entropy-gradient bank at the rebuilt-L16 column — the
+#: `xi` of the hub-frame decomposition (see `hub_frame_coordinates`). ONE path,
+#: no fallback: the neighbouring `entropy_gradient_8b.npz` is a different
+#: column, and a near-miss here would silently rotate every alpha (rake M12).
+#: Its absence degrades the descriptive companions, never the prediction.
+HUB_VECTOR_PATH = (COLLECTION_ROOT / HUB_MODEL / "vectors"
+                   / f"entropy_gradient_{HUB_MODEL}_L{HUB_SITE_OF_RECORD}rebuild.npz")
+#: The hub-frame decomposition needs BOTH hub maps to share one hub-side PCA
+#: basis (`va`). Banked maps fit against the same hub bank agree to ~2e-12
+#: (chart-overlap preview: hub_basis_max_dev 1.82e-12 across 12 models); a
+#: genuinely different basis differs by O(1), so this separates them with room
+#: to spare. Beyond it the companions are NOT emitted — the identity
+#: â_comp = alpha_AB·ceil_B only holds over a common hub frame.
+HUB_BASIS_MAX_DEV_TOLERANCE = 1e-6
+#: The decomposition must reproduce the predictor itself; anything above this is
+#: a broken companion, not a rounding difference.
+COMPANION_IDENTITY_TOLERANCE = 1e-8
+
 #: Corpus-v2.1 manifest sha — ADDENDUM 2026-07-28-G §G1's go-forward collection
 #: basis, and the sha every â computed on it must carry (§G2(a): "every quoted â
 #: carries its corpus manifest sha"). Verified locally against the pulled v2.1
@@ -641,6 +659,67 @@ class VectorBankRef(BaseModel):
         return self.resolved is not None
 
 
+class DescriptiveCompanions(BaseModel):
+    """The hub-frame decomposition of a composed prediction. NEVER SCORED.
+
+    Descriptive companions only: no band, no gate, no verdict and no aggregate
+    depends on any field here. They are emitted beside the prediction because
+    they are FREE — every quantity comes from the two hub maps and two vectors
+    already loaded to compute â_comp — and because the decomposition is the
+    mechanism claim's own vocabulary (SURVIVAL-AUDIT §4: alpha is a pair-chart
+    overlap property, not a per-model constant).
+
+    Construction and algebra: see the `descriptive companions` section below
+    (`chart_companions`), whose convention is the chart-overlap preview's
+    verbatim. `â_comp = alpha_pair · ceiling_target` is an IDENTITY, so this is
+    a decomposition of the filed number and never a second prediction.
+    """
+    STATUS: str = (
+        "DESCRIPTIVE — never scored, never a gate, never a band. A decomposition "
+        "of the filed â_comp, not a second prediction: â_comp = alpha_pair · "
+        "ceiling_target is an IDENTITY, verified per record below.")
+    operationalization: str = (
+        "hub-frame coordinates per staging/chart-overlap-preview/"
+        "chart_overlap_preview.py (zeta_M = omega_M @ (vb_M @ v_M), "
+        "xi = va @ v_hub); convention reused verbatim, not re-derived")
+    alpha_source: Optional[float] = Field(
+        default=None, description="cos(xi, zeta_A) — the source endpoint's "
+                                  "in-chart alignment with the hub axis")
+    alpha_target: Optional[float] = Field(
+        default=None, description="cos(xi, zeta_B)")
+    alpha_pair: Optional[float] = Field(
+        default=None, description="cos(zeta_A, zeta_B) — the pair-chart overlap")
+    rank1_implied: Optional[float] = Field(
+        default=None, description="alpha_source · alpha_target — what the "
+                                  "rank-one (scalar-star) law claims alpha_pair is")
+    delta_excess: Optional[float] = Field(
+        default=None, description="alpha_pair − alpha_source·alpha_target")
+    rho_offaxis: Optional[float] = Field(
+        default=None, description="delta_excess / (sin_A · sin_B) — the overlap "
+                                  "of the chart components ORTHOGONAL to the hub "
+                                  "axis; None when either sin is 0")
+    ceiling_target: Optional[float] = Field(
+        default=None, description="||zeta_B|| — the same ceiling reported beside "
+                                  "the prediction, recomputed in hub coordinates")
+    identity_a_comp: Optional[float] = Field(
+        default=None, description="alpha_pair · ceiling_target — must equal the "
+                                  "filed â_comp")
+    identity_abs_delta: Optional[float] = Field(
+        default=None, description="|â_comp − alpha_pair·ceiling_target|; the "
+                                  "decomposition is corroborated iff this is "
+                                  "below the tolerance")
+    identity_holds: Optional[bool] = None
+    hub_basis_max_dev: Optional[float] = Field(
+        default=None, description="max |va_source − va_target|: 0 means the two "
+                                  "maps share one hub frame, which the identity "
+                                  "requires")
+    hub_vector: Optional[str] = Field(
+        default=None, description="the hub's own entropy-gradient bank used for "
+                                  "xi; None => the alpha_* endpoint terms are "
+                                  "not computable and are reported absent")
+    notes: list[str] = []
+
+
 class ComposedPrediction(BaseModel):
     """One â_comp: a pair × arm × family, computed from banked hub maps ONLY."""
     prediction_id: str = Field(
@@ -679,6 +758,11 @@ class ComposedPrediction(BaseModel):
     hub_map_target: HubMapRef
     source_vector: VectorSpec
     target_vector: VectorSpec
+    descriptive_companions: Optional[DescriptiveCompanions] = Field(
+        default=None,
+        description="the hub-frame decomposition — DESCRIPTIVE ONLY, clearly "
+                    "separated from a_comp/magnitude_only and from anything a "
+                    "band or gate reads. Never scored.")
     flags: list[str] = []
 
 
@@ -894,6 +978,151 @@ def composed_exchange_rate(hub_to_source: TransportMap, hub_to_target: Transport
     return cos(moved, v_target)
 
 
+# ------------------------------------------------- descriptive companions (c)
+#  THE HUB-FRAME DECOMPOSITION. Operationalization of record:
+#  `staging/chart-overlap-preview/chart_overlap_preview.py` (its module
+#  docstring derives the construction and its --selftest verifies it
+#  numerically). The convention is reused here EXACTLY, not re-derived:
+#
+#      m_M    := vb_M @ v_M        model M's banked vector in its own map basis
+#      zeta_M := omega_M @ m_M     the SAME vector in HUB coordinates
+#      xi     := va @ v_hub        the hub's own vector in hub coordinates
+#
+#  with ||zeta_M|| = ceil_M. Two exact consequences:
+#
+#      â(hub→M) = cos(xi, zeta_M) · ceil_M      => alpha_M   = cos(xi, zeta_M)
+#      â_comp(A→B) = cos(zeta_A, zeta_B) · ceil_B => alpha_AB = cos(zeta_A, zeta_B)
+#
+#  So `alpha_AB` is NOT a new number: â_comp = alpha_AB · ceil_B is an identity,
+#  and this block is a DECOMPOSITION of the filed prediction. The rank-one
+#  (scalar-star) law is exactly the claim alpha_AB = alpha_A · alpha_B, so the
+#  excess delta = alpha_AB − alpha_A·alpha_B and its normalized form
+#  rho = delta / (sin_A · sin_B) measure the off-axis chart overlap.
+#
+#  Both consequences hold only over ONE common hub-side basis, which is checked
+#  rather than assumed. And per rake M19 — instrumentation that only DESCRIBES a
+#  run must never be able to FAIL it — every failure mode here degrades to
+#  `None` + a named note, and the prediction files regardless.
+
+
+def hub_frame_coordinates(tm: TransportMap, vector: np.ndarray) -> np.ndarray:
+    """zeta_M = omega_M @ (vb_M @ v_M) — the banked vector in HUB coordinates.
+
+    Loud on a map that cannot carry the construction: only a proc map has the
+    (va, vb, omega) triple the hub frame is defined over, and a ridge map has no
+    such coordinates at all.
+    """
+    if tm.kind != "proc" or tm.vb is None or tm.omega is None:
+        raise ComposedPathError(
+            f"hub-frame coordinates need a proc map with vb/omega; got kind "
+            f"{tm.kind!r} — the chart decomposition is undefined for it")
+    vb = np.asarray(tm.vb, np.float64)
+    omega = np.asarray(tm.omega, np.float64)
+    return omega @ (vb @ np.asarray(vector, np.float64))
+
+
+def load_hub_vector(path: Path = HUB_VECTOR_PATH
+                    ) -> tuple[Optional[np.ndarray], Optional[str]]:
+    """The hub's own vector for `xi`, or (None, None) if it is not banked."""
+    if not path.exists():
+        return None, None
+    vector, spec = load_entropy_gradient(path, HUB_MODEL, HUB_SITE_OF_RECORD)
+    return np.asarray(vector, np.float64), spec.path
+
+
+def chart_companions(tm_source: TransportMap, tm_target: TransportMap,
+                     v_source: np.ndarray, v_target: np.ndarray,
+                     a_comp: float,
+                     hub_vector_path: Path = HUB_VECTOR_PATH,
+                     ) -> DescriptiveCompanions:
+    """The descriptive companion block for one composed prediction.
+
+    Computed from the SAME two maps and two vectors the prediction was computed
+    from — nothing is re-resolved, nothing is re-loaded except the hub's own
+    vector, and `a_comp` is passed IN rather than recomputed so this can only
+    ever describe the filed number, never replace it.
+    """
+    block = DescriptiveCompanions()
+    notes: list[str] = []
+    try:
+        zeta_a = hub_frame_coordinates(tm_source, v_source)
+        zeta_b = hub_frame_coordinates(tm_target, v_target)
+    except ComposedPathError as exc:
+        block.notes = [f"companions NOT computed: {exc}"]
+        return block
+
+    va_a, va_b = tm_source.va, tm_target.va
+    if va_a is None or va_b is None or va_a.shape != va_b.shape:
+        block.notes = ["companions NOT computed: the two hub maps do not carry "
+                       "comparable hub-side bases, so there is no common hub "
+                       "frame for the decomposition"]
+        return block
+    dev = float(np.abs(np.asarray(va_a, np.float64)
+                       - np.asarray(va_b, np.float64)).max())
+    block.hub_basis_max_dev = dev
+    if dev > HUB_BASIS_MAX_DEV_TOLERANCE:
+        block.notes = [
+            f"companions NOT computed: the two hub maps' hub-side bases differ "
+            f"by {dev:.3e} (> {HUB_BASIS_MAX_DEV_TOLERANCE:.0e}) — they were not "
+            f"fit over one common hub frame, and the identity â_comp = "
+            f"alpha_pair·ceil_B does not hold across different frames"]
+        return block
+
+    ceiling_target = float(np.linalg.norm(zeta_b))
+    alpha_pair = float(cos(zeta_a, zeta_b))
+    identity = alpha_pair * ceiling_target
+    block.alpha_pair = alpha_pair
+    block.ceiling_target = ceiling_target
+    block.identity_a_comp = identity
+    block.identity_abs_delta = abs(a_comp - identity)
+    block.identity_holds = bool(block.identity_abs_delta
+                                <= COMPANION_IDENTITY_TOLERANCE)
+    if not block.identity_holds:
+        notes.append(
+            f"IDENTITY DID NOT HOLD: |â_comp − alpha_pair·ceiling_target| = "
+            f"{block.identity_abs_delta:.3e} > "
+            f"{COMPANION_IDENTITY_TOLERANCE:.0e}. The prediction stands (it is "
+            f"the predictor's own arithmetic); the DECOMPOSITION is what is "
+            f"suspect and must not be read.")
+
+    v_hub, hub_path = load_hub_vector(hub_vector_path)
+    if v_hub is None:
+        notes.append(
+            f"the hub's own entropy-gradient bank is not present at "
+            f"{hub_vector_path}, so xi — and with it alpha_source, "
+            f"alpha_target, delta_excess and rho_offaxis — is not computable. "
+            f"alpha_pair and the identity above are unaffected (they need only "
+            f"the two charts).")
+        block.notes = notes
+        return block
+    basis = np.asarray(va_a, np.float64)
+    if int(basis.shape[1]) != int(v_hub.shape[0]):
+        notes.append(
+            f"the hub vector at {hub_path} has dim {int(v_hub.shape[0])} but the "
+            f"hub-side basis expects {int(basis.shape[1])} — xi is not "
+            f"computable, so the alpha_* endpoint terms are reported absent "
+            f"rather than computed against a mismatched hub column")
+        block.notes = notes
+        return block
+    block.hub_vector = hub_path
+    xi = basis @ v_hub
+    alpha_a = float(cos(xi, zeta_a))
+    alpha_b = float(cos(xi, zeta_b))
+    block.alpha_source, block.alpha_target = alpha_a, alpha_b
+    block.rank1_implied = alpha_a * alpha_b
+    block.delta_excess = alpha_pair - block.rank1_implied
+    sin_a = float(np.sqrt(max(0.0, 1.0 - alpha_a ** 2)))
+    sin_b = float(np.sqrt(max(0.0, 1.0 - alpha_b ** 2)))
+    if sin_a > 0.0 and sin_b > 0.0:
+        block.rho_offaxis = block.delta_excess / (sin_a * sin_b)
+    else:
+        notes.append("rho_offaxis undefined: an endpoint chart lies exactly on "
+                     "the hub axis (sin = 0), so there is no off-axis component "
+                     "to correlate")
+    block.notes = notes
+    return block
+
+
 # ---------------------------------------------------------------- resolution
 def resolve_hub_map(model: str, site: int, arm: str, family: str) -> HubMapRef:
     """Find the banked primary-hub→`model` map, or report it absent as data.
@@ -1005,6 +1234,21 @@ def compose_pair(source_model: str, target_model: str,
     tm_tgt = load_transport_map(Path(ref_tgt.resolved))
     a_comp = composed_exchange_rate(tm_src, tm_tgt, v_src, v_tgt)
 
+    #  DESCRIPTIVE COMPANIONS — computed AFTER â_comp, from the objects already
+    #  loaded, and passed the finished â_comp so they can only describe it.
+    #  Rake M19: instrumentation that only describes a run must never be able to
+    #  fail it, so any failure here degrades to a note-bearing block (or None)
+    #  and the prediction files unchanged.
+    try:
+        companions: Optional[DescriptiveCompanions] = chart_companions(
+            tm_src, tm_tgt, v_src, v_tgt, a_comp)
+    except Exception as exc:                                 # noqa: BLE001
+        companions = DescriptiveCompanions(
+            notes=[f"companions NOT computed — {type(exc).__name__}: {exc}. The "
+                   f"prediction is unaffected: â_comp is the predictor's own "
+                   f"arithmetic and nothing below this line feeds it."])
+        logger.warning("descriptive companions failed for %s: %s", pair_id, exc)
+
     flags: list[str] = []
     for side, ref in (("source", ref_src), ("target", ref_tgt)):
         if ref.corpus == "legacy":
@@ -1054,7 +1298,8 @@ def compose_pair(source_model: str, target_model: str,
         dim_hub_side=_source_dim(tm_tgt),
         corpus_vintage=vintage, corpus_manifest_sha256=corpus_sha,
         hub_map_source=ref_src, hub_map_target=ref_tgt,
-        source_vector=spec_src, target_vector=spec_tgt, flags=flags)
+        source_vector=spec_src, target_vector=spec_tgt,
+        descriptive_companions=companions, flags=flags)
 
 
 # ---------------------------------------------------------------- candidates
@@ -2766,6 +3011,104 @@ def selftest() -> int:                                   # noqa: C901 — a chec
             check(exc.code == 2,
                   f"--observed and --score-record are required together "
                   f"(argparse exit {exc.code})")
+
+    print("== selftest 16: the chart decomposition IS the predictor (identity) ==")
+    #  â_comp = alpha_pair · ceil_B is an IDENTITY over a common hub frame, so
+    #  the descriptive companions are a decomposition of the filed number and
+    #  never a second one. Proved twice: closed-form on synthetic maps (always
+    #  on), and on the FIVE ARCHIVED GATE PAIRS (free corroboration that the
+    #  decomposition matches the operationalization of record bit-for-bit).
+    shared_va = np.linalg.qr(rng.standard_normal((d_hub, k)))[0].T
+    def _shared_map(d_model: int, scale: float, src_n: float, tgt_n: float
+                    ) -> TransportMap:
+        return TransportMap(
+            kind="proc", src_norm=src_n, tgt_norm=tgt_n, va=shared_va,
+            vb=np.linalg.qr(rng.standard_normal((d_model, k)))[0].T,
+            omega=np.linalg.qr(rng.standard_normal((k, k)))[0], scale=scale)
+
+    m_a = _shared_map(d_a, 1.1541, 5.6915, 2.2506)
+    m_b = _shared_map(d_b, 0.8375, 5.6915, 3.9012)
+    z_a = hub_frame_coordinates(m_a, v_a)
+    z_b = hub_frame_coordinates(m_b, v_b)
+    check(abs(float(np.linalg.norm(z_b))
+              - projection_norm(image_basis(m_b), v_b)) < 1e-12,
+          "‖zeta_B‖ == the â-ceiling of hub→B at v_B (the hub-frame norm IS "
+          "the ceiling already reported beside the prediction)")
+    synth_comp = composed_exchange_rate(m_a, m_b, v_a, v_b)
+    synth_identity = float(cos(z_a, z_b)) * float(np.linalg.norm(z_b))
+    check(abs(synth_comp - synth_identity) < 1e-12,
+          f"â_comp {synth_comp:+.15f} == alpha_pair·ceil_B {synth_identity:+.15f} "
+          f"on synthetic maps sharing one hub frame "
+          f"(|Δ| {abs(synth_comp - synth_identity):.3e})")
+    synth_block = chart_companions(m_a, m_b, v_a, v_b, synth_comp,
+                                   hub_vector_path=Path("/nonexistent/hub.npz"))
+    check(synth_block.identity_holds is True
+          and synth_block.alpha_pair is not None
+          and synth_block.alpha_source is None
+          and any("not present" in n for n in synth_block.notes),
+          "with the hub's own vector absent, alpha_pair and the identity still "
+          "compute and the alpha_* endpoint terms are reported ABSENT with a "
+          "named note — the prediction never depends on this block (rake M19)")
+    off_frame = _proc_map(rng, d_hub, d_b, k, 1.0, 1.0, 1.0)   # its own va
+    off_block = chart_companions(m_a, off_frame, v_a, v_b, 0.0,
+                                 hub_vector_path=Path("/nonexistent/hub.npz"))
+    check(off_block.alpha_pair is None
+          and any("common hub frame" in n for n in off_block.notes),
+          "two maps NOT fit over one hub frame produce no companions at all — "
+          "the identity does not hold across frames, so no number is emitted")
+    ridge = TransportMap(kind="ridge", src_norm=1.0, tgt_norm=1.0,
+                         left=np.eye(d_hub, d_a), right=np.eye(d_a, d_b))
+    ridge_block = chart_companions(ridge, m_b, v_a, v_b, 0.0)
+    check(ridge_block.alpha_pair is None and ridge_block.notes,
+          f"a ridge map has no hub-frame coordinates and degrades with a note "
+          f"instead of raising: {ridge_block.notes[0][:60]}")
+
+    if not ARCHIVE_GLUE.exists():
+        print(f"  [SKIP] the archive is absent at {ARCHIVE_GLUE} — the "
+              f"archived-pair leg of this check needs the data tree and is "
+              f"NODE-OWED here, not silently passed")
+    else:
+        archived_pairs = load_archived_glue(ARCHIVE_GLUE)
+        worst_identity = 0.0
+        n_checked = 0
+        problems: list[str] = []
+        for spec in archived_pairs.PAIRS:
+            got = compose_pair(spec.src, spec.tgt, family=archived_pairs.FAM)
+            if isinstance(got, NotFilable):
+                problems.append(f"{spec.src}->{spec.tgt}: N/A-AT-FILING")
+                continue
+            block = got.descriptive_companions
+            if block is None or block.identity_abs_delta is None:
+                problems.append(f"{spec.src}->{spec.tgt}: no companions emitted")
+                continue
+            n_checked += 1
+            worst_identity = max(worst_identity, block.identity_abs_delta)
+            if not block.identity_holds:
+                problems.append(
+                    f"{spec.src}->{spec.tgt}: |Δ| {block.identity_abs_delta:.3e}")
+            print(f"  {spec.src}L{spec.src_site}->{spec.tgt}L{spec.tgt_site:<4} "
+                  f"â_comp {got.a_comp:+.9f} = alpha_pair "
+                  f"{block.alpha_pair:+.9f} × ceil_B {block.ceiling_target:.9f} "
+                  f"→ |Δ| {block.identity_abs_delta:.3e}"
+                  + (f"  rho {block.rho_offaxis:+.4f}"
+                     if block.rho_offaxis is not None else ""))
+        check(n_checked == len(archived_pairs.PAIRS) and not problems,
+              f"the decomposition reproduces â_comp on all "
+              f"{len(archived_pairs.PAIRS)} archived gate pairs (worst |Δ| "
+              f"{worst_identity:.3e}, tol {COMPANION_IDENTITY_TOLERANCE:.0e})"
+              + ("" if not problems else f" — {problems}"))
+        check(worst_identity <= COMPANION_IDENTITY_TOLERANCE,
+              f"worst identity |Δ| over the archived pairs "
+              f"{worst_identity:.3e} <= {COMPANION_IDENTITY_TOLERANCE:.0e}")
+
+    check(not any(f in DescriptiveCompanions.model_fields
+                  for f in ("band", "verdict", "predicted", "in_band",
+                            "magnitude_only")),
+          "the companion block carries no band, no verdict and no predicted "
+          "value — it cannot be mistaken for, or read as, a prediction")
+    check("descriptive_companions" not in ScoredSlot.model_fields,
+          "and nothing in the SCORED record reads it — the companions are "
+          "never scored, by construction and not by convention")
 
     print(f"\nselftest: {len(failures)} failure(s)")
     return 1 if failures else 0
