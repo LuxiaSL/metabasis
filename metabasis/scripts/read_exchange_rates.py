@@ -71,6 +71,15 @@ think you are reading (wave-1's hub bank is the SMALLS 8B bank, whose L14 native
 norm is 5.2234 — the A8 trunk bank's is 5.6915: two different banks, same model,
 same site). That mismatch is exactly the failure this audit catches.
 
+WHERE the norms file comes from is part of the guard, not an implementation
+detail (rake M21b). `resolve_norms` probes in TIERS — an explicitly-passed path,
+then caller-supplied roots, then the fit's OWN tree (`fits_dir.parent/states`),
+and only then the two GLOBAL trees that resolve by model key alone. With three
+corpus vintages live, a global hit can be a different vintage wearing the same
+model name, so it is never silent: the tier and the resolved path ride into
+every `NormAudit` (`norms_tier`, `global_fallback`), the resolver logs a warning
+naming both, and `--strict-norms` turns the fallback into a refusal outright.
+
 ────────────────────────────────────────────────────────────────────────────────
 Arm and family discipline (prereg §2, and the arm-consistency rule)
 ────────────────────────────────────────────────────────────────────────────────
@@ -188,6 +197,11 @@ class NormAudit(BaseModel):
     map_norm: float
     bank_norm: Optional[float] = None
     bank_norms_path: Optional[str] = None
+    #: WHERE the norms came from. `global_fallback=True` means they were found
+    #: by model key outside the fit's own tree — a possible corpus-vintage
+    #: mismatch, so `match` means less than usual either way (rake M21b).
+    norms_tier: Optional[str] = None
+    global_fallback: bool = False
     match: Optional[bool] = None
     note: str = ""
 
@@ -377,54 +391,185 @@ def fit_path_for(fits_dir: Path, src: str, s_site: int, tgt: str, t_site: int,
     return fits_dir / f"fit_{src}L{s_site}__{tgt}L{t_site}_{arm}_{family}.npz"
 
 
-def probe_norms_path(model: str, arm: str, fits_dir: Path,
-                     extra_roots: Sequence[Path] = ()) -> Optional[Path]:
-    """Find `norms_{model}_{arm}.json` — the FIT-TIME median mean-state norms."""
+class NormsProvenanceError(RuntimeError):
+    """A norms lookup escaped the fit's own tree while strict mode was on.
+
+    Raised only when the caller ASKED for strict resolution
+    (`on_global_fallback="raise"`): the default is to warn loudly and record
+    the resolved path, because an unverified provenance still leaves â itself
+    readable — see `NormsResolution`.
+    """
+
+
+#: Where a norms file was found, in the order the resolver prefers. The first
+#: three are TIED TO THE CALLER'S OWN TREE; the last two are GLOBAL — they
+#: resolve by MODEL KEY alone, which is the whole hazard (rake M21b).
+NormsTier = Literal["explicit", "extra-root", "fit-local",
+                    "global-collection", "global-smalls"]
+GLOBAL_NORMS_TIERS: tuple[NormsTier, ...] = ("global-collection", "global-smalls")
+
+#: What a global resolution does by default. `warn` = log loudly and carry the
+#: warning + resolved path into the stamp (`NormAudit`); `raise` = refuse.
+#: Default `warn` because the audit's job is to REPORT provenance, not to stop
+#: a readout — but the warning is never silent and never omitted from the record.
+DEFAULT_NORMS_GLOBAL_FALLBACK: Literal["warn", "raise"] = "warn"
+
+#: LOG dedup only. A preset run resolves the same hub-side norms once per row,
+#: and seven copies of the same paragraph train the reader to skip it. The
+#: warning is emitted once per distinct (model, arm, resolved path); EVERY row's
+#: `NormAudit` still carries the flag, the tier and the full warning text, so
+#: nothing is dropped from the record — only from the console.
+_WARNED_GLOBAL_NORMS: set[tuple[str, str, str]] = set()
+
+
+class NormsResolution(BaseModel):
+    """Which `norms_{model}_{arm}.json` was used, from which tier, and why it
+    might be the wrong one.
+
+    RAKE M21b, and it is no longer hypothetical with three corpus vintages
+    live: the global tiers resolve by MODEL KEY alone. A fit made in a battery
+    leg (or against any older bank) whose own `states/` lacks the norms file
+    would otherwise resolve, silently, against whatever the collection tree
+    holds for the same model today — a different corpus vintage wearing the
+    same name. The fit-local tier is therefore tried BEFORE any global one, and
+    a global hit is a loud, recorded event rather than an invisible default.
+    """
+    model: str
+    arm: str
+    path: Optional[str] = None
+    tier: Optional[NormsTier] = None
+    probed: list[str] = []
+    warning: str = ""
+
+    @property
+    def found(self) -> bool:
+        return self.path is not None
+
+    @property
+    def is_global_fallback(self) -> bool:
+        return self.tier in GLOBAL_NORMS_TIERS
+
+
+def resolve_norms(model: str, arm: str, fits_dir: Path,
+                  extra_roots: Sequence[Path] = (),
+                  explicit: Optional[Path] = None,
+                  on_global_fallback: Literal["warn", "raise"]
+                  = DEFAULT_NORMS_GLOBAL_FALLBACK,
+                  collection_root: Optional[Path] = None) -> NormsResolution:
+    """Locate the FIT-TIME median mean-state norms, tier and hazard recorded.
+
+    Order: an explicitly-passed path, then caller-supplied `extra_roots`, then
+    the fit's OWN tree (`fits_dir.parent/states`), and only then the two global
+    trees. Resolving globally means the norms came from somewhere the fit does
+    not live; the resolution says so in `warning`, logs it at WARNING level with
+    the resolved path named, and — if the caller asked for strict mode — raises.
+    """
     name = f"norms_{model}_{arm}.json"
-    candidates = [
-        *(root / name for root in extra_roots),
-        fits_dir.parent / "states" / name,
-        COLLECTION_ROOT / model / "states" / name,
-        SMALLS_STATES / name,
-    ]
-    for c in candidates:
-        if c.exists():
-            return c
-    return None
+    collection = COLLECTION_ROOT if collection_root is None else collection_root
+    candidates: list[tuple[NormsTier, Path]] = []
+    if explicit is not None:
+        candidates.append(("explicit", explicit))
+    candidates.extend(("extra-root", root / name) for root in extra_roots)
+    candidates.append(("fit-local", fits_dir.parent / "states" / name))
+    candidates.append(("global-collection", collection / model / "states" / name))
+    candidates.append(("global-smalls", SMALLS_STATES / name))
+
+    probed: list[str] = []
+    for tier, path in candidates:
+        probed.append(str(path))
+        if not path.exists():
+            continue
+        resolution = NormsResolution(model=model, arm=arm, path=str(path),
+                                     tier=tier, probed=probed)
+        if resolution.is_global_fallback:
+            local = fits_dir.parent / "states" / name
+            resolution.warning = (
+                f"GLOBAL-FALLBACK NORMS ({tier}): the fit dir {fits_dir} has no "
+                f"{name} of its own ({local} absent), so provenance was resolved "
+                f"by MODEL KEY against {path}. That file belongs to whatever "
+                f"corpus vintage that tree currently holds, which need not be "
+                f"the vintage this fit was made on (rake M21b). â is unaffected "
+                f"— only the provenance verdict below depends on it — but a "
+                f"MATCH here proves less than a fit-local match would, and a "
+                f"MISMATCH may mean nothing worse than two vintages.")
+            if on_global_fallback == "raise":
+                raise NormsProvenanceError(resolution.warning)
+            seen = (model, arm, str(path))
+            if seen not in _WARNED_GLOBAL_NORMS:
+                _WARNED_GLOBAL_NORMS.add(seen)
+                logger.warning("%s", resolution.warning)
+        return resolution
+    return NormsResolution(
+        model=model, arm=arm, probed=probed,
+        warning=f"no {name} found in any tier — provenance UNVERIFIED")
+
+
+def probe_norms_path(model: str, arm: str, fits_dir: Path,
+                     extra_roots: Sequence[Path] = (),
+                     on_global_fallback: Literal["warn", "raise"]
+                     = DEFAULT_NORMS_GLOBAL_FALLBACK) -> Optional[Path]:
+    """`resolve_norms`, reduced to the path. Prefer `resolve_norms` in new code:
+    the path alone cannot tell a caller that the file came from another tree."""
+    return _as_path(resolve_norms(model, arm, fits_dir, extra_roots,
+                                  on_global_fallback=on_global_fallback))
+
+
+def _as_path(resolution: NormsResolution) -> Optional[Path]:
+    return Path(resolution.path) if resolution.path is not None else None
 
 
 def audit_norm(side: Literal["source", "target"], model: str, site: int, arm: str,
                map_norm: float, fits_dir: Path,
                norms_path: Optional[Path] = None,
-               extra_roots: Sequence[Path] = ()) -> NormAudit:
-    """Provenance guard — see the module docstring's normalization section."""
-    path = norms_path or probe_norms_path(model, arm, fits_dir, extra_roots)
+               extra_roots: Sequence[Path] = (),
+               on_global_fallback: Literal["warn", "raise"]
+               = DEFAULT_NORMS_GLOBAL_FALLBACK,
+               collection_root: Optional[Path] = None) -> NormAudit:
+    """Provenance guard — see the module docstring's normalization section.
+
+    The RESOLVED PATH AND ITS TIER ride into the audit record, so a row read
+    months later says not only which norms file was compared but whether that
+    file was the fit's own or one found by model key in another tree.
+    """
+    resolution = resolve_norms(model, arm, fits_dir, extra_roots,
+                               explicit=norms_path,
+                               on_global_fallback=on_global_fallback,
+                               collection_root=collection_root)
+    path = _as_path(resolution)
+    tier, fallback = resolution.tier, resolution.is_global_fallback
+    suffix = f" {resolution.warning}" if fallback else ""
     if path is None:
         return NormAudit(side=side, model=model, site=site, arm=arm,
-                         map_norm=map_norm,
+                         map_norm=map_norm, norms_tier=tier,
+                         global_fallback=fallback,
                          note="no norms_{model}_{arm}.json found — provenance "
                               "UNVERIFIED (â is unaffected; the fit's bank of "
-                              "origin is simply unconfirmed)")
+                              "origin is simply unconfirmed). Probed: "
+                              + "; ".join(resolution.probed))
     try:
         norms = json.loads(path.read_text())
     except (OSError, ValueError) as exc:
         return NormAudit(side=side, model=model, site=site, arm=arm,
                          map_norm=map_norm, bank_norms_path=str(path),
-                         note=f"norms file unreadable: {exc}")
+                         norms_tier=tier, global_fallback=fallback,
+                         note=f"norms file unreadable: {exc}.{suffix}")
     bank = norms.get(f"L{site}")
     if bank is None:
         return NormAudit(side=side, model=model, site=site, arm=arm,
                          map_norm=map_norm, bank_norms_path=str(path),
+                         norms_tier=tier, global_fallback=fallback,
                          note=f"L{site} absent from {path.name} "
-                              f"(has {sorted(norms)})")
+                              f"(has {sorted(norms)}).{suffix}")
     ok = bool(np.isclose(map_norm, float(bank), rtol=NORM_AUDIT_RTOL, atol=0.0))
     return NormAudit(
         side=side, model=model, site=site, arm=arm, map_norm=map_norm,
-        bank_norm=float(bank), bank_norms_path=str(path), match=ok,
-        note="" if ok else
-             "MISMATCH — the fit was made against a DIFFERENT state bank than "
-             "this norms file. â itself is unchanged by normalization, but the "
-             "pair's provenance is wrong: resolve before quoting the number.")
+        bank_norm=float(bank), bank_norms_path=str(path), norms_tier=tier,
+        global_fallback=fallback, match=ok,
+        note=("" if ok else
+              "MISMATCH — the fit was made against a DIFFERENT state bank than "
+              "this norms file. â itself is unchanged by normalization, but the "
+              "pair's provenance is wrong: resolve before quoting the number."
+              ).strip() + suffix)
 
 
 def transported_null_floor(tm: TransportMap, v_tgt: np.ndarray, d_src: int,
@@ -467,6 +612,8 @@ def read_pair(src_model: str, src_site: int, src_vectors: Path,
               src_norms: Optional[Path] = None,
               tgt_norms: Optional[Path] = None,
               with_nulls: bool = True,
+              on_global_fallback: Literal["warn", "raise"]
+              = DEFAULT_NORMS_GLOBAL_FALLBACK,
               ) -> ExchangeRateRow | MissingPiece:
     """Read one â end-to-end. Returns a MissingPiece instead of raising when a
     banked piece is simply absent — the wave-1 case until targets land."""
@@ -518,9 +665,9 @@ def read_pair(src_model: str, src_site: int, src_vectors: Path,
 
     audits = [
         audit_norm("source", src_model, src_site, arm, tm.src_norm, fits_dir,
-                   src_norms),
+                   src_norms, on_global_fallback=on_global_fallback),
         audit_norm("target", tgt_model, tgt_site, arm, tm.tgt_norm, fits_dir,
-                   tgt_norms),
+                   tgt_norms, on_global_fallback=on_global_fallback),
     ]
     return ExchangeRateRow(
         pair_id=pair_id, source_model=src_model, source_site=src_site,
@@ -614,7 +761,9 @@ def preset_banked_precedent(family: str) -> list[PairRequest]:
 # ---------------------------------------------------------------- driver
 def run(requests: Sequence[PairRequest], hub: str = HUB_MODEL,
         direction: Literal["fwd", "rev"] = "fwd",
-        with_nulls: bool = True) -> ExchangeRateReadout:
+        with_nulls: bool = True,
+        on_global_fallback: Literal["warn", "raise"]
+        = DEFAULT_NORMS_GLOBAL_FALLBACK) -> ExchangeRateReadout:
     readout = ExchangeRateReadout(generated=date.today().isoformat(), hub=hub,
                                   direction=direction)
     for req in requests:
@@ -622,7 +771,7 @@ def run(requests: Sequence[PairRequest], hub: str = HUB_MODEL,
             req.source_model, req.source_site, req.source_vectors,
             req.target_model, req.target_site, req.target_vectors,
             req.fits_dir, req.arm, req.family, direction=direction,
-            with_nulls=with_nulls)
+            with_nulls=with_nulls, on_global_fallback=on_global_fallback)
         if isinstance(result, MissingPiece):
             readout.missing.append(result)
             logger.warning("MISSING %-46s %s::%s — %s", result.pair_id, req.arm,
@@ -630,12 +779,15 @@ def run(requests: Sequence[PairRequest], hub: str = HUB_MODEL,
             continue
         readout.rows.append(result)
         bad_audit = [a for a in result.norm_audit if a.match is False]
-        logger.info("â %-46s %s::%-9s = %+.4f  null_q95=%.4f clears=%s%s%s",
+        drifted = [a for a in result.norm_audit if a.global_fallback]
+        logger.info("â %-46s %s::%-9s = %+.4f  null_q95=%.4f clears=%s%s%s%s",
                     result.pair_id, req.arm, req.family, result.a_hat,
                     result.null_floor.random_unit_abs_cos_q95,
                     result.clears_null_floor,
                     "  RANK-FORBIDDEN" if result.rank_forbidden else "",
-                    "  NORM-PROVENANCE-MISMATCH" if bad_audit else "")
+                    "  NORM-PROVENANCE-MISMATCH" if bad_audit else "",
+                    f"  NORMS-GLOBAL-FALLBACK[{','.join(a.side for a in drifted)}]"
+                    if drifted else "")
     return readout
 
 
@@ -801,6 +953,57 @@ def selftest() -> int:                                   # noqa: C901 — a chec
         nofile = audit_norm("target", "nobodyM", 3, "raw", 1.0, root / "fits")
         check(nofile.match is None and "UNVERIFIED" in nofile.note,
               "no norms file → provenance UNVERIFIED (â still readable)")
+        check(ok.norms_tier == "fit-local" and ok.global_fallback is False,
+              f"a fit whose own tree holds the norms resolves FIT-LOCAL "
+              f"({ok.norms_tier}) — no global tree is consulted at all")
+        local_res = resolve_norms("srcM", "native", root / "fits")
+        check(local_res.tier == "fit-local" and local_res.probed[-1]
+              == str(states / "norms_srcM_native.json"),
+              "the fit-local tier is reached BEFORE either global tier is even "
+              "probed (rake M21b's ordering requirement, shown by the probe list)")
+        explicit = audit_norm("source", "srcM", 14, "native", 5.2234,
+                              root / "elsewhere",
+                              norms_path=states / "norms_srcM_native.json")
+        check(explicit.norms_tier == "explicit" and not explicit.global_fallback,
+              "an explicitly-passed norms path outranks every probe and is not "
+              "a fallback")
+
+        print("== selftest 10: the global norms fallback is LOUD, never silent ==")
+        #  Rake M21b: resolving by MODEL KEY outside the fit's own tree is a
+        #  corpus-vintage cross-contamination path. Simulated by pointing the
+        #  global tier at a temp tree, so the check needs no data tree.
+        global_states = root / "global" / "someM" / "states"
+        global_states.mkdir(parents=True)
+        (global_states / "norms_someM_native.json").write_text(
+            json.dumps({"L14": 5.2234}))
+        elsewhere = root / "global"
+        drifted = resolve_norms("someM", "native", root / "fits",
+                                collection_root=elsewhere)
+        check(drifted.tier == "global-collection" and drifted.is_global_fallback,
+              f"a fit with no local norms resolves at the GLOBAL tier "
+              f"({drifted.tier}) rather than reporting nothing")
+        check("GLOBAL-FALLBACK NORMS" in drifted.warning
+              and str(global_states) in drifted.warning,
+              "the warning names the tier AND the resolved path, so the stamp "
+              "records what was actually read")
+        audit = audit_norm("source", "someM", 14, "native", 5.2234,
+                           root / "fits", collection_root=elsewhere)
+        check(audit.global_fallback is True
+              and audit.norms_tier == "global-collection"
+              and "GLOBAL-FALLBACK NORMS" in audit.note,
+              "and the audit RECORD carries the tier, the flag and the warning "
+              "— a match found this way never looks fit-local")
+        try:
+            resolve_norms("someM", "native", root / "fits",
+                          on_global_fallback="raise", collection_root=elsewhere)
+            check(False, "strict mode must refuse a global fallback")
+        except NormsProvenanceError as exc:
+            check("rake M21b" in str(exc),
+                  f"strict mode raises NormsProvenanceError: {exc!s:.60}")
+        check(resolve_norms("srcM", "native", root / "fits",
+                            on_global_fallback="raise",
+                            collection_root=elsewhere).tier == "fit-local",
+              "strict mode does NOT interfere with a fit-local resolution")
 
     print(f"\nselftest: {len(failures)} failure(s)")
     return 1 if failures else 0
@@ -830,6 +1033,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--no-nulls", action="store_true",
                     help="skip the transported-null envelope (faster; the floor "
                          "is then unknown and clears_null_floor is meaningless)")
+    ap.add_argument("--strict-norms", action="store_true",
+                    help="REFUSE to resolve norms_{model}_{arm}.json outside the "
+                         "fit's own tree (rake M21b). Default is to resolve, warn "
+                         "loudly, and record the tier + resolved path in every "
+                         "norm_audit entry; this flag makes it fatal instead.")
     ap.add_argument("--out", type=Path, default=None,
                     help="write the readout JSON here (parents created)")
     # single-pair mode
@@ -884,7 +1092,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             target_site=args.target_site, target_vectors=tgt_vec,
             fits_dir=args.fits_dir, arm=args.arm, family=args.family)]
 
-    readout = run(requests, direction=args.direction, with_nulls=not args.no_nulls)
+    try:
+        readout = run(requests, direction=args.direction,
+                      with_nulls=not args.no_nulls,
+                      on_global_fallback="raise" if args.strict_norms else "warn")
+    except NormsProvenanceError as exc:
+        #  An EXPECTED refusal with a meaningful message: the operator asked for
+        #  strict provenance and did not get it. Reported cleanly and nonzero
+        #  rather than as a traceback, which would read like a bug.
+        print(f"\nNORMS PROVENANCE HALT — {exc}")
+        return 1
     payload = readout.model_dump_json(indent=1)
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)
