@@ -631,15 +631,122 @@ BIG_CHAIN_MULTICARD: tuple[RosterNode, ...] = (
               "accepted-and-ignored rather than raising; the branch taken is recorded."),
 )
 
+# The CARRIED banked nodes (2026-07-29). Prereg roster rows 1-6 (3b, 8b,
+# qwen-7b, dsv2-lite, gemma-3-27b, olmo2-7b) were collected and banked before
+# this campaign's registries existed. They are NOT new collections — every one
+# is already ratified in `fit_transport_maps.SITES` — so a row here does
+# something different from every group above: it does not make the node
+# collectable, it gives an already-banked node the M9 DRIFT-DETECTION GUARD (a
+# config sha anchor) that every other roster node carries and these had none of.
+# A carried node therefore enters ROSTER ALREADY GRADUATED, which is why its row
+# number sits below wave-1's and its scan grid is the grid the scan ceremony
+# actually ran rather than a grid still to be run.
+#
+# ONLY ROW 5 IS HERE SO FAR. The other five carried nodes still have no roster
+# row and therefore still no config-sha anchor; that is a NAMED GAP, not an
+# omission this tuple's shape implies is closed. They join as their anchors are
+# verified, one row at a time, on the evidence each one's own audit produces.
+#
+# Adding a key here has one mechanical consequence worth stating: SCAN_GRIDS
+# gains the key, so `sites_for`/`scan_grid_table`/`collectable` start reporting
+# it. It changes NO site registration — `fit_transport_maps.SITES` and
+# `read_composed_predictions.SITE_OF_RECORD` are untouched by this row, and L36
+# remains the carried-provisional site of record pending Luxia's ruling on the
+# L35 global neighbour (see the interleave note below).
+CARRIED_BANKED: tuple[RosterNode, ...] = (
+    RosterNode(
+        key="gemma3-27b", model_id="google/gemma-3-27b-it",
+        roster_row=5, arms=("native", "raw"), num_hidden_layers=62,
+        hidden_size=5376,
+        weights_dirname="models--google--gemma-3-27b-it",
+        checkpoint_identity="instruct",
+        config_sha256="cabd884f5e0d4f01a5bd7fe14bd4bacd0bd83f3725a02acbdc4e72dc001835fa",
+        # max_position_embeddings: DELIBERATELY UNSET — see the notes. The
+        # checkpoint's config.json DECLARES NO max_position_embeddings at all;
+        # None here means ABSENT-FROM-CONFIG, verified, not un-read.
+        scan_grid_extension=(34, 36, 38),
+        notes="THE FIRST CARRIED BANKED NODE TO GET A ROSTER ROW (prereg row 5, "
+              "'anchor, 3rd family (carried; banked)'). Architecture facts read "
+              "from the checkpoint's own config.json 2026-07-29 at the PINNED "
+              "revision 005ad3404e59d6023443cb575daa05336842228a: 62 layers, "
+              "hidden_size 5376, 32 attention heads, 16 kv heads (GQA 2:1), "
+              "head_dim 128 (declared, and NOT hidden_size/heads — 5376/32 = 168, "
+              "so head_dim must be read, never computed, on this lineage), eos "
+              "[1, 106], architecture `Gemma3ForConditionalGeneration`. That "
+              "architecture is the MULTIMODAL WRAPPER: the decoder stack resolves "
+              "through the `language_model` branch (hooks.decoder_layers handles "
+              "it; `metabasis.config.MODEL_PRESETS['gemma3-27b']` carries the same "
+              "facts for the probe side). "
+              "⚠ max_position_embeddings IS ABSENT FROM THE CONFIG — the field "
+              "above is None because the checkpoint DECLARES NONE, not because "
+              "nobody looked. Recorded explicitly so no reader ever back-fills a "
+              "plausible default (8192/32768/131072 are all wrong here: the config "
+              "says nothing, and a job preflight's corpus-length check must "
+              "therefore be satisfied some other way, or the gap ruled on). This "
+              "is the ONE roster node whose positional capacity is not a number. "
+              "IDENTITY (rakes M9/M17) — THIS LINEAGE INVERTS MIXTRAL, so the "
+              "discriminator is CHOSEN and SHOWN rather than reused: the "
+              "DISCRIMINATOR OF RECORD IS THE CONFIG SHA. config.json hashes "
+              "cabd884f… on `-it` (this checkpoint) against 019693e9… on the "
+              "sibling `-pt` BASE repo — they separate. generation_config.json is "
+              "BYTE-IDENTICAL between it and pt and therefore proves NOTHING here, "
+              "which is the exact inverse of the Llama/Qwen rows where the "
+              "sampling defaults are the signature; tokenizer_config.json "
+              "separates them too and is recorded as the corroborating check, not "
+              "the discriminator of record. WEIGHTS-LEVEL BACKSTOP (M17 rule (b), "
+              "and here it is not the last resort but an independent pass): 12/12 "
+              "shards verified BITWISE against the hub's LFS sha256 at the pinned "
+              "revision, 54.86 GB, untouched on the shared store since 2026-07-12 "
+              "— M9's mutation threat is excluded at the weights level, not "
+              "inferred from metadata. "
+              "RULED GRID EXTENSION (34, 36, 38) — the deviation, recorded here so "
+              "the extension history is machine-readable and `scan_grid` stays "
+              "re-derivable from num_hidden_layers alone. The computed 12-site "
+              "[0.15,0.85] grid is (9,13,17,21,25,29,33,37,41,45,49,53) and does "
+              "NOT contain 36; the WH6-stamped banked peak region {34,36,38} is "
+              "where the ENTIRE banked gemma object roster lives, so the scan "
+              "ceremony ran the effective 15-site grid (the additions were DERIVED "
+              "in-preflight from scan_grid(62) and re-added, never typed). +35 IS "
+              "PENDING the site-evidence pass and is deliberately NOT in this "
+              "tuple — see below. `fit_transport_maps.SITES['gemma3-27b']` = "
+              "(34, 36, 38) is a subset of the effective grid, so the ratification "
+              "invariant is satisfied by construction. "
+              "ATTENTION INTERLEAVE, A NAMED ARCHITECTURE FACT THE SITE MACHINERY "
+              "MAY CONSULT: gemma-3 is 5:1 LOCAL:GLOBAL interleaved — sliding "
+              "window 1024, and layer i is GLOBAL iff (i+1) % 6 == 0, i.e. "
+              "{5,11,17,23,29,35,41,47,53,59}. Consequences that are material to "
+              "the L36 ruling and must not be rediscovered: L36 IS A LOCAL "
+              "sliding-window layer, and its 1024-token window is MARGINALLY "
+              "BINDING against the longest templated corpus text (1134 tokens); "
+              "all three ruled additions (34, 36, 38) are local; L35 is L36's "
+              "GLOBAL neighbour and is UNMEASURED; of the effective 15-site grid "
+              "only {17, 29, 41, 53} are global. "
+              "⚠ THE SLIDING WINDOW IS NOT A POSITION CEILING and must never be "
+              "written as one: `max_seq_len` stays unset. Truncating the corpus to "
+              "1024 would change the object every other node is compared against, "
+              "whereas a sliding window is a per-layer attention span the model "
+              "applies to the FULL sequence. The prereg ADDENDUM 2026-07-27-B "
+              "truncation is for LEARNED-absolute-position ceilings (gpt2-xl); it "
+              "does not apply here. "
+              "WEIGHTS LAYOUT DEVIATION: unlike every node above, this checkpoint "
+              "lives in an HF SNAPSHOT CACHE, not the flat weights root — "
+              "`weights_dirname` is the cache's repo directory basename and the "
+              "actual weights are one level further down under "
+              "`snapshots/<revision>` at the pinned revision above. The full path "
+              "is passed via --model-path as always and is never hardcoded here; "
+              "the carried banked-4 nodes (qwen-7b, dsv2-lite) share this layout, "
+              "which is why a flat-root sweep does not find them (rake M35)."),
+)
+
 ROSTER: dict[str, RosterNode] = {
     n.key: n for n in WAVE1 + HUB_RUNGS_2 + MOE_CHAT + BIG_CHAIN_SINGLE_CARD
-    + BIG_CHAIN_MULTICARD}
+    + BIG_CHAIN_MULTICARD + CARRIED_BANKED}
 
 #: model key -> the grid it was actually collected and curve-scanned on. This is
 #: what `--sites` should carry for a scan collection, and what `--tgt-sites`
 #: should carry for the scan fit. Normally the computed 12 sites; for a node with
-#: a ruled extension (pythia-6.9b) it is the EFFECTIVE grid, because that is what
-#: the bank holds and what reproduces the published curve.
+#: a ruled extension (pythia-6.9b, gpt2-xl, gemma3-27b) it is the EFFECTIVE grid,
+#: because that is what the bank holds and what reproduces the published curve.
 SCAN_GRIDS: dict[str, tuple[int, ...]] = {
     k: n.effective_scan_grid for k, n in ROSTER.items()}
 

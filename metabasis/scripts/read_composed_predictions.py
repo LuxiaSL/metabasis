@@ -124,6 +124,47 @@ objects. Two independent guards, because one of them being bypassed
 programmatically is exactly how this trap gets sprung.
 
 ────────────────────────────────────────────────────────────────────────────────
+WHICH TREE ANSWERED — THE PROVENANCE LEDGER AND THE FILED-PATHS PIN (E4 A1)
+────────────────────────────────────────────────────────────────────────────────
+`REPORT-e4-nulls-batch4-2026-07-29` anomaly A1: with no `--v21-root` the probe
+order starts at the frozen collection tree, so **0/24 filed batch-4 legs
+resolved to the corpus-v2.1 maps their record was filed from**. That enactment
+loaded the filed `resolved` paths BY HAND and was proved right by exact E1
+parity (|Δ| = 0.0 ×12). The probe order itself is not the defect — `--v21-root`
+already prepends the go-forward vintage when the operator asks for it, and the
+E1 gate's parity leg depends on the default order staying put. The defect is
+that a resolve never SAID which tree answered, so a caller could not tell a
+same-vintage hit from a cross-vintage one without reading paths by eye. Two
+additions, neither of which moves the default probe order:
+
+  * **The provenance ledger.** Every `resolve_hub_map` / `resolve_vector_bank`
+    appends a `ResolutionProvenance`: the model, the artifact kind, WHICH TREE
+    answered, that tree's corpus vintage, where in the probe order it sat, and
+    everything probed and missed. Read it with `resolution_provenance()`, scope
+    it with `provenance_scope()`, write it with `--provenance-out`. It is quiet
+    for an ordinary resolve and LOUD where a vintage confusion is born: a
+    resolve that falls THROUGH a set v2.1 root to a pre-v2.1 tree is warned and
+    flagged `cross_vintage_fallback` (today such a slot surfaces only later, as
+    MIXED-VINTAGE, and only if some OTHER side did resolve to v2.1 — where all
+    four fall through, nothing says anything at all).
+  * **Filed-paths mode**, for scoring and null tooling: `--filed-paths <filed
+    record>` (`load_filed_paths` / `set_filed_paths` / `filed_paths_scope`)
+    PINS resolution to that record's own `resolved` paths, so the artifacts
+    re-derived are the ones the record was filed from rather than whatever the
+    probe order finds. A pinned artifact that has gone HALTS; a key the record
+    does not file HALTS under the strict default, or probes WARNED and recorded
+    as UNPINNED with `--filed-paths-allow-unpinned`. **There is no silent
+    fallback across vintages** — falling back from a pinned v2.1 artifact to a
+    probed v1 one is rake M21b's lesson at map grain. `--filed-paths` is
+    mutually exclusive with `--gate` (parity would test the pin, not the
+    resolver; `run_gate` guards it programmatically as well) and with
+    `--v21-root` (two different answers to "which artifact", per key).
+
+Both are DEFAULT-OFF and neither changes what any existing caller resolves: with
+no root and no pin, `--gate` and `--candidates` are byte-identical to what they
+were before this section existed, which selftests 21–22 prove path-by-path.
+
+────────────────────────────────────────────────────────────────────────────────
 THE DIRECTIONAL STAR — A THIRD PREDICTOR COLUMN (ADDENDUM 2026-07-29-H)
 ────────────────────────────────────────────────────────────────────────────────
 Addendum H invokes Addendum C item 2 and ADOPTS the directional star
@@ -189,6 +230,10 @@ Run (repo root, PYTHONPATH=.):
   python -m metabasis.scripts.read_composed_predictions --candidates \
       --directional-constants <directional constants readout>.json \
       --directional-out /tmp/claude-output/directional_slots.json
+  python -m metabasis.scripts.read_composed_predictions --candidates \
+      --filed-paths outputs/collection/predictions/<record>.json \
+      --filed-paths-allow-unpinned \
+      --provenance-out /tmp/claude-output/resolution_provenance.json
   python -m metabasis.scripts.read_composed_predictions \
       --score-record outputs/collection/predictions/<record>.json \
       --observed /tmp/claude-output/observed-<batch>.json \
@@ -554,6 +599,446 @@ def _under_v21_root(path: Optional[str | Path]) -> bool:
     except (ValueError, OSError):
         return False
     return True
+
+
+# ------------------------------------------- resolution provenance (E4 A1)
+#  WHAT ANSWERED, AND FROM WHICH VINTAGE — recorded on EVERY resolve.
+#
+#  The E4 batch-4 enactment (REPORT-e4-nulls-batch4-2026-07-29, anomaly A1)
+#  found the shape of the gap exactly: with no `--v21-root` the probe order
+#  starts at the frozen collection tree, so 0/24 filed batch-4 legs resolved to
+#  the corpus-v2.1 maps their record was FILED from. The enactment had to load
+#  the filed `resolved` paths by hand — and was proven right by exact E1 parity
+#  (|Δ| = 0.0 ×12). Nothing in the resolver was wrong; the resolver simply never
+#  SAID which tree answered, so a caller could not tell a same-vintage hit from
+#  a cross-vintage one without reading the path by eye.
+#
+#  Two mechanisms close that, and NEITHER moves the default probe order (the
+#  E1 gate's resolution-parity leg depends on it, and `--v21-root` already
+#  prepends the go-forward vintage when the operator asks for it):
+#
+#    1. THIS LEDGER. Every `resolve_hub_map` / `resolve_vector_bank` call
+#       appends a `ResolutionProvenance` naming the model, the artifact kind,
+#       WHICH TREE answered, that tree's corpus vintage, where in the probe
+#       order it sat, and what was probed and missed. It is data, always
+#       present, retrievable with `resolution_provenance()` and writable with
+#       `--provenance-out`.
+#    2. THE FILED-PATHS PIN (below): scoring and null tooling pins resolution
+#       to a record's OWN `resolved` paths instead of probing at all.
+#
+#  WHERE IT GETS LOUD. The ledger is written at DEBUG for an ordinary resolve —
+#  a routine v1 resolve in the v1 regime is not news, and stdout is a frozen
+#  surface here. It ESCALATES exactly where a vintage confusion can be born:
+#    * a v2.1 root is in force and a resolve fell through it to a pre-v2.1 tree
+#      (`cross_vintage_fallback`) -> WARNING, and the record says so. This is
+#      the silent half of A1: today such a slot only surfaces later, as
+#      MIXED-VINTAGE, and only if some OTHER side did resolve to v2.1. Where
+#      ALL sides fall through, nothing said anything at all.
+#    * a filed-paths pin is in force and the pinned artifact is gone, or the
+#      key is unpinned under the strict default -> HALT (`FiledPathsError`).
+#      Never a fallback: falling back from a pinned v2.1 artifact to a probed
+#      v1 one is rake M21b's lesson at map grain.
+ResolutionKind = Literal["hub map", "vector bank"]
+#: How a resolve was answered. `pin` = a filed-paths record named the artifact;
+#: `probe` = the preference-ordered candidate list answered; `absent` = every
+#: probe missed (N/A-AT-FILING, which is data, not a failure).
+ResolutionSource = Literal["pin", "probe", "absent"]
+
+
+class ResolutionProvenance(BaseModel):
+    """One resolve, and which tree answered it. DESCRIPTIVE — never a verdict.
+
+    Nothing in the prediction path reads this back: `compose_pair` computes
+    â_comp from the `HubMapRef`/`VectorBankRef` exactly as before, and this
+    ledger only records what those resolvers did. It exists so the question the
+    E4 enactment had to answer by eye — "is this the vintage the record was
+    filed from?" — is answerable mechanically.
+    """
+    kind: ResolutionKind
+    model: str
+    site: int
+    arm: Optional[str] = Field(
+        default=None, description="hub maps only; a vector bank is arm-free")
+    family: Optional[str] = None
+    source: ResolutionSource
+    resolved: Optional[str] = Field(
+        default=None, description="the artifact actually used; None => absent")
+    corpus: Optional[CorpusProvenance] = Field(
+        default=None,
+        description="the vintage of the tree that answered. None on a vector "
+                    "bank outside a verified v2.1 root, for the reason "
+                    "`VectorBankRef.corpus` states: only the bank's own stamp "
+                    "is entitled to claim a vintage there")
+    tree: str = Field(
+        description="WHICH TREE answered, in words — the candidate dir's own "
+                    "note, or the pin's record path. The field the A1 read "
+                    "needed and did not have")
+    probe_index: Optional[int] = Field(
+        default=None, description="0-based position in the probe order that "
+                                  "answered; None for a pin or an absence")
+    n_probed: int = 0
+    probed_paths: list[str] = []
+    v21_root: Optional[str] = Field(
+        default=None, description="the verified v2.1 root in force at resolve "
+                                  "time, if any")
+    pin_record: Optional[str] = Field(
+        default=None, description="the filing record the pin was built from")
+    cross_vintage_fallback: bool = Field(
+        default=False,
+        description="a v2.1 root was in force and this resolve fell THROUGH it "
+                    "to a pre-v2.1 tree. Computable before, sayable now")
+    notes: list[str] = []
+
+
+class ResolutionProvenanceReadout(BaseModel):
+    """The ledger as an artifact (`--provenance-out`). Writes nothing itself."""
+    STATUS: str = (
+        "DESCRIPTIVE — a record of which tree answered each resolve. Computes "
+        "no â, moves no band, writes nothing under outputs/.")
+    generated: str
+    v21_root: Optional[str] = None
+    filed_paths_record: Optional[str] = None
+    n_resolves: int = 0
+    n_by_source: dict[str, int] = {}
+    n_by_corpus: dict[str, int] = {}
+    n_cross_vintage_fallback: int = 0
+    n_absent: int = 0
+    records: list[ResolutionProvenance] = []
+
+
+#: The append-only resolution ledger for this process. MODULE-LEVEL for the same
+#: reason `V21_ROOT` is: the resolvers are called from deep inside the predictor
+#: through fixed signatures. It grows with every resolve — a long-lived process
+#: should scope it (`provenance_scope()`) or clear it
+#: (`clear_resolution_provenance()`); a CLI run is bounded by construction.
+_RESOLUTION_PROVENANCE: list[ResolutionProvenance] = []
+
+
+def resolution_provenance() -> tuple[ResolutionProvenance, ...]:
+    """Every resolve recorded so far, in call order. A COPY — the ledger is
+    appended to by the resolvers and must not be mutated from outside."""
+    return tuple(_RESOLUTION_PROVENANCE)
+
+
+def clear_resolution_provenance() -> int:
+    """Empty the ledger; returns how many records were dropped."""
+    n = len(_RESOLUTION_PROVENANCE)
+    _RESOLUTION_PROVENANCE.clear()
+    return n
+
+
+@contextmanager
+def provenance_scope() -> Iterator[list[ResolutionProvenance]]:
+    """Record provenance for the duration of a block, restoring the ledger after.
+
+    Yields the list the block's own records land in, so a caller can read them
+    without having to diff a global.
+    """
+    global _RESOLUTION_PROVENANCE
+    previous = _RESOLUTION_PROVENANCE
+    scoped: list[ResolutionProvenance] = []
+    _RESOLUTION_PROVENANCE = scoped
+    try:
+        yield scoped
+    finally:
+        _RESOLUTION_PROVENANCE = previous
+
+
+def _record_provenance(record: ResolutionProvenance) -> ResolutionProvenance:
+    """Append one resolve to the ledger, at the volume its content deserves."""
+    _RESOLUTION_PROVENANCE.append(record)
+    if record.cross_vintage_fallback:
+        logger.warning(
+            "CROSS-VINTAGE FALLBACK — %s %s L%s resolved to the %s tree (%s) "
+            "while corpus-v2.1 root %s is in force. The value is computable and "
+            "is NOT the go-forward vintage; a prediction mixing this with a "
+            "v2.1 side is flagged MIXED-VINTAGE, one where every side falls "
+            "through carries no flag at all, which is why this line exists.",
+            record.kind, record.model, record.site, record.corpus, record.tree,
+            record.v21_root)
+    else:
+        logger.debug("resolved %s %s L%s <- %s [%s] via %s", record.kind,
+                     record.model, record.site, record.resolved, record.corpus,
+                     record.tree)
+    return record
+
+
+def provenance_readout() -> ResolutionProvenanceReadout:
+    """The ledger, summarized, as the `--provenance-out` artifact."""
+    records = list(_RESOLUTION_PROVENANCE)
+    by_source: dict[str, int] = {}
+    by_corpus: dict[str, int] = {}
+    for rec in records:
+        by_source[rec.source] = by_source.get(rec.source, 0) + 1
+        label = rec.corpus or "unlabelled"
+        by_corpus[label] = by_corpus.get(label, 0) + 1
+    return ResolutionProvenanceReadout(
+        generated=date.today().isoformat(),
+        v21_root=None if V21_ROOT is None else str(V21_ROOT),
+        filed_paths_record=None if FILED_PATHS is None else FILED_PATHS.record,
+        n_resolves=len(records), n_by_source=by_source, n_by_corpus=by_corpus,
+        n_cross_vintage_fallback=sum(r.cross_vintage_fallback for r in records),
+        n_absent=sum(r.source == "absent" for r in records),
+        records=records)
+
+
+# ------------------------------------------------- the filed-paths pin (E4 A1)
+class FiledPathsError(ComposedPathError):
+    """A filed-paths pin cannot answer a resolve, and MUST NOT fall back.
+
+    Three cases, all loud, all naming the record: the pinned artifact is gone
+    from disk; the record files two different paths for one key; a key is
+    unpinned while the pin is STRICT. The fourth possible behaviour — quietly
+    probing instead — is the one this class exists to make impossible, because
+    a probe answers from the frozen tree and the record was filed from v2.1.
+    """
+
+
+class FiledPath(BaseModel):
+    """One artifact path as a filing record filed it."""
+    key: str
+    path: str
+    corpus: Optional[CorpusProvenance] = Field(
+        default=None, description="the vintage the RECORD says that path had; "
+                                  "carried through as filed, never re-derived")
+    filed_in_slot: str = Field(description="the record slot it was read from")
+
+
+class FiledPaths(BaseModel):
+    """A record's own resolved paths, as a resolution pin. READ-ONLY over it.
+
+    Built by `load_filed_paths` from a filed prediction record's
+    `composed_prediction` blocks. Keys are the resolver's own identity —
+    `<model>L<site>/<arm>-<family>` for a hub map, `<model>L<site>` for a vector
+    bank — so `resolve_hub_map`/`resolve_vector_bank` keep their signatures and
+    every caller (including `compose_pair` and the E1 machinery) is pinned by
+    the pin's mere presence, with no argument threading.
+
+    `strict` is the default and the point: a key the record does not file is a
+    HALT, not a silent return to probing. `strict=False` is the sweep-shaped
+    escape valve — unpinned keys probe as usual, but every one of them is
+    WARNED and recorded with `notes` saying the pin did not cover it.
+    """
+    record: str
+    sha256: str
+    strict: bool = True
+    hub_maps: dict[str, FiledPath] = {}
+    vector_banks: dict[str, FiledPath] = {}
+
+    @property
+    def n_pinned(self) -> int:
+        return len(self.hub_maps) + len(self.vector_banks)
+
+
+def hub_map_pin_key(model: str, site: int, arm: str, family: str) -> str:
+    """The pin key for a hub map — the resolver's full identity (rake M18)."""
+    return f"{model}L{site}/{arm}-{family}"
+
+
+def vector_bank_pin_key(model: str, site: int) -> str:
+    """The pin key for an entropy-gradient bank (arm-free by construction)."""
+    return f"{model}L{site}"
+
+
+#: The filed-paths pin in force, or None (the default, and what every existing
+#: caller gets). Set ONLY through `set_filed_paths`, exactly as `V21_ROOT` is.
+FILED_PATHS: Optional[FiledPaths] = None
+
+
+def _pin_conflict(record: Path, key: str, kind: str, first: FiledPath,
+                  second: str, slot: str) -> FiledPathsError:
+    return FiledPathsError(
+        f"HALT — {record} files TWO different {kind} paths for one key {key!r}:\n"
+        f"  {first.path}   (slot {first.filed_in_slot})\n"
+        f"  {second}   (slot {slot})\n"
+        f"A pin cannot choose between them, and choosing silently is how a "
+        f"scored read ends up mixing vintages within one record. Reconcile the "
+        f"record (or score the halves as separate records) — this tool will not "
+        f"guess which artifact is of record.")
+
+
+def _filed_corpus(record: Path, key: str, value: Any) -> Optional[CorpusProvenance]:
+    """The vintage a record claims for one artifact, checked against the enum.
+
+    A record naming a vintage this module does not know is a HALT, not a
+    coerced None: `CorpusProvenance` is a closed set, and an unrecognized label
+    means the record and this parser disagree about what the vintages ARE —
+    which is precisely the confusion a pin exists to remove.
+    """
+    if value is None:
+        return None
+    if value not in ("frozen", "legacy", "v21"):
+        raise FiledPathsError(
+            f"HALT — {record} labels the artifact for {key!r} with corpus "
+            f"vintage {value!r}, which is not one of the vintages this module "
+            f"knows ('frozen', 'legacy', 'v21'). Either the record was written "
+            f"by a different schema or the label is a typo; a pin will not "
+            f"carry a vintage it cannot name.")
+    return value                                    # type: ignore[return-value]
+
+
+def load_filed_paths(path: Path, strict: bool = True) -> FiledPaths:
+    """Build a resolution pin from a filed prediction record's own paths.
+
+    Reads the `composed_prediction` block of every row and takes the FOUR
+    artifacts it names: `hub_map_source.resolved`, `hub_map_target.resolved`,
+    `source_vector.path`, `target_vector.path`. Nothing is recomputed, nothing
+    is probed, and no path is checked for existence HERE — a missing artifact is
+    reported at the resolve that wanted it, where the message can name the key.
+
+    Paths are used AS FILED. The records file repo-relative paths and the whole
+    module resolves repo-relative (`COLLECTION_ROOT = Path("outputs")`), so a
+    pin is used from the same working directory as the record was filed from.
+    """
+    if not path.is_file():
+        raise FiledPathsError(
+            f"filed prediction record absent: {path}. Filed-paths mode pins "
+            f"resolution to a RECORD's own artifacts; without the record there "
+            f"is nothing to pin to")
+    try:
+        doc = json.loads(path.read_text())
+    except (OSError, ValueError) as exc:
+        raise FiledPathsError(f"unreadable prediction record {path}: {exc}") from exc
+    if not isinstance(doc, dict) or not isinstance(doc.get("predictions"), list):
+        raise FiledPathsError(
+            f"{path}: not a filing record — expected a top-level object with a "
+            f"`predictions` list, got keys "
+            f"{sorted(doc) if isinstance(doc, dict) else type(doc).__name__}")
+
+    pin = FiledPaths(record=str(path), sha256=sha256_of(path), strict=strict)
+    for row in doc["predictions"]:
+        if not isinstance(row, dict):
+            raise FiledPathsError(f"{path}: prediction row is not an object: {row!r}")
+        block = row.get("composed_prediction")
+        if not isinstance(block, dict):
+            continue                      # a row that files no composed column
+        slot = str(block.get("pair_id") or block.get("prediction_id") or row)
+        for side in ("hub_map_source", "hub_map_target"):
+            ref = block.get(side)
+            if not isinstance(ref, dict) or not ref.get("resolved"):
+                continue
+            try:
+                key = hub_map_pin_key(str(ref["model"]), int(ref["site"]),
+                                      str(ref["arm"]), str(ref["family"]))
+            except (KeyError, TypeError, ValueError) as exc:
+                raise FiledPathsError(
+                    f"{path}: slot {slot} {side} is missing the identity a pin "
+                    f"keys on (model/site/arm/family): {exc}") from exc
+            resolved = str(ref["resolved"])
+            seen = pin.hub_maps.get(key)
+            if seen is not None and seen.path != resolved:
+                raise _pin_conflict(path, key, "hub map", seen, resolved, slot)
+            pin.hub_maps[key] = FiledPath(
+                key=key, path=resolved,
+                corpus=_filed_corpus(path, key, ref.get("corpus")),
+                filed_in_slot=slot)
+        for side in ("source_vector", "target_vector"):
+            spec = block.get(side)
+            if not isinstance(spec, dict) or not spec.get("path"):
+                continue
+            try:
+                key = vector_bank_pin_key(str(spec["model"]), int(spec["site"]))
+            except (KeyError, TypeError, ValueError) as exc:
+                raise FiledPathsError(
+                    f"{path}: slot {slot} {side} is missing the identity a pin "
+                    f"keys on (model/site): {exc}") from exc
+            resolved = str(spec["path"])
+            seen = pin.vector_banks.get(key)
+            if seen is not None and seen.path != resolved:
+                raise _pin_conflict(path, key, "vector bank", seen, resolved, slot)
+            pin.vector_banks[key] = FiledPath(
+                key=key, path=resolved, filed_in_slot=slot)
+
+    if not pin.n_pinned:
+        raise FiledPathsError(
+            f"{path}: no `composed_prediction` block in it names a resolved "
+            f"artifact, so the pin would be empty. A star-only or "
+            f"directional-only record has no composed resolution to pin to")
+    logger.info("filed-paths pin: %s (%d hub map(s), %d vector bank(s), "
+                "strict=%s)", path, len(pin.hub_maps), len(pin.vector_banks),
+                strict)
+    return pin
+
+
+def set_filed_paths(pin: Optional[FiledPaths]) -> Optional[FiledPaths]:
+    """Pin resolution to a record's own paths, or clear the pin (None)."""
+    global FILED_PATHS
+    FILED_PATHS = pin
+    return pin
+
+
+@contextmanager
+def filed_paths_scope(pin: Optional[FiledPaths]) -> Iterator[Optional[FiledPaths]]:
+    """`set_filed_paths` for the duration of a block, restored on any exit."""
+    global FILED_PATHS
+    previous = FILED_PATHS
+    try:
+        yield set_filed_paths(pin)
+    finally:
+        FILED_PATHS = previous
+
+
+def _pinned_path(kind: ResolutionKind, key: str, model: str,
+                 site: int) -> Optional[FiledPath]:
+    """The pinned artifact for `key`, or None when no pin is in force.
+
+    Raises rather than returning None when a pin IS in force and cannot answer:
+    a strict pin that does not cover the key, always; and — in either mode — a
+    pinned path that is no longer on disk. Falling back would silently swap the
+    vintage the record was filed from for whatever the probe order finds.
+    """
+    if FILED_PATHS is None:
+        return None
+    table = (FILED_PATHS.hub_maps if kind == "hub map"
+             else FILED_PATHS.vector_banks)
+    filed = table.get(key)
+    if filed is None:
+        if FILED_PATHS.strict:
+            raise FiledPathsError(
+                f"filed-paths pin {FILED_PATHS.record} does not file a {kind} "
+                f"for {key!r} ({model} L{site}), and the pin is STRICT. It "
+                f"files {len(table)} {kind}(s): {sorted(table)[:8]}"
+                + (" …" if len(table) > 8 else "")
+                + f".\nThe strict pin refuses to probe for an unfiled key on "
+                  f"purpose: probing answers from the frozen collection tree "
+                  f"first, which is exactly how 0/24 filed batch-4 legs missed "
+                  f"the corpus-v2.1 maps of record (E4 anomaly A1). Score the "
+                  f"record's own slots, or pass allow_unpinned=True "
+                  f"(--filed-paths-allow-unpinned) to let unfiled keys probe "
+                  f"— WARNED and recorded, never silent.")
+        return None
+    if not Path(filed.path).exists():
+        raise FiledPathsError(
+            f"HALT — filed-paths pin {FILED_PATHS.record} files the {kind} for "
+            f"{key!r} at {filed.path} (record slot {filed.filed_in_slot}, "
+            f"vintage as filed: {filed.corpus or 'unlabelled'}), and that path "
+            f"is not on disk.\nThis tool will NOT fall back to the probe order: "
+            f"the probe order answers from the frozen collection tree and would "
+            f"substitute a different corpus vintage for the artifact the record "
+            f"was filed from — a number that is individually valid and "
+            f"collectively meaningless (rake M21b at map grain). Restore the "
+            f"artifact, or re-file the record against what is banked.")
+    return filed
+
+
+def _unpinned_notes(kind: ResolutionKind, key: str) -> list[str]:
+    """The warning + note for a resolve a NON-STRICT pin did not cover.
+
+    Empty when no pin is in force, which is every existing caller. A strict pin
+    never reaches here — `_pinned_path` has already raised.
+    """
+    if FILED_PATHS is None:
+        return []
+    logger.warning(
+        "UNPINNED RESOLVE — filed-paths pin %s files no %s for %r; probing "
+        "instead (allow_unpinned). The probe order answers from the frozen "
+        "collection tree first, so what it finds may be a DIFFERENT corpus "
+        "vintage from the one the record was filed on.",
+        FILED_PATHS.record, kind, key)
+    return [f"UNPINNED — the filed-paths pin {FILED_PATHS.record} files no "
+            f"{kind} for {key!r}, so this resolve PROBED. Permitted only "
+            f"because the pin is non-strict (allow_unpinned): the vintage here "
+            f"is whatever the probe order found, NOT what the record filed."]
 
 
 def hub_map_dirs(model: str) -> list[HubMapDir]:
@@ -1218,16 +1703,57 @@ def resolve_hub_map(model: str, site: int, arm: str, family: str) -> HubMapRef:
     Absent is NOT an error here — draft E1 makes it the N/A-AT-FILING verdict,
     and the returned record carries every path probed so the desk can see what
     was looked for. Use `require_hub_map` when a caller must have the map.
+
+    A FILED-PATHS PIN, when one is set, answers BEFORE any probe and never falls
+    back to one (`_pinned_path`). With no pin the probe order is exactly what it
+    was — and either way the resolve is recorded in the provenance ledger, which
+    names the tree that answered and its vintage.
     """
+    pinned = _pinned_path("hub map", hub_map_pin_key(model, site, arm, family),
+                          model, site)
+    if pinned is not None:
+        assert FILED_PATHS is not None
+        _record_provenance(ResolutionProvenance(
+            kind="hub map", model=model, site=site, arm=arm, family=family,
+            source="pin", resolved=pinned.path, corpus=pinned.corpus,
+            tree=f"filed-paths pin: {FILED_PATHS.record} (slot "
+                 f"{pinned.filed_in_slot})",
+            v21_root=None if V21_ROOT is None else str(V21_ROOT),
+            pin_record=FILED_PATHS.record))
+        return HubMapRef(
+            model=model, site=site, arm=arm, family=family,
+            resolved=pinned.path, corpus=pinned.corpus,
+            dir_note=f"FILED-PATHS PIN — taken from {FILED_PATHS.record} as "
+                     f"filed, not probed",
+            probed_paths=[pinned.path])
     probed: list[str] = []
-    for candidate in hub_map_dirs(model):
+    unpinned_note = _unpinned_notes("hub map",
+                                    hub_map_pin_key(model, site, arm, family))
+    for index, candidate in enumerate(hub_map_dirs(model)):
         path = fit_path_for(candidate.path, HUB_MODEL, HUB_SITE_OF_RECORD,
                             model, site, arm, family)
         probed.append(str(path))
         if path.exists():
+            _record_provenance(ResolutionProvenance(
+                kind="hub map", model=model, site=site, arm=arm, family=family,
+                source="probe", resolved=str(path), corpus=candidate.corpus,
+                tree=candidate.note or str(candidate.path),
+                probe_index=index, n_probed=len(probed), probed_paths=probed,
+                v21_root=None if V21_ROOT is None else str(V21_ROOT),
+                pin_record=None if FILED_PATHS is None else FILED_PATHS.record,
+                cross_vintage_fallback=(V21_ROOT is not None
+                                        and candidate.corpus != "v21"),
+                notes=unpinned_note))
             return HubMapRef(model=model, site=site, arm=arm, family=family,
                              resolved=str(path), corpus=candidate.corpus,
                              dir_note=candidate.note, probed_paths=probed)
+    _record_provenance(ResolutionProvenance(
+        kind="hub map", model=model, site=site, arm=arm, family=family,
+        source="absent", tree="none — every probe missed (N/A-AT-FILING)",
+        n_probed=len(probed), probed_paths=probed,
+        v21_root=None if V21_ROOT is None else str(V21_ROOT),
+        pin_record=None if FILED_PATHS is None else FILED_PATHS.record,
+        notes=unpinned_note))
     return HubMapRef(model=model, site=site, arm=arm, family=family,
                      probed_paths=probed)
 
@@ -1250,20 +1776,77 @@ def vector_bank(model: str) -> Path:
     return COLLECTION_ROOT / model / "vectors" / f"entropy_gradient_{model}.npz"
 
 
+def _vector_tree_note(path: Path, site: int) -> str:
+    """Which tree a vector-bank probe answered from, in words.
+
+    `vector_bank_paths` offers at most three: the verified v2.1 mirror's
+    per-site bank, the collection tree's MERGED bank, and the collection tree's
+    per-site build. They are told apart by where they are and how they are
+    named, never by probe position, so the note stays right if the order moves.
+    """
+    if _under_v21_root(path):
+        return "corpus-v2.1 re-bank mirror (verified root, per-site bank)"
+    if path.stem.endswith(f"_L{site}"):
+        return "collection tree, per-site build"
+    return "collection tree, merged bank"
+
+
 def resolve_vector_bank(model: str, site: int) -> VectorBankRef:
     """Find `model`'s banked entropy-gradient vectors, or report them absent.
 
     Absent is data, not an exception: a node whose hub map is banked but whose
     target build has not run yet (gemma3-27b today) must produce a NAMED gap
     rather than a `FileNotFoundError` from inside the predictor.
+
+    Pinned and recorded exactly as `resolve_hub_map` is: a filed-paths pin
+    answers first and never falls back, and every resolve lands in the
+    provenance ledger naming the tree that answered.
     """
+    pinned = _pinned_path("vector bank", vector_bank_pin_key(model, site),
+                          model, site)
+    if pinned is not None:
+        assert FILED_PATHS is not None
+        #  Corpus stays as `VectorBankRef.corpus` documents it: `v21` only when
+        #  the path is inside a VERIFIED root right now. A pin carries the
+        #  record's word for the vintage, and the record's word is not a
+        #  verification — it rides the provenance record, never the ref.
+        _record_provenance(ResolutionProvenance(
+            kind="vector bank", model=model, site=site, source="pin",
+            resolved=pinned.path,
+            corpus="v21" if _under_v21_root(pinned.path) else None,
+            tree=f"filed-paths pin: {FILED_PATHS.record} (slot "
+                 f"{pinned.filed_in_slot})",
+            v21_root=None if V21_ROOT is None else str(V21_ROOT),
+            pin_record=FILED_PATHS.record))
+        return VectorBankRef(
+            model=model, site=site, resolved=pinned.path,
+            corpus="v21" if _under_v21_root(pinned.path) else None,
+            probed_paths=[pinned.path])
     probed: list[str] = []
-    for path in vector_bank_paths(model, site):
+    unpinned_note = _unpinned_notes("vector bank", vector_bank_pin_key(model, site))
+    for index, path in enumerate(vector_bank_paths(model, site)):
         probed.append(str(path))
         if path.exists():
+            in_v21 = _under_v21_root(path)
+            _record_provenance(ResolutionProvenance(
+                kind="vector bank", model=model, site=site, source="probe",
+                resolved=str(path), corpus="v21" if in_v21 else None,
+                tree=_vector_tree_note(path, site), probe_index=index,
+                n_probed=len(probed), probed_paths=probed,
+                v21_root=None if V21_ROOT is None else str(V21_ROOT),
+                pin_record=None if FILED_PATHS is None else FILED_PATHS.record,
+                cross_vintage_fallback=V21_ROOT is not None and not in_v21,
+                notes=unpinned_note))
             return VectorBankRef(model=model, site=site, resolved=str(path),
-                                 corpus="v21" if _under_v21_root(path) else None,
+                                 corpus="v21" if in_v21 else None,
                                  probed_paths=probed)
+    _record_provenance(ResolutionProvenance(
+        kind="vector bank", model=model, site=site, source="absent",
+        tree="none — every probe missed (the target build has not landed)",
+        n_probed=len(probed), probed_paths=probed,
+        v21_root=None if V21_ROOT is None else str(V21_ROOT),
+        pin_record=None if FILED_PATHS is None else FILED_PATHS.record,
+        notes=unpinned_note))
     return VectorBankRef(model=model, site=site, probed_paths=probed)
 
 
@@ -1347,6 +1930,18 @@ def compose_pair(source_model: str, target_model: str,
                 f"until a frozen-corpus refit lands.")
     if arm is not None and arm != resolved_arm:
         flags.append("ARM OVERRIDDEN — diagnostic only; not a filable slot.")
+    if FILED_PATHS is not None:
+        #  The pin decides resolution, so say so on the slot itself rather than
+        #  leave a reader to infer it from paths. It also explains the sha:
+        #  `corpus_manifest_sha256` below is populated from a root VERIFIED this
+        #  run, and a pin verifies no root — so a wholly-v2.1-as-resolved slot
+        #  can carry the vintage label and no sha, which would otherwise read
+        #  as a bug rather than as the honest state.
+        flags.append(
+            f"FILED-PATHS PIN in force ({FILED_PATHS.record}): every artifact "
+            f"above was taken from that record's own `resolved` paths, not "
+            f"probed. corpus_manifest_sha256 is populated only from a root "
+            f"VERIFIED this run, which a pin does not perform.")
 
     #  Addendum G §G2(a): the corpus sha rides the â — but only when the WHOLE
     #  computation rode one vintage. All four artifacts, or none.
@@ -2282,6 +2877,16 @@ def run_gate(archive_dir: Path = ARCHIVE_ROOT,
             f"against the archive's own npz files. Clear the root "
             f"(`set_v21_root(None)`) and re-run; `--gate` and `--v21-root` are "
             f"mutually exclusive by design, not by accident")
+    if FILED_PATHS is not None:
+        raise CorpusVintageError(
+            f"the E1 gate cannot run while a filed-paths pin is set "
+            f"({FILED_PATHS.record}). Same trap, other mechanism: the gate's "
+            f"leg 2 asserts RESOLUTION PARITY between what this module resolves "
+            f"and the ARCHIVE's own npz files, and a pin answers from a filing "
+            f"record instead — parity would then be testing the pin, not the "
+            f"resolver. Clear it (`set_filed_paths(None)`) and re-run; "
+            f"`--gate` and `--filed-paths` are mutually exclusive at the CLI "
+            f"too, and this is the programmatic guard on the same trap.")
     manifest = archive_dir / "MANIFEST-worstpair-diag.sha256"
     digests, verified = verify_archive(manifest)
     archived = load_archived_glue(archive_dir / "wp_composition.py")
@@ -5064,6 +5669,298 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                   f"--alpha-companion is a SCORING input and argparse refuses "
                   f"it at filing time (exit {exc.code})")
 
+    print("== selftest 21: the resolution-provenance ledger (E4 A1) ==")
+    #  The ledger must (a) exist for EVERY resolve, hit or miss, (b) name the
+    #  tree AND the vintage that answered, (c) change nothing about what the
+    #  resolvers return, and (d) get LOUD exactly where a vintage confusion is
+    #  born — a resolve that falls THROUGH a set v2.1 root to a pre-v2.1 tree.
+    import tempfile as _tmp21
+
+    check(FILED_PATHS is None and V21_ROOT is None,
+          "the resolvers default to unpinned + no root — every existing caller "
+          "gets the resolution it always got")
+    probe_model = "phi-4"
+    probe_site = site_of_record(probe_model)
+    outer_ledger_before = len(resolution_provenance())
+    with provenance_scope() as scoped:
+        ref_hit = resolve_hub_map(probe_model, probe_site, "native",
+                                  FAMILY_OF_RECORD)
+        vec_hit = resolve_vector_bank(probe_model, probe_site)
+        ref_miss = resolve_hub_map(probe_model, probe_site, "native",
+                                   "proc_kNOPE")
+        check(len(scoped) == 3,
+              f"one provenance record per resolve, hits and misses alike "
+              f"({len(scoped)} for 3 resolves)")
+        check([r.kind for r in scoped]
+              == ["hub map", "vector bank", "hub map"],
+              "each record names the artifact KIND it resolved")
+        check(scoped[2].source == "absent" and scoped[2].resolved is None
+              and scoped[2].n_probed == len(ref_miss.probed_paths),
+              "an absent artifact is recorded as `absent` with everything "
+              "probed — N/A-AT-FILING is data here too, never a failure")
+        if ref_hit.available:
+            check(scoped[0].source == "probe"
+                  and scoped[0].resolved == ref_hit.resolved
+                  and scoped[0].corpus == ref_hit.corpus
+                  and scoped[0].tree == ref_hit.dir_note
+                  and scoped[0].probe_index is not None,
+                  f"a probe hit records WHICH TREE answered and its vintage: "
+                  f"{scoped[0].corpus} — {scoped[0].tree!s:.44}")
+            check(not scoped[0].cross_vintage_fallback
+                  and scoped[0].v21_root is None,
+                  "with no root set nothing is a cross-vintage fallback — the "
+                  "v1 regime is not news, and the ledger does not cry wolf")
+        else:
+            check(True, "phi-4's hub map is not banked in this checkout — the "
+                        "hit branch is exercised by the --candidates re-run")
+        check(vec_hit.available is (scoped[1].source == "probe"),
+              "the vector-bank record agrees with the ref it was built beside")
+    check(len(resolution_provenance()) == outer_ledger_before,
+          f"provenance_scope restores the previous ledger on exit — the 3 "
+          f"scoped records did NOT leak into it (still "
+          f"{outer_ledger_before} record(s))")
+
+    with _tmp21.TemporaryDirectory(prefix="composed_prov_") as td:
+        root21 = Path(td)
+        (root21 / V21_CORPUS_MANIFEST_RELPATH).parent.mkdir(parents=True)
+        (root21 / V21_CORPUS_MANIFEST_RELPATH).write_text(
+            '{"synthetic": "corpus-v2.1 stand-in for selftest 21"}\n')
+        sha21 = sha256_of(root21 / V21_CORPUS_MANIFEST_RELPATH)
+        with v21_root_scope(root21, expected_corpus_sha=sha21):
+            with provenance_scope() as under_root:
+                ref_fall = resolve_hub_map(probe_model, probe_site, "native",
+                                           FAMILY_OF_RECORD)
+                check(len(under_root) == 1, "one record, as ever")
+                if ref_fall.available:
+                    check(under_root[0].cross_vintage_fallback
+                          and under_root[0].corpus != "v21"
+                          and under_root[0].v21_root == str(root21),
+                          "a resolve that falls THROUGH a set v2.1 root to a "
+                          "pre-v2.1 tree is FLAGGED cross_vintage_fallback — "
+                          "the silent half of E4 anomaly A1, now sayable")
+                else:
+                    check(not under_root[0].cross_vintage_fallback,
+                          "an absent artifact is not a cross-vintage fallback "
+                          "— there was nothing to fall through to")
+    check(V21_ROOT is None, "selftest 21 leaves no root set")
+
+    print("== selftest 22: filed-paths mode — pinned, loud, never a fallback ==")
+    #  The mode E4 anomaly A1 asks for: scoring/null tooling pins resolution to
+    #  a record's OWN resolved paths. Every refusal below is the same refusal —
+    #  a pin that cannot answer must HALT, because the fallback it would take is
+    #  the probe order, which answers from the frozen tree the record is not.
+    import tempfile as _tmp22
+
+    with _tmp22.TemporaryDirectory(prefix="composed_pin_") as td:
+        root22 = Path(td)
+        pinned_map = root22 / "fits_v21_synthetic" / "fit_map.npz"
+        pinned_vec = root22 / "vectors" / "entropy_gradient_synthetic.npz"
+        for artifact in (pinned_map, pinned_vec):
+            artifact.parent.mkdir(parents=True, exist_ok=True)
+            artifact.write_bytes(b"synthetic artifact - selftest 22 fixture")
+
+        def _record(map_path: str, vec_path: str,
+                    second: Optional[dict[str, Any]] = None) -> Path:
+            block = {
+                "prediction_id": "composed-prediction/alpha→beta/native-k128",
+                "pair_id": "alphaL1->betaL2",
+                "hub_map_source": {"model": "alpha", "site": 1, "arm": "native",
+                                   "family": FAMILY_OF_RECORD,
+                                   "resolved": map_path, "corpus": "v21"},
+                "hub_map_target": {"model": "beta", "site": 2, "arm": "native",
+                                   "family": FAMILY_OF_RECORD,
+                                   "resolved": map_path, "corpus": "v21"},
+                "source_vector": {"model": "alpha", "site": 1, "path": vec_path},
+                "target_vector": {"model": "beta", "site": 2, "path": vec_path}}
+            rows: list[dict[str, Any]] = [
+                {"source": "alpha", "target": "beta", "arm": "native",
+                 "family": FAMILY_OF_RECORD, "composed_prediction": block}]
+            if second is not None:
+                rows.append(second)
+            out = root22 / f"record-{len(rows)}-{abs(hash(map_path)) % 9973}.json"
+            out.write_text(json.dumps({"predictions": rows}))
+            return out
+
+        rec22 = _record(str(pinned_map), str(pinned_vec))
+        pin = load_filed_paths(rec22)
+        check(pin.strict and pin.n_pinned == 4
+              and sorted(pin.hub_maps) == [f"alphaL1/native-{FAMILY_OF_RECORD}",
+                                           f"betaL2/native-{FAMILY_OF_RECORD}"]
+              and sorted(pin.vector_banks) == ["alphaL1", "betaL2"],
+              f"a pin keys on the resolver's FULL identity — "
+              f"{sorted(pin.hub_maps)} + {sorted(pin.vector_banks)}")
+        check(pin.sha256 == sha256_of(rec22),
+              "the pin carries the record's sha, so a scored read can prove "
+              "WHICH record it resolved from")
+
+        with filed_paths_scope(pin), provenance_scope() as pinned_prov:
+            ref = resolve_hub_map("alpha", 1, "native", FAMILY_OF_RECORD)
+            vec = resolve_vector_bank("beta", 2)
+            check(ref.resolved == str(pinned_map)
+                  and ref.probed_paths == [str(pinned_map)],
+                  "a pinned hub map is TAKEN, not probed — the probe order is "
+                  "never consulted, so the frozen tree cannot answer first")
+            check(vec.resolved == str(pinned_vec),
+                  "and so is a pinned vector bank")
+            check([p.source for p in pinned_prov] == ["pin", "pin"]
+                  and all(p.pin_record == str(rec22) for p in pinned_prov)
+                  and all("filed-paths pin" in p.tree for p in pinned_prov),
+                  "every pinned resolve is recorded as such, naming the record")
+            check(ref.corpus == "v21" and ref.dir_note.startswith("FILED-PATHS"),
+                  "the ref carries the vintage AS FILED and says on its face "
+                  "that it was pinned")
+            try:
+                resolve_hub_map("gamma", 3, "native", FAMILY_OF_RECORD)
+                check(False, "a strict pin must refuse an unfiled key")
+            except FiledPathsError as exc:
+                check("STRICT" in str(exc) and "A1" in str(exc),
+                      f"an unfiled key under a STRICT pin HALTs, naming the "
+                      f"gap it exists to prevent: {exc!s:.60}")
+            try:
+                run_gate()
+                check(False, "run_gate must refuse while a pin is set")
+            except CorpusVintageError as exc:
+                check("RESOLUTION PARITY" in str(exc),
+                      f"the E1 gate refuses a pin programmatically — parity "
+                      f"would test the pin, not the resolver: {exc!s:.60}")
+        check(FILED_PATHS is None, "filed_paths_scope restores the pin on exit")
+
+        #  THE A1 SHAPE ITSELF: the pin must beat a probe that WOULD HAVE
+        #  SUCCEEDED. `alpha`/`beta` above are synthetic and resolve to nothing,
+        #  so they cannot show this; a REGISTERED model whose frozen-tree map is
+        #  banked can, and that is exactly the case anomaly A1 describes — the
+        #  probe order answers, from the wrong vintage, and the pin must win.
+        unpinned_ref = resolve_hub_map(probe_model, probe_site, "native",
+                                       FAMILY_OF_RECORD)
+        if unpinned_ref.available:
+            over_block = {
+                "source": probe_model, "target": probe_model, "arm": "native",
+                "family": FAMILY_OF_RECORD,
+                "composed_prediction": {
+                    "pair_id": f"{probe_model}L{probe_site}-override",
+                    "hub_map_source": {
+                        "model": probe_model, "site": probe_site,
+                        "arm": "native", "family": FAMILY_OF_RECORD,
+                        "resolved": str(pinned_map), "corpus": "v21"},
+                    "source_vector": {"model": probe_model, "site": probe_site,
+                                      "path": str(pinned_vec)}}}
+            rec_over = root22 / "record-override.json"
+            rec_over.write_text(json.dumps({"predictions": [over_block]}))
+            with filed_paths_scope(load_filed_paths(rec_over)):
+                over = resolve_hub_map(probe_model, probe_site, "native",
+                                       FAMILY_OF_RECORD)
+            check(over.resolved == str(pinned_map)
+                  and over.resolved != unpinned_ref.resolved
+                  and str(pinned_map) not in unpinned_ref.probed_paths,
+                  f"THE A1 CASE: with the probe order able to answer "
+                  f"({unpinned_ref.resolved}), the pin wins and the record's "
+                  f"own artifact is used instead — a filed v2.1 leg cannot be "
+                  f"silently served from the frozen tree")
+        else:
+            check(True, f"{probe_model}'s frozen-tree map is not banked in this "
+                        f"checkout, so the pin-beats-probe case has no probe to "
+                        f"beat; the real proof is the --filed-paths re-run")
+
+        #  THE CENTRAL REFUSAL: a pinned artifact that has gone must HALT, and
+        #  must NOT quietly become whatever the probe order finds instead.
+        gone = root22 / "fits_v21_synthetic" / "vanished.npz"
+        gone.write_bytes(b"about to vanish")
+        rec_gone = _record(str(gone), str(pinned_vec))
+        pin_gone = load_filed_paths(rec_gone)
+        gone.unlink()
+        with filed_paths_scope(pin_gone):
+            try:
+                resolve_hub_map("alpha", 1, "native", FAMILY_OF_RECORD)
+                check(False, "a vanished pinned artifact must HALT")
+            except FiledPathsError as exc:
+                check("will NOT fall back" in str(exc) and "M21b" in str(exc),
+                      f"a pinned artifact that is gone HALTs and REFUSES the "
+                      f"probe-order fallback: {exc!s:.60}")
+
+        #  Non-strict: unfiled keys probe, but never silently.
+        pin_loose = load_filed_paths(rec22, strict=False)
+        with filed_paths_scope(pin_loose), provenance_scope() as loose_prov:
+            loose = resolve_hub_map(probe_model, probe_site, "native",
+                                    FAMILY_OF_RECORD)
+            ordinary = [str(fit_path_for(d.path, HUB_MODEL, HUB_SITE_OF_RECORD,
+                                         probe_model, probe_site, "native",
+                                         FAMILY_OF_RECORD))
+                        for d in hub_map_dirs(probe_model)]
+            check(bool(loose.probed_paths)
+                  and loose.probed_paths == ordinary[:len(loose.probed_paths)],
+                  f"a non-strict pin lets an unfiled key probe the ORDINARY "
+                  f"list, in order ({len(loose.probed_paths)} of "
+                  f"{len(ordinary)} probed before it stopped)")
+            check(loose_prov[0].source == "probe"
+                  and any("UNPINNED" in n for n in loose_prov[0].notes),
+                  "and the resolve is RECORDED as unpinned — permitted, "
+                  "warned, never silent")
+
+        #  A record that files two different paths for one key cannot be pinned.
+        conflict_block = {
+            "source": "alpha", "target": "gamma", "arm": "native",
+            "family": FAMILY_OF_RECORD,
+            "composed_prediction": {
+                "pair_id": "alphaL1->gammaL3",
+                "hub_map_source": {"model": "alpha", "site": 1, "arm": "native",
+                                   "family": FAMILY_OF_RECORD,
+                                   "resolved": str(pinned_vec), "corpus": "frozen"},
+                "source_vector": {"model": "alpha", "site": 1,
+                                  "path": str(pinned_vec)}}}
+        rec_conflict = _record(str(pinned_map), str(pinned_vec), conflict_block)
+        try:
+            load_filed_paths(rec_conflict)
+            check(False, "a record filing two paths for one key must HALT")
+        except FiledPathsError as exc:
+            check("TWO different" in str(exc),
+                  f"a record that files two artifacts under one key HALTs — a "
+                  f"pin will not choose: {exc!s:.60}")
+
+        bad_vintage = root22 / "record-bad-vintage.json"
+        bad_vintage.write_text(json.dumps({"predictions": [{
+            "source": "alpha", "target": "beta", "arm": "native",
+            "family": FAMILY_OF_RECORD,
+            "composed_prediction": {
+                "pair_id": "alphaL1->betaL2",
+                "hub_map_source": {
+                    "model": "alpha", "site": 1, "arm": "native",
+                    "family": FAMILY_OF_RECORD, "resolved": str(pinned_map),
+                    "corpus": "corpus-v3-from-the-future"}}}]}))
+        try:
+            load_filed_paths(bad_vintage)
+            check(False, "a record claiming an unknown vintage must HALT")
+        except FiledPathsError as exc:
+            check("not one of the vintages" in str(exc),
+                  f"a vintage label this module cannot name HALTs as a "
+                  f"FiledPathsError, not as a raw ValidationError: {exc!s:.60}")
+
+        empty = root22 / "record-empty.json"
+        empty.write_text(json.dumps({"predictions": [
+            {"source": "a", "target": "b", "arm": "native",
+             "family": FAMILY_OF_RECORD, "star_prediction": {"predicted": 0.1}}]}))
+        try:
+            load_filed_paths(empty)
+            check(False, "a record with no composed resolution must HALT")
+        except FiledPathsError as exc:
+            check("would be empty" in str(exc),
+                  f"a star-only record cannot be a composed pin: {exc!s:.60}")
+
+        for argv22, why in (
+                (["--gate", "--filed-paths", str(rec22)],
+                 "--gate and --filed-paths are MUTUALLY EXCLUSIVE"),
+                (["--candidates", "--filed-paths", str(rec22),
+                  "--v21-root", str(root22)],
+                 "--filed-paths and --v21-root are MUTUALLY EXCLUSIVE"),
+                (["--candidates", "--filed-paths-allow-unpinned"],
+                 "--filed-paths-allow-unpinned needs a pin to relax")):
+            try:
+                main(argv22)
+                check(False, f"{why} — argparse must refuse")
+            except SystemExit as exc:
+                check(exc.code == 2, f"{why} (argparse exit {exc.code})")
+        check(FILED_PATHS is None and V21_ROOT is None,
+              "no refused CLI combination left a pin or a root set")
+
     print(f"\nselftest: {len(failures)} failure(s)")
     return 1 if failures else 0
 
@@ -5098,6 +5995,27 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     default=V21_CORPUS_MANIFEST_RELPATH,
                     help=f"path of the vintage manifest RELATIVE to --v21-root "
                          f"(default {V21_CORPUS_MANIFEST_RELPATH})")
+    ap.add_argument("--filed-paths", type=Path, default=None,
+                    help="a FILED prediction record whose own `resolved` paths "
+                         "PIN resolution (E4 anomaly A1). Every hub map and "
+                         "vector is taken from the record instead of probed, so "
+                         "scoring and null tooling re-derive the artifacts the "
+                         "record was filed from rather than whatever the probe "
+                         "order finds. A pinned artifact that is gone HALTS; a "
+                         "key the record does not file HALTS unless "
+                         "--filed-paths-allow-unpinned. MUTUALLY EXCLUSIVE WITH "
+                         "--gate and --v21-root.")
+    ap.add_argument("--filed-paths-allow-unpinned", action="store_true",
+                    help="let keys the record does not file fall through to the "
+                         "normal probes. Each one is WARNED and recorded in the "
+                         "provenance ledger as UNPINNED — never silent, because "
+                         "a probe answers from the frozen tree first and the "
+                         "record was filed from v2.1.")
+    ap.add_argument("--provenance-out", type=Path, default=None,
+                    help="write the resolution-provenance ledger here: which "
+                         "tree answered every resolve, and which vintage. A "
+                         "SEPARATE artifact from --out on purpose — the "
+                         "composed readout's shape does not move for it.")
     ap.add_argument("--directional-constants", type=Path, default=None,
                     help=f"a {SCHEMA_DIRECTIONAL_CONSTANTS_V1} readout of "
                          f"per-model c_out/c_in (ADDENDUM 2026-07-29-H). With "
@@ -5166,6 +6084,34 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "leg silently moves onto v2.1 objects — the gate would fail for a "
             "reason that has nothing to do with fidelity, or pass on the wrong "
             "objects. Run the gate on its own, then run the v2.1 work.")
+    #  THE SAME TRAP, THE OTHER MECHANISM. A pin answers resolution from a
+    #  FILING RECORD; the gate's parity leg exists to compare this module's
+    #  resolution against the ARCHIVE's, so under a pin it would test the pin.
+    #  `run_gate` guards this too — one guard can be bypassed programmatically.
+    if args.gate and args.filed_paths is not None:
+        ap.error(
+            "--gate and --filed-paths are MUTUALLY EXCLUSIVE. The E1 gate is a "
+            "FIXED-VINTAGE proof about the archived v1 operationalization and "
+            "asserts RESOLUTION PARITY against the archive's own npz files; a "
+            "filed-paths pin replaces resolution with a record's filed paths, "
+            "so the parity leg would be testing the pin rather than the "
+            "resolver. Run the gate on its own, then run the pinned work.")
+    #  A pin and a v2.1 root are two different answers to 'which artifact'. The
+    #  pin wins for keys it files and the root would silently decide the rest,
+    #  which is a mixed regime nobody asked for — refuse instead of ranking them.
+    if args.filed_paths is not None and args.v21_root is not None:
+        ap.error(
+            "--filed-paths and --v21-root are MUTUALLY EXCLUSIVE. Both decide "
+            "which artifact answers a resolve: the pin names it outright, the "
+            "root re-orders the probes. Combined, pinned keys would come from "
+            "the record and unpinned ones from the root — a mixed regime whose "
+            "vintage is a per-key fact, which is exactly what E4 anomaly A1 was "
+            "about. Pin to the record, or point at the root; not both.")
+    if args.filed_paths_allow_unpinned and args.filed_paths is None:
+        ap.error(
+            "--filed-paths-allow-unpinned only means anything with "
+            "--filed-paths: it relaxes a pin, and with no pin every resolve "
+            "probes already.")
     if (args.score_record is None) != (args.observed is None):
         ap.error(
             "--score-record and --observed go together. Scoring is a DESK ACT "
@@ -5220,6 +6166,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             print(f"\nVINTAGE HALT — {exc}")
             return 1
 
+    if args.filed_paths is not None:
+        try:
+            set_filed_paths(load_filed_paths(
+                args.filed_paths, strict=not args.filed_paths_allow_unpinned))
+        except FiledPathsError as exc:
+            #  An EXPECTED halt: the record cannot be read as a pin.
+            print(f"\nFILED-PATHS HALT — {exc}")
+            return 1
+
     readout = ComposedReadout(generated=date.today().isoformat(), hub=HUB_MODEL,
                               hub_site=HUB_SITE_OF_RECORD, family=args.family,
                               v21_root=None if V21_ROOT is None else str(V21_ROOT),
@@ -5256,7 +6211,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             status = 1
 
     if args.resolution_sweep:
-        sweep = registry_resolution_sweep(args.family)
+        try:
+            sweep = registry_resolution_sweep(args.family)
+        except FiledPathsError as exc:
+            print(f"\nFILED-PATHS HALT — {exc}")
+            return 1
         print(f"\n{'registered model':<28} {'site':>5} {'arm':<7} {'hub map':<8} "
               f"{'vectors':<8} on-disk  resolved")
         for row in sweep.rows:
@@ -5280,7 +6239,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             status = 1
 
     if args.candidates:
-        computed = run_candidates(args.family, args.pairs_json)
+        try:
+            computed = run_candidates(args.family, args.pairs_json)
+        except FiledPathsError as exc:
+            print(f"\nFILED-PATHS HALT — {exc}")
+            return 1
         readout.predictions.extend(computed.predictions)
         readout.na_at_filing.extend(computed.na_at_filing)
         total = len(computed.predictions) + len(computed.na_at_filing)
@@ -5363,8 +6326,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.source_model:
         if not args.target_model:
             raise SystemExit("--source-model needs --target-model")
-        one = compose_pair(args.source_model, args.target_model,
-                           family=args.family, arm=args.arm)
+        try:
+            one = compose_pair(args.source_model, args.target_model,
+                               family=args.family, arm=args.arm)
+        except FiledPathsError as exc:
+            print(f"\nFILED-PATHS HALT — {exc}")
+            return 1
         if isinstance(one, NotFilable):
             readout.na_at_filing.append(one)
             print(f"{one.pair_id}: N/A-AT-FILING (missing "
@@ -5442,6 +6409,36 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         except ScoringError as exc:
             print(f"\nSCORING HALT — {exc}")
             return 1
+
+    #  THE RESOLUTION-PROVENANCE LEDGER (E4 anomaly A1). Printed only when the
+    #  operator asked for a pin or for the artifact: the no-root stdout of every
+    #  existing mode is a frozen surface (the E1 gate and the --candidates
+    #  column are re-run byte-for-byte at review), so this reports on demand and
+    #  is otherwise carried as data.
+    if args.filed_paths is not None or args.provenance_out is not None:
+        prov = provenance_readout()
+        print(f"\nresolution provenance: {prov.n_resolves} resolve(s) — "
+              + " · ".join(f"{k} {v}" for k, v in sorted(prov.n_by_source.items()))
+              + " | vintage " + " · ".join(f"{k} {v}" for k, v
+                                           in sorted(prov.n_by_corpus.items())))
+        if prov.filed_paths_record:
+            assert FILED_PATHS is not None
+            print(f"  pinned to {prov.filed_paths_record} (sha "
+                  f"{FILED_PATHS.sha256[:12]}…, {len(FILED_PATHS.hub_maps)} hub "
+                  f"map(s) + {len(FILED_PATHS.vector_banks)} vector bank(s), "
+                  f"strict={FILED_PATHS.strict})")
+        if prov.n_cross_vintage_fallback:
+            print(f"  CROSS-VINTAGE FALLBACK on {prov.n_cross_vintage_fallback} "
+                  f"resolve(s): a corpus-v2.1 root was in force and these fell "
+                  f"THROUGH it to a pre-v2.1 tree")
+        if prov.n_absent:
+            print(f"  {prov.n_absent} resolve(s) found nothing (N/A-AT-FILING "
+                  f"or an un-landed target build) — data, not a failure")
+        if args.provenance_out:
+            args.provenance_out.parent.mkdir(parents=True, exist_ok=True)
+            args.provenance_out.write_text(prov.model_dump_json(indent=1))
+            logger.info("wrote %s (%d resolve record(s))", args.provenance_out,
+                        prov.n_resolves)
 
     payload = readout.model_dump_json(indent=1)
     if args.out:
