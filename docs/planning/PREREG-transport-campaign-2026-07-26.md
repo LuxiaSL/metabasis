@@ -729,3 +729,42 @@ defective first mirror is deleted by ruling; the corrected mirror
 re-materializes from the fp8 checkpoint under the corrected tool and
 becomes the dequantization of record (its manifest sha recorded in
 the desk ledger at acceptance).
+
+### ADDENDUM 2026-07-29-H — adoption of the Addendum-C directional star — ratified by Luxia 2026-07-29
+
+Invokes Addendum C item 2 exactly as pre-registered: the directional
+star **â(A→B) = c_A^out · c_B^in** is ADOPTED for not-yet-filed
+predictions, beginning with the next filed batch. Trigger evidence
+on record (all dated, all banked): the measured orientation
+asymmetry in DIRECT fits on corpus-v2.1 — â(3b→8b)/â(8b→3b) =
+1.320 at the family of record (1.325 raw) — which the symmetric
+form c_A·c_B cannot express by construction; the symmetric v2.1
+column's held-out battery (1/3 native, 0/3 raw, module verdict
+USABLE_FOR_PREDICTIONS=false under the strict reading); and the
+composed-path identity â_comp(A→B)/â_comp(B→A) = ceil_B/ceil_A
+(the chart-decomposition finding), of which the directional star is
+the designated scalar-form analog.
+
+Terms, per C2 and this ratification:
+1. Adoption affects NOT-YET-FILED slots only; every filed band and
+   scored verdict stands. This is model selection between the two
+   pre-named candidates, not a patch.
+2. **The symmetric star CONTINUES FILING unchanged** per Addendum E
+   (its G-star-hit gate, budget, and nulls are its own; its record
+   completes on its own frozen terms — expected misses are
+   documented, not suppressed).
+3. The directional star files as a third predictor column beside
+   the symmetric and composed, scored on structurally identical
+   terms: ±.05 absolute bands frozen at filing, near-zero carve-out
+   at |pred| < .08, per-model failure accounting. Its aggregate
+   gate mirrors G-star-hit over directional-filed-and-scored slots.
+4. **Addendum D ACTIVATES** (its scope trigger is this adoption):
+   the constant-α companion and α-permutation null are reported at
+   every scoring read of the directional column, under Addendum D's
+   frozen margins and interpretive rule.
+5. Derivation: c^out and c^in are hub-derived on corpus-v2.1 from
+   BOTH fit directions (hub→M and M→hub), anchored per the §3 hub
+   protocol; the system reports BOTH its designated anchor check
+   AND the full held-out battery the v2.1 anchor legs enable,
+   before hosting constants. Every quoted constant carries its
+   corpus manifest sha (G2).
