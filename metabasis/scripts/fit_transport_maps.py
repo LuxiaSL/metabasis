@@ -350,7 +350,137 @@ SITES = {"3b": (13, 14, 18), "8b": (14, 16, 18), "qwen-7b": (19, 21, 23),
          # — the sparsity raises the CEILING, it does not move the SITE. The raw
          # arm is healthy here and in fact beats native (.7248), unlike the Qwen
          # raw arms affected by the corpus finding.
-         "mixtral-8x7b-instruct-v0.1": (13, 15, 17)}   # ⋆ L15
+         "mixtral-8x7b-instruct-v0.1": (13, 15, 17),   # ⋆ L15
+         # qwen3-30b-a3b (roster row 18, the QWEN-FAMILY MoE — the freeze's
+         # controlled family-matched sparsity comparison):
+         # RULED DIRECTLY BY LUXIA 2026-07-29 (morning), AND THE PROVENANCE OF
+         # THIS RULING IS NOT THE SAME AS THE THREE ROWS ABOVE. Those were desk
+         # rulings under her overnight delegation 2. This one is HERS FIRST-HAND:
+         # the overnight pass PARKED this node — the delegated rule requires a
+         # clear dominant site and the table did not supply one (rank-1 FLIPS
+         # across the robustness columns) — so the enactor hit the ambiguity
+         # clause honestly, escalated with the table, and Luxia adjudicated it
+         # off the parked evidence. Do not re-file this as a delegated ruling.
+         # Readout of record `site_evidence_qwen3-30b-a3b_20260729-075641.json`,
+         # sha `13527972…`, 40 rows / 0 problems, strict (fit-local) norms,
+         # FROZEN-v1 evidence basis (corpus `a6712ca0…`). This row was
+         # SCAN-REGISTRY ONLY until now: a FIRST registration, not a re-ranking,
+         # so NOTHING retires and no refusal check accompanies it.
+         # L38 is the site of record ⋆ and L35 is the robustness site.
+         # THE CANDIDATE SET WAS AMENDED, ARITHMETICALLY AND ON THE RECORD
+         # BEFORE ANY â EXISTED: the campaign rule (r²-top-2 overall ∪ r²-top-3
+         # at depth ≥ .50, scanned sites only) collapsed to THREE here because
+         # this node's top r² sites are ALL deep (L38 .7155 d.79 · L26 .7118
+         # d.54 · L35 .6936 d.73). The desk amended it — those 3 ∪ top-2 r² at
+         # depth < .50, giving L22 (.6853, d.458) and L19 (.6698, d.396) — to
+         # restore the shallow/deep contrast so the r²/â inversion could be
+         # TESTED rather than assumed absent. Purely arithmetic, dated, ledgered,
+         # no â peeked. Sites of evidence: L19, L22, L26, L35, L38.
+         # THE EVIDENCE, so nobody re-derives this from the r² curve:
+         #  · THE TOP PAIR IS UNANIMOUS, THE ORDER WITHIN IT IS NOT. {L35, L38}
+         #    take rank-1 and rank-2 in ALL FOUR robustness columns; rank-1
+         #    FLIPS 2–2:
+         #      native/k128/L14   L35 > L38 > L26 > L22 > L19   (L35 by +.0010)
+         #      native/k32 /L14   L35 > L38 > L22 > L19 > L26   (L35 by +.0216)
+         #      raw   /k128/L14   L38 > L35 > L22 > L26 > L19   (L38 by +.0025)
+         #      native/k128/L16   L38 > L35 > L26 > L22 > L19   (L38 by +.0094)
+         #    L19 is last in three of the four columns (L26 falls last in k32).
+         #  · THE STRONGEST FACT AGAINST THE RULING, STATED FIRST SO IT IS NEVER
+         #    DISCOVERED LATER AS A GOTCHA: the parked table's summary lines
+         #    named only THREE of the four rank-1 margins (+.0010 native/L14 for
+         #    L35, +.0025 raw and +.0094 rebuilt-L16 for L38). The FOURTH column,
+         #    native/k32, ALSO ranks L35 first — and by +.0216, the LARGEST
+         #    rank-1 margin anywhere on this table, ~21× the +.0010 the ruling
+         #    reads as noise. So the flip is 2–2 on columns, not 1–3, and L35's
+         #    best column beats L38's best column. Why that does not overturn
+         #    L38, on the evidence rather than by deference: (a) k32 is the
+         #    LOW-RANK ROBUSTNESS family, not the canonical cell — every constant
+         #    of record in this campaign is native::proc_k128, and the parity
+         #    gate is a k128 proof; (b) that column is the NOISIEST on the table
+         #    by its own internal evidence — it is the only one whose ordering
+         #    breaks depth monotonicity, dropping L26 to LAST beneath L19, which
+         #    no k128 column does; (c) L38 takes â/ceiling in ALL THREE k128
+         #    columns (.5186 / .4717 / .6024 against L35's .5004 / .4567 /
+         #    .5651), so on the canonical family the ruling is not close.
+         #  · WHAT LUXIA'S RULING RESTS ON: L38 carries the node's best coherence
+         #    (.750, the maximum over the five-site FD set, against .442–.638
+         #    elsewhere), its best â/ceiling (.6024, rebuilt-L16), and the
+         #    depth→coherence→â law that all four ruled nodes follow —
+         #    r(coherence, â) = +.909 / +.920 here. It also holds the CLEANEST FD
+         #    gate on the grid (best_median_rel_error .00199 against
+         #    .00579–.01606), which is independent of the â ranking and points
+         #    the same way.
+         #  · NO r²/â INVERSION ON THIS NODE, AND IT IS THE ONLY ONE: r(r², â) =
+         #    +.579 / +.580 — mildly POSITIVE, where the inverting nodes run
+         #    −.41 to −.96. All 40 rows clear their null floors; NOTHING is
+         #    sub-null anywhere on this table, which is also unique among the
+         #    four ruled nodes. THE READING, AND IT IS NOT "MoE IS DIFFERENT":
+         #    the four inversions on record (3.1-70B L17 · gemma3-27b L13 ·
+         #    3.3-70B L17 · 405B L43) are all DENSE nodes whose r² peak or
+         #    near-peak sits in the SHALLOW half of the grid, so r² crowns a
+         #    shallow site that â then refutes. Here the r² PEAK **IS** the deep
+         #    site — L38 tops the curve from all three hub sources (.7155 8bL14 /
+         #    .7015 8bL16 / .6945 8bL18) at fractional depth .792, and the whole
+         #    shallow half tops out at .6853 below both deep sites. There is no
+         #    shallow r² trap on this node, so there is nothing to invert. The
+         #    discriminating variable is WHERE THE r² PEAK SITS, not the family
+         #    or the sparsity; treat "the inversion is a dense/Llama phenomenon"
+         #    as a description of the sample, never as a mechanism. (Note the
+         #    tally is 3 Llama + 1 Gemma — it was never Llama-only.)
+         #  · MoE FD NOISE IS PRESENT AS EXPECTED — the mixtral precedent. All
+         #    5/5 gates PASS with `direction_specific = True`, sign consistency
+         #    20/20 and control ratios 11.4–27.3, but the accepted eps rung is
+         #    JAGGED across sites (.1 / .01 / .005 / .03 / .03) and the
+         #    best-rung errors scatter .002–.016 rather than sitting on one
+         #    scale. Expect that from a top-8-of-128 router and do not read a
+         #    jagged rung as a failing gate.
+         #  · THE CURVE IS THE FLATTEST OF THE OVERNIGHT QUARTET — r² span .1020
+         #    (8bL14) against .30/.38 on the dense nodes. That is exactly the
+         #    regime where r² carries the least information and the â evidence
+         #    carries the most, and it is why this ruling turned on coherence and
+         #    â/ceiling rather than on the curve.
+         # FAMILY-MATCHED OBSERVATION, RECORDED WITH ITS CONFOUNDS NAMED: this
+         # node has EXACTLY the same layer count (48) as its dense family-mate
+         # qwen2.5-14b-instruct, so for once the comparison is available
+         # site-for-site and not only by fractional depth — and the sites
+         # DISAGREE: dense L29 (depth .604) against MoE L38 (.792). That is the
+         # OPPOSITE of the mixtral row, where the MoE and its dense mate share
+         # both site and depth (L15 of 32 each) and the sparsity raised only the
+         # ceiling. Two MoE rows, two different answers to "does sparsity move
+         # the site". CONFOUNDS, so this is an observation and not a claim: the
+         # two Qwen nodes are different GENERATIONS (qwen3 vs qwen2.5), different
+         # parameter scales (30B-A3B vs 14B dense) and different widths (2048 vs
+         # 5120); mixtral/mistral is the better-controlled pair. What is solid is
+         # that the whole Qwen family rules DEEP — .604 / .719 / .722 dense and
+         # .792 here — so the MoE site is in-band for its family either way.
+         # ARCHITECTURE NOTE: Qwen3MoeConfig with NO `layer_types` — uniform full
+         # attention on every one of the 48 layers, confirmed per-site in the
+         # readout (all five sites "full"). 128 experts, top-8 routed at EVERY
+         # layer; d_model 2048. As on the Llama rows there is no local/global
+         # contrast to read, so depth and coherence are the only structure
+         # available — and here they are also sufficient.
+         # ⚠ CROSS-NODE COMPARABILITY CAVEAT, AND IT RIDES EVERY â/ceiling NUMBER
+         # THIS ROW PRODUCES: `ceiling_random_q95` is ≈ .275 here (k128, d=2048)
+         # against ≈ .136 on the d=8192 nodes. That is a pure √(k/d) artifact of
+         # the narrow residual stream, not a property of the model's
+         # transportability, and the arithmetic checks out both ways: the width
+         # ratio 8192/2048 = 4 predicts a q95 ratio of √4 = 2, and .275/2 = .1375
+         # lands on the wide-node .136; within this readout the k32 family sits at
+         # ≈ .148 against k128's ≈ .275, the same √(k) direction (the k check is
+         # looser than the d check — .275/2 = .1375 vs .148 observed — because a
+         # q95 order statistic is only asymptotically √(k/d)). NEVER compare â or
+         # â/ceiling across nodes of different width without stating this.
+         # Both 35 and 38 are ON the model's own computed 12-site scan grid
+         # (7, 10, 13, 16, 19, 22, 26, 29, 32, 35, 38, 41 — no
+         # `scan_grid_extension` needed, unlike gemma), so the ratification
+         # invariant is satisfied by construction — a curve-visited pair
+         # re-ranked by â evidence, never a fiat grid.
+         # THE VECTOR SIDE IS OPEN: the five site-evidence vectors are FROZEN-v1
+         # SELECTION instruments and never file. A fresh FD-gated corpus-v2.1
+         # L38 build + L35/L38 v2.1 state banks + their hub fits are REQUIRED
+         # before any qwen3 slot files — the re-bank is QUEUED, census-first. See
+         # `read_composed_predictions.SITE_OF_RECORD`.
+         "qwen3-30b-a3b": (35, 38)}                    # ⋆ L38 primary, L35 robustness
 
 # Every model key the CLIs will accept. SITES = models whose FIT grid is fixed;
 # metabasis.roster.SCAN_GRIDS = the 12-site alignment-curve scan grids (prereg §4,

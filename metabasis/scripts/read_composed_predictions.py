@@ -530,6 +530,49 @@ SITE_OF_RECORD: dict[str, int] = {
     # the full rationale; the two registries must agree and are cross-checked in
     # selftest 7).
     "mixtral-8x7b-instruct-v0.1": 15,
+    # qwen3-30b-a3b: L38, RULED DIRECTLY BY LUXIA 2026-07-29 (morning) — and the
+    # provenance differs from the three rows above, which were desk rulings under
+    # her overnight delegation 2. The overnight pass PARKED this node on the
+    # delegated rule's ambiguity clause (rank-1 flips across the robustness
+    # columns, so no clear dominant); she adjudicated it first-hand off the
+    # parked evidence table. Readout of record
+    # `site_evidence_qwen3-30b-a3b_20260729-075641.json`, sha `13527972…`,
+    # 40 rows / 0 problems, strict (fit-local) norms, frozen-v1 evidence basis
+    # (amended candidate set {19, 22, 26, 35, 38}; the amendment is arithmetic
+    # and was ledgered BEFORE any â existed). L38 ⋆ primary (fractional depth
+    # .792), L35 robustness (.729).
+    # The top PAIR {L35, L38} is unanimous rank-1/rank-2 in all four robustness
+    # columns; rank-1 itself flips 2–2 — L35 leads both NATIVE columns (+.0010
+    # k128, +.0216 k32) and L38 leads raw k128 (+.0025) and the rebuilt-L16 hub
+    # (+.0094). The ruling crowns L38 on the node's best coherence (.750), its
+    # best â/ceiling (.6024 rebuilt-L16, and the best in all three k128 columns),
+    # its cleanest FD gate (.00199), and the depth→coherence→â law all four ruled
+    # nodes follow (r(coherence, â) = +.909/+.920). The k32 column's larger
+    # margin is on the record in `fit_transport_maps.SITES` together with the
+    # reasons it does not overturn the k128 read — go there before re-opening
+    # this, and note it is the only column whose ordering breaks depth
+    # monotonicity.
+    # THIS NODE IS THE CAMPAIGN'S NON-INVERSION COUNTEREXAMPLE: r(r², â) =
+    # +.579/+.580, mildly POSITIVE, and nothing on the 40-row table is sub-null.
+    # The reason is that its r² peak IS the deep site (L38 tops the curve from
+    # all three hub sources), so unlike the four inverting dense nodes there is
+    # no shallow r² trap to fall into. That makes L38 the one site of record in
+    # the campaign that an r² curve WOULD have found — which is a fact about this
+    # node's curve, not a licence to crown sites from r² anywhere else.
+    # ⚠ CROSS-NODE COMPARABILITY: ceiling_random_q95 ≈ .275 here (k128, d=2048)
+    # vs ≈ .136 on the d=8192 nodes — a pure √(k/d) artifact of the narrow
+    # residual stream. Any qwen3 â/ceiling read downstream states this before it
+    # is set beside a wide node.
+    # ⚠ THE VECTOR GAP IS OPEN, AND IT IS THE BINDING ONE. NO corpus-v2.1
+    # entropy-gradient vector exists for this node at ANY site: the five
+    # site-evidence vectors are FROZEN-v1 SELECTION instruments that never file.
+    # Before ANY qwen3 slot files, a fresh FD-gated corpus-v2.1 L38 build +
+    # L35/L38 v2.1 state banks + their hub fits are REQUIRED. The re-bank is
+    # QUEUED, census-first. Until it lands `--resolution-sweep` reports this
+    # model as a NAMED GAP at L38 — the honest state, not a regression — and
+    # `--candidates` must NOT enumerate it (there is no collection vectors dir at
+    # all; see also `vector_bank_paths`).
+    "qwen3-30b-a3b": 38,
 }
 
 #: Checkpoint identity for models NOT in `metabasis.roster.ROSTER` (which holds
@@ -4563,6 +4606,19 @@ def selftest() -> int:                                   # noqa: C901 — a chec
           "evidence table `04f2a2c4…`; L107 robustness). Unanimous rank-1 in "
           "all four robustness columns; the r² peak L43 ranks 3rd/4th on â and "
           "goes sub-null on the rebuilt-L16 hub — never re-derive this from r²")
+    #  No retired-site refusal check rides with qwen3-30b-a3b either, and for the
+    #  third time the same reason: SCAN-REGISTRY ONLY before the ruling, so there
+    #  is no prior registration to retire. Only gemma's L36 and the 3.1-70B's L17
+    #  were ever registered-then-MOVED, and only they get refusal checks; a first
+    #  registration has nothing to refuse. Note this is also NOT a delegated
+    #  ruling — Luxia ruled it first-hand off a table the overnight pass parked.
+    check(site_of_record("qwen3-30b-a3b") == 38,
+          "qwen3-30b-a3b resolves at its RULED site L38 (Luxia DIRECTLY, "
+          "2026-07-29 morning, off the PARKED five-site â evidence table "
+          "`13527972…`; L35 robustness). The top pair {L35, L38} is unanimous "
+          "but rank-1 flips 2–2, so this site is a RULING on evidence, never a "
+          "table maximum — and it is the campaign's one non-inverting node "
+          "(r(r²,â) = +.58), because here the r² peak IS the deep site")
     check(site_of_record("phi-3.5-mini-instruct") == 13,
           "phi-3.5-mini site of record is L13 (double-humped curve, 4-site grid)")
     try:
