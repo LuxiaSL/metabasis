@@ -124,6 +124,34 @@ objects. Two independent guards, because one of them being bypassed
 programmatically is exactly how this trap gets sprung.
 
 ────────────────────────────────────────────────────────────────────────────────
+THE DIRECTIONAL STAR — A THIRD PREDICTOR COLUMN (ADDENDUM 2026-07-29-H)
+────────────────────────────────────────────────────────────────────────────────
+Addendum H invokes Addendum C item 2 and ADOPTS the directional star
+
+    â(A→B) = c_A^out · c_B^in
+
+for NOT-YET-FILED slots. It is a third column beside the symmetric star and the
+composed path, on structurally identical terms (H item 3): ±.05 absolute bands
+frozen at filing, near-zero carve-out at |pred| < .08, corpus sha per G2. **The
+symmetric star column is UNTOUCHED** (H item 2 — it keeps filing per Addendum E
+on its own frozen terms), and nothing in this module recomputes, moves or
+re-derives it.
+
+This module does not FIT c^out / c^in — that derivation is the hub protocol's
+(H item 5, both fit directions on corpus-v2.1). It CONSUMES a banked directional
+constants readout and emits filable slots:
+
+    `directional-prediction/<source>→<target>/<arm>-k128`
+
+The readout is read against a NAMED, VERSIONED schema
+(`directional-constants-readout/v1`, `load_directional_constants`) and every
+departure from it is a HALT whose message states exactly what was expected —
+the schema is a contract with the derivation lane, not a shape to be inferred.
+Availability mirrors E1's arm rule at scalar order: a slot files only where the
+source has a c^out AND the target a c^in **in the pair's applicable arm**; where
+it does not, the slot is `N/A-AT-FILING` and is never proxied from another arm.
+
+────────────────────────────────────────────────────────────────────────────────
 SCORING — A SEPARATE, DESK-INITIATED ACT
 ────────────────────────────────────────────────────────────────────────────────
 `--score-record <filed record> --observed <desk-supplied â>` emits a
@@ -135,8 +163,21 @@ makes the ARTIFACT; the desk does the scoring act and rules on what it means.
 Rules are prereg §3 + Addendum E §E2 verbatim: frozen ±.05 absolute band as
 FILED (never recomputed, never moved), |predicted| < .08 scored MAGNITUDE-ONLY
 (sign unscored), the ±.04 hit reported descriptively beside. Campaign gates
-(G-star-hit / G-comp-hit) are NOT evaluated here — they are aggregates over the
-whole 190 and are the desk's read.
+(G-star-hit / G-comp-hit / the H-item-3 directional gate) are NOT evaluated here
+— they are aggregates over the whole 190 and are the desk's read.
+
+Since Addendum H the scored record carries THREE predictor columns. The E3 2×2
+is preserved verbatim (`head_to_head`, star vs composed — continuity: the same
+field, the same field names, the same denominators) and the three-predictor
+reads are ADDED beside it: every predictor PAIR's 2×2 (`head_to_head_pairwise`)
+and the per-slot hit-set census across all three (`head_to_head_three_way`).
+
+Addendum D ACTIVATES with H (its scope trigger is exactly this adoption). Its
+constant-α companion is NEVER auto-computed here: ᾱ is a grand mean over the
+scored set that only the desk can form, and the ceiling/calibration terms are
+the adopted gauge's. Supply it with `--alpha-companion` against the named schema
+`constant-alpha-companion/v1`; supply nothing and the scored record NAMES the
+companion as OWED, with D2/D3's frozen text attached.
 
 Run (repo root, PYTHONPATH=.):
   python -m metabasis.scripts.read_composed_predictions --selftest
@@ -145,9 +186,13 @@ Run (repo root, PYTHONPATH=.):
       --out /tmp/claude-output/composed_candidates.json
   python -m metabasis.scripts.read_composed_predictions --candidates \
       --v21-root <v2.1 re-bank root> --out /tmp/claude-output/composed_v21.json
+  python -m metabasis.scripts.read_composed_predictions --candidates \
+      --directional-constants <directional constants readout>.json \
+      --directional-out /tmp/claude-output/directional_slots.json
   python -m metabasis.scripts.read_composed_predictions \
       --score-record outputs/collection/predictions/<record>.json \
-      --observed /tmp/claude-output/observed-<batch>.json
+      --observed /tmp/claude-output/observed-<batch>.json \
+      [--alpha-companion /tmp/claude-output/constant-alpha-<batch>.json]
 """
 from __future__ import annotations
 
@@ -233,6 +278,28 @@ BAND_ARITHMETIC_TOLERANCE = 1e-6
 #: representation error at an exact edge hit, nothing more.
 BAND_EDGE_EPSILON = 1e-12
 
+#: Filing convention of record for a scalar predicted â and its band: 4 decimal
+#: places (batches canary/2/3 all file that way — e.g. star .3614 with band
+#: [.3114, .4114]). A directional slot therefore emits BOTH the full-precision
+#: arithmetic and the 4-dp `filed_*` pair, so the band the desk freezes is the
+#: band of the value it files rather than of an unrounded one it never saw.
+FILED_DECIMALS = 4
+#: A portability coefficient is a cosine-scale quantity; |c| > 1 is not
+#: impossible for a chain-break/gauge-divided read, so it is FLAGGED on the
+#: slot, never silently accepted and never used to refuse the readout. A
+#: non-finite constant IS refused (there is no reading of NaN·c that files).
+DIRECTIONAL_CONSTANT_FLAG_ABS = 1.0
+
+#: ADDENDUM 2026-07-29-H — the directional star's constants readout, by NAME and
+#: VERSION. The derivation lane (hub protocol, both fit directions, corpus-v2.1)
+#: produces this file; this module only consumes it, and consumes it against
+#: this contract. NAMED WITH ITS VERSION per rake M26 so a schema bump is
+#: visible to a mechanical sweep instead of hiding inside a string literal.
+SCHEMA_DIRECTIONAL_CONSTANTS_V1 = "directional-constants-readout/v1"
+#: ADDENDUM 2026-07-27-D §D2 — the constant-α companion baseline artifact. Same
+#: discipline: named, versioned, desk-supplied, never computed here.
+SCHEMA_CONSTANT_ALPHA_COMPANION_V1 = "constant-alpha-companion/v1"
+
 ARCHIVE_ROOT = COLLECTION_ROOT / "enactment-archives" / "worstpair-diag"
 ARCHIVE_GLUE = ARCHIVE_ROOT / "wp_composition.py"
 ARCHIVE_JSON = ARCHIVE_ROOT / "wp_composition.json"
@@ -277,6 +344,17 @@ class CorpusVintageError(ComposedPathError):
     numbers that are individually valid and collectively meaningless."""
 
 
+class DirectionalConstantsError(ComposedPathError):
+    """A directional-constants readout is not `directional-constants-readout/v1`.
+
+    ALWAYS LOUD, and always by naming the contract: the readout is produced by a
+    different lane (the hub-protocol derivation of c^out / c^in), so the failure
+    a reader must never see is a filed â that silently rode a mis-keyed, mis-
+    armed or half-parsed constants table. Every message here states what this
+    module expected, so the two lanes can be reconciled from the error alone.
+    """
+
+
 class ScoringError(RuntimeError):
     """A scoring input cannot be read as what it claims to be.
 
@@ -284,6 +362,16 @@ class ScoringError(RuntimeError):
     malformed record, an unmatched observation, or a band that is not the
     frozen one must stop the run rather than produce a verdict nobody can
     audit.
+    """
+
+
+class AlphaCompanionError(ScoringError):
+    """A constant-α companion artifact is not `constant-alpha-companion/v1`.
+
+    Addendum D's companion is a BASELINE the desk computes (ᾱ is a grand mean
+    over the scored set; the ceiling terms are the adopted gauge's). A malformed
+    companion must halt rather than degrade to "absent", because "absent" is
+    itself a reportable state — OWED — and the two must never be confused.
     """
 
 
@@ -1385,6 +1473,610 @@ def run_candidates(family: str = FAMILY_OF_RECORD,
     return readout
 
 
+# --------------------------------------------- the directional star (ADD. H)
+#  ADDENDUM 2026-07-29-H, item 3: â(A→B) = c_A^out · c_B^in files as a THIRD
+#  predictor column beside the symmetric star and the composed path, on
+#  structurally identical terms. Item 2: the symmetric star column is UNTOUCHED
+#  — nothing below reads, recomputes or moves it.
+#
+#  THE SCHEMA OF RECORD — `directional-constants-readout/v1`
+#  ─────────────────────────────────────────────────────────────────────────────
+#  Produced by the derivation lane (H item 5: c^out and c^in hub-derived on
+#  corpus-v2.1 from BOTH fit directions, anchored per the §3 hub protocol).
+#  Consumed here, never derived here.
+#
+#    {
+#      "schema": "directional-constants-readout/v1",   REQUIRED, exact string
+#      "corpus_manifest_sha256": "<64 lowercase hex>", REQUIRED  (G2(a))
+#      "gauge": "<the anchor/gauge of record, free text>",  REQUIRED
+#      "generated":  "YYYY-MM-DD",                     optional
+#      "derivation": "<free text>",                    optional
+#      "hub": "8b",                                    optional, CHECKED
+#      "hub_site": 16,                                 optional, CHECKED
+#      "arm":    "native",                             optional row default
+#      "family": "proc_k128",                          optional row default
+#      "constants": [                                  REQUIRED, non-empty
+#        {"model": "qwen2.5-32b-instruct",             REQUIRED
+#         "arm":    "native",                          REQUIRED (or doc default)
+#         "family": "proc_k128",                       REQUIRED (or doc default)
+#         "c_out": 0.6642,                             REQUIRED, finite
+#         "c_in":  0.5441,                             REQUIRED, finite
+#         "site": 46,                                  optional, CROSS-CHECKED
+#         "corpus_manifest_sha256": "<64 hex>",        optional row override
+#         "note": "<free text>"}                       optional
+#      ]
+#    }
+#
+#  `constants` may equivalently be an OBJECT mapping model → the same row
+#  WITHOUT its `model` key. Both encodings are named in the contract and in
+#  every error message; a third encoding is a HALT, never an inference.
+#
+#  WHAT IS CHECKED, AND WHY EACH CHECK IS A HALT
+#    * `schema` exact-match — a v2 readout parsed as v1 would file numbers whose
+#      meaning moved underneath their names;
+#    * doc-level corpus sha, 64 lowercase hex — G2(a) makes the vintage tag part
+#      of the â, and a tag that is not a digest is not a tag;
+#    * every model resolvable through `site_of_record` — an unknown or DEFERRED
+#      key (gpt2-xl) has no candidate slot, so a constant for it is a lane
+#      disagreement, not a bonus row;
+#    * a row's `site`, when present, must EQUAL the site registry's — the same
+#      halt `load_candidate_slots` makes, for the same reason: two artifacts
+#      describing different objects under one name;
+#    * (model, arm, family) unique — rake M18: key by the FULL identity and
+#      assert no duplicates, because "which c^out is of record" cannot be
+#      guessed;
+#    * c_out / c_in finite. |c| > 1 is FLAGGED on the slot (a gauge-divided
+#      chain-break read can legitimately exceed 1), never silently dropped.
+
+
+class DirectionalConstantRow(BaseModel):
+    """One model's directional pair (c^out, c^in) in ONE arm × family."""
+    model: str
+    arm: str
+    family: str
+    c_out: float = Field(description="the SOURCE-role constant: â(A→·) ∝ c_A^out")
+    c_in: float = Field(description="the TARGET-role constant: â(·→B) ∝ c_B^in")
+    site: Optional[int] = Field(
+        default=None, description="the readout's own site claim, cross-checked "
+                                  "against SITE_OF_RECORD; None => not claimed")
+    corpus_manifest_sha256: Optional[str] = None
+    note: str = ""
+    unrecognized_keys: list[str] = Field(
+        default=[], description="keys this schema version does not know — "
+                                "carried so a silent schema drift is VISIBLE "
+                                "rather than dropped on the floor")
+
+    model_config = {"protected_namespaces": ()}
+
+    @property
+    def key(self) -> str:
+        return f"{self.model}/{self.arm}-{self.family}"
+
+
+class DirectionalConstants(BaseModel):
+    """A parsed, validated `directional-constants-readout/v1`.
+
+    Holds the readout's own provenance beside the rows: which file, which sha,
+    which gauge, which corpus vintage. Every directional prediction quotes it,
+    so a filed slot can be traced to the constants table it rode without
+    consulting a ledger row (the same discipline `HubMapRef` applies to maps).
+    """
+    schema_name: str = SCHEMA_DIRECTIONAL_CONSTANTS_V1
+    path: str
+    sha256: str
+    generated: Optional[str] = None
+    corpus_manifest_sha256: str
+    gauge: str
+    derivation: str = ""
+    hub: str = HUB_MODEL
+    hub_site: int = HUB_SITE_OF_RECORD
+    rows: list[DirectionalConstantRow] = []
+    notes: list[str] = []
+
+    def row(self, model: str, arm: str, family: str
+            ) -> Optional[DirectionalConstantRow]:
+        """The row for this model IN THIS ARM, or None. NEVER cross-arm.
+
+        Addendum H item 3 scores the directional column on E1's terms; E1's
+        arm-availability rule forbids proxying a quantity from another arm, and
+        a scalar constant is no more proxiable than a map.
+        """
+        for candidate in self.rows:
+            if (candidate.model == model and candidate.arm == arm
+                    and candidate.family == family):
+                return candidate
+        return None
+
+    @property
+    def arms(self) -> list[str]:
+        return sorted({row.arm for row in self.rows})
+
+
+def _is_sha256_hex(value: Any) -> bool:
+    """A 64-character lowercase hex digest, and nothing else."""
+    return (isinstance(value, str) and len(value) == 64
+            and all(c in "0123456789abcdef" for c in value))
+
+
+#: Keys `directional-constants-readout/v1` knows at row level. Anything else is
+#: recorded on the row (never dropped, never obeyed) so schema drift is seen.
+_DIRECTIONAL_ROW_KEYS = frozenset(
+    {"model", "arm", "family", "c_out", "c_in", "site",
+     "corpus_manifest_sha256", "note"})
+
+
+def _directional_schema_halt(path: Path, problem: str) -> DirectionalConstantsError:
+    """One place that builds the contract-quoting halt, so every failure path
+    says exactly the same thing about what was expected."""
+    return DirectionalConstantsError(
+        f"{path}: {problem}\n"
+        f"EXPECTED `{SCHEMA_DIRECTIONAL_CONSTANTS_V1}`:\n"
+        f"  top level  : object with REQUIRED `schema` == "
+        f"{SCHEMA_DIRECTIONAL_CONSTANTS_V1!r}, REQUIRED "
+        f"`corpus_manifest_sha256` (64 lowercase hex), REQUIRED `gauge` (free "
+        f"text provenance), REQUIRED non-empty `constants`; OPTIONAL "
+        f"`generated`, `derivation`, `hub` (must be {HUB_MODEL!r} if present), "
+        f"`hub_site` (must be {HUB_SITE_OF_RECORD} if present), `arm`, "
+        f"`family` (the last two are row defaults).\n"
+        f"  `constants`: EITHER a list of row objects each carrying `model`, OR "
+        f"an object mapping model -> the same row object without `model`. No "
+        f"third encoding is accepted.\n"
+        f"  each row   : REQUIRED `model` (a key of SITE_OF_RECORD), REQUIRED "
+        f"`arm` and `family` (or the doc-level defaults), REQUIRED finite "
+        f"`c_out` and `c_in`; OPTIONAL `site` (must equal the site registry's), "
+        f"`corpus_manifest_sha256`, `note`. (model, arm, family) must be "
+        f"UNIQUE across the readout.\n"
+        f"This module CONSUMES the readout and never derives it: if the "
+        f"derivation lane's actual output differs from the above, the contract "
+        f"is what must be reconciled — not the parse.")
+
+
+def load_directional_constants(path: Path) -> DirectionalConstants:
+    """Read and VALIDATE a `directional-constants-readout/v1` readout.
+
+    Every failure raises `DirectionalConstantsError` quoting the whole expected
+    contract, so a mismatch with the derivation lane's actual output is legible
+    from the error alone (that is the point of naming and versioning the schema
+    before the file exists).
+    """
+    if not path.is_file():
+        raise _directional_schema_halt(
+            path, "directional-constants readout absent. Addendum H's third "
+                  "column cannot file without one, and no constant is ever "
+                  "defaulted, inferred or carried from another readout")
+    try:
+        doc = json.loads(path.read_text())
+    except (OSError, ValueError) as exc:
+        raise _directional_schema_halt(
+            path, f"unreadable as JSON: {exc}") from exc
+    if not isinstance(doc, dict):
+        raise _directional_schema_halt(
+            path, f"top level is {type(doc).__name__}, not an object")
+
+    declared = doc.get("schema")
+    if declared != SCHEMA_DIRECTIONAL_CONSTANTS_V1:
+        raise _directional_schema_halt(
+            path, f"declares schema {declared!r}, not "
+                  f"{SCHEMA_DIRECTIONAL_CONSTANTS_V1!r}. A readout of another "
+                  f"name or version is NEVER parsed on the assumption that its "
+                  f"fields still mean what they meant here")
+
+    corpus_sha = doc.get("corpus_manifest_sha256")
+    if not _is_sha256_hex(corpus_sha):
+        raise _directional_schema_halt(
+            path, f"`corpus_manifest_sha256` is {corpus_sha!r}, not 64 "
+                  f"lowercase hex. Addendum G §G2(a) rides a corpus manifest "
+                  f"sha on every quoted â; an unverifiable tag is worse than a "
+                  f"missing one")
+    gauge = doc.get("gauge")
+    if not isinstance(gauge, str) or not gauge.strip():
+        raise _directional_schema_halt(
+            path, f"`gauge` is {gauge!r}; the gauge/anchor of record is "
+                  f"REQUIRED provenance — c^out and c^in are only meaningful "
+                  f"relative to the anchor that fixed them")
+    hub = doc.get("hub", HUB_MODEL)
+    if hub != HUB_MODEL:
+        raise _directional_schema_halt(
+            path, f"`hub` is {hub!r}, but this module's hub of record is "
+                  f"{HUB_MODEL!r} at L{HUB_SITE_OF_RECORD}")
+    hub_site = doc.get("hub_site", HUB_SITE_OF_RECORD)
+    if hub_site != HUB_SITE_OF_RECORD:
+        raise _directional_schema_halt(
+            path, f"`hub_site` is {hub_site!r}, but the hub column of record is "
+                  f"L{HUB_SITE_OF_RECORD} (rebuilt-L16)")
+
+    raw = doc.get("constants")
+    if isinstance(raw, dict):
+        entries = []
+        for model_key, body in raw.items():
+            if not isinstance(body, dict):
+                raise _directional_schema_halt(
+                    path, f"`constants[{model_key!r}]` is "
+                          f"{type(body).__name__}, not an object")
+            if "model" in body and body["model"] != model_key:
+                raise _directional_schema_halt(
+                    path, f"`constants[{model_key!r}]` carries model "
+                          f"{body['model']!r} — the mapping key and the row's "
+                          f"own `model` disagree, and which one is of record "
+                          f"cannot be guessed")
+            entries.append({**body, "model": model_key})
+    elif isinstance(raw, list):
+        entries = list(raw)
+    else:
+        raise _directional_schema_halt(
+            path, f"`constants` is {type(raw).__name__ if raw is not None else 'absent'}"
+                  f", not a list of rows or a model->row object")
+    if not entries:
+        raise _directional_schema_halt(
+            path, "`constants` is empty — a readout that names no constant "
+                  "cannot back a single directional slot")
+
+    default_arm = doc.get("arm")
+    default_family = doc.get("family")
+    rows: list[DirectionalConstantRow] = []
+    seen: dict[str, int] = {}
+    for i, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            raise _directional_schema_halt(
+                path, f"`constants[{i}]` is {type(entry).__name__}, not an object")
+        model = entry.get("model")
+        if not isinstance(model, str) or not model:
+            raise _directional_schema_halt(
+                path, f"`constants[{i}]` has no usable `model` (got {model!r})")
+        arm = entry.get("arm", default_arm)
+        family = entry.get("family", default_family)
+        if not isinstance(arm, str) or arm not in ARMS:
+            raise _directional_schema_halt(
+                path, f"`constants[{i}]` ({model}): arm {arm!r} is not one of "
+                      f"{ARMS} and no usable doc-level `arm` default is set. "
+                      f"The arm is load-bearing — H item 3 scores on E1's "
+                      f"terms and E1 forbids proxying across arms")
+        if not isinstance(family, str) or family not in FAMILIES:
+            raise _directional_schema_halt(
+                path, f"`constants[{i}]` ({model}): family {family!r} is not "
+                      f"one of {FAMILIES} and no usable doc-level `family` "
+                      f"default is set")
+        values: dict[str, float] = {}
+        for field in ("c_out", "c_in"):
+            value = entry.get(field)
+            try:
+                as_float = float(value)                 # type: ignore[arg-type]
+            except (TypeError, ValueError) as exc:
+                raise _directional_schema_halt(
+                    path, f"`constants[{i}]` ({model}): `{field}` is {value!r}, "
+                          f"which is not a number") from exc
+            if not np.isfinite(as_float):
+                raise _directional_schema_halt(
+                    path, f"`constants[{i}]` ({model}): `{field}` is "
+                          f"{as_float!r} — a non-finite constant has no product "
+                          f"that can be banded, so it is refused rather than "
+                          f"filed")
+            values[field] = as_float
+        try:
+            registry_site = site_of_record(model)
+        except (ComposedPathError, FitGridError) as exc:
+            raise _directional_schema_halt(
+                path, f"`constants[{i}]`: {exc}") from exc
+        claimed_site = entry.get("site")
+        if claimed_site is not None and int(claimed_site) != registry_site:
+            raise _directional_schema_halt(
+                path, f"`constants[{i}]` ({model}): the readout says L"
+                      f"{int(claimed_site)} but the site registry says "
+                      f"L{registry_site}. Two artifacts describing different "
+                      f"objects under one name is a HALT, never a preference")
+        row_sha = entry.get("corpus_manifest_sha256", corpus_sha)
+        if not _is_sha256_hex(row_sha):
+            raise _directional_schema_halt(
+                path, f"`constants[{i}]` ({model}): row "
+                      f"`corpus_manifest_sha256` is {row_sha!r}, not 64 "
+                      f"lowercase hex")
+        row = DirectionalConstantRow(
+            model=model, arm=arm, family=family, c_out=values["c_out"],
+            c_in=values["c_in"], site=registry_site,
+            corpus_manifest_sha256=row_sha, note=str(entry.get("note", "")),
+            unrecognized_keys=sorted(set(entry) - _DIRECTIONAL_ROW_KEYS))
+        if row.key in seen:
+            raise _directional_schema_halt(
+                path, f"duplicate constants row for {row.key} (entries "
+                      f"{seen[row.key]} and {i}) — rake M18: key by the FULL "
+                      f"identity and assert no duplicates; which c^out is of "
+                      f"record cannot be guessed")
+        seen[row.key] = i
+        rows.append(row)
+
+    notes: list[str] = []
+    drifted = sorted({k for row in rows for k in row.unrecognized_keys})
+    if drifted:
+        notes.append(
+            f"SCHEMA DRIFT (reported, not obeyed): the readout carries row keys "
+            f"{drifted} that {SCHEMA_DIRECTIONAL_CONSTANTS_V1} does not define. "
+            f"They are recorded per row and IGNORED — if they are load-bearing, "
+            f"the schema needs a version bump, not a silent read")
+    mixed = sorted({r.corpus_manifest_sha256 for r in rows
+                    if r.corpus_manifest_sha256 != corpus_sha
+                    and r.corpus_manifest_sha256 is not None})
+    if mixed:
+        notes.append(
+            f"MIXED-VINTAGE READOUT: {len(mixed)} row-level corpus sha(s) "
+            f"differ from the document's {corpus_sha[:8]}…. Per-slot vintage is "
+            f"resolved from the two rows a slot actually uses; a slot whose two "
+            f"constants disagree carries NO sha (Addendum G §G2(a))")
+    logger.info("directional constants: %d row(s), arms %s, gauge %r, corpus "
+                "%s… (%s)", len(rows), sorted({r.arm for r in rows}), gauge,
+                corpus_sha[:8], SCHEMA_DIRECTIONAL_CONSTANTS_V1)
+    return DirectionalConstants(
+        path=str(path), sha256=sha256_of(path), generated=doc.get("generated"),
+        corpus_manifest_sha256=corpus_sha, gauge=gauge,
+        derivation=str(doc.get("derivation", "")), hub=hub, hub_site=hub_site,
+        rows=rows, notes=notes)
+
+
+class DirectionalPrediction(BaseModel):
+    """One â(A→B) = c_A^out · c_B^in, filable under Addendum H item 3.
+
+    Carries its OWN frozen band, because H item 3 freezes the ±.05 band at
+    filing: the value that files and the band that files are computed together,
+    from the same rounding, so no downstream glue can pair a rounded prediction
+    with an unrounded band.
+    """
+    prediction_id: str = Field(
+        description="Addendum H item 3 ID shape, mirroring E2's: "
+                    "directional-prediction/<src>→<tgt>/<arm>-k128")
+    pair_id: str
+    source_model: str
+    source_site: int
+    target_model: str
+    target_site: int
+    arm: str
+    arm_rule: str
+    family: str
+    estimand: str = (
+        "â(A→B) = c_A^out · c_B^in — the Addendum-C item-2 directional star, "
+        "ADOPTED by Addendum 2026-07-29-H for not-yet-filed slots")
+    c_out_source: float
+    c_in_target: float
+    predicted: float = Field(
+        description="c_A^out · c_B^in at full precision — the arithmetic")
+    band: list[float] = Field(
+        description="the FROZEN ±.05 absolute band of `predicted`, [lo, hi]")
+    filed_predicted: float = Field(
+        description=f"`predicted` at the {FILED_DECIMALS}-dp filing convention "
+                    f"of record (batches canary/2/3)")
+    filed_band: list[float] = Field(
+        description="the frozen ±.05 band OF THE FILED VALUE — the band that "
+                    "goes into the record, so the two never disagree")
+    magnitude_only: bool = Field(
+        description="Addendum H item 3 mirrors prereg §3 / E2: |predicted| < "
+                    ".08 → sign unscored, MAGNITUDE-ONLY")
+    corpus_vintage: PredictionVintage = Field(
+        default="pre-v2.1",
+        description="the vintage of BOTH constants together; MIXED when the "
+                    "two rows disagree, and MIXED carries no sha")
+    corpus_manifest_sha256: Optional[str] = Field(
+        default=None,
+        description="Addendum G §G2(a) / H item 5 — the corpus manifest sha "
+                    "this â rides on, taken from the constants rows themselves")
+    constants_readout: str = Field(description="the readout file consumed")
+    constants_readout_sha256: str
+    constants_gauge: str = Field(
+        description="the anchor/gauge of record the constants were fixed "
+                    "against — c^out and c^in are only meaningful relative to it")
+    descriptive_reverse_predicted: Optional[float] = Field(
+        default=None,
+        description="DESCRIPTIVE, NEVER FILED, NEVER SCORED: c_B^out · c_A^in, "
+                    "the reverse-orientation value. Free from the same two "
+                    "rows; recorded because the orientation asymmetry is the "
+                    "trigger evidence Addendum H rests on")
+    descriptive_asymmetry_ratio: Optional[float] = Field(
+        default=None,
+        description="DESCRIPTIVE: predicted / reverse, the â(A→B)/â(B→A) form "
+                    "quoted in Addendum H (1.320 at the family of record). "
+                    "None when the reverse value is 0")
+    flags: list[str] = []
+
+
+class DirectionalNotFilable(BaseModel):
+    """A directional slot with no constant behind it — N/A-AT-FILING.
+
+    Distinct from the composed column's `NotFilable` and deliberately so: the
+    composed slot is unbacked when a banked MAP is missing, the directional slot
+    when a banked CONSTANT is. Reporting them under one model would let a reader
+    conclude that a pair is unfilable for both columns when it is unfilable for
+    one — the two columns race, and their availability is independent.
+    """
+    pair_id: str
+    source_model: str
+    source_site: int
+    target_model: str
+    target_site: int
+    arm: str
+    arm_rule: str
+    family: str
+    verdict: Literal["N/A-AT-FILING"] = "N/A-AT-FILING"
+    missing_sides: list[str]
+    constants_readout: str
+    constants_readout_sha256: str
+    available_keys: list[str] = Field(
+        default=[], description="every (model/arm-family) the readout DOES "
+                                "carry, so the gap is legible without opening "
+                                "the readout")
+    reason: str = (
+        "Addendum H item 3 files the directional column on Addendum E §E1's "
+        "terms: a slot files only where the SOURCE has a c^out and the TARGET a "
+        "c^in in the pair's applicable arm. Never proxied from another arm, "
+        "never from the other role's constant, never backfilled after the pair "
+        "is fit.")
+
+
+class DirectionalReadout(BaseModel):
+    """The directional column for a set of candidate slots.
+
+    A SEPARATE artifact from `ComposedReadout` on purpose: the composed readout
+    is the record of an existing, already-filed-against column, and bolting a
+    new column into its shape would move a document other tools read. The
+    directional column arrives beside it, in its own file, and the desk's
+    filing glue lays the two side by side in one filing record.
+    """
+    STATUS: str = (
+        "UNSTAMPED — computation only. Fits nothing, refits nothing, FILES NO "
+        "PREDICTION, moves no band, writes nothing under outputs/. The "
+        "SYMMETRIC star column is untouched by everything here (Addendum H "
+        "item 2). The desk rules.")
+    estimand: str = (
+        "â(A→B) = c_A^out · c_B^in, per-model directional constants read from a "
+        f"{SCHEMA_DIRECTIONAL_CONSTANTS_V1} readout in the pair's applicable "
+        "arm; ±.05 absolute band frozen at filing; |predicted| < .08 "
+        "MAGNITUDE-ONLY (Addendum 2026-07-29-H item 3)")
+    generated: str
+    hub: str = HUB_MODEL
+    hub_site: int = HUB_SITE_OF_RECORD
+    family: str
+    direction_rule: str = (
+        "source→target AS ENUMERATED (the candidate column's model_a→model_b, "
+        "the same direction the composed column takes and the same "
+        "'forward as listed' direction of record batch 3 ruled). â is "
+        "orientation-dependent and the directional star is asymmetric BY "
+        "CONSTRUCTION, so the orientation is never inferred here")
+    constants_readout: str
+    constants_readout_sha256: str
+    constants_gauge: str
+    constants_corpus_manifest_sha256: str
+    constants_notes: list[str] = []
+    predictions: list[DirectionalPrediction] = []
+    na_at_filing: list[DirectionalNotFilable] = []
+
+
+def _frozen_band(predicted: float) -> list[float]:
+    """`predicted` ± the FROZEN half-width. The only band arithmetic there is."""
+    return [predicted - FROZEN_BAND_HALF_WIDTH,
+            predicted + FROZEN_BAND_HALF_WIDTH]
+
+
+def directional_pair(source_model: str, target_model: str,
+                     constants: DirectionalConstants,
+                     family: str = FAMILY_OF_RECORD,
+                     arm: Optional[str] = None,
+                     ) -> DirectionalPrediction | DirectionalNotFilable:
+    """â(A→B) = c_A^out · c_B^in for one slot, or its N/A-AT-FILING record.
+
+    `arm` defaults to the pair's applicable arm (prereg §3); overriding it is a
+    diagnostic and is echoed into the record with a flag, exactly as
+    `compose_pair` does. The filing path never overrides.
+    """
+    s_site = site_of_record(source_model)
+    t_site = site_of_record(target_model)
+    resolved_arm, arm_rule = applicable_arm(source_model, target_model)
+    if arm is not None and arm != resolved_arm:
+        arm_rule = (f"OVERRIDDEN to {arm!r} (applicable arm by prereg §3 is "
+                    f"{resolved_arm!r}: {arm_rule})")
+    use_arm = arm or resolved_arm
+    if use_arm not in ARMS:
+        raise ComposedPathError(f"unknown arm {use_arm!r}; known: {ARMS}")
+
+    pair_id = f"{source_model}L{s_site}->{target_model}L{t_site}"
+    row_src = constants.row(source_model, use_arm, family)
+    row_tgt = constants.row(target_model, use_arm, family)
+    missing = [label for label, row in
+               ((f"source c^out ({source_model}/{use_arm}-{family})", row_src),
+                (f"target c^in ({target_model}/{use_arm}-{family})", row_tgt))
+               if row is None]
+    if missing:
+        return DirectionalNotFilable(
+            pair_id=pair_id, source_model=source_model, source_site=s_site,
+            target_model=target_model, target_site=t_site, arm=use_arm,
+            arm_rule=arm_rule, family=family, missing_sides=missing,
+            constants_readout=constants.path,
+            constants_readout_sha256=constants.sha256,
+            available_keys=sorted(row.key for row in constants.rows))
+
+    assert row_src is not None and row_tgt is not None
+    predicted = float(row_src.c_out) * float(row_tgt.c_in)
+    filed_predicted = round(predicted, FILED_DECIMALS)
+    reverse = float(row_tgt.c_out) * float(row_src.c_in)
+
+    flags: list[str] = []
+    for role, row, field, value in (("source", row_src, "c_out", row_src.c_out),
+                                    ("target", row_tgt, "c_in", row_tgt.c_in)):
+        if abs(value) > DIRECTIONAL_CONSTANT_FLAG_ABS:
+            flags.append(
+                f"OUT-OF-RANGE CONSTANT — {row.model}'s {field} is {value:+.6f}, "
+                f"|c| > {DIRECTIONAL_CONSTANT_FLAG_ABS}. A gauge-divided "
+                f"chain-break read can legitimately exceed 1, so this is "
+                f"reported on the slot rather than refused; the desk rules "
+                f"whether the {role} constant is usable")
+    if arm is not None and arm != resolved_arm:
+        flags.append("ARM OVERRIDDEN — diagnostic only; not a filable slot.")
+
+    #  Addendum G §G2(a): the sha rides the â, and only when the WHOLE
+    #  computation rode one vintage. Two constants, both or neither.
+    if row_src.corpus_manifest_sha256 == row_tgt.corpus_manifest_sha256:
+        corpus_sha = row_src.corpus_manifest_sha256
+        vintage: PredictionVintage = (
+            "v2.1" if corpus_sha == CORPUS_SHA_V21 else "pre-v2.1")
+    else:
+        corpus_sha = None
+        vintage = "MIXED"
+        flags.append(
+            f"MIXED-VINTAGE — {source_model}'s c^out rode corpus "
+            f"{(row_src.corpus_manifest_sha256 or '')[:8]}… and "
+            f"{target_model}'s c^in rode "
+            f"{(row_tgt.corpus_manifest_sha256 or '')[:8]}…. The product is "
+            f"computable but carries NO corpus sha: Addendum G §G2(a) wants a "
+            f"vintage tag on every â and a tag covering half a computation is "
+            f"worse than none. Cross-vintage reads are calibration, never "
+            f"scored (§G2(c))")
+
+    return DirectionalPrediction(
+        prediction_id=f"directional-prediction/{source_model}→{target_model}"
+                      f"/{use_arm}-k128",
+        pair_id=pair_id, source_model=source_model, source_site=s_site,
+        target_model=target_model, target_site=t_site, arm=use_arm,
+        arm_rule=arm_rule, family=family,
+        c_out_source=float(row_src.c_out), c_in_target=float(row_tgt.c_in),
+        predicted=predicted, band=_frozen_band(predicted),
+        filed_predicted=filed_predicted,
+        filed_band=[round(b, FILED_DECIMALS)
+                    for b in _frozen_band(filed_predicted)],
+        magnitude_only=bool(abs(predicted) < NEAR_ZERO_CARVE_OUT),
+        corpus_vintage=vintage, corpus_manifest_sha256=corpus_sha,
+        constants_readout=constants.path,
+        constants_readout_sha256=constants.sha256,
+        constants_gauge=constants.gauge,
+        descriptive_reverse_predicted=reverse,
+        descriptive_asymmetry_ratio=(None if reverse == 0.0
+                                     else predicted / reverse),
+        flags=flags)
+
+
+def run_directional(constants: DirectionalConstants,
+                    family: str = FAMILY_OF_RECORD,
+                    pairs_json: Path = CANDIDATE_PAIRS_JSON) -> DirectionalReadout:
+    """The directional column for every current candidate slot."""
+    readout = DirectionalReadout(
+        generated=date.today().isoformat(), family=family,
+        constants_readout=constants.path,
+        constants_readout_sha256=constants.sha256,
+        constants_gauge=constants.gauge,
+        constants_corpus_manifest_sha256=constants.corpus_manifest_sha256,
+        constants_notes=list(constants.notes))
+    for slot in load_candidate_slots(pairs_json):
+        result = directional_pair(slot.model_a, slot.model_b, constants,
+                                  family=family)
+        if isinstance(result, DirectionalNotFilable):
+            readout.na_at_filing.append(result)
+            logger.warning("N/A-AT-FILING %-52s %s::%s — missing %s",
+                           result.pair_id, result.arm, family,
+                           ", ".join(result.missing_sides))
+            continue
+        readout.predictions.append(result)
+        logger.info("â_dir %-52s %s::%-9s = %+.6f  band [%+.4f, %+.4f]%s%s",
+                    result.pair_id, result.arm, family, result.predicted,
+                    result.filed_band[0], result.filed_band[1],
+                    "  MAGNITUDE-ONLY" if result.magnitude_only else "",
+                    "  FLAGGED" if result.flags else "")
+    return readout
+
+
 # ------------------------------------------------------- the resolution sweep
 class ResolutionRow(BaseModel):
     """What this module's registries can reach for ONE model, and what they miss.
@@ -1701,9 +2393,36 @@ def run_gate(archive_dir: Path = ARCHIVE_ROOT,
 #  evaluated here: they are aggregates over the whole 190 with frozen
 #  interpretive rules, and they are the desk's read, not a tool's verdict.
 
-#: The two predictors racing under Addendum E. `star` = prereg §3's scalar
-#: c_A·c_B; `composed` = E1's two-hop â_comp.
-Predictor = Literal["star", "composed"]
+#: The predictors racing under Addendum E + Addendum H. `star` = prereg §3's
+#: symmetric scalar c_A·c_B, which Addendum H item 2 leaves UNTOUCHED and
+#: filing on its own frozen terms; `composed` = E1's two-hop â_comp;
+#: `directional` = H item 3's â(A→B) = c_A^out·c_B^in.
+#: Order matters only for display; every aggregate keys by the value.
+Predictor = Literal["star", "composed", "directional"]
+#: The predictor pairs whose 2×2 the head-to-head read emits, in a FIXED order.
+#: `("star", "composed")` is FIRST and its counts are ALSO emitted in the
+#: original `HeadToHead` shape — Addendum E §E3's read is preserved verbatim for
+#: continuity, and the directional 2×2s arrive BESIDE it, never in place of it.
+PREDICTOR_PAIRS: tuple[tuple[Predictor, Predictor], ...] = (
+    ("star", "composed"),
+    ("star", "directional"),
+    ("composed", "directional"),
+)
+#: Predictor -> the block key it files under in a RACING filing record row.
+#: Insertion order is the order predictions are read off a row (star first,
+#: unchanged from batch 3) so a scored record's slot order does not move when
+#: the third column starts filing.
+RACING_BLOCK_KEYS: dict[Predictor, str] = {
+    "star": "star_prediction",
+    "composed": "composed_prediction",
+    "directional": "directional_prediction",
+}
+#: Addendum D §D1's scope trigger, as a SET rather than a hardcoded name: "any
+#: ceiling-aware gauge (the Addendum-C directional star c_A^out·c_B^in, or any
+#: explicitly ratified α-based refinement)". Today exactly one gauge is adopted
+#: (Addendum 2026-07-29-H). A future α-based refinement joins this tuple and the
+#: companion starts being owed for it too — which is the point of naming it.
+CEILING_AWARE_GAUGES: tuple[Predictor, ...] = ("directional",)
 
 #: Every verdict this tool can emit. `UNSCORED-NO-OBSERVATION` is a first-class
 #: result: a first-read that covers part of a record must say which slots it did
@@ -1804,6 +2523,179 @@ class ObservationSet(BaseModel):
     observations: list[ObservedAhat] = []
 
 
+# ------------------------------------- ADDENDUM D — the constant-α companion
+#  D1's scope trigger IS Addendum H's adoption of the directional star, so from
+#  the first directional filing this companion is owed at every scoring read.
+#
+#  WHAT THIS TOOL DOES AND DOES NOT DO. It does NOT compute ᾱ — D2 defines ᾱ as
+#  the grand mean of the fitted per-model (or per-role) α values ACROSS THE
+#  SCORED SET, which is a desk quantity formed once the scored set exists, and a
+#  tool that auto-computed it would silently pick its own scored set. It does
+#  NOT compute the ceiling/calibration terms — D2 says they are "the same terms
+#  the adopted gauge uses", which is the derivation lane's object. It does NOT
+#  run the α-permutation null (D3, n=1000).
+#
+#  It scores what the desk supplies, on structurally identical terms, and when
+#  nothing is supplied it NAMES THE COMPANION AS OWED with D2/D3's frozen text.
+#  Absent and malformed are different states and never collapse into each other.
+#
+#  THE SCHEMA OF RECORD — `constant-alpha-companion/v1`
+#    {
+#      "schema": "constant-alpha-companion/v1",       REQUIRED, exact string
+#      "gauge": "directional",                        REQUIRED, a Predictor name
+#      "alpha_bar": 0.7213,                           REQUIRED, finite
+#      "alpha_bar_provenance": "<free text>",         REQUIRED
+#      "corpus_manifest_sha256": "<64 hex>",          optional
+#      "note": "<free text>",                         optional
+#      "rows": [                                      REQUIRED, non-empty
+#        {"source": "...", "target": "...", "arm": "native",
+#         "family": "proc_k128",
+#         "predicted": 0.3104,                        REQUIRED, finite
+#         "ceiling_term": 0.4304,                     optional descriptive
+#         "note": ""}                                 optional
+#      ],
+#      "alpha_permutation_null": {                    optional; absent => OWED
+#         "n_permutations": 1000,
+#         "true_in_band_count": 12,
+#         "percentile_rank": 99.4}
+#    }
+#
+#  `predicted` is ᾱ · (the adopted gauge's ceiling/calibration terms) for that
+#  slot, computed by the desk. This module bands it at the SAME frozen ±.05 and
+#  applies the SAME |predicted| < .08 carve-out — D2's "against the SAME frozen
+#  bands", read as the same band RULE around the baseline's own prediction
+#  (which is how Addendum C item 1 applies it to the constant grand-mean
+#  predictor: "the mean of all 190 observed â, applied to every pair"). That
+#  reading is stated on the artifact, not left to a reader.
+
+
+class AlphaPermutationNull(BaseModel):
+    """D3's α-permutation null, AS SUPPLIED. Never computed here."""
+    n_permutations: int
+    true_in_band_count: int
+    percentile_rank: float = Field(
+        description="the true star's in-band count as a percentile of the "
+                    "permutation distribution; D3 wants ≥ 99")
+    note: str = ""
+
+
+class ConstantAlphaRow(BaseModel):
+    """The desk's constant-α prediction for ONE slot."""
+    source: str
+    target: str
+    arm: str
+    family: str = FAMILY_OF_RECORD
+    predicted: float = Field(
+        description="ᾱ · [the adopted gauge's ceiling/calibration terms]")
+    ceiling_term: Optional[float] = Field(
+        default=None, description="descriptive: the ceiling/calibration term "
+                                  "the desk multiplied ᾱ by")
+    note: str = ""
+
+    @property
+    def key(self) -> str:
+        return slot_key(self.source, self.target, self.arm, self.family)
+
+
+class ConstantAlphaCompanion(BaseModel):
+    """A parsed, validated `constant-alpha-companion/v1` artifact."""
+    schema_name: str = SCHEMA_CONSTANT_ALPHA_COMPANION_V1
+    path: str
+    sha256: str
+    gauge: Predictor = Field(
+        description="which filed predictor column this baseline companions — "
+                    "D1/D3's 'the adopted gauge'")
+    alpha_bar: float
+    alpha_bar_provenance: str
+    corpus_manifest_sha256: Optional[str] = None
+    note: str = ""
+    rows: list[ConstantAlphaRow] = []
+    alpha_permutation_null: Optional[AlphaPermutationNull] = None
+
+
+class ConstantAlphaVerdict(BaseModel):
+    """The constant-α baseline's verdict for ONE slot. A BASELINE, not a filing.
+
+    Deliberately NOT a `ScoredSlot` and deliberately NOT a member of
+    `Predictor`: nothing filed a band for it before the fit, so it can never
+    enter `aggregates`, `head_to_head` or any gate denominator. It rides on the
+    scored slot of the gauge it companions and is read only by D3's margin.
+    """
+    STATUS: str = (
+        "ADDENDUM-D BASELINE — a companion, never a filed prediction. Scored "
+        "against the SAME frozen ±.05 rule and the SAME |predicted| < .08 "
+        "carve-out as the adopted gauge (D2: 'against the SAME frozen bands'), "
+        "but no band for it was frozen before the fit, so it enters no gate and "
+        "no in-band fraction that a gate reads.")
+    alpha_bar: float
+    predicted: float
+    band: list[float]
+    scored_band: list[float]
+    magnitude_only: bool
+    ceiling_term: Optional[float] = None
+    observed: Optional[float] = None
+    scored_value: Optional[float] = None
+    verdict: Verdict
+    in_band: Optional[bool] = None
+    error: Optional[float] = None
+    abs_error: Optional[float] = None
+    band_excess: Optional[float] = None
+    companion_source: str
+    companion_sha256: str
+
+
+class AddendumDCompanion(BaseModel):
+    """The record-level Addendum-D read: SCORED, OWED, or NOT-TRIGGERED."""
+    STATUS: Literal["SCORED", "OWED", "NOT-TRIGGERED"]
+    scope_trigger: str = (
+        "Addendum D §D1: this companion activates if and when any ceiling-aware "
+        "gauge (the Addendum-C directional star c_A^out·c_B^in, or any "
+        "explicitly ratified α-based refinement) is adopted for not-yet-filed "
+        "predictions. Addendum 2026-07-29-H item 4 ACTIVATES it.")
+    interpretive_rule: str = (
+        "Addendum D §D3, frozen: the per-model-structure claim — 'models carry "
+        "intrinsic, role-specific portability beyond measurement calibration' — "
+        "is DEMONSTRATED only if the adopted star beats the constant-α "
+        "predictor by ≥ 15 percentage points in in-band count AND an "
+        "α-permutation null (per-model α permuted across models, n = 1000) "
+        "places the true star's in-band count at ≥ the 99th percentile. "
+        "Passing G-star-hit while failing this companion is scored "
+        "'calibration-driven; per-model structure not demonstrated.'")
+    band_reading: str = (
+        "D2's 'against the SAME frozen bands' is applied as the same band RULE "
+        "around the baseline's own prediction (±.05 absolute, |pred| < .08 "
+        "magnitude-only) — the reading Addendum C item 1 already uses for the "
+        "constant grand-mean predictor. Stated here rather than assumed.")
+    gauge: Optional[Predictor] = Field(
+        default=None, description="the adopted gauge this companion is read "
+                                  "against; None when not triggered")
+    alpha_bar: Optional[float] = None
+    alpha_bar_provenance: Optional[str] = None
+    companion_source: Optional[str] = None
+    companion_sha256: Optional[str] = None
+    n_gauge_scored_of_record: int = 0
+    n_gauge_in_band: int = 0
+    gauge_in_band_fraction: Optional[float] = None
+    n_companion_scored: int = 0
+    n_companion_in_band: int = 0
+    companion_in_band_fraction: Optional[float] = None
+    n_slots_companion_missing: int = Field(
+        default=0, description="gauge slots scored of record for which the "
+                               "companion artifact supplies no row — named, "
+                               "never dropped from the gauge's denominator")
+    margin_percentage_points: Optional[float] = Field(
+        default=None,
+        description="100 × (gauge in-band fraction − companion in-band "
+                    "fraction), over slots where BOTH are scored. D3 wants "
+                    "≥ 15. Computed, never adjudicated: the desk rules")
+    margin_meets_d3_threshold: Optional[bool] = None
+    alpha_permutation_null: Optional[AlphaPermutationNull] = None
+    permutation_rank_meets_d3_threshold: Optional[bool] = None
+    owed: list[str] = Field(
+        default=[], description="exactly what is still owed before D3 can be "
+                                "read at all — never silently absent")
+
+
 class ScoredSlot(BaseModel):
     """One (slot × predictor) verdict, with everything needed to re-derive it."""
     key: str
@@ -1852,6 +2744,15 @@ class ScoredSlot(BaseModel):
     observed_utc: Optional[str] = None
     scored_utc: str
     fit_path: Optional[str] = None
+    constant_alpha: Optional[ConstantAlphaVerdict] = Field(
+        default=None,
+        description="Addendum D §D2's constant-α baseline verdict for this "
+                    "slot. Present ONLY on slots of the adopted gauge and ONLY "
+                    "when the desk supplied a constant-α companion; NEVER "
+                    "auto-computed (ᾱ is a grand mean over the scored set and "
+                    "the ceiling terms are the gauge's). None here means the "
+                    "companion was not supplied for this slot — the record's "
+                    "`addendum_d` block names what is owed")
     flags: list[str] = []
 
 
@@ -1877,7 +2778,15 @@ class PredictorAggregate(BaseModel):
 
 
 class HeadToHead(BaseModel):
-    """Addendum E §E3's per-pair 2×2, over slots where BOTH are scored of record."""
+    """Addendum E §E3's per-pair 2×2, over slots where BOTH are scored of record.
+
+    PRESERVED VERBATIM across the Addendum-H adoption: same field names, same
+    denominators, same star-vs-composed semantics. Addendum H item 1 makes the
+    directional star model selection over not-yet-filed slots, not a patch, so
+    the E3 race's own record must keep reading the same way in every scored
+    record before and after the adoption. The three-predictor reads are
+    `PairwiseHeadToHead` and `ThreeWayHeadToHead`, beside this — never instead.
+    """
     n_slots_both_scored: int = 0
     n_both_in_band: int = 0
     n_star_only: int = 0
@@ -1886,6 +2795,41 @@ class HeadToHead(BaseModel):
     n_slots_incomplete: int = Field(
         default=0, description="slots where at least one predictor is not "
                                "scored of record — excluded from the 2×2")
+
+
+class PairwiseHeadToHead(BaseModel):
+    """The E3 2×2 for ONE ordered predictor pair, over slots both scored."""
+    predictor_a: Predictor
+    predictor_b: Predictor
+    n_slots_both_scored: int = 0
+    n_both_in_band: int = 0
+    n_a_only: int = Field(default=0, description="predictor_a hit, b missed")
+    n_b_only: int = Field(default=0, description="predictor_b hit, a missed")
+    n_both_out_of_band: int = 0
+    n_slots_incomplete: int = Field(
+        default=0, description="slots where at least one of the two is not "
+                               "scored of record — excluded from this 2×2")
+
+
+class ThreeWayHeadToHead(BaseModel):
+    """The per-slot hit census across ALL THREE predictors.
+
+    Addendum E §E3's 2×2 generalizes to a 2³ once three columns file: the
+    natural object is the SET of predictors that hit on each slot. Reported as
+    counts keyed by that set (`"none"`, `"star"`, `"star+composed"`, …) over
+    slots where all three are scored of record, so no slot is counted under a
+    denominator some predictor never entered.
+    """
+    n_slots_all_scored: int = 0
+    n_slots_incomplete: int = Field(
+        default=0, description="slots where fewer than all three predictors "
+                               "are scored of record")
+    predictors: list[Predictor] = []
+    n_by_hit_set: dict[str, int] = Field(
+        default={},
+        description="hit-set label -> count; label is the '+'-joined predictor "
+                    "names in PREDICTOR order, or 'none'. Keys with count 0 "
+                    "are emitted too, so the census is a complete partition")
 
 
 class ScoredRecord(BaseModel):
@@ -1916,7 +2860,28 @@ class ScoredRecord(BaseModel):
     tool: str = "metabasis/scripts/read_composed_predictions.py"
     slots: list[ScoredSlot] = []
     aggregates: list[PredictorAggregate] = []
-    head_to_head: HeadToHead = HeadToHead()
+    head_to_head: HeadToHead = Field(
+        default=HeadToHead(),
+        description="Addendum E §E3's star-vs-composed 2×2, PRESERVED VERBATIM "
+                    "across the Addendum-H adoption — same field, same names, "
+                    "same denominators, so the E3 race reads identically in "
+                    "records filed before and after the third column")
+    head_to_head_pairwise: list[PairwiseHeadToHead] = Field(
+        default=[],
+        description="the same 2×2 for every predictor pair (star×composed, "
+                    "star×directional, composed×directional) — Addendum H item "
+                    "3's 'scored on structurally identical terms', beside E3's "
+                    "read and never in place of it")
+    head_to_head_three_way: ThreeWayHeadToHead = Field(
+        default=ThreeWayHeadToHead(),
+        description="the per-slot hit-set census across all three predictors, "
+                    "over slots where all three are scored of record")
+    addendum_d: AddendumDCompanion = Field(
+        default=AddendumDCompanion(STATUS="NOT-TRIGGERED"),
+        description="Addendum D's constant-α companion: SCORED when the desk "
+                    "supplied one, OWED when a directional column is filed and "
+                    "it was not, NOT-TRIGGERED when no ceiling-aware gauge is "
+                    "filed in this record")
     warnings: list[str] = []
     record_sha256: Optional[str] = Field(
         default=None, description="sha256 of this document with this field null "
@@ -1976,6 +2941,36 @@ def _band_position(value: float, lo: float, hi: float) -> tuple[bool, str, float
     return True, "in", 0.0
 
 
+def _scored_band_for(predicted: float, band: Sequence[float],
+                     magnitude_only: bool) -> list[float]:
+    """The band the comparison actually runs against.
+
+    Magnitude-only moves the comparison onto |·| (prereg §3: "|observed| within
+    the band of |predicted|; sign unscored") and the band travels with it — the
+    FROZEN half-width never changes. Otherwise the band is the filed one,
+    verbatim. ONE implementation, shared by the filed predictors and by
+    Addendum D's companion baseline, so "structurally identical terms" is a
+    property of the code and not of two copies agreeing today.
+    """
+    if magnitude_only:
+        return [abs(predicted) - FROZEN_BAND_HALF_WIDTH,
+                abs(predicted) + FROZEN_BAND_HALF_WIDTH]
+    return [float(band[0]), float(band[1])]
+
+
+def _verdict_for(value: float, scored_band: Sequence[float],
+                 magnitude_only: bool) -> tuple[Verdict, bool, float]:
+    """(verdict, in_band, band_excess) for one value against one scored band."""
+    in_band, where, excess = _band_position(value, float(scored_band[0]),
+                                            float(scored_band[1]))
+    if magnitude_only:
+        verdict: Verdict = ("magnitude-only-in-band" if in_band
+                            else f"magnitude-only-out-of-band-{where}")  # type: ignore[assignment]
+    else:
+        verdict = "in-band" if in_band else f"out-of-band-{where}"  # type: ignore[assignment]
+    return verdict, in_band, excess
+
+
 def score_prediction(slot: FiledSlot, filed: FiledPrediction,
                      observed: Optional[ObservedAhat], *,
                      filed_utc: Optional[str] = None,
@@ -2004,11 +2999,7 @@ def score_prediction(slot: FiledSlot, filed: FiledPrediction,
     #  The scored band: magnitude-only moves the comparison onto |·| (prereg §3
     #  "|observed| within band of |predicted|; sign unscored"), and the band
     #  travels with it — the frozen half-width never changes.
-    if filed.magnitude_only:
-        scored_band = [abs(filed.predicted) - FROZEN_BAND_HALF_WIDTH,
-                       abs(filed.predicted) + FROZEN_BAND_HALF_WIDTH]
-    else:
-        scored_band = band
+    scored_band = _scored_band_for(filed.predicted, band, filed.magnitude_only)
 
     if observed is None:
         return ScoredSlot(scored_band=scored_band,
@@ -2020,12 +3011,8 @@ def score_prediction(slot: FiledSlot, filed: FiledPrediction,
                           **common)                     # type: ignore[arg-type]
 
     value = abs(observed.a_hat) if filed.magnitude_only else observed.a_hat
-    in_band, where, excess = _band_position(value, scored_band[0], scored_band[1])
-    if filed.magnitude_only:
-        verdict: Verdict = ("magnitude-only-in-band" if in_band
-                            else f"magnitude-only-out-of-band-{where}")  # type: ignore[assignment]
-    else:
-        verdict = "in-band" if in_band else f"out-of-band-{where}"  # type: ignore[assignment]
+    verdict, in_band, excess = _verdict_for(value, scored_band,
+                                            filed.magnitude_only)
 
     descriptive_hit: Optional[bool] = None
     if filed.descriptive_band_04 is not None:
@@ -2096,8 +3083,11 @@ def _filed_prediction_from(block: dict[str, Any], predictor: Predictor,
 def parse_filing_record(path: Path) -> FilingRecord:
     """Read a filed prediction record into slots. TWO shapes are on record.
 
-      * RACING (batch 3 onward): a row carries `source`/`target` plus a
-        `star_prediction` and/or `composed_prediction` block.
+      * RACING (batch 3 onward): a row carries `source`/`target` plus any of a
+        `star_prediction`, `composed_prediction` and — from Addendum H,
+        batch 4 onward — `directional_prediction` block. Every block present is
+        read; a row filing only one of the three is legal (the columns' filing
+        availability is independent) and a row filing none is a HALT.
       * SCALAR-FLAT (canary, batch 2): a row IS the star prediction —
         `source_model`/`target_model`, `predicted_a_hat`, `band`,
         `near_zero_carveout`.
@@ -2128,11 +3118,10 @@ def parse_filing_record(path: Path) -> FilingRecord:
             raise ScoringError(f"{path}: prediction row is not an object: {row!r}")
         row_sha = row.get("corpus_manifest_sha256", record_sha)
         filed: list[FiledPrediction] = []
-        if "star_prediction" in row or "composed_prediction" in row:
+        if any(k in row for k in RACING_BLOCK_KEYS.values()):
             source, target = str(row["source"]), str(row["target"])
             arm, family = str(row["arm"]), str(row["family"])
-            for predictor, block_key in (("star", "star_prediction"),
-                                         ("composed", "composed_prediction")):
+            for predictor, block_key in RACING_BLOCK_KEYS.items():
                 block = row.get(block_key)
                 if isinstance(block, dict):
                     filed.append(_filed_prediction_from(
@@ -2149,10 +3138,10 @@ def parse_filing_record(path: Path) -> FilingRecord:
         else:
             raise ScoringError(
                 f"{path}: unrecognized prediction-row shape (keys "
-                f"{sorted(row)}). Known shapes: racing "
-                f"(`star_prediction`/`composed_prediction` blocks) and "
-                f"scalar-flat (`predicted_a_hat`). A third shape must be taught "
-                f"to this parser explicitly — never guessed")
+                f"{sorted(row)}). Known shapes: racing (any of "
+                f"{sorted(RACING_BLOCK_KEYS.values())} blocks) and scalar-flat "
+                f"(`predicted_a_hat`). A further shape must be taught to this "
+                f"parser explicitly — never guessed")
         if not filed:
             raise ScoringError(
                 f"{path}: row {source}->{target} files no predictor block at all")
@@ -2231,6 +3220,280 @@ def load_observations(path: Path) -> ObservationSet:
                           note=str(doc.get("note", "")), observations=obs)
 
 
+def _alpha_companion_halt(path: Path, problem: str) -> AlphaCompanionError:
+    """The contract-quoting halt for the constant-α companion artifact."""
+    return AlphaCompanionError(
+        f"{path}: {problem}\n"
+        f"EXPECTED `{SCHEMA_CONSTANT_ALPHA_COMPANION_V1}`:\n"
+        f"  top level: object with REQUIRED `schema` == "
+        f"{SCHEMA_CONSTANT_ALPHA_COMPANION_V1!r}, REQUIRED `gauge` (one of "
+        f"{sorted(RACING_BLOCK_KEYS)} — the adopted gauge this baseline "
+        f"companions), REQUIRED finite `alpha_bar`, REQUIRED "
+        f"`alpha_bar_provenance` (free text), REQUIRED non-empty `rows`; "
+        f"OPTIONAL `corpus_manifest_sha256`, `note`, `alpha_permutation_null` "
+        f"({{n_permutations, true_in_band_count, percentile_rank}}).\n"
+        f"  each row : REQUIRED `source`, `target`, `arm`, finite `predicted` "
+        f"(= ᾱ · the adopted gauge's ceiling/calibration terms for that slot); "
+        f"OPTIONAL `family` (default {FAMILY_OF_RECORD!r}), `ceiling_term`, "
+        f"`note`. (source, target, arm, family) must be UNIQUE.\n"
+        f"This tool NEVER computes ᾱ, the ceiling terms, or the α-permutation "
+        f"null: Addendum D §D2 defines ᾱ over the scored set and §D3's null is "
+        f"a desk computation. Supplying nothing is legal and is reported as "
+        f"OWED — supplying something malformed is not.")
+
+
+def load_alpha_companion(path: Path) -> ConstantAlphaCompanion:
+    """Read and VALIDATE a `constant-alpha-companion/v1` artifact."""
+    if not path.is_file():
+        raise _alpha_companion_halt(
+            path, "constant-α companion artifact absent. (Passing no "
+                  "--alpha-companion at all is the legal way to leave it OWED; "
+                  "naming a file that does not exist is not)")
+    try:
+        doc = json.loads(path.read_text())
+    except (OSError, ValueError) as exc:
+        raise _alpha_companion_halt(path, f"unreadable as JSON: {exc}") from exc
+    if not isinstance(doc, dict):
+        raise _alpha_companion_halt(
+            path, f"top level is {type(doc).__name__}, not an object")
+    declared = doc.get("schema")
+    if declared != SCHEMA_CONSTANT_ALPHA_COMPANION_V1:
+        raise _alpha_companion_halt(
+            path, f"declares schema {declared!r}, not "
+                  f"{SCHEMA_CONSTANT_ALPHA_COMPANION_V1!r}")
+    gauge = doc.get("gauge")
+    if gauge not in RACING_BLOCK_KEYS:
+        raise _alpha_companion_halt(
+            path, f"`gauge` is {gauge!r}, not one of {sorted(RACING_BLOCK_KEYS)}")
+    try:
+        alpha_bar = float(doc["alpha_bar"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise _alpha_companion_halt(
+            path, f"`alpha_bar` is {doc.get('alpha_bar')!r}, which is not a "
+                  f"number") from exc
+    if not np.isfinite(alpha_bar):
+        raise _alpha_companion_halt(
+            path, f"`alpha_bar` is {alpha_bar!r} — non-finite")
+    provenance = doc.get("alpha_bar_provenance")
+    if not isinstance(provenance, str) or not provenance.strip():
+        raise _alpha_companion_halt(
+            path, f"`alpha_bar_provenance` is {provenance!r}; ᾱ is a grand mean "
+                  f"over a SCORED SET, and which set it was formed over is the "
+                  f"only thing that makes D3's margin auditable")
+    raw_rows = doc.get("rows")
+    if not isinstance(raw_rows, list) or not raw_rows:
+        raise _alpha_companion_halt(
+            path, f"`rows` is {type(raw_rows).__name__ if raw_rows is not None else 'absent'}"
+                  f", not a non-empty list")
+
+    rows: list[ConstantAlphaRow] = []
+    seen: dict[str, int] = {}
+    for i, entry in enumerate(raw_rows):
+        if not isinstance(entry, dict):
+            raise _alpha_companion_halt(
+                path, f"`rows[{i}]` is {type(entry).__name__}, not an object")
+        try:
+            predicted = float(entry["predicted"])
+            row = ConstantAlphaRow(
+                source=str(entry["source"]), target=str(entry["target"]),
+                arm=str(entry["arm"]),
+                family=str(entry.get("family", FAMILY_OF_RECORD)),
+                predicted=predicted,
+                ceiling_term=(None if entry.get("ceiling_term") is None
+                              else float(entry["ceiling_term"])),
+                note=str(entry.get("note", "")))
+        except (KeyError, TypeError, ValueError) as exc:
+            raise _alpha_companion_halt(
+                path, f"malformed `rows[{i}]` {entry!r}: {exc}") from exc
+        if not np.isfinite(row.predicted):
+            raise _alpha_companion_halt(
+                path, f"`rows[{i}]` ({row.key}): `predicted` is non-finite")
+        if row.key in seen:
+            raise _alpha_companion_halt(
+                path, f"duplicate companion row for {row.key} (rows "
+                      f"{seen[row.key]} and {i}) — which baseline value is of "
+                      f"record cannot be guessed")
+        seen[row.key] = i
+        rows.append(row)
+
+    null_doc = doc.get("alpha_permutation_null")
+    null: Optional[AlphaPermutationNull] = None
+    if null_doc is not None:
+        if not isinstance(null_doc, dict):
+            raise _alpha_companion_halt(
+                path, f"`alpha_permutation_null` is {type(null_doc).__name__}, "
+                      f"not an object")
+        try:
+            null = AlphaPermutationNull(
+                n_permutations=int(null_doc["n_permutations"]),
+                true_in_band_count=int(null_doc["true_in_band_count"]),
+                percentile_rank=float(null_doc["percentile_rank"]),
+                note=str(null_doc.get("note", "")))
+        except (KeyError, TypeError, ValueError) as exc:
+            raise _alpha_companion_halt(
+                path, f"malformed `alpha_permutation_null` {null_doc!r}: "
+                      f"{exc}") from exc
+
+    logger.info("constant-α companion: gauge %s, ᾱ %.6f, %d row(s), "
+                "permutation null %s (%s)", gauge, alpha_bar, len(rows),
+                "supplied" if null else "OWED",
+                SCHEMA_CONSTANT_ALPHA_COMPANION_V1)
+    return ConstantAlphaCompanion(
+        path=str(path), sha256=sha256_of(path),
+        gauge=gauge,                                 # type: ignore[arg-type]
+        alpha_bar=alpha_bar, alpha_bar_provenance=provenance,
+        corpus_manifest_sha256=doc.get("corpus_manifest_sha256"),
+        note=str(doc.get("note", "")), rows=rows, alpha_permutation_null=null)
+
+
+def score_constant_alpha(row: ConstantAlphaRow, companion: ConstantAlphaCompanion,
+                         observed: Optional[ObservedAhat]) -> ConstantAlphaVerdict:
+    """Score the constant-α baseline for one slot. Same band rule, no gate."""
+    magnitude_only = bool(abs(row.predicted) < NEAR_ZERO_CARVE_OUT)
+    band = _frozen_band(row.predicted)
+    scored_band = _scored_band_for(row.predicted, band, magnitude_only)
+    common = dict(alpha_bar=companion.alpha_bar, predicted=row.predicted,
+                  band=band, scored_band=scored_band,
+                  magnitude_only=magnitude_only, ceiling_term=row.ceiling_term,
+                  companion_source=companion.path,
+                  companion_sha256=companion.sha256)
+    if observed is None:
+        return ConstantAlphaVerdict(
+            verdict="UNSCORED-NO-OBSERVATION", in_band=None,
+            **common)                                # type: ignore[arg-type]
+    value = abs(observed.a_hat) if magnitude_only else observed.a_hat
+    verdict, in_band, excess = _verdict_for(value, scored_band, magnitude_only)
+    return ConstantAlphaVerdict(
+        observed=observed.a_hat, scored_value=value, verdict=verdict,
+        in_band=in_band, error=observed.a_hat - row.predicted,
+        abs_error=abs(observed.a_hat - row.predicted), band_excess=excess,
+        **common)                                    # type: ignore[arg-type]
+
+
+def attach_constant_alpha(slots: Sequence[ScoredSlot],
+                          companion: Optional[ConstantAlphaCompanion],
+                          observations: dict[str, ObservedAhat],
+                          ) -> AddendumDCompanion:
+    """Attach D2's baseline to the adopted gauge's slots and read D3's margin.
+
+    Mutates the gauge's `ScoredSlot.constant_alpha` in place and returns the
+    record-level block. Three outcomes, never conflated:
+
+      * NOT-TRIGGERED — no ceiling-aware gauge is filed in this record at all;
+      * OWED          — a gauge IS filed and no companion was supplied, or one
+                        was supplied without the α-permutation null;
+      * SCORED        — the margin is computed. Computed, not adjudicated: D3's
+                        thresholds are reported as booleans beside the numbers
+                        and the desk rules.
+    """
+    filed_gauges = {s.predictor for s in slots}
+    triggered = [g for g in CEILING_AWARE_GAUGES if g in filed_gauges]
+    if companion is None and not triggered:
+        return AddendumDCompanion(STATUS="NOT-TRIGGERED", gauge=None)
+    gauge: Predictor = companion.gauge if companion else triggered[0]
+    if companion is not None and gauge not in filed_gauges:
+        raise AlphaCompanionError(
+            f"{companion.path}: companions the {companion.gauge!r} gauge, but "
+            f"this record files no {companion.gauge!r} prediction (it files "
+            f"{sorted(filed_gauges)}). Scoring a baseline against a column "
+            f"nobody filed would produce a margin with no gauge on the other "
+            f"side of it")
+
+    gauge_slots = [s for s in slots if s.predictor == gauge]
+    n_gauge_scored = sum(1 for s in gauge_slots if s.scored_of_record)
+    n_gauge_in_band = sum(1 for s in gauge_slots
+                          if s.scored_of_record and s.in_band)
+
+    if companion is None:
+        return AddendumDCompanion(
+            STATUS="OWED", gauge=gauge,
+            n_gauge_scored_of_record=n_gauge_scored,
+            n_gauge_in_band=n_gauge_in_band,
+            gauge_in_band_fraction=(n_gauge_in_band / n_gauge_scored
+                                    if n_gauge_scored else None),
+            owed=[f"the constant-α companion for the {gauge!r} column "
+                  f"(Addendum D §D2): ᾱ = the grand mean of the fitted "
+                  f"per-model/per-role α over the scored set, and ᾱ · [the "
+                  f"same ceiling/calibration terms the adopted gauge uses] per "
+                  f"slot. NEVER auto-computed here — supply it as "
+                  f"`{SCHEMA_CONSTANT_ALPHA_COMPANION_V1}` via "
+                  f"--alpha-companion.",
+                  "the α-permutation null (Addendum D §D3): per-model α "
+                  "assignments permuted across models, n = 1000, reporting the "
+                  "true star's in-band count as a percentile.",
+                  "until both land, D3's per-model-structure claim cannot be "
+                  "read at all — neither as demonstrated nor as refuted."])
+
+    by_key = {row.key: row for row in companion.rows}
+    n_missing = 0
+    n_companion_scored = 0
+    n_companion_in_band = 0
+    n_both = 0
+    n_gauge_in_band_both = 0
+    for slot in gauge_slots:
+        row = by_key.get(slot.key)
+        if row is None:
+            n_missing += 1
+            continue
+        verdict = score_constant_alpha(row, companion,
+                                       observations.get(slot.key))
+        slot.constant_alpha = verdict
+        if not slot.scored_of_record or verdict.in_band is None:
+            continue
+        n_companion_scored += 1
+        n_both += 1
+        if verdict.in_band:
+            n_companion_in_band += 1
+        if slot.in_band:
+            n_gauge_in_band_both += 1
+
+    unmatched = sorted(set(by_key) - {s.key for s in gauge_slots})
+    if unmatched:
+        raise AlphaCompanionError(
+            f"{companion.path}: {len(unmatched)} companion row(s) match no "
+            f"filed {gauge!r} slot: {unmatched}. A baseline row for a slot the "
+            f"record never filed is a typo, a wrong record or a direction flip "
+            f"— every one of which yields a margin that looks complete and is "
+            f"not")
+
+    margin: Optional[float] = None
+    if n_both:
+        margin = 100.0 * ((n_gauge_in_band_both / n_both)
+                          - (n_companion_in_band / n_both))
+    null = companion.alpha_permutation_null
+    owed: list[str] = []
+    if n_missing:
+        owed.append(
+            f"{n_missing} scored {gauge!r} slot(s) have no companion row — "
+            f"D3's margin is read over the {n_both} slot(s) where BOTH are "
+            f"scored, and the shortfall is named rather than absorbed")
+    if null is None:
+        owed.append(
+            "the α-permutation null (Addendum D §D3): per-model α assignments "
+            "permuted across models, n = 1000, true star's in-band count at "
+            "≥ the 99th percentile. NOT computed here. Until it lands the "
+            "margin alone cannot demonstrate per-model structure")
+    return AddendumDCompanion(
+        STATUS="SCORED", gauge=gauge, alpha_bar=companion.alpha_bar,
+        alpha_bar_provenance=companion.alpha_bar_provenance,
+        companion_source=companion.path, companion_sha256=companion.sha256,
+        n_gauge_scored_of_record=n_gauge_scored,
+        n_gauge_in_band=n_gauge_in_band,
+        gauge_in_band_fraction=(n_gauge_in_band / n_gauge_scored
+                                if n_gauge_scored else None),
+        n_companion_scored=n_companion_scored,
+        n_companion_in_band=n_companion_in_band,
+        companion_in_band_fraction=(n_companion_in_band / n_companion_scored
+                                    if n_companion_scored else None),
+        n_slots_companion_missing=n_missing,
+        margin_percentage_points=margin,
+        margin_meets_d3_threshold=(None if margin is None else margin >= 15.0),
+        alpha_permutation_null=null,
+        permutation_rank_meets_d3_threshold=(
+            None if null is None else null.percentile_rank >= 99.0),
+        owed=owed)
+
+
 def aggregate_scored(slots: Sequence[ScoredSlot]) -> list[PredictorAggregate]:
     """Counts per predictor. Only `scored_of_record` slots enter the fraction."""
     by_predictor: dict[str, PredictorAggregate] = {}
@@ -2294,8 +3557,73 @@ def head_to_head(slots: Sequence[ScoredSlot]) -> HeadToHead:
     return h2h
 
 
+def _slots_by_key(slots: Sequence[ScoredSlot]) -> dict[str, dict[str, ScoredSlot]]:
+    """slot key -> {predictor: ScoredSlot}."""
+    by_key: dict[str, dict[str, ScoredSlot]] = {}
+    for s in slots:
+        by_key.setdefault(s.key, {})[s.predictor] = s
+    return by_key
+
+
+def head_to_head_pairwise(slots: Sequence[ScoredSlot]) -> list[PairwiseHeadToHead]:
+    """The E3 2×2 for EVERY predictor pair, in `PREDICTOR_PAIRS` order.
+
+    The `("star", "composed")` entry reproduces `head_to_head()` exactly — same
+    slots, same denominators — which selftest 18 proves rather than asserts, so
+    the E3 read has one arithmetic and two presentations, never two arithmetics.
+    A pair neither of whose predictors is filed in the record yields a row of
+    zeros: an empty 2×2 is a fact about the record, not a reason to omit it.
+    """
+    by_key = _slots_by_key(slots)
+    out: list[PairwiseHeadToHead] = []
+    for predictor_a, predictor_b in PREDICTOR_PAIRS:
+        row = PairwiseHeadToHead(predictor_a=predictor_a, predictor_b=predictor_b)
+        for pair in by_key.values():
+            a, b = pair.get(predictor_a), pair.get(predictor_b)
+            if (a is None or b is None or not a.scored_of_record
+                    or not b.scored_of_record):
+                row.n_slots_incomplete += 1
+                continue
+            row.n_slots_both_scored += 1
+            if a.in_band and b.in_band:
+                row.n_both_in_band += 1
+            elif a.in_band:
+                row.n_a_only += 1
+            elif b.in_band:
+                row.n_b_only += 1
+            else:
+                row.n_both_out_of_band += 1
+        out.append(row)
+    return out
+
+
+def head_to_head_three_way(slots: Sequence[ScoredSlot]) -> ThreeWayHeadToHead:
+    """The per-slot hit-set census over slots where ALL THREE columns scored."""
+    predictors: list[Predictor] = list(RACING_BLOCK_KEYS)
+    #  Enumerate every subset in PREDICTOR order, so the census is a COMPLETE
+    #  partition of the all-scored slots and a zero cell is visible as a zero
+    #  rather than as a missing key.
+    labels: list[str] = ["none"]
+    for mask in range(1, 1 << len(predictors)):
+        labels.append("+".join(p for i, p in enumerate(predictors)
+                               if mask & (1 << i)))
+    census = ThreeWayHeadToHead(predictors=predictors,
+                                n_by_hit_set={label: 0 for label in labels})
+    for pair in _slots_by_key(slots).values():
+        present = [pair.get(p) for p in predictors]
+        if any(s is None or not s.scored_of_record for s in present):
+            census.n_slots_incomplete += 1
+            continue
+        census.n_slots_all_scored += 1
+        hits = [p for p, s in zip(predictors, present)
+                if s is not None and s.in_band]
+        census.n_by_hit_set["+".join(hits) if hits else "none"] += 1
+    return census
+
+
 def score_record(record_path: Path, observations_path: Path,
-                 scored_utc: Optional[str] = None) -> ScoredRecord:
+                 scored_utc: Optional[str] = None,
+                 alpha_companion_path: Optional[Path] = None) -> ScoredRecord:
     """Build the scored record for one filing record. WRITES NOTHING.
 
     Unmatched observations are a HALT: an observation that matches no filed slot
@@ -2305,6 +3633,8 @@ def score_record(record_path: Path, observations_path: Path,
     stamp = scored_utc or utc_now()
     filing = parse_filing_record(record_path)
     observed = load_observations(observations_path)
+    companion = (None if alpha_companion_path is None
+                 else load_alpha_companion(alpha_companion_path))
     by_key = {o.key: o for o in observed.observations}
 
     filed_keys = {slot.key for slot in filing.slots}
@@ -2325,6 +3655,11 @@ def score_record(record_path: Path, observations_path: Path,
                                            filed_utc=filing.filed_utc,
                                            scored_utc=stamp))
 
+    #  Addendum D §D1's scope trigger is Addendum H's adoption, so this runs at
+    #  every scoring read once a directional column is filed. It attaches the
+    #  baseline to the gauge's slots and NEVER computes ᾱ or the null itself.
+    addendum_d = attach_constant_alpha(scored, companion, by_key)
+
     warnings: list[str] = []
     n_missing = sum(1 for s in scored if s.verdict == "UNSCORED-NO-OBSERVATION")
     if n_missing:
@@ -2337,6 +3672,13 @@ def score_record(record_path: Path, observations_path: Path,
         warnings.append(
             f"{n_cross} slot(s) are CROSS-VINTAGE calibration reads (Addendum G "
             f"§G2(c)) — verdicts shown, excluded from the aggregates")
+    if addendum_d.STATUS == "OWED":
+        warnings.append(
+            "ADDENDUM D OWED — a ceiling-aware gauge is filed in this record, "
+            "so §D1's scope trigger has fired and the constant-α companion is "
+            "part of the read: " + " · ".join(addendum_d.owed))
+    elif addendum_d.owed:
+        warnings.append("ADDENDUM D PARTIAL — " + " · ".join(addendum_d.owed))
 
     record = ScoredRecord(
         generated=date.today().isoformat(), scored_utc=stamp,
@@ -2348,7 +3690,10 @@ def score_record(record_path: Path, observations_path: Path,
         n_observations=len(observed.observations),
         n_observations_unmatched=0,
         slots=scored, aggregates=aggregate_scored(scored),
-        head_to_head=head_to_head(scored), warnings=warnings)
+        head_to_head=head_to_head(scored),
+        head_to_head_pairwise=head_to_head_pairwise(scored),
+        head_to_head_three_way=head_to_head_three_way(scored),
+        addendum_d=addendum_d, warnings=warnings)
     record.record_sha256 = _canonical_sha256(record.model_dump(mode="json"))
     return record
 
@@ -3110,6 +4455,615 @@ def selftest() -> int:                                   # noqa: C901 — a chec
           "and nothing in the SCORED record reads it — the companions are "
           "never scored, by construction and not by convention")
 
+    print("== selftest 17: the directional-constants schema, and its refusals ==")
+    #  ADDENDUM 2026-07-29-H. The readout is produced by a DIFFERENT lane, so
+    #  every departure from the named contract must halt with a message that
+    #  states the contract — that is how the two lanes reconcile without a
+    #  round trip through a person's memory.
+    import tempfile as _tempfile
+
+    _SHA_A = "a" * 64
+    _SHA_B = "b" * 64
+
+    def _constants_doc(**overrides: Any) -> dict[str, Any]:
+        doc: dict[str, Any] = {
+            "schema": SCHEMA_DIRECTIONAL_CONSTANTS_V1,
+            "corpus_manifest_sha256": CORPUS_SHA_V21,
+            "gauge": "in-lineage anchor c_8B=.8375 (synthetic selftest fixture)",
+            "generated": "2026-07-29",
+            "arm": "native", "family": FAMILY_OF_RECORD,
+            "constants": [
+                {"model": "phi-4", "c_out": 0.6000, "c_in": 0.5000, "site": 19},
+                {"model": "qwen2.5-32b-instruct", "c_out": 0.8000,
+                 "c_in": 0.7000},
+                {"model": "qwen2.5-3b-instruct", "c_out": 0.1000,
+                 "c_in": 0.1000},
+            ],
+        }
+        doc.update(overrides)
+        return doc
+
+    with _tempfile.TemporaryDirectory(prefix="directional_schema_") as td:
+        root = Path(td)
+
+        def _write(name: str, payload: Any) -> Path:
+            path = root / name
+            path.write_text(payload if isinstance(payload, str)
+                            else json.dumps(payload, indent=1))
+            return path
+
+        good_path = _write("constants-good.json", _constants_doc())
+        loaded = load_directional_constants(good_path)
+        check(loaded.schema_name == SCHEMA_DIRECTIONAL_CONSTANTS_V1
+              and len(loaded.rows) == 3 and loaded.sha256 == sha256_of(good_path)
+              and loaded.corpus_manifest_sha256 == CORPUS_SHA_V21,
+              f"a well-formed {SCHEMA_DIRECTIONAL_CONSTANTS_V1} readout loads: "
+              f"{len(loaded.rows)} rows, gauge recorded, own sha carried")
+        check(loaded.row("phi-4", "native", FAMILY_OF_RECORD) is not None
+              and loaded.row("phi-4", "raw", FAMILY_OF_RECORD) is None,
+              "a row resolves IN ITS ARM only — the arm is never proxied "
+              "(Addendum E §E1's rule, applied at scalar order by H item 3)")
+        check(loaded.row("phi-4", "native", FAMILY_OF_RECORD).site == 19,  # type: ignore[union-attr]
+              "the row carries the SITE REGISTRY's site, cross-checked against "
+              "the readout's own claim")
+
+        mapped = load_directional_constants(_write("constants-map.json", _constants_doc(
+            constants={"phi-4": {"c_out": 0.6, "c_in": 0.5, "site": 19},
+                       "qwen2.5-32b-instruct": {"c_out": 0.8, "c_in": 0.7},
+                       "qwen2.5-3b-instruct": {"c_out": 0.1, "c_in": 0.1}})))
+        check([(r.model, r.c_out, r.c_in) for r in mapped.rows]
+              == [(r.model, r.c_out, r.c_in) for r in loaded.rows],
+              "the model->row OBJECT encoding yields the same rows as the list "
+              "encoding — both are named in the contract, neither is inferred")
+
+        drifted = load_directional_constants(_write(
+            "constants-drift.json", _constants_doc(constants=[
+                {"model": "phi-4", "c_out": 0.6, "c_in": 0.5,
+                 "c_sideways": 0.4, "vintage": "v2.1"}])))
+        check(drifted.rows[0].unrecognized_keys == ["c_sideways", "vintage"]
+              and any("SCHEMA DRIFT" in n for n in drifted.notes),
+              "row keys the schema does not define are RECORDED and ignored, "
+              "never obeyed and never dropped silently")
+
+        big = load_directional_constants(_write("constants-big.json", _constants_doc(
+            constants=[{"model": "phi-4", "c_out": 1.4, "c_in": 0.5},
+                       {"model": "qwen2.5-32b-instruct", "c_out": 0.8,
+                        "c_in": 0.7}])))
+        big_slot = directional_pair("phi-4", "qwen2.5-32b-instruct", big)
+        check(isinstance(big_slot, DirectionalPrediction)
+              and any("OUT-OF-RANGE CONSTANT" in f for f in big_slot.flags),
+              "|c| > 1 is FLAGGED on the slot and still files — a gauge-divided "
+              "chain-break read can legitimately exceed 1, and the desk rules")
+
+        refusals: list[tuple[str, Any]] = [
+            ("a file that does not exist", None),
+            ("not JSON at all", "{not json"),
+            ("a top-level list", [1, 2, 3]),
+            ("a readout of another schema name",
+             _constants_doc(schema="portability-constants/v1")),
+            ("a readout of a FUTURE version",
+             _constants_doc(schema="directional-constants-readout/v2")),
+            ("no schema declaration at all",
+             {k: v for k, v in _constants_doc().items() if k != "schema"}),
+            ("a corpus sha that is not 64 hex",
+             _constants_doc(corpus_manifest_sha256="deadbeef")),
+            ("no corpus sha at all",
+             {k: v for k, v in _constants_doc().items()
+              if k != "corpus_manifest_sha256"}),
+            ("no gauge/anchor provenance", _constants_doc(gauge="   ")),
+            ("a hub that is not the hub of record", _constants_doc(hub="70b")),
+            ("a hub site that is not the column of record",
+             _constants_doc(hub_site=14)),
+            ("constants of the wrong type", _constants_doc(constants="c_out")),
+            ("an empty constants table", _constants_doc(constants=[])),
+            ("a constants row that is not an object",
+             _constants_doc(constants=[0.6])),
+            ("a row with no model", _constants_doc(constants=[{"c_out": .6, "c_in": .5}])),
+            ("a row whose arm is not an arm of record",
+             _constants_doc(arm=None, constants=[
+                 {"model": "phi-4", "c_out": .6, "c_in": .5, "arm": "hybrid"}])),
+            ("a row with no arm and no doc default",
+             _constants_doc(arm=None, constants=[
+                 {"model": "phi-4", "c_out": .6, "c_in": .5}])),
+            ("a row whose family is not a family of record",
+             _constants_doc(family=None, constants=[
+                 {"model": "phi-4", "c_out": .6, "c_in": .5,
+                  "family": "proc_k9000"}])),
+            ("a c_out that is not a number",
+             _constants_doc(constants=[{"model": "phi-4", "c_out": "point six",
+                                        "c_in": .5}])),
+            ("a missing c_in",
+             _constants_doc(constants=[{"model": "phi-4", "c_out": .6}])),
+            ("a non-finite constant",
+             _constants_doc(constants=[{"model": "phi-4", "c_out": "NaN",
+                                        "c_in": .5}])),
+            ("a model with no site of record (gpt2-xl is DEFERRED)",
+             _constants_doc(constants=[{"model": "gpt2-xl", "c_out": .6,
+                                        "c_in": .5}])),
+            ("a misspelled model key",
+             _constants_doc(constants=[{"model": "phi4", "c_out": .6, "c_in": .5}])),
+            ("a row whose site disagrees with the site registry",
+             _constants_doc(constants=[{"model": "phi-4", "c_out": .6,
+                                        "c_in": .5, "site": 21}])),
+            ("a row-level corpus sha that is not 64 hex",
+             _constants_doc(constants=[{"model": "phi-4", "c_out": .6, "c_in": .5,
+                                        "corpus_manifest_sha256": "v2.1"}])),
+            ("two rows for the same (model, arm, family)",
+             _constants_doc(constants=[
+                 {"model": "phi-4", "c_out": .6, "c_in": .5},
+                 {"model": "phi-4", "c_out": .7, "c_in": .4}])),
+            ("a mapping key and row `model` that disagree",
+             _constants_doc(constants={"phi-4": {"model": "phi-3.5-mini-instruct",
+                                                 "c_out": .6, "c_in": .5}})),
+            ("a mapping whose value is not an object",
+             _constants_doc(constants={"phi-4": 0.6})),
+        ]
+        for i, (label, payload) in enumerate(refusals):
+            path = (root / "constants-absent.json" if payload is None
+                    else _write(f"constants-bad-{i}.json", payload))
+            try:
+                load_directional_constants(path)
+                check(False, f"{label} must be REFUSED")
+            except DirectionalConstantsError as exc:
+                check(f"EXPECTED `{SCHEMA_DIRECTIONAL_CONSTANTS_V1}`" in str(exc),
+                      f"{label} → halt quoting the contract: "
+                      f"{str(exc).splitlines()[0]!s:.78}")
+
+        print("== selftest 18: directional slots — band, carve-out, arm, vintage ==")
+        pred = directional_pair("phi-4", "qwen2.5-32b-instruct", loaded)
+        assert isinstance(pred, DirectionalPrediction)
+        check(pred.prediction_id
+              == "directional-prediction/phi-4→qwen2.5-32b-instruct/native-k128",
+              f"the ID is Addendum H's shape: {pred.prediction_id}")
+        check(abs(pred.predicted - (0.6000 * 0.7000)) < 1e-15
+              and pred.c_out_source == 0.6 and pred.c_in_target == 0.7,
+              f"predicted = c_src^out · c_tgt^in = {pred.predicted:.6f} "
+              f"(0.6 × 0.7); the SOURCE contributes c^out and the TARGET c^in")
+        check(abs(pred.band[0] - (pred.predicted - 0.05)) < 1e-15
+              and abs(pred.band[1] - (pred.predicted + 0.05)) < 1e-15,
+              f"the ±.05 band is frozen at filing around the predicted value: "
+              f"{pred.band}")
+        check(pred.filed_predicted == round(pred.predicted, FILED_DECIMALS)
+              and pred.filed_band == [round(pred.filed_predicted - 0.05,
+                                            FILED_DECIMALS),
+                                      round(pred.filed_predicted + 0.05,
+                                            FILED_DECIMALS)],
+              f"the FILED value and the FILED band are the same rounding: "
+              f"{pred.filed_predicted} {pred.filed_band} — the band that files "
+              f"is the band OF the value that files")
+        check(_check_filed_band(pred.prediction_id, pred.filed_predicted,
+                                pred.filed_band) == pred.filed_band,
+              "and the filed pair survives the scorer's own frozen-band check, "
+              "so a slot this tool emits can be scored by this tool")
+        check(not pred.magnitude_only,
+              f"|{pred.predicted:.4f}| >= {NEAR_ZERO_CARVE_OUT} → sign SCORED")
+        near = directional_pair("qwen2.5-3b-instruct", "qwen2.5-3b-instruct",
+                                loaded)
+        assert isinstance(near, DirectionalPrediction)
+        check(abs(near.predicted - 0.01) < 1e-15 and near.magnitude_only,
+              f"|{near.predicted:.4f}| < {NEAR_ZERO_CARVE_OUT} → MAGNITUDE-ONLY "
+              f"(prereg §3 / E2 / H item 3, the same carve-out verbatim)")
+        check(near.corpus_vintage == "v2.1"
+              and near.corpus_manifest_sha256 == CORPUS_SHA_V21,
+              "a slot whose BOTH constants rode corpus-v2.1 carries the v2.1 "
+              "sha (Addendum G §G2(a) / H item 5)")
+        check(abs(pred.descriptive_reverse_predicted - (0.8 * 0.5)) < 1e-15
+              and abs(pred.descriptive_asymmetry_ratio
+                      - (0.6 * 0.7) / (0.8 * 0.5)) < 1e-12,
+              f"the reverse value and the â(A→B)/â(B→A) ratio are reported "
+              f"DESCRIPTIVELY ({pred.descriptive_asymmetry_ratio:.4f}) — the "
+              f"asymmetry the symmetric star cannot express by construction")
+        check(not any(f in DirectionalPrediction.model_fields
+                      for f in ("observed", "verdict", "in_band", "a_hat")),
+              "a DirectionalPrediction has no observed/verdict field — the "
+              "filing path cannot carry a score even by accident")
+
+        raw_only = load_directional_constants(_write(
+            "constants-raw.json", _constants_doc(arm="raw", constants=[
+                {"model": "phi-4", "c_out": .6, "c_in": .5},
+                {"model": "qwen2.5-32b-instruct", "c_out": .8, "c_in": .7}])))
+        na = directional_pair("phi-4", "qwen2.5-32b-instruct", raw_only)
+        check(isinstance(na, DirectionalNotFilable)
+              and len(na.missing_sides) == 2 and na.arm == "native"
+              and "Never proxied from another arm" in na.reason,
+              f"constants banked in the RAW arm do not back a NATIVE slot: "
+              f"N/A-AT-FILING, missing {getattr(na, 'missing_sides', None)}")
+        one_sided = load_directional_constants(_write(
+            "constants-one.json", _constants_doc(constants=[
+                {"model": "phi-4", "c_out": .6, "c_in": .5}])))
+        na2 = directional_pair("phi-4", "qwen2.5-32b-instruct", one_sided)
+        check(isinstance(na2, DirectionalNotFilable)
+              and na2.missing_sides == ["target c^in (qwen2.5-32b-instruct/"
+                                        "native-proc_k128)"]
+              and na2.available_keys == ["phi-4/native-proc_k128"],
+              "a slot missing ONLY the target's c^in names exactly that side, "
+              "and lists what the readout does carry")
+        na3 = directional_pair("qwen2.5-32b-instruct", "phi-4", one_sided)
+        check(isinstance(na3, DirectionalNotFilable)
+              and na3.missing_sides[0].startswith("source c^out"),
+              "and the SOURCE-role miss is named as the source's c^out — the "
+              "two roles are never substituted for each other")
+
+        mixed = load_directional_constants(_write(
+            "constants-mixed.json", _constants_doc(constants=[
+                {"model": "phi-4", "c_out": .6, "c_in": .5,
+                 "corpus_manifest_sha256": _SHA_A},
+                {"model": "qwen2.5-32b-instruct", "c_out": .8, "c_in": .7,
+                 "corpus_manifest_sha256": _SHA_B}])))
+        mix = directional_pair("phi-4", "qwen2.5-32b-instruct", mixed)
+        assert isinstance(mix, DirectionalPrediction)
+        check(mix.corpus_vintage == "MIXED"
+              and mix.corpus_manifest_sha256 is None
+              and any("MIXED-VINTAGE" in f for f in mix.flags),
+              "two constants on DIFFERENT vintages → the product is computable "
+              "and carries NO sha: a tag covering half a computation is worse "
+              "than none (Addendum G §G2(a))")
+        check(any("MIXED-VINTAGE READOUT" in n for n in mixed.notes),
+              "and the readout itself notes that its row shas disagree")
+
+        cross_arm = directional_pair("3b", "pythia-6.9b", loaded)
+        check(isinstance(cross_arm, DirectionalNotFilable)
+              and cross_arm.arm == "raw"
+              and "instruct↔base → raw" in cross_arm.arm_rule,
+              "an instruct↔base pair resolves to the RAW arm before any "
+              "constant is looked up (prereg §3), and misses there")
+        try:
+            directional_pair("gpt2-xl", "phi-4", loaded)
+            check(False, "a model with no site of record must refuse")
+        except ComposedPathError as exc:
+            check("DEFERRED" in str(exc),
+                  f"gpt2-xl refuses loudly in the directional path too: "
+                  f"{exc!s:.60}")
+
+    print("== selftest 19: three predictor columns — aggregates and 2×2s ==")
+    check(set(RACING_BLOCK_KEYS) == {"star", "composed", "directional"}
+          and RACING_BLOCK_KEYS["directional"] == "directional_prediction",
+          f"the racing record shape knows all three columns: "
+          f"{sorted(RACING_BLOCK_KEYS.values())}")
+    tri_slots: list[ScoredSlot] = []
+    #  four pairs, chosen so every 2×2 cell and several hit-sets are populated
+    tri_spec: list[tuple[str, float, float, float, float]] = [
+        # (pair, star pred, composed pred, directional pred, observed)
+        ("p1", 0.30, 0.30, 0.30, 0.32),   # all three hit
+        ("p2", 0.30, 0.30, 0.60, 0.32),   # star + composed hit, directional miss
+        ("p3", 0.30, 0.60, 0.60, 0.32),   # star only
+        ("p4", 0.90, 0.90, 0.30, 0.32),   # directional only
+    ]
+    for pair_name, s_pred, c_pred, d_pred, obs_value in tri_spec:
+        slot_i = _slot(pair_name, pair_name + "-t")
+        for predictor, predicted in (("star", s_pred), ("composed", c_pred),
+                                     ("directional", d_pred)):
+            tri_slots.append(score_prediction(
+                slot_i, _filed(predictor, predicted),
+                _obs(pair_name, pair_name + "-t", obs_value)))
+    #  a fifth pair where only the directional column is observed at all
+    lone = _slot("p5", "p5-t")
+    tri_slots.append(score_prediction(lone, _filed("directional", 0.30),
+                                      _obs("p5", "p5-t", 0.32)))
+    tri_slots.append(score_prediction(lone, _filed("star", 0.30), None))
+
+    tri_aggs = {a.predictor: a for a in aggregate_scored(tri_slots)}
+    check(sorted(tri_aggs) == ["composed", "directional", "star"],
+          f"the aggregates cover all three columns: {sorted(tri_aggs)}")
+    check((tri_aggs["star"].n_in_band, tri_aggs["star"].n_out_of_band) == (3, 1)
+          and (tri_aggs["composed"].n_in_band,
+               tri_aggs["composed"].n_out_of_band) == (2, 2)
+          and (tri_aggs["directional"].n_in_band,
+               tri_aggs["directional"].n_out_of_band) == (3, 2),
+          f"per-column counts are independent: star "
+          f"{tri_aggs['star'].n_in_band}/4, composed "
+          f"{tri_aggs['composed'].n_in_band}/4, directional "
+          f"{tri_aggs['directional'].n_in_band}/5")
+    check(tri_aggs["star"].n_unscored_no_observation == 1
+          and tri_aggs["star"].n_scored_of_record == 4,
+          "an unobserved slot stays in n_filed and out of the fraction, "
+          "exactly as before the third column existed")
+
+    legacy = head_to_head(tri_slots)
+    pairwise = {(r.predictor_a, r.predictor_b): r
+                for r in head_to_head_pairwise(tri_slots)}
+    star_comp = pairwise[("star", "composed")]
+    check((star_comp.n_slots_both_scored, star_comp.n_both_in_band,
+           star_comp.n_a_only, star_comp.n_b_only, star_comp.n_both_out_of_band,
+           star_comp.n_slots_incomplete)
+          == (legacy.n_slots_both_scored, legacy.n_both_in_band,
+              legacy.n_star_only, legacy.n_composed_only,
+              legacy.n_both_out_of_band, legacy.n_slots_incomplete),
+          f"the star×composed 2×2 is UNMOVED by the third column: pairwise "
+          f"{(star_comp.n_both_in_band, star_comp.n_a_only, star_comp.n_b_only, star_comp.n_both_out_of_band)}"
+          f" == E3's {(legacy.n_both_in_band, legacy.n_star_only, legacy.n_composed_only, legacy.n_both_out_of_band)}"
+          f" (Addendum H item 1: model selection, not a patch)")
+    check(len(pairwise) == 3 and set(pairwise) == set(PREDICTOR_PAIRS),
+          f"every predictor PAIR gets its own 2×2: {sorted(pairwise)}")
+    star_dir = pairwise[("star", "directional")]
+    check((star_dir.n_slots_both_scored, star_dir.n_both_in_band,
+           star_dir.n_a_only, star_dir.n_b_only, star_dir.n_both_out_of_band)
+          == (4, 1, 2, 1, 0),
+          f"star×directional over the 4 slots both scored: both "
+          f"{star_dir.n_both_in_band}, star-only {star_dir.n_a_only}, "
+          f"directional-only {star_dir.n_b_only}, both out "
+          f"{star_dir.n_both_out_of_band}")
+    check(star_dir.n_slots_incomplete == 1,
+          "the slot where the star has no observation is INCOMPLETE for that "
+          "2×2, never counted as a miss")
+    three = head_to_head_three_way(tri_slots)
+    check(three.n_slots_all_scored == 4 and three.n_slots_incomplete == 1
+          and sum(three.n_by_hit_set.values()) == 4,
+          f"the three-way census partitions the {three.n_slots_all_scored} "
+          f"slots scored for all three ({three.n_slots_incomplete} incomplete)")
+    check(len(three.n_by_hit_set) == 8
+          and three.n_by_hit_set["star+composed+directional"] == 1
+          and three.n_by_hit_set["star+composed"] == 1
+          and three.n_by_hit_set["star"] == 1
+          and three.n_by_hit_set["directional"] == 1
+          and three.n_by_hit_set["none"] == 0,
+          f"all 2³ hit-sets are emitted, zeros included: {three.n_by_hit_set}")
+
+    print("== selftest 20: Addendum D — the constant-α companion, and OWED ==")
+    with _tempfile.TemporaryDirectory(prefix="directional_scoring_") as td:
+        root = Path(td)
+        racing_row = {
+            "source": "alpha", "target": "beta", "arm": "native",
+            "family": FAMILY_OF_RECORD,
+            "star_prediction": {
+                "id": "star-prediction/alpha→beta/native-k128",
+                "predicted": 0.30, "band": [0.25, 0.35],
+                "magnitude_only": False},
+            "composed_prediction": {
+                "id": "composed-prediction/alpha→beta/native-k128",
+                "predicted": 0.34, "band": [0.29, 0.39],
+                "magnitude_only": False},
+            "directional_prediction": {
+                "id": "directional-prediction/alpha→beta/native-k128",
+                "predicted": 0.33, "band": [0.28, 0.38],
+                "magnitude_only": False},
+        }
+        second_row = {
+            "source": "gamma", "target": "delta", "arm": "native",
+            "family": FAMILY_OF_RECORD,
+            "star_prediction": {
+                "id": "star-prediction/gamma→delta/native-k128",
+                "predicted": 0.30, "band": [0.25, 0.35],
+                "magnitude_only": False},
+            "directional_prediction": {
+                "id": "directional-prediction/gamma→delta/native-k128",
+                "predicted": 0.30, "band": [0.25, 0.35],
+                "magnitude_only": False},
+        }
+        record_path = root / "predictions-batch4-synthetic-2026-07-29.json"
+        record_path.write_text(json.dumps({
+            "STATUS": "SYNTHETIC — selftest fixture, files nothing",
+            "filed_utc": "2026-07-29",
+            "predictions": [racing_row, second_row]}, indent=1))
+        obs_path = root / "observed.json"
+        obs_path.write_text(json.dumps({"observed": [
+            {"source": "alpha", "target": "beta", "arm": "native",
+             "family": FAMILY_OF_RECORD, "a_hat": 0.32},
+            {"source": "gamma", "target": "delta", "arm": "native",
+             "family": FAMILY_OF_RECORD, "a_hat": 0.60}]}, indent=1))
+
+        scored = score_record(record_path, obs_path)
+        by_predictor: dict[str, list[ScoredSlot]] = {}
+        for s in scored.slots:
+            by_predictor.setdefault(s.predictor, []).append(s)
+        check(len(scored.slots) == 5 and len(by_predictor["directional"]) == 2,
+              f"a racing record's `directional_prediction` block parses beside "
+              f"the other two: {len(scored.slots)} scored slots across "
+              f"{sorted(by_predictor)}")
+        check(by_predictor["directional"][0].verdict == "in-band"
+              and by_predictor["directional"][1].verdict == "out-of-band-high",
+              "the directional column scores against ITS OWN filed band, "
+              "independently of the star's on the same slot")
+        check(scored.addendum_d.STATUS == "OWED"
+              and scored.addendum_d.gauge == "directional"
+              and len(scored.addendum_d.owed) == 3
+              and any("ADDENDUM D OWED" in w for w in scored.warnings),
+              f"a filed directional column with no companion is Addendum D "
+              f"{scored.addendum_d.STATUS} — named, with what is owed spelled "
+              f"out, never silently absent")
+        check(all(s.constant_alpha is None for s in scored.slots),
+              "and NOTHING is auto-computed: not one slot carries a constant-α "
+              "verdict the desk did not supply (D2's ᾱ is a grand mean over "
+              "the scored set, which only the desk can form)")
+        check(scored.addendum_d.n_gauge_scored_of_record == 2
+              and scored.addendum_d.n_gauge_in_band == 1,
+              "the OWED block still reports the gauge's own counts, so the "
+              "margin is one artifact away rather than a re-score away")
+
+        star_only_record = root / "predictions-star-only-2026-07-29.json"
+        star_only_record.write_text(json.dumps({
+            "filed_utc": "2026-07-29",
+            "predictions": [{
+                "source": "alpha", "target": "beta", "arm": "native",
+                "family": FAMILY_OF_RECORD,
+                "star_prediction": {
+                    "id": "star-prediction/alpha→beta/native-k128",
+                    "predicted": 0.30, "band": [0.25, 0.35],
+                    "magnitude_only": False}}]}, indent=1))
+        star_obs = root / "observed-star-only.json"
+        star_obs.write_text(json.dumps({"observed": [
+            {"source": "alpha", "target": "beta", "arm": "native",
+             "family": FAMILY_OF_RECORD, "a_hat": 0.32}]}))
+        star_scored = score_record(star_only_record, star_obs)
+        check(star_scored.addendum_d.STATUS == "NOT-TRIGGERED"
+              and star_scored.addendum_d.gauge is None
+              and not any("ADDENDUM D" in w for w in star_scored.warnings),
+              "a record filing no ceiling-aware gauge is NOT-TRIGGERED — "
+              "Addendum D §D1's scope trigger has not fired, and 'owed' and "
+              "'not applicable' are different states")
+        check((star_scored.head_to_head.n_slots_both_scored,
+               star_scored.head_to_head.n_both_in_band) == (0, 0)
+              and len(star_scored.head_to_head_pairwise) == 3,
+              "and its E3 2×2 still reads exactly as it always did")
+
+        def _companion(**overrides: Any) -> dict[str, Any]:
+            doc: dict[str, Any] = {
+                "schema": SCHEMA_CONSTANT_ALPHA_COMPANION_V1,
+                "gauge": "directional",
+                "alpha_bar": 0.70,
+                "alpha_bar_provenance": "SYNTHETIC — selftest fixture",
+                "rows": [
+                    {"source": "alpha", "target": "beta", "arm": "native",
+                     "family": FAMILY_OF_RECORD, "predicted": 0.31,
+                     "ceiling_term": 0.4429},
+                    {"source": "gamma", "target": "delta", "arm": "native",
+                     "family": FAMILY_OF_RECORD, "predicted": 0.20}],
+            }
+            doc.update(overrides)
+            return doc
+
+        comp_path = root / "constant-alpha.json"
+        comp_path.write_text(json.dumps(_companion(), indent=1))
+        with_comp = score_record(record_path, obs_path,
+                                 alpha_companion_path=comp_path)
+        d_block = with_comp.addendum_d
+        dir_slots = [s for s in with_comp.slots if s.predictor == "directional"]
+        check(d_block.STATUS == "SCORED" and d_block.alpha_bar == 0.70
+              and d_block.n_companion_scored == 2
+              and d_block.n_companion_in_band == 1,
+              f"a supplied companion scores on the SAME band rule: "
+              f"{d_block.n_companion_in_band}/{d_block.n_companion_scored} in "
+              f"band (ᾱ-predicted ± .05)")
+        check(all(s.constant_alpha is not None for s in dir_slots)
+              and all(s.constant_alpha is None for s in with_comp.slots
+                      if s.predictor != "directional"),
+              "the baseline attaches ONLY to the adopted gauge's slots — the "
+              "star and composed columns are untouched by Addendum D")
+        check(dir_slots[0].constant_alpha.band                # type: ignore[union-attr]
+              == [0.31 - FROZEN_BAND_HALF_WIDTH, 0.31 + FROZEN_BAND_HALF_WIDTH],
+              "the companion's band is the FROZEN ±.05 around its own "
+              "prediction (D2's 'the SAME frozen bands', the Addendum-C item-1 "
+              "reading, stated on the artifact)")
+        check(abs((d_block.margin_percentage_points or 0.0) - 0.0) < 1e-9
+              and d_block.margin_meets_d3_threshold is False,
+              f"D3's margin is computed over the slots where BOTH are scored "
+              f"({d_block.margin_percentage_points:+.1f} pp; 1/2 gauge vs 1/2 "
+              f"companion) and reported against the ≥15 pp threshold — "
+              f"computed, never adjudicated")
+        check(d_block.alpha_permutation_null is None
+              and d_block.permutation_rank_meets_d3_threshold is None
+              and any("permutation null" in o for o in d_block.owed),
+              "with no α-permutation null supplied, D3's second leg is OWED — "
+              "n=1000 permutations are a desk computation, not a tool's")
+        check(not any(a.predictor == "constant-alpha"  # type: ignore[comparison-overlap]
+                      for a in with_comp.aggregates)
+              and with_comp.head_to_head_three_way.n_slots_all_scored
+              == scored.head_to_head_three_way.n_slots_all_scored,
+              "and the baseline enters NO aggregate and NO 2×2: it is a "
+              "companion, not a fourth racing column")
+
+        null_path = root / "constant-alpha-with-null.json"
+        null_path.write_text(json.dumps(_companion(
+            rows=[{"source": "alpha", "target": "beta", "arm": "native",
+                   "family": FAMILY_OF_RECORD, "predicted": 0.90},
+                  {"source": "gamma", "target": "delta", "arm": "native",
+                   "family": FAMILY_OF_RECORD, "predicted": 0.20}],
+            alpha_permutation_null={"n_permutations": 1000,
+                                    "true_in_band_count": 47,
+                                    "percentile_rank": 99.4}), indent=1))
+        with_null = score_record(record_path, obs_path,
+                                 alpha_companion_path=null_path)
+        check(abs((with_null.addendum_d.margin_percentage_points or 0) - 50.0)
+              < 1e-9
+              and with_null.addendum_d.margin_meets_d3_threshold is True
+              and with_null.addendum_d.permutation_rank_meets_d3_threshold
+              is True
+              and not with_null.addendum_d.owed,
+              f"a companion the gauge beats by "
+              f"{with_null.addendum_d.margin_percentage_points:+.1f} pp with a "
+              f"99.4th-percentile null meets BOTH D3 legs, and nothing is left "
+              f"owed — the desk still rules")
+
+        partial_path = root / "constant-alpha-partial.json"
+        partial_path.write_text(json.dumps(_companion(rows=[
+            {"source": "alpha", "target": "beta", "arm": "native",
+             "family": FAMILY_OF_RECORD, "predicted": 0.31}]), indent=1))
+        partial = score_record(record_path, obs_path,
+                               alpha_companion_path=partial_path)
+        check(partial.addendum_d.n_slots_companion_missing == 1
+              and any("no companion row" in o for o in partial.addendum_d.owed)
+              and any("ADDENDUM D PARTIAL" in w for w in partial.warnings),
+              "a companion covering only some gauge slots names the shortfall "
+              "rather than absorbing it into a denominator")
+
+        alpha_refusals: list[tuple[str, Any]] = [
+            ("a companion of another schema name",
+             _companion(schema="alpha-baseline/v1")),
+            ("no schema declaration",
+             {k: v for k, v in _companion().items() if k != "schema"}),
+            ("a gauge that is not a predictor of record",
+             _companion(gauge="composed-path")),
+            ("a non-numeric alpha_bar", _companion(alpha_bar="seven tenths")),
+            ("a null alpha_bar", _companion(alpha_bar=None)),
+            ("a non-finite alpha_bar", _companion(alpha_bar=float("inf"))),
+            ("no alpha_bar provenance", _companion(alpha_bar_provenance="")),
+            ("no rows", _companion(rows=[])),
+            ("a row that is not an object", _companion(rows=[0.31])),
+            ("a row with no predicted",
+             _companion(rows=[{"source": "alpha", "target": "beta",
+                               "arm": "native"}])),
+            ("a row with a non-finite predicted",
+             _companion(rows=[{"source": "alpha", "target": "beta",
+                               "arm": "native", "predicted": float("nan")}])),
+            ("two rows for the same slot",
+             _companion(rows=[{"source": "alpha", "target": "beta",
+                               "arm": "native", "predicted": 0.31},
+                              {"source": "alpha", "target": "beta",
+                               "arm": "native", "predicted": 0.29}])),
+            ("a malformed permutation null",
+             _companion(alpha_permutation_null={"n_permutations": 1000})),
+        ]
+        for i, (label, payload) in enumerate(alpha_refusals):
+            bad = root / f"constant-alpha-bad-{i}.json"
+            bad.write_text(json.dumps(payload))
+            try:
+                load_alpha_companion(bad)
+                check(False, f"{label} must be REFUSED")
+            except AlphaCompanionError as exc:
+                check(f"EXPECTED `{SCHEMA_CONSTANT_ALPHA_COMPANION_V1}`"
+                      in str(exc),
+                      f"{label} → halt quoting the contract: "
+                      f"{str(exc).splitlines()[0]!s:.72}")
+        try:
+            load_alpha_companion(root / "no-such-companion.json")
+            check(False, "a named-but-absent companion must be REFUSED")
+        except AlphaCompanionError as exc:
+            check("Passing no --alpha-companion at all is the legal way" in str(exc),
+                  "an absent NAMED companion halts, and the message names the "
+                  "legal way to leave it OWED — absent and malformed never "
+                  "collapse into each other")
+
+        wrong_gauge = root / "constant-alpha-wrong-gauge.json"
+        wrong_gauge.write_text(json.dumps(_companion(gauge="composed")))
+        try:
+            score_record(star_only_record, star_obs,
+                         alpha_companion_path=wrong_gauge)
+            check(False, "a companion for an unfiled gauge must HALT")
+        except AlphaCompanionError as exc:
+            check("files no 'composed' prediction" in str(exc),
+                  f"a baseline whose gauge this record never filed HALTs: "
+                  f"{exc!s:.70}")
+        stray = root / "constant-alpha-stray.json"
+        stray.write_text(json.dumps(_companion(rows=[
+            {"source": "alpha", "target": "beta", "arm": "native",
+             "family": FAMILY_OF_RECORD, "predicted": 0.31},
+            {"source": "beta", "target": "alpha", "arm": "native",
+             "family": FAMILY_OF_RECORD, "predicted": 0.31}])))
+        try:
+            score_record(record_path, obs_path, alpha_companion_path=stray)
+            check(False, "a companion row matching no filed slot must HALT")
+        except AlphaCompanionError as exc:
+            check("match no filed" in str(exc),
+                  f"a flipped/typo'd companion row HALTs rather than yielding "
+                  f"a margin that looks complete: {exc!s:.60}")
+        try:
+            main(["--alpha-companion", str(comp_path), "--candidates"])
+            check(False, "--alpha-companion without --score-record must not run")
+        except SystemExit as exc:
+            check(exc.code == 2,
+                  f"--alpha-companion is a SCORING input and argparse refuses "
+                  f"it at filing time (exit {exc.code})")
+
     print(f"\nselftest: {len(failures)} failure(s)")
     return 1 if failures else 0
 
@@ -3144,6 +5098,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     default=V21_CORPUS_MANIFEST_RELPATH,
                     help=f"path of the vintage manifest RELATIVE to --v21-root "
                          f"(default {V21_CORPUS_MANIFEST_RELPATH})")
+    ap.add_argument("--directional-constants", type=Path, default=None,
+                    help=f"a {SCHEMA_DIRECTIONAL_CONSTANTS_V1} readout of "
+                         f"per-model c_out/c_in (ADDENDUM 2026-07-29-H). With "
+                         f"--candidates or --source-model/--target-model it "
+                         f"emits the DIRECTIONAL column: "
+                         f"directional-prediction/<src>→<tgt>/<arm>-k128, "
+                         f"predicted = c_src^out · c_tgt^in, ±.05 band frozen "
+                         f"at filing. The SYMMETRIC star column is untouched "
+                         f"(H item 2).")
+    ap.add_argument("--directional-out", type=Path, default=None,
+                    help="write the directional readout JSON here. A SEPARATE "
+                         "artifact from --out on purpose: the composed "
+                         "readout's shape does not move for the new column.")
     ap.add_argument("--score-record", type=Path, default=None,
                     help="a FILED prediction record to score. Requires "
                          "--observed; never runs at filing time.")
@@ -3155,6 +5122,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--scored-out", type=Path, default=None,
                     help="where the scored record is written (default: beside "
                          "the filing record as scored-<record name>)")
+    ap.add_argument("--alpha-companion", type=Path, default=None,
+                    help=f"a {SCHEMA_CONSTANT_ALPHA_COMPANION_V1} artifact "
+                         f"(Addendum D §D2), supplied by the DESK. Never "
+                         f"computed here: ᾱ is a grand mean over the scored "
+                         f"set and §D3's permutation null is a desk "
+                         f"computation. Omit it and the scored record names "
+                         f"the companion OWED.")
     ap.add_argument("--overwrite-scored", action="store_true",
                     help="permit replacing an existing scored record — a "
                          "deliberate desk act, never the default")
@@ -3198,12 +5172,43 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "against observed â values the desk produces at first-read; this "
             "tool never observes, never fits, and never auto-scores at filing "
             "time — it only builds the machine-readable artifact.")
+    if args.alpha_companion is not None and args.score_record is None:
+        ap.error(
+            "--alpha-companion is a SCORING input (Addendum D §D2's constant-α "
+            "baseline) and only applies with --score-record/--observed. It is "
+            "never consulted at filing time: a baseline scored before the fit "
+            "exists would have nothing to be a baseline against.")
+    if args.directional_out is not None and args.directional_constants is None:
+        ap.error(
+            "--directional-out needs --directional-constants: the directional "
+            "column is COMPUTED FROM a "
+            f"{SCHEMA_DIRECTIONAL_CONSTANTS_V1} readout and is never emitted "
+            "empty, which would look like 'no slots file' rather than 'no "
+            "constants were supplied'.")
+    if (args.directional_constants is not None
+            and not (args.candidates or args.source_model)):
+        ap.error(
+            "--directional-constants needs --candidates or "
+            "--source-model/--target-model — it names the constants, not the "
+            "slots to compute.")
 
     if not (args.gate or args.candidates or args.resolution_sweep
             or args.source_model or args.score_record):
         raise SystemExit("pass --selftest, --gate, --candidates, "
                          "--resolution-sweep, --source-model/--target-model, "
                          "or --score-record/--observed")
+
+    directional_constants: Optional[DirectionalConstants] = None
+    if args.directional_constants is not None:
+        try:
+            directional_constants = load_directional_constants(
+                args.directional_constants)
+        except DirectionalConstantsError as exc:
+            #  An EXPECTED halt with a meaningful message: the constants readout
+            #  is not the contract this module consumes. Reported cleanly and
+            #  nonzero so the derivation lane can be reconciled from the error.
+            print(f"\nDIRECTIONAL CONSTANTS HALT — {exc}")
+            return 1
 
     if args.v21_root is not None:
         try:
@@ -3293,6 +5298,68 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(f"\ncandidates: {len(computed.predictions)}/{total} filable, "
               f"{len(computed.na_at_filing)}/{total} N/A-AT-FILING")
 
+    #  THE DIRECTIONAL COLUMN (Addendum 2026-07-29-H). Emitted only when the
+    #  constants readout is supplied, into its OWN readout: nothing above this
+    #  point changes shape, and the symmetric star column is untouched.
+    directional_readout: Optional[DirectionalReadout] = None
+    if directional_constants is not None:
+        directional_readout = DirectionalReadout(
+            generated=date.today().isoformat(), family=args.family,
+            constants_readout=directional_constants.path,
+            constants_readout_sha256=directional_constants.sha256,
+            constants_gauge=directional_constants.gauge,
+            constants_corpus_manifest_sha256=(
+                directional_constants.corpus_manifest_sha256),
+            constants_notes=list(directional_constants.notes))
+        if args.candidates:
+            computed_dir = run_directional(directional_constants, args.family,
+                                           args.pairs_json)
+            directional_readout.predictions.extend(computed_dir.predictions)
+            directional_readout.na_at_filing.extend(computed_dir.na_at_filing)
+        if args.source_model:
+            if not args.target_model:
+                raise SystemExit("--source-model needs --target-model")
+            one_dir = directional_pair(args.source_model, args.target_model,
+                                       directional_constants,
+                                       family=args.family, arm=args.arm)
+            if isinstance(one_dir, DirectionalNotFilable):
+                directional_readout.na_at_filing.append(one_dir)
+            else:
+                directional_readout.predictions.append(one_dir)
+        total_dir = (len(directional_readout.predictions)
+                     + len(directional_readout.na_at_filing))
+        print(f"\n{'directional slot (Addendum H)':52s} {'arm':7s} "
+              f"{'c_out':>9s} {'c_in':>9s} {'â_dir':>9s} "
+              f"{'band lo':>9s} {'band hi':>9s} verdict")
+        for pred in directional_readout.predictions:
+            print(f"{pred.pair_id:52s} {pred.arm:7s} "
+                  f"{pred.c_out_source:+9.4f} {pred.c_in_target:+9.4f} "
+                  f"{pred.filed_predicted:+9.4f} "
+                  f"{pred.filed_band[0]:+9.4f} {pred.filed_band[1]:+9.4f} "
+                  + ("MAGNITUDE-ONLY " if pred.magnitude_only else "")
+                  + ("FLAGGED" if pred.flags else "filable"))
+        for na_dir in directional_readout.na_at_filing:
+            print(f"{na_dir.pair_id:52s} {na_dir.arm:7s} {'—':>9s} {'—':>9s} "
+                  f"{'—':>9s} {'—':>9s} {'—':>9s} N/A-AT-FILING "
+                  f"({', '.join(na_dir.missing_sides)})")
+        for note in directional_readout.constants_notes:
+            print(f"  CONSTANTS NOTE: {note}")
+        print(f"\ndirectional: {len(directional_readout.predictions)}/"
+              f"{total_dir} filable, "
+              f"{len(directional_readout.na_at_filing)}/{total_dir} "
+              f"N/A-AT-FILING; constants {directional_constants.path} sha "
+              f"{directional_constants.sha256[:12]}…, gauge "
+              f"{directional_constants.gauge!r}, corpus "
+              f"{directional_constants.corpus_manifest_sha256[:8]}…")
+        if args.directional_out:
+            args.directional_out.parent.mkdir(parents=True, exist_ok=True)
+            args.directional_out.write_text(
+                directional_readout.model_dump_json(indent=1))
+            logger.info("wrote %s (%d directional prediction(s), %d "
+                        "N/A-at-filing)", args.directional_out,
+                        len(directional_readout.predictions),
+                        len(directional_readout.na_at_filing))
+
     if args.source_model:
         if not args.target_model:
             raise SystemExit("--source-model needs --target-model")
@@ -3310,7 +5377,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.score_record is not None and args.observed is not None:
         out = args.scored_out or default_scored_path(args.score_record)
         try:
-            scored = score_record(args.score_record, args.observed)
+            scored = score_record(args.score_record, args.observed,
+                                  alpha_companion_path=args.alpha_companion)
             print(f"\n{'scored slot':44s} {'predictor':10s} {'pred':>8s} "
                   f"{'obs':>8s} {'err':>8s}  verdict")
             for s in scored.slots:
@@ -3332,11 +5400,39 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                       f"{agg.n_unscored_no_observation} unobserved; "
                       f"{agg.n_cross_vintage_excluded} cross-vintage excluded")
             h = scored.head_to_head
-            print(f"\nhead-to-head over {h.n_slots_both_scored} slot(s) scored "
-                  f"for both: both {h.n_both_in_band} · star-only "
-                  f"{h.n_star_only} · composed-only {h.n_composed_only} · both "
-                  f"out {h.n_both_out_of_band} ({h.n_slots_incomplete} "
-                  f"incomplete)")
+            print(f"\nhead-to-head (Addendum E §E3, star × composed) over "
+                  f"{h.n_slots_both_scored} slot(s) scored for both: both "
+                  f"{h.n_both_in_band} · star-only {h.n_star_only} · "
+                  f"composed-only {h.n_composed_only} · both out "
+                  f"{h.n_both_out_of_band} ({h.n_slots_incomplete} incomplete)")
+            for pair_row in scored.head_to_head_pairwise:
+                print(f"  2×2 {pair_row.predictor_a:>11s} × "
+                      f"{pair_row.predictor_b:<11s} n={pair_row.n_slots_both_scored:<4d} "
+                      f"both {pair_row.n_both_in_band} · "
+                      f"{pair_row.predictor_a}-only {pair_row.n_a_only} · "
+                      f"{pair_row.predictor_b}-only {pair_row.n_b_only} · "
+                      f"both out {pair_row.n_both_out_of_band} "
+                      f"({pair_row.n_slots_incomplete} incomplete)")
+            three = scored.head_to_head_three_way
+            print(f"  three-way hit census over {three.n_slots_all_scored} "
+                  f"slot(s) scored for all three "
+                  f"({three.n_slots_incomplete} incomplete): "
+                  + " · ".join(f"{label} {count}"
+                               for label, count in three.n_by_hit_set.items()))
+            d = scored.addendum_d
+            print(f"\nAddendum D companion: {d.STATUS}"
+                  + (f" (gauge {d.gauge!r})" if d.gauge else "")
+                  + (f" — ᾱ {d.alpha_bar:+.6f}; gauge "
+                     f"{d.n_gauge_in_band}/{d.n_gauge_scored_of_record} in "
+                     f"band, constant-α {d.n_companion_in_band}/"
+                     f"{d.n_companion_scored}; margin "
+                     f"{d.margin_percentage_points:+.1f} pp "
+                     f"(D3 wants >= 15: "
+                     f"{'MET' if d.margin_meets_d3_threshold else 'not met'})"
+                     if d.STATUS == "SCORED"
+                     and d.margin_percentage_points is not None else ""))
+            for item in d.owed:
+                print(f"  OWED: {item}")
             for warning in scored.warnings:
                 print(f"  WARNING: {warning}")
             written = write_scored_record(scored, out, args.overwrite_scored)
