@@ -94,11 +94,60 @@ therefore reports missing maps as a structured `HubMapRef` with every probed
 path, and refuses to substitute an arm. `require_hub_map()` is the loud
 variant for callers that must have the map.
 
+────────────────────────────────────────────────────────────────────────────────
+CORPUS VINTAGE — THE v2.1 ROOT, AND WHY THE GATE REFUSES IT
+────────────────────────────────────────────────────────────────────────────────
+Addendum G §G1 makes corpus-v2.1 the go-forward basis for all future filings and
+§G2(a) makes the corpus manifest sha ride EVERY quoted â. `--v21-root` points
+the resolver at a v2.1 re-bank mirror: its `fits_v21_<model>/` hub maps and
+`vectors/<model>/entropy_gradient_<model>_L<site>.npz` vectors are PREPENDED to
+the existing preference-ordered probes, so a node with no v2.1 fit degrades to
+the frozen tree instead of to N/A. Default is None — with no `--v21-root` the
+probe lists are byte-identical to what they were before this option existed
+(selftest 13 proves that path-by-path, and the E1 gate proves it on the data).
+
+The root is not taken on trust: `set_v21_root` hashes the root's own
+`corpus/corpus_manifest.json` and refuses unless it equals `CORPUS_SHA_V21`
+(the constant is named WITH its vintage per rake M26). Only a prediction whose
+FOUR resolved artifacts — both hub maps, both vectors — all came from that
+verified root carries `corpus_manifest_sha256`; a partial resolution is flagged
+MIXED-VINTAGE and carries no sha, because a sha that covers half a computation
+is worse than none.
+
+**`--gate` and `--v21-root` are MUTUALLY EXCLUSIVE, and `run_gate` refuses to
+run while a v2.1 root is set.** The gate is a fixed-vintage proof ABOUT THE
+ARCHIVE: it re-resolves the five archived v1 pairs through this module's own
+`hub_map_dirs` and asserts RESOLUTION PARITY against the archive's own npz
+files. A global v2.1 root would silently move that leg onto v2.1 objects — the
+gate would either fail for the wrong reason or, worse, pass on the wrong
+objects. Two independent guards, because one of them being bypassed
+programmatically is exactly how this trap gets sprung.
+
+────────────────────────────────────────────────────────────────────────────────
+SCORING — A SEPARATE, DESK-INITIATED ACT
+────────────────────────────────────────────────────────────────────────────────
+`--score-record <filed record> --observed <desk-supplied â>` emits a
+machine-readable scored-record JSON beside the filing record. **Nothing here
+ever auto-scores at filing time**: no prediction path computes a verdict, the
+mode requires an explicit observed-â artifact that only the desk can produce at
+first-read, and it refuses to overwrite an existing scored record. This tool
+makes the ARTIFACT; the desk does the scoring act and rules on what it means.
+Rules are prereg §3 + Addendum E §E2 verbatim: frozen ±.05 absolute band as
+FILED (never recomputed, never moved), |predicted| < .08 scored MAGNITUDE-ONLY
+(sign unscored), the ±.04 hit reported descriptively beside. Campaign gates
+(G-star-hit / G-comp-hit) are NOT evaluated here — they are aggregates over the
+whole 190 and are the desk's read.
+
 Run (repo root, PYTHONPATH=.):
   python -m metabasis.scripts.read_composed_predictions --selftest
   python -m metabasis.scripts.read_composed_predictions --gate
   python -m metabasis.scripts.read_composed_predictions --candidates \
       --out /tmp/claude-output/composed_candidates.json
+  python -m metabasis.scripts.read_composed_predictions --candidates \
+      --v21-root <v2.1 re-bank root> --out /tmp/claude-output/composed_v21.json
+  python -m metabasis.scripts.read_composed_predictions \
+      --score-record outputs/collection/predictions/<record>.json \
+      --observed /tmp/claude-output/observed-<batch>.json
 """
 from __future__ import annotations
 
@@ -108,10 +157,11 @@ import importlib.util
 import json
 import logging
 import sys
-from datetime import date
+from contextlib import contextmanager
+from datetime import date, datetime, timezone
 from pathlib import Path
 from types import ModuleType
-from typing import Literal, Optional, Sequence
+from typing import Any, Iterator, Literal, Optional, Sequence
 
 import numpy as np
 from pydantic import BaseModel, Field
@@ -139,6 +189,31 @@ GATE_TOLERANCE = 1e-8
 BANKED_JSON_TOLERANCE = 5e-7
 #: The draft quotes 4-dp display figures; they must round-trip exactly.
 DISPLAY_DECIMALS = 4
+
+#: Corpus-v2.1 manifest sha — ADDENDUM 2026-07-28-G §G1's go-forward collection
+#: basis, and the sha every â computed on it must carry (§G2(a): "every quoted â
+#: carries its corpus manifest sha"). Verified locally against the pulled v2.1
+#: arm mirror's own `corpus/corpus_manifest.json`.
+#: NAMED WITH ITS VINTAGE (rake M26): a version sweep must be able to SEE this
+#: constant by name, not discover it holds the wrong vintage's digest.
+CORPUS_SHA_V21 = "5ae355bc5d130f8e9c3ae426f5e71bf2b6e99c74b95369a874bec2abcd59b5d9"
+#: Where a v2.1 re-bank root keeps the manifest whose sha pins its vintage.
+V21_CORPUS_MANIFEST_RELPATH = Path("corpus") / "corpus_manifest.json"
+
+#: Prereg §3 / Addendum E §E2: the FROZEN half-width of every scored band, for
+#: both predictors. Never used to move a filed band — only to CHECK that a
+#: filed band is the frozen one (`_check_filed_band`).
+FROZEN_BAND_HALF_WIDTH = 0.05
+#: Addendum E §E2: the ±.04 hit reported DESCRIPTIVELY beside the scored band
+#: (Luxia ruling 2026-07-28 — recorded per pair at scoring, never a gate).
+DESCRIPTIVE_BAND_HALF_WIDTH = 0.04
+#: A filed band is 4-dp rounded arithmetic on a 4-dp predicted value; anything
+#: further than this from `predicted ± .05` means the record is malformed, not
+#: rounded, and scoring it would score a band nobody froze.
+BAND_ARITHMETIC_TOLERANCE = 1e-6
+#: Band edges are INCLUSIVE ("± .05 absolute"); this absorbs binary
+#: representation error at an exact edge hit, nothing more.
+BAND_EDGE_EPSILON = 1e-12
 
 ARCHIVE_ROOT = COLLECTION_ROOT / "enactment-archives" / "worstpair-diag"
 ARCHIVE_GLUE = ARCHIVE_ROOT / "wp_composition.py"
@@ -176,6 +251,22 @@ class ComposedPathError(RuntimeError):
 
 class ArchiveIntegrityError(ComposedPathError):
     """The archived operationalization does not match its own manifest sha."""
+
+
+class CorpusVintageError(ComposedPathError):
+    """A corpus-vintage root is not what it claims to be, or is set where it
+    must not be (the E1 gate). Always LOUD: a vintage confusion produces
+    numbers that are individually valid and collectively meaningless."""
+
+
+class ScoringError(RuntimeError):
+    """A scoring input cannot be read as what it claims to be.
+
+    Scoring is a desk act performed ONCE per record against frozen bands; a
+    malformed record, an unmatched observation, or a band that is not the
+    frozen one must stop the run rather than produce a verdict nobody can
+    audit.
+    """
 
 
 # ---------------------------------------------------------------- registries
@@ -239,8 +330,14 @@ CARRIED_CHECKPOINT_IDENTITY: dict[str, Literal["instruct", "base"]] = {
 #: whatever hub map is banked, so which CORPUS the fit was made on rides with
 #: every prediction rather than living in a ledger row nobody reads at filing
 #: time. `legacy` = the pre-freeze anamnesis corpus; `frozen` = the frozen
-#: campaign corpus.
-CorpusProvenance = Literal["frozen", "legacy"]
+#: campaign corpus (v1); `v21` = the corpus-v2.1 re-bank (Addendum G §G1's
+#: go-forward basis), reachable only when a verified `--v21-root` is set.
+CorpusProvenance = Literal["frozen", "legacy", "v21"]
+
+#: Which corpus vintage a whole PREDICTION rides on — a property of all four
+#: resolved artifacts together, never of one side. `MIXED` is a first-class
+#: result and is flagged, not silently averaged over.
+PredictionVintage = Literal["v2.1", "pre-v2.1", "MIXED"]
 
 
 class HubMapDir(BaseModel):
@@ -252,6 +349,107 @@ class HubMapDir(BaseModel):
     model_config = {"arbitrary_types_allowed": True}
 
 
+# ------------------------------------------------------- the corpus-v2.1 root
+#: The verified corpus-v2.1 re-bank root, or None (the default, and the vintage
+#: every existing caller gets). MODULE-LEVEL because the resolution helpers
+#: (`hub_map_dirs`, `vector_bank_paths`) are called from deep inside the
+#: predictor and from other tools with fixed signatures — but it is never set by
+#: import and only ever set through `set_v21_root`, which VERIFIES the root.
+V21_ROOT: Optional[Path] = None
+#: The sha of the manifest that verified `V21_ROOT`, recomputed at set time.
+#: Never assumed from the constant: a root that cannot prove its vintage is
+#: refused, so this and `CORPUS_SHA_V21` agree by construction (rake M26 —
+#: the constant is checked by value, not trusted by name).
+V21_CORPUS_SHA: Optional[str] = None
+
+
+def set_v21_root(root: Optional[Path],
+                 expected_corpus_sha: str = CORPUS_SHA_V21,
+                 manifest_relpath: Path = V21_CORPUS_MANIFEST_RELPATH,
+                 ) -> Optional[str]:
+    """Point the resolvers at a corpus-v2.1 re-bank root, or clear it (None).
+
+    The root must prove its vintage: its own `corpus/corpus_manifest.json` is
+    hashed and must equal `expected_corpus_sha`. Addendum G §G2(a) requires the
+    corpus sha to ride every â — a root taken on the operator's word would
+    stamp predictions with a digest nobody verified, which is the failure rake
+    M26 describes at constant grain and rake M12 at bank grain.
+
+    `expected_corpus_sha` is a parameter ONLY so the selftest can exercise the
+    machinery against a synthetic root; every caller in the filing path takes
+    the default.
+    """
+    global V21_ROOT, V21_CORPUS_SHA
+    if root is None:
+        V21_ROOT, V21_CORPUS_SHA = None, None
+        return None
+    root = Path(root)
+    if not root.is_dir():
+        raise CorpusVintageError(
+            f"--v21-root {root} is not a directory. The v2.1 re-bank root is "
+            f"the tree holding `fits_v21_<model>/`, `vectors/<model>/` and "
+            f"`{manifest_relpath}`")
+    manifest = root / manifest_relpath
+    if not manifest.is_file():
+        raise CorpusVintageError(
+            f"v2.1 root {root} carries no {manifest_relpath} — its vintage "
+            f"cannot be VERIFIED, and Addendum G §G2(a) requires every â to "
+            f"carry a corpus manifest sha that was checked, not asserted")
+    digest = sha256_of(manifest)
+    if digest != expected_corpus_sha:
+        raise CorpusVintageError(
+            f"HALT — {manifest} hashes to {digest}, not the expected "
+            f"{expected_corpus_sha}. This root is NOT the corpus-v2.1 basis of "
+            f"record (Addendum G §G1); refusing rather than stamping "
+            f"predictions with a vintage they do not have")
+    V21_ROOT, V21_CORPUS_SHA = root, digest
+    logger.info("corpus-v2.1 root set: %s (manifest sha %s… VERIFIED)",
+                root, digest[:8])
+    return digest
+
+
+@contextmanager
+def v21_root_scope(root: Optional[Path],
+                   expected_corpus_sha: str = CORPUS_SHA_V21,
+                   manifest_relpath: Path = V21_CORPUS_MANIFEST_RELPATH,
+                   ) -> Iterator[Optional[str]]:
+    """`set_v21_root` for the duration of a block, restored on any exit path."""
+    global V21_ROOT, V21_CORPUS_SHA
+    previous_root, previous_sha = V21_ROOT, V21_CORPUS_SHA
+    try:
+        yield set_v21_root(root, expected_corpus_sha, manifest_relpath)
+    finally:
+        V21_ROOT, V21_CORPUS_SHA = previous_root, previous_sha
+
+
+def v21_hub_map_dir(model: str, root: Optional[Path] = None) -> Optional[HubMapDir]:
+    """The v2.1 hub-map candidate dir for `model`, or None when no root is set.
+
+    Layout of record for the v2.1 re-bank mirror (the pulled `arm-v21` tree):
+    one flat `fits_v21_<model>/` per model, holding the same
+    `fit_8bL<hub>__<model>L<site>_<arm>_<family>.npz` names
+    `read_exchange_rates.fit_path_for` builds — so only the DIRECTORY differs
+    from the frozen convention, never the filename.
+    """
+    base = V21_ROOT if root is None else Path(root)
+    if base is None:
+        return None
+    return HubMapDir(path=base / f"fits_v21_{model}", corpus="v21",
+                     note="corpus-v2.1 re-bank mirror (Addendum G §G1 "
+                          "go-forward basis; root sha-verified at set time)")
+
+
+def _under_v21_root(path: Optional[str | Path]) -> bool:
+    """True iff `path` resolves inside the currently-set v2.1 root."""
+    if path is None or V21_ROOT is None:
+        return False
+    try:
+        Path(path).resolve().relative_to(V21_ROOT.resolve())
+    except (ValueError, OSError):
+        return False
+    return True
+
+
 def hub_map_dirs(model: str) -> list[HubMapDir]:
     """Ordered candidate directories for the banked hub→`model` map.
 
@@ -261,10 +459,21 @@ def hub_map_dirs(model: str) -> list[HubMapDir]:
     lands for a node whose only banked map today is a legacy-corpus one, the
     refit supersedes automatically instead of needing a code change. Every
     probed path is echoed into the returned record either way.
+
+    When a VERIFIED corpus-v2.1 root is set (`set_v21_root`; off by default) its
+    `fits_v21_<model>/` dir is PREPENDED — the go-forward vintage wins, and a
+    node with no v2.1 fit falls through to exactly the list below rather than to
+    N/A. With no root set the list is byte-identical to what it was before the
+    option existed: selftest 13 proves that path-by-path for every registered
+    model, and the E1 gate proves it on the data.
     """
-    dirs = [HubMapDir(path=COLLECTION_ROOT / model / f"fits_scan_{model}",
-                      corpus="frozen",
-                      note="collection-phase convention")]
+    dirs: list[HubMapDir] = []
+    v21 = v21_hub_map_dir(model)
+    if v21 is not None:
+        dirs.append(v21)
+    dirs.append(HubMapDir(path=COLLECTION_ROOT / model / f"fits_scan_{model}",
+                          corpus="frozen",
+                          note="collection-phase convention"))
     a8 = BANK_ROOT / "arms" / "A8_conjugation"
     if model == "3b":
         # Hub→3B maps were fit by the desk onto the frozen-corpus A8-smalls
@@ -317,10 +526,21 @@ def vector_bank_paths(model: str, site: int) -> list[Path]:
     per-site build name used where sites were built separately), and an absent
     bank is reported as data by `resolve_vector_bank` rather than resolved
     sideways into a different object.
+
+    A VERIFIED corpus-v2.1 root (off by default) PREPENDS its own per-site bank
+    `vectors/<model>/entropy_gradient_<model>_L<site>.npz` — the same per-site
+    naming convention the frozen tree already uses as its second probe, under
+    the v2.1 mirror's per-model subdirectory. With no root set the list is
+    byte-identical to what it was before the option existed.
     """
+    paths: list[Path] = []
+    if V21_ROOT is not None:
+        paths.append(V21_ROOT / "vectors" / model
+                     / f"entropy_gradient_{model}_L{site}.npz")
     vectors = COLLECTION_ROOT / model / "vectors"
-    return [vectors / f"entropy_gradient_{model}.npz",
-            vectors / f"entropy_gradient_{model}_L{site}.npz"]
+    paths.extend([vectors / f"entropy_gradient_{model}.npz",
+                  vectors / f"entropy_gradient_{model}_L{site}.npz"])
+    return paths
 
 
 def site_of_record(model: str) -> int:
@@ -406,6 +626,14 @@ class VectorBankRef(BaseModel):
     resolved: Optional[str] = Field(
         default=None, description="the entropy-gradient npz actually used; None "
                                   "=> the target build has not landed")
+    corpus: Optional[CorpusProvenance] = Field(
+        default=None,
+        description="`v21` iff the bank resolved inside a VERIFIED corpus-v2.1 "
+                    "root. Left None otherwise ON PURPOSE: a vector build only "
+                    "re-derives when its own recipe consumes the corpus "
+                    "(Addendum F §3), so labelling a collection-tree bank with "
+                    "a corpus vintage would assert what its stamp, not this "
+                    "resolver, is entitled to say")
     probed_paths: list[str] = []
 
     @property
@@ -434,6 +662,19 @@ class ComposedPrediction(BaseModel):
     dim_source: int
     dim_target: int
     dim_hub_side: int
+    corpus_vintage: PredictionVintage = Field(
+        default="pre-v2.1",
+        description="the vintage of ALL FOUR resolved artifacts together "
+                    "(both hub maps, both vectors). `MIXED` means they "
+                    "disagree and is flagged, never averaged over")
+    corpus_manifest_sha256: Optional[str] = Field(
+        default=None,
+        description="Addendum G §G2(a) — the corpus manifest sha this â rides "
+                    "on. Populated ONLY for a wholly-v2.1 prediction, from the "
+                    "root's own manifest as verified at set time; None for the "
+                    "pre-v2.1 trees (whose per-bank stamps are the record) and "
+                    "None for MIXED, because a sha covering half a computation "
+                    "is worse than no sha at all")
     hub_map_source: HubMapRef
     hub_map_target: HubMapRef
     source_vector: VectorSpec
@@ -509,6 +750,11 @@ class ComposedReadout(BaseModel):
     hub: str
     hub_site: int
     family: str
+    v21_root: Optional[str] = Field(
+        default=None, description="the corpus-v2.1 re-bank root in force, if any")
+    corpus_manifest_sha256_v21: Optional[str] = Field(
+        default=None, description="that root's own manifest sha, recomputed and "
+                                  "verified against CORPUS_SHA_V21 at set time")
     gate: Optional["GateResult"] = None
     predictions: list[ComposedPrediction] = []
     na_at_filing: list[NotFilable] = []
@@ -699,6 +945,7 @@ def resolve_vector_bank(model: str, site: int) -> VectorBankRef:
         probed.append(str(path))
         if path.exists():
             return VectorBankRef(model=model, site=site, resolved=str(path),
+                                 corpus="v21" if _under_v21_root(path) else None,
                                  probed_paths=probed)
     return VectorBankRef(model=model, site=site, probed_paths=probed)
 
@@ -769,6 +1016,32 @@ def compose_pair(source_model: str, target_model: str,
     if arm is not None and arm != resolved_arm:
         flags.append("ARM OVERRIDDEN — diagnostic only; not a filable slot.")
 
+    #  Addendum G §G2(a): the corpus sha rides the â — but only when the WHOLE
+    #  computation rode one vintage. All four artifacts, or none.
+    v21_sides = [ref.corpus == "v21"
+                 for ref in (ref_src, ref_tgt, vec_src, vec_tgt)]
+    if all(v21_sides):
+        vintage: PredictionVintage = "v2.1"
+        corpus_sha = V21_CORPUS_SHA
+    elif any(v21_sides):
+        vintage = "MIXED"
+        corpus_sha = None
+        flags.append(
+            "MIXED-VINTAGE — some of {source hub map, target hub map, source "
+            "vector, target vector} resolved inside the corpus-v2.1 root and "
+            "some fell through to the pre-v2.1 trees: "
+            + ", ".join(f"{label}={'v2.1' if is_v21 else 'pre-v2.1'}"
+                        for label, is_v21 in zip(
+                            ("source hub map", "target hub map",
+                             "source vector", "target vector"), v21_sides))
+            + ". The value is computable but carries NO corpus sha — Addendum "
+              "G §G2(a) wants a vintage tag on every â, and a tag covering "
+              "half a computation is worse than none. Cross-vintage reads are "
+              "calibration, never scored (§G2(c)).")
+    else:
+        vintage = "pre-v2.1"
+        corpus_sha = None
+
     return ComposedPrediction(
         prediction_id=f"composed-prediction/{source_model}→{target_model}"
                       f"/{use_arm}-k128",
@@ -779,6 +1052,7 @@ def compose_pair(source_model: str, target_model: str,
         ceiling_target_hub_map=projection_norm(image_basis(tm_tgt), v_tgt),
         dim_source=int(v_src.shape[0]), dim_target=int(v_tgt.shape[0]),
         dim_hub_side=_source_dim(tm_tgt),
+        corpus_vintage=vintage, corpus_manifest_sha256=corpus_sha,
         hub_map_source=ref_src, hub_map_target=ref_tgt,
         source_vector=spec_src, target_vector=spec_tgt, flags=flags)
 
@@ -1052,7 +1326,25 @@ def load_archived_glue(path: Path = ARCHIVE_GLUE) -> ModuleType:
 
 def run_gate(archive_dir: Path = ARCHIVE_ROOT,
              tolerance: float = GATE_TOLERANCE) -> GateResult:
-    """Draft E1's frozen implementation gate. Returns the record; never exits."""
+    """Draft E1's frozen implementation gate. Returns the record; never exits.
+
+    REFUSES to run while a corpus-v2.1 root is set. The gate's leg 2 re-resolves
+    the five ARCHIVED (v1) pairs through this module's own `hub_map_dirs` and
+    asserts resolution parity against the archive's own npz files; a v2.1 root
+    prepends itself to that probe and silently moves the leg onto v2.1 objects —
+    the gate would fail for a reason that is not about fidelity, or pass on the
+    wrong objects. `--gate` and `--v21-root` are mutually exclusive at the CLI;
+    this is the second, programmatic guard on the same trap.
+    """
+    if V21_ROOT is not None:
+        raise CorpusVintageError(
+            f"the E1 gate cannot run while a corpus-v2.1 root is set "
+            f"({V21_ROOT}). The gate is a FIXED-VINTAGE proof about the "
+            f"archived v1 operationalization — it resolves the five archived "
+            f"pairs through hub_map_dirs() and asserts resolution parity "
+            f"against the archive's own npz files. Clear the root "
+            f"(`set_v21_root(None)`) and re-run; `--gate` and `--v21-root` are "
+            f"mutually exclusive by design, not by accident")
     manifest = archive_dir / "MANIFEST-worstpair-diag.sha256"
     digests, verified = verify_archive(manifest)
     archived = load_archived_glue(archive_dir / "wp_composition.py")
@@ -1142,6 +1434,699 @@ def run_gate(archive_dir: Path = ARCHIVE_ROOT,
         result.failures.append(
             f"gate produced {result.n_rows} rows for {expected_rows} archived pairs")
     return result
+
+
+# ---------------------------------------------------------------- scoring
+#  A SEPARATE, DESK-INITIATED ACT. Nothing in the prediction path above reaches
+#  anything below this line: `compose_pair`, `run_candidates` and `run_gate`
+#  neither import nor call a scorer, and no filed record can be scored without
+#  an observed-â artifact the desk supplies at first-read. What this section
+#  builds is the ARTIFACT the scoring act has been missing — verdicts have lived
+#  in canon prose only (slate-prep §review note, the hygiene gap this closes).
+#
+#  The rules are prereg §3 + Addendum E §E2 verbatim and are never re-derived:
+#    * the band is the FILED band, read off the record; it is CHECKED to be the
+#      frozen `predicted ± .05` and a record that disagrees is a HALT, not a
+#      band this tool quietly repairs. Bands never move after filing.
+#    * |predicted| < .08 → MAGNITUDE-ONLY: |observed| is scored against the band
+#      of |predicted| and the SIGN IS UNSCORED (reported beside, descriptively).
+#    * the ±.04 hit is DESCRIPTIVE and is reported only where the record filed
+#      that band — this tool never invents one.
+#  Campaign gates (G-star-hit, G-comp-hit, the superiority rule) are NOT
+#  evaluated here: they are aggregates over the whole 190 with frozen
+#  interpretive rules, and they are the desk's read, not a tool's verdict.
+
+#: The two predictors racing under Addendum E. `star` = prereg §3's scalar
+#: c_A·c_B; `composed` = E1's two-hop â_comp.
+Predictor = Literal["star", "composed"]
+
+#: Every verdict this tool can emit. `UNSCORED-NO-OBSERVATION` is a first-class
+#: result: a first-read that covers part of a record must say which slots it did
+#: not reach, never silently drop them from the denominator.
+Verdict = Literal[
+    "in-band",
+    "out-of-band-high",
+    "out-of-band-low",
+    "magnitude-only-in-band",
+    "magnitude-only-out-of-band-high",
+    "magnitude-only-out-of-band-low",
+    "UNSCORED-NO-OBSERVATION",
+]
+
+
+def utc_now() -> str:
+    """The scoring timestamp, to the second, in UTC."""
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def slot_key(source: str, target: str, arm: str, family: str) -> str:
+    """The join key between a filed slot and an observed â. Direction MATTERS —
+    â is orientation-dependent, and batch 3 ruled source→target as filed."""
+    return f"{source}->{target}/{arm}-{family}"
+
+
+class FiledPrediction(BaseModel):
+    """One predictor's filed slot, as read off the record. Nothing is recomputed."""
+    predictor: Predictor
+    prediction_id: str
+    predicted: float
+    band: list[float] = Field(description="the FROZEN band as filed, [lo, hi]")
+    magnitude_only: bool
+    descriptive_band_04: Optional[list[float]] = Field(
+        default=None, description="E2's descriptive ±.04 band, only where the "
+                                  "record filed one; never invented here")
+    corpus_manifest_sha256: Optional[str] = Field(
+        default=None, description="the vintage this prediction was computed on "
+                                  "(Addendum G §G2(a)); None on pre-G records")
+
+
+class FiledSlot(BaseModel):
+    """One pair × arm × family as filed, with every predictor filed for it."""
+    key: str
+    pair_id: str
+    source: str
+    target: str
+    arm: str
+    family: str
+    direction_of_record: Optional[str] = None
+    predictions: list[FiledPrediction] = []
+    flags: list[str] = []
+
+
+class FilingRecord(BaseModel):
+    """A filed prediction record, parsed into slots. READ-ONLY over the record."""
+    path: str
+    sha256: str
+    filed_utc: Optional[str] = None
+    status: Optional[str] = None
+    corpus_manifest_sha256: Optional[str] = None
+    slots: list[FiledSlot] = []
+
+
+class ObservedAhat(BaseModel):
+    """One observed â, supplied by the DESK at first-read. Never computed here.
+
+    `corpus_manifest_sha256` is the vintage the FIT rode. Addendum G §G2(b)
+    makes within-vintage scoring the thing the frozen ceremony tests, and
+    §G2(c) makes a cross-vintage comparison a calibration read that is never
+    scored — so the fit's vintage is part of the observation, not an
+    afterthought.
+    """
+    source: str
+    target: str
+    arm: str
+    family: str = FAMILY_OF_RECORD
+    a_hat: float
+    corpus_manifest_sha256: Optional[str] = None
+    fit_path: Optional[str] = None
+    observed_utc: Optional[str] = None
+    note: str = ""
+
+    @property
+    def key(self) -> str:
+        return slot_key(self.source, self.target, self.arm, self.family)
+
+
+class ObservationSet(BaseModel):
+    """The desk's observed-â artifact for one filing record."""
+    path: str
+    sha256: str
+    corpus_manifest_sha256: Optional[str] = Field(
+        default=None, description="record-wide default vintage for rows that "
+                                  "do not carry their own")
+    observed_utc: Optional[str] = None
+    note: str = ""
+    observations: list[ObservedAhat] = []
+
+
+class ScoredSlot(BaseModel):
+    """One (slot × predictor) verdict, with everything needed to re-derive it."""
+    key: str
+    pair_id: str
+    prediction_id: str
+    predictor: Predictor
+    source: str
+    target: str
+    arm: str
+    family: str
+    predicted: float
+    band: list[float] = Field(description="the frozen band AS FILED")
+    scored_band: list[float] = Field(
+        description="the band actually compared against: the filed band, or "
+                    "the band of |predicted| for a magnitude-only slot")
+    magnitude_only: bool
+    observed: Optional[float] = None
+    scored_value: Optional[float] = Field(
+        default=None, description="observed, or |observed| when magnitude-only")
+    verdict: Verdict
+    in_band: Optional[bool] = None
+    error: Optional[float] = Field(
+        default=None, description="observed − predicted (signed, always on the "
+                                  "raw values — descriptive for magnitude-only)")
+    abs_error: Optional[float] = None
+    band_excess: Optional[float] = Field(
+        default=None, description="distance outside the scored band; 0.0 in-band")
+    sign_scored: bool = Field(
+        description="False under the near-zero carve-out (prereg §3 / E2)")
+    sign_agrees: Optional[bool] = Field(
+        default=None, description="reported even when unscored — descriptive")
+    descriptive_band_04: Optional[list[float]] = None
+    descriptive_04_in_band: Optional[bool] = Field(
+        default=None, description="E2's ±.04 hit — DESCRIPTIVE, never a gate")
+    corpus_manifest_sha256_prediction: Optional[str] = None
+    corpus_manifest_sha256_fit: Optional[str] = None
+    cross_vintage: bool = Field(
+        default=False,
+        description="prediction and fit rode DIFFERENT corpus vintages "
+                    "(both known and unequal) — Addendum G §G2(c) makes such a "
+                    "comparison a calibration read, never scored")
+    scored_of_record: bool = Field(
+        description="False for an unobserved slot and for a cross-vintage "
+                    "calibration read; only True slots enter the aggregates")
+    filed_utc: Optional[str] = None
+    observed_utc: Optional[str] = None
+    scored_utc: str
+    fit_path: Optional[str] = None
+    flags: list[str] = []
+
+
+class PredictorAggregate(BaseModel):
+    """Counts for one predictor over one record. Counts only — no gate verdict."""
+    predictor: Predictor
+    n_filed: int = 0
+    n_scored_of_record: int = 0
+    n_unscored_no_observation: int = 0
+    n_cross_vintage_excluded: int = 0
+    n_in_band: int = 0
+    n_out_of_band: int = 0
+    n_out_of_band_high: int = 0
+    n_out_of_band_low: int = 0
+    n_magnitude_only: int = 0
+    n_magnitude_only_in_band: int = 0
+    in_band_fraction: Optional[float] = Field(
+        default=None, description="n_in_band / n_scored_of_record; None when "
+                                  "nothing in this record is scored of record")
+    n_descriptive_04_reported: int = 0
+    n_descriptive_04_in_band: int = 0
+    descriptive_04_fraction: Optional[float] = None
+
+
+class HeadToHead(BaseModel):
+    """Addendum E §E3's per-pair 2×2, over slots where BOTH are scored of record."""
+    n_slots_both_scored: int = 0
+    n_both_in_band: int = 0
+    n_star_only: int = 0
+    n_composed_only: int = 0
+    n_both_out_of_band: int = 0
+    n_slots_incomplete: int = Field(
+        default=0, description="slots where at least one predictor is not "
+                               "scored of record — excluded from the 2×2")
+
+
+class ScoredRecord(BaseModel):
+    """The machine-readable scoring artifact for ONE filed prediction record."""
+    STATUS: str = (
+        "SCORED RECORD — the artifact of a desk scoring act. Fits nothing, "
+        "refits nothing, files no prediction, moves no band. Verdicts are "
+        "arithmetic against the FROZEN bands as filed (prereg §3 + Addendum E "
+        "§E2); campaign gates (G-star-hit / G-comp-hit / the superiority rule) "
+        "are aggregates over the whole 190 and are NOT evaluated here.")
+    scoring_rules: str = (
+        "band = the filed band, checked to be predicted ± .05 absolute and "
+        "never recomputed; edges inclusive. |predicted| < .08 → MAGNITUDE-ONLY: "
+        "|observed| scored against the band of |predicted|, sign unscored "
+        "(reported beside). ±.04 reported descriptively where the record filed "
+        "that band. A slot whose prediction and fit rode different corpus "
+        "vintages is a calibration read (Addendum G §G2(c)): its verdict is "
+        "computed and shown, but it is excluded from the aggregates.")
+    generated: str
+    scored_utc: str
+    prediction_record: str
+    prediction_record_sha256: str
+    prediction_record_filed_utc: Optional[str] = None
+    observations_source: str
+    observations_sha256: str
+    n_observations: int = 0
+    n_observations_unmatched: int = 0
+    tool: str = "metabasis/scripts/read_composed_predictions.py"
+    slots: list[ScoredSlot] = []
+    aggregates: list[PredictorAggregate] = []
+    head_to_head: HeadToHead = HeadToHead()
+    warnings: list[str] = []
+    record_sha256: Optional[str] = Field(
+        default=None, description="sha256 of this document with this field null "
+                                  "— recompute by nulling it and re-hashing the "
+                                  "canonical (sort_keys, compact) JSON")
+
+
+def _canonical_sha256(payload: dict[str, Any]) -> str:
+    """sha256 over a canonical JSON serialization — stable across runs."""
+    blob = json.dumps(payload, sort_keys=True, separators=(",", ":"),
+                      ensure_ascii=False, default=str)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+def _check_filed_band(prediction_id: str, predicted: float,
+                      band: Sequence[float]) -> list[float]:
+    """The filed band must BE the frozen band. A HALT, never a repair."""
+    if len(band) != 2:
+        raise ScoringError(
+            f"{prediction_id}: filed band {list(band)!r} is not a [lo, hi] pair")
+    lo, hi = float(band[0]), float(band[1])
+    if lo > hi:
+        raise ScoringError(f"{prediction_id}: filed band [{lo}, {hi}] is inverted")
+    want_lo = predicted - FROZEN_BAND_HALF_WIDTH
+    want_hi = predicted + FROZEN_BAND_HALF_WIDTH
+    if (abs(lo - want_lo) > BAND_ARITHMETIC_TOLERANCE
+            or abs(hi - want_hi) > BAND_ARITHMETIC_TOLERANCE):
+        raise ScoringError(
+            f"{prediction_id}: filed band [{lo}, {hi}] is not the FROZEN "
+            f"predicted ± {FROZEN_BAND_HALF_WIDTH} = [{want_lo}, {want_hi}] "
+            f"(|Δ| lo {abs(lo - want_lo):.3e}, hi {abs(hi - want_hi):.3e}, tol "
+            f"{BAND_ARITHMETIC_TOLERANCE:.0e}). Bands never move after filing, "
+            f"so this record disagrees with the frozen contract and is NOT "
+            f"scored — the desk rules on which side is wrong")
+    return [lo, hi]
+
+
+def _check_carve_out(prediction_id: str, predicted: float,
+                     magnitude_only: bool) -> None:
+    """The filed carve-out flag must be the frozen rule's own verdict."""
+    expected = bool(abs(predicted) < NEAR_ZERO_CARVE_OUT)
+    if expected != magnitude_only:
+        raise ScoringError(
+            f"{prediction_id}: the record files magnitude_only={magnitude_only} "
+            f"for predicted {predicted:+.6f}, but the frozen near-zero carve-out "
+            f"(prereg §3 / E2: |predicted| < {NEAR_ZERO_CARVE_OUT}) says "
+            f"{expected}. Scoring on a carve-out flag that disagrees with the "
+            f"frozen rule would score a contract nobody froze")
+
+
+def _band_position(value: float, lo: float, hi: float) -> tuple[bool, str, float]:
+    """(in_band, 'in'|'high'|'low', distance outside the band). Edges INCLUSIVE."""
+    if value > hi + BAND_EDGE_EPSILON:
+        return False, "high", value - hi
+    if value < lo - BAND_EDGE_EPSILON:
+        return False, "low", lo - value
+    return True, "in", 0.0
+
+
+def score_prediction(slot: FiledSlot, filed: FiledPrediction,
+                     observed: Optional[ObservedAhat], *,
+                     filed_utc: Optional[str] = None,
+                     scored_utc: Optional[str] = None) -> ScoredSlot:
+    """Score ONE filed prediction against ONE observed â. Pure arithmetic.
+
+    Every branch is decided by the frozen rules and nothing else: no threshold
+    is read from the environment, no band is recomputed, no verdict depends on
+    the other predictor.
+    """
+    stamp = scored_utc or utc_now()
+    band = _check_filed_band(filed.prediction_id, filed.predicted, filed.band)
+    _check_carve_out(filed.prediction_id, filed.predicted, filed.magnitude_only)
+
+    flags: list[str] = list(slot.flags)
+    common = dict(
+        key=slot.key, pair_id=slot.pair_id, prediction_id=filed.prediction_id,
+        predictor=filed.predictor, source=slot.source, target=slot.target,
+        arm=slot.arm, family=slot.family, predicted=filed.predicted, band=band,
+        magnitude_only=filed.magnitude_only,
+        descriptive_band_04=filed.descriptive_band_04,
+        corpus_manifest_sha256_prediction=filed.corpus_manifest_sha256,
+        sign_scored=not filed.magnitude_only,
+        filed_utc=filed_utc, scored_utc=stamp)
+
+    #  The scored band: magnitude-only moves the comparison onto |·| (prereg §3
+    #  "|observed| within band of |predicted|; sign unscored"), and the band
+    #  travels with it — the frozen half-width never changes.
+    if filed.magnitude_only:
+        scored_band = [abs(filed.predicted) - FROZEN_BAND_HALF_WIDTH,
+                       abs(filed.predicted) + FROZEN_BAND_HALF_WIDTH]
+    else:
+        scored_band = band
+
+    if observed is None:
+        return ScoredSlot(scored_band=scored_band,
+                          verdict="UNSCORED-NO-OBSERVATION", in_band=None,
+                          scored_of_record=False,
+                          flags=flags + ["NO OBSERVED â SUPPLIED for this slot — "
+                                         "reported, never dropped from the "
+                                         "denominator"],
+                          **common)                     # type: ignore[arg-type]
+
+    value = abs(observed.a_hat) if filed.magnitude_only else observed.a_hat
+    in_band, where, excess = _band_position(value, scored_band[0], scored_band[1])
+    if filed.magnitude_only:
+        verdict: Verdict = ("magnitude-only-in-band" if in_band
+                            else f"magnitude-only-out-of-band-{where}")  # type: ignore[assignment]
+    else:
+        verdict = "in-band" if in_band else f"out-of-band-{where}"  # type: ignore[assignment]
+
+    descriptive_hit: Optional[bool] = None
+    if filed.descriptive_band_04 is not None:
+        d_lo, d_hi = (float(filed.descriptive_band_04[0]),
+                      float(filed.descriptive_band_04[1]))
+        if filed.magnitude_only:
+            d_lo = abs(filed.predicted) - DESCRIPTIVE_BAND_HALF_WIDTH
+            d_hi = abs(filed.predicted) + DESCRIPTIVE_BAND_HALF_WIDTH
+        descriptive_hit = _band_position(value, d_lo, d_hi)[0]
+
+    fit_sha = observed.corpus_manifest_sha256
+    cross_vintage = bool(filed.corpus_manifest_sha256 and fit_sha
+                         and filed.corpus_manifest_sha256 != fit_sha)
+    scored_of_record = not cross_vintage
+    if cross_vintage:
+        flags.append(
+            f"CROSS-VINTAGE — the prediction rode corpus "
+            f"{filed.corpus_manifest_sha256[:8]}… and the fit rode "
+            f"{(fit_sha or '')[:8]}…. Addendum G §G2(c): a cross-vintage â "
+            f"comparison is a CALIBRATION READ, never scored. The verdict is "
+            f"shown for inspection and EXCLUDED from the aggregates; the desk "
+            f"rules on whether a within-vintage refit is owed.")
+    if filed.corpus_manifest_sha256 is None or fit_sha is None:
+        flags.append(
+            "VINTAGE UNVERIFIED — "
+            + ("the filed prediction carries no corpus manifest sha"
+               if filed.corpus_manifest_sha256 is None else "")
+            + ("; " if filed.corpus_manifest_sha256 is None and fit_sha is None
+               else "")
+            + ("the observed â carries no corpus manifest sha"
+               if fit_sha is None else "")
+            + ". Addendum G §G2(a) wants one on both sides; pre-G records have "
+              "none, so within-vintage scoring here rests on the desk's own "
+              "provenance trail, not on this artifact.")
+
+    return ScoredSlot(
+        scored_band=scored_band, observed=observed.a_hat, scored_value=value,
+        verdict=verdict, in_band=in_band,
+        error=observed.a_hat - filed.predicted,
+        abs_error=abs(observed.a_hat - filed.predicted), band_excess=excess,
+        sign_agrees=((filed.predicted >= 0.0) == (observed.a_hat >= 0.0)),
+        descriptive_04_in_band=descriptive_hit,
+        corpus_manifest_sha256_fit=fit_sha, cross_vintage=cross_vintage,
+        scored_of_record=scored_of_record, observed_utc=observed.observed_utc,
+        fit_path=observed.fit_path, flags=flags,
+        **common)                                       # type: ignore[arg-type]
+
+
+def _filed_prediction_from(block: dict[str, Any], predictor: Predictor,
+                           fallback_sha: Optional[str]) -> FiledPrediction:
+    """Read one predictor's block out of a racing-shaped filing record row."""
+    try:
+        band = list(block["band"])
+        return FiledPrediction(
+            predictor=predictor, prediction_id=str(block["id"]),
+            predicted=float(block["predicted"]), band=[float(b) for b in band],
+            magnitude_only=bool(block["magnitude_only"]),
+            descriptive_band_04=([float(b) for b in block["descriptive_band_04"]]
+                                 if block.get("descriptive_band_04") else None),
+            corpus_manifest_sha256=block.get("corpus_manifest_sha256",
+                                             fallback_sha))
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ScoringError(
+            f"malformed {predictor} prediction block (keys {sorted(block)}): "
+            f"{exc}") from exc
+
+
+def parse_filing_record(path: Path) -> FilingRecord:
+    """Read a filed prediction record into slots. TWO shapes are on record.
+
+      * RACING (batch 3 onward): a row carries `source`/`target` plus a
+        `star_prediction` and/or `composed_prediction` block.
+      * SCALAR-FLAT (canary, batch 2): a row IS the star prediction —
+        `source_model`/`target_model`, `predicted_a_hat`, `band`,
+        `near_zero_carveout`.
+
+    Any third shape is a HALT naming the keys it saw: guessing which number is
+    the prediction is exactly how a scoring artifact becomes unauditable.
+    """
+    if not path.is_file():
+        raise ScoringError(f"filed prediction record absent: {path}")
+    try:
+        doc = json.loads(path.read_text())
+    except (OSError, ValueError) as exc:
+        raise ScoringError(f"unreadable prediction record {path}: {exc}") from exc
+    if not isinstance(doc, dict) or not isinstance(doc.get("predictions"), list):
+        raise ScoringError(
+            f"{path}: not a filing record — expected a top-level object with a "
+            f"`predictions` list, got keys "
+            f"{sorted(doc) if isinstance(doc, dict) else type(doc).__name__}")
+
+    record_sha = doc.get("corpus_manifest_sha256")
+    record = FilingRecord(path=str(path), sha256=sha256_of(path),
+                          filed_utc=doc.get("filed_utc"),
+                          status=doc.get("STATUS"),
+                          corpus_manifest_sha256=record_sha)
+    seen: dict[str, str] = {}
+    for row in doc["predictions"]:
+        if not isinstance(row, dict):
+            raise ScoringError(f"{path}: prediction row is not an object: {row!r}")
+        row_sha = row.get("corpus_manifest_sha256", record_sha)
+        filed: list[FiledPrediction] = []
+        if "star_prediction" in row or "composed_prediction" in row:
+            source, target = str(row["source"]), str(row["target"])
+            arm, family = str(row["arm"]), str(row["family"])
+            for predictor, block_key in (("star", "star_prediction"),
+                                         ("composed", "composed_prediction")):
+                block = row.get(block_key)
+                if isinstance(block, dict):
+                    filed.append(_filed_prediction_from(
+                        block, predictor, row_sha))  # type: ignore[arg-type]
+        elif "predicted_a_hat" in row:
+            source, target = str(row["source_model"]), str(row["target_model"])
+            arm, family = str(row["arm"]), str(row["family"])
+            filed.append(FiledPrediction(
+                predictor="star", prediction_id=str(row["id"]),
+                predicted=float(row["predicted_a_hat"]),
+                band=[float(b) for b in row["band"]],
+                magnitude_only=bool(row.get("near_zero_carveout", False)),
+                corpus_manifest_sha256=row_sha))
+        else:
+            raise ScoringError(
+                f"{path}: unrecognized prediction-row shape (keys "
+                f"{sorted(row)}). Known shapes: racing "
+                f"(`star_prediction`/`composed_prediction` blocks) and "
+                f"scalar-flat (`predicted_a_hat`). A third shape must be taught "
+                f"to this parser explicitly — never guessed")
+        if not filed:
+            raise ScoringError(
+                f"{path}: row {source}->{target} files no predictor block at all")
+        key = slot_key(source, target, arm, family)
+        if key in seen:
+            raise ScoringError(
+                f"{path}: duplicate slot {key} — a filing record must name each "
+                f"pair×arm×family once (rake M18: comparisons key by the FULL "
+                f"identity and assert no duplicates)")
+        seen[key] = key
+        record.slots.append(FiledSlot(
+            key=key, pair_id=f"{source}->{target}", source=source, target=target,
+            arm=arm, family=family,
+            direction_of_record=row.get("direction_of_record"),
+            predictions=filed, flags=[str(f) for f in row.get("flags", [])]))
+    return record
+
+
+def load_observations(path: Path) -> ObservationSet:
+    """Read the desk's observed-â artifact. Shape is documented in `--help`.
+
+    ```json
+    {"corpus_manifest_sha256": "<the FIT vintage, default for all rows>",
+     "observed": [{"source": "...", "target": "...", "arm": "native",
+                   "family": "proc_k128", "a_hat": 0.41,
+                   "corpus_manifest_sha256": "...", "fit_path": "...",
+                   "observed_utc": "..."}]}
+    ```
+    """
+    if not path.is_file():
+        raise ScoringError(
+            f"observed-â artifact absent: {path}. Scoring REQUIRES one — this "
+            f"tool never observes, never fits, and never auto-scores at filing "
+            f"time; the desk supplies the observed â at first-read")
+    try:
+        doc = json.loads(path.read_text())
+    except (OSError, ValueError) as exc:
+        raise ScoringError(f"unreadable observation set {path}: {exc}") from exc
+    if not isinstance(doc, dict):
+        raise ScoringError(f"{path}: expected a top-level object")
+    rows = doc.get("observed", doc.get("observations"))
+    if not isinstance(rows, list):
+        raise ScoringError(
+            f"{path}: expected an `observed` (or `observations`) list, got keys "
+            f"{sorted(doc)}")
+    default_sha = doc.get("corpus_manifest_sha256")
+    default_utc = doc.get("observed_utc")
+    obs: list[ObservedAhat] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            raise ScoringError(f"{path}: observation is not an object: {row!r}")
+        try:
+            obs.append(ObservedAhat(
+                source=str(row["source"]), target=str(row["target"]),
+                arm=str(row["arm"]),
+                family=str(row.get("family", FAMILY_OF_RECORD)),
+                a_hat=float(row["a_hat"]),
+                corpus_manifest_sha256=row.get("corpus_manifest_sha256",
+                                               default_sha),
+                fit_path=row.get("fit_path"),
+                observed_utc=row.get("observed_utc", default_utc),
+                note=str(row.get("note", ""))))
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ScoringError(
+                f"{path}: malformed observation {row!r}: {exc}") from exc
+    keys: dict[str, int] = {}
+    for i, o in enumerate(obs):
+        if o.key in keys:
+            raise ScoringError(
+                f"{path}: duplicate observation for {o.key} (rows {keys[o.key]} "
+                f"and {i}) — which â is of record cannot be guessed")
+        keys[o.key] = i
+    return ObservationSet(path=str(path), sha256=sha256_of(path),
+                          corpus_manifest_sha256=default_sha,
+                          observed_utc=default_utc,
+                          note=str(doc.get("note", "")), observations=obs)
+
+
+def aggregate_scored(slots: Sequence[ScoredSlot]) -> list[PredictorAggregate]:
+    """Counts per predictor. Only `scored_of_record` slots enter the fraction."""
+    by_predictor: dict[str, PredictorAggregate] = {}
+    for s in slots:
+        agg = by_predictor.setdefault(
+            s.predictor, PredictorAggregate(predictor=s.predictor))
+        agg.n_filed += 1
+        if s.verdict == "UNSCORED-NO-OBSERVATION":
+            agg.n_unscored_no_observation += 1
+            continue
+        if s.cross_vintage:
+            agg.n_cross_vintage_excluded += 1
+            continue
+        agg.n_scored_of_record += 1
+        if s.magnitude_only:
+            agg.n_magnitude_only += 1
+            if s.in_band:
+                agg.n_magnitude_only_in_band += 1
+        if s.in_band:
+            agg.n_in_band += 1
+        else:
+            agg.n_out_of_band += 1
+            if s.verdict.endswith("high"):
+                agg.n_out_of_band_high += 1
+            elif s.verdict.endswith("low"):
+                agg.n_out_of_band_low += 1
+        if s.descriptive_04_in_band is not None:
+            agg.n_descriptive_04_reported += 1
+            if s.descriptive_04_in_band:
+                agg.n_descriptive_04_in_band += 1
+    for agg in by_predictor.values():
+        if agg.n_scored_of_record:
+            agg.in_band_fraction = agg.n_in_band / agg.n_scored_of_record
+        if agg.n_descriptive_04_reported:
+            agg.descriptive_04_fraction = (agg.n_descriptive_04_in_band
+                                           / agg.n_descriptive_04_reported)
+    return [by_predictor[k] for k in sorted(by_predictor)]
+
+
+def head_to_head(slots: Sequence[ScoredSlot]) -> HeadToHead:
+    """Addendum E §E3's 2×2, over slots where BOTH predictors scored of record."""
+    by_key: dict[str, dict[str, ScoredSlot]] = {}
+    for s in slots:
+        by_key.setdefault(s.key, {})[s.predictor] = s
+    h2h = HeadToHead()
+    for pair in by_key.values():
+        star, comp = pair.get("star"), pair.get("composed")
+        if (star is None or comp is None or not star.scored_of_record
+                or not comp.scored_of_record):
+            h2h.n_slots_incomplete += 1
+            continue
+        h2h.n_slots_both_scored += 1
+        if star.in_band and comp.in_band:
+            h2h.n_both_in_band += 1
+        elif star.in_band:
+            h2h.n_star_only += 1
+        elif comp.in_band:
+            h2h.n_composed_only += 1
+        else:
+            h2h.n_both_out_of_band += 1
+    return h2h
+
+
+def score_record(record_path: Path, observations_path: Path,
+                 scored_utc: Optional[str] = None) -> ScoredRecord:
+    """Build the scored record for one filing record. WRITES NOTHING.
+
+    Unmatched observations are a HALT: an observation that matches no filed slot
+    is a typo, a wrong record, or a direction flip, and every one of those
+    produces a scoring artifact that looks complete and is not.
+    """
+    stamp = scored_utc or utc_now()
+    filing = parse_filing_record(record_path)
+    observed = load_observations(observations_path)
+    by_key = {o.key: o for o in observed.observations}
+
+    filed_keys = {slot.key for slot in filing.slots}
+    unmatched = sorted(set(by_key) - filed_keys)
+    if unmatched:
+        raise ScoringError(
+            f"{observations_path}: {len(unmatched)} observation(s) match no "
+            f"filed slot in {record_path.name}: {unmatched}. Filed slots: "
+            f"{sorted(filed_keys)}. Direction of record is source→target as "
+            f"filed and â is orientation-dependent — an unmatched key is a "
+            f"HALT, never a skipped row")
+
+    scored: list[ScoredSlot] = []
+    for slot in filing.slots:
+        obs = by_key.get(slot.key)
+        for filed in slot.predictions:
+            scored.append(score_prediction(slot, filed, obs,
+                                           filed_utc=filing.filed_utc,
+                                           scored_utc=stamp))
+
+    warnings: list[str] = []
+    n_missing = sum(1 for s in scored if s.verdict == "UNSCORED-NO-OBSERVATION")
+    if n_missing:
+        warnings.append(
+            f"{n_missing} filed prediction(s) have no observed â in "
+            f"{observations_path.name} — recorded UNSCORED-NO-OBSERVATION and "
+            f"excluded from the fractions, never dropped")
+    n_cross = sum(1 for s in scored if s.cross_vintage)
+    if n_cross:
+        warnings.append(
+            f"{n_cross} slot(s) are CROSS-VINTAGE calibration reads (Addendum G "
+            f"§G2(c)) — verdicts shown, excluded from the aggregates")
+
+    record = ScoredRecord(
+        generated=date.today().isoformat(), scored_utc=stamp,
+        prediction_record=str(record_path),
+        prediction_record_sha256=filing.sha256,
+        prediction_record_filed_utc=filing.filed_utc,
+        observations_source=str(observations_path),
+        observations_sha256=observed.sha256,
+        n_observations=len(observed.observations),
+        n_observations_unmatched=0,
+        slots=scored, aggregates=aggregate_scored(scored),
+        head_to_head=head_to_head(scored), warnings=warnings)
+    record.record_sha256 = _canonical_sha256(record.model_dump(mode="json"))
+    return record
+
+
+def default_scored_path(record_path: Path) -> Path:
+    """Beside the filing record, named for it: `scored-<record name>`."""
+    return record_path.parent / f"scored-{record_path.name}"
+
+
+def write_scored_record(record: ScoredRecord, out: Path,
+                        overwrite: bool = False) -> Path:
+    """Write the scored record. Refuses to clobber an existing one by default."""
+    if out.exists() and not overwrite:
+        raise ScoringError(
+            f"a scored record already exists at {out}. Scoring happens ONCE per "
+            f"record; re-scoring it would silently replace a verdict that may "
+            f"already be ledgered. Pass --overwrite-scored deliberately, or "
+            f"write elsewhere with --scored-out")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(record.model_dump_json(indent=1))
+    logger.info("wrote scored record %s (%d slot(s), sha %s…)", out,
+                len(record.slots), (record.record_sha256 or "")[:12])
+    return out
 
 
 # ---------------------------------------------------------------- selftest
@@ -1441,6 +2426,347 @@ def selftest() -> int:                                   # noqa: C901 — a chec
           "every model either fully resolves or carries a NAMED gap — no row "
           "is silently incomplete")
 
+    print("== selftest 13: the corpus-v2.1 root — default-off, prepend-only ==")
+    #  The whole point of this check is the NEGATIVE: with no root set, every
+    #  probe list must be what it was before the option existed. The frozen
+    #  paths are captured FIRST, compared after a root is set and cleared, and
+    #  the E1 gate proves the same invariant on the real data.
+    check(V21_ROOT is None and V21_CORPUS_SHA is None,
+          "V21_ROOT defaults to None — no import sets a vintage")
+    check(len(CORPUS_SHA_V21) == 64
+          and all(c in "0123456789abcdef" for c in CORPUS_SHA_V21),
+          f"CORPUS_SHA_V21 is a sha256 and is NAMED with its vintage (rake "
+          f"M26): {CORPUS_SHA_V21[:12]}…")
+    frozen_hub = {m: [(str(d.path), d.corpus, d.note) for d in hub_map_dirs(m)]
+                  for m in sorted(SITE_OF_RECORD)}
+    frozen_vec = {m: [str(p) for p in vector_bank_paths(m, site_of_record(m))]
+                  for m in sorted(SITE_OF_RECORD)}
+    with tempfile.TemporaryDirectory(prefix="composed_v21_") as td:
+        root = Path(td)
+        (root / V21_CORPUS_MANIFEST_RELPATH).parent.mkdir(parents=True)
+        (root / V21_CORPUS_MANIFEST_RELPATH).write_text(
+            '{"synthetic": "corpus-v2.1 stand-in for the selftest"}\n')
+        synthetic_sha = sha256_of(root / V21_CORPUS_MANIFEST_RELPATH)
+        try:
+            set_v21_root(root)                      # the REAL expected sha
+            check(False, "a root whose manifest sha is not CORPUS_SHA_V21 must "
+                         "be refused")
+        except CorpusVintageError as exc:
+            check("HALT" in str(exc) and CORPUS_SHA_V21 in str(exc),
+                  f"a root that cannot prove its vintage is REFUSED: {exc!s:.60}")
+        check(V21_ROOT is None, "a refused root leaves V21_ROOT unset")
+        try:
+            set_v21_root(root / "nope", expected_corpus_sha=synthetic_sha)
+            check(False, "a nonexistent root must be refused")
+        except CorpusVintageError as exc:
+            check("not a directory" in str(exc),
+                  f"a nonexistent root refuses loudly: {exc!s:.60}")
+        bare = root / "bare"
+        bare.mkdir()
+        try:
+            set_v21_root(bare, expected_corpus_sha=synthetic_sha)
+            check(False, "a root with no corpus manifest must be refused")
+        except CorpusVintageError as exc:
+            check("cannot be VERIFIED" in str(exc),
+                  f"a root with no manifest refuses loudly: {exc!s:.60}")
+
+        with v21_root_scope(root, expected_corpus_sha=synthetic_sha) as sha:
+            check(sha == synthetic_sha and V21_CORPUS_SHA == synthetic_sha,
+                  "a verified root records the sha it actually hashed, not the "
+                  "one it was told to expect")
+            prepend_ok, tail_ok = True, True
+            for model in sorted(SITE_OF_RECORD):
+                dirs = hub_map_dirs(model)
+                prepend_ok &= (dirs[0].corpus == "v21"
+                               and dirs[0].path == root / f"fits_v21_{model}")
+                tail_ok &= ([(str(d.path), d.corpus, d.note) for d in dirs[1:]]
+                            == frozen_hub[model])
+                paths = vector_bank_paths(model, site_of_record(model))
+                prepend_ok &= (paths[0] == root / "vectors" / model
+                               / f"entropy_gradient_{model}_L{site_of_record(model)}.npz")
+                tail_ok &= ([str(p) for p in paths[1:]] == frozen_vec[model])
+            check(prepend_ok, f"every one of the {len(SITE_OF_RECORD)} registered "
+                              f"models gains the v2.1 hub-map dir and per-site "
+                              f"vector bank at the FRONT of its probe list")
+            check(tail_ok, "and the rest of every probe list is byte-identical "
+                           "to the frozen list — the prepend adds, never edits")
+            try:
+                run_gate()
+                check(False, "run_gate must refuse while a v2.1 root is set")
+            except CorpusVintageError as exc:
+                check("FIXED-VINTAGE" in str(exc),
+                      f"the E1 gate refuses a v2.1 root programmatically — the "
+                      f"resolution-parity trap, closed: {exc!s:.60}")
+        check(V21_ROOT is None and V21_CORPUS_SHA is None,
+              "v21_root_scope restores the previous (unset) root on exit")
+        after_hub = {m: [(str(d.path), d.corpus, d.note) for d in hub_map_dirs(m)]
+                     for m in sorted(SITE_OF_RECORD)}
+        after_vec = {m: [str(p) for p in vector_bank_paths(m, site_of_record(m))]
+                     for m in sorted(SITE_OF_RECORD)}
+        check(after_hub == frozen_hub and after_vec == frozen_vec,
+              "with the root cleared, EVERY probe list is byte-identical to "
+              "before it was ever set (the frozen resolution is untouched)")
+        try:
+            main(["--gate", "--v21-root", str(root)])
+            check(False, "--gate with --v21-root must not run")
+        except SystemExit as exc:
+            check(exc.code == 2,
+                  f"--gate and --v21-root are MUTUALLY EXCLUSIVE at the CLI "
+                  f"(argparse exit {exc.code})")
+        check(V21_ROOT is None, "the refused CLI combination set no root")
+
+    print("== selftest 14: scoring — every verdict branch, on synthetic slots ==")
+
+    def _slot(src: str, tgt: str, arm: str = "native") -> FiledSlot:
+        return FiledSlot(key=slot_key(src, tgt, arm, FAMILY_OF_RECORD),
+                         pair_id=f"{src}->{tgt}", source=src, target=tgt,
+                         arm=arm, family=FAMILY_OF_RECORD)
+
+    def _filed(predictor: str, predicted: float, band04: bool = False,
+               sha: Optional[str] = None) -> FiledPrediction:
+        return FiledPrediction(
+            predictor=predictor,                     # type: ignore[arg-type]
+            prediction_id=f"{predictor}-prediction/synthetic/native-k128",
+            predicted=predicted,
+            band=[predicted - FROZEN_BAND_HALF_WIDTH,
+                  predicted + FROZEN_BAND_HALF_WIDTH],
+            magnitude_only=abs(predicted) < NEAR_ZERO_CARVE_OUT,
+            descriptive_band_04=([predicted - DESCRIPTIVE_BAND_HALF_WIDTH,
+                                  predicted + DESCRIPTIVE_BAND_HALF_WIDTH]
+                                 if band04 else None),
+            corpus_manifest_sha256=sha)
+
+    def _obs(src: str, tgt: str, a_hat: float, arm: str = "native",
+             sha: Optional[str] = None) -> ObservedAhat:
+        return ObservedAhat(source=src, target=tgt, arm=arm,
+                            family=FAMILY_OF_RECORD, a_hat=a_hat,
+                            corpus_manifest_sha256=sha)
+
+    slot = _slot("alpha", "beta")
+    branches: list[tuple[str, float, Optional[float], str, Optional[bool]]] = [
+        ("comfortably inside the band",        0.30, 0.32, "in-band", True),
+        ("above the band",                     0.30, 0.40, "out-of-band-high", False),
+        ("below the band",                     0.30, 0.20, "out-of-band-low", False),
+        ("exactly on the upper edge",          0.30, 0.30 + 0.05, "in-band", True),
+        ("exactly on the lower edge",          0.30, 0.30 - 0.05, "in-band", True),
+        ("near-zero, |obs| inside, SIGN FLIPPED",
+         0.03, -0.05, "magnitude-only-in-band", True),
+        ("near-zero, magnitude too large",     0.03, -0.20,
+         "magnitude-only-out-of-band-high", False),
+        ("near-zero, magnitude too small",     0.07, 0.005,
+         "magnitude-only-out-of-band-low", False),
+    ]
+    for label, predicted, observation, want_verdict, want_in in branches:
+        filed = _filed("composed", predicted)
+        got = score_prediction(slot, filed,
+                               _obs("alpha", "beta", observation)  # type: ignore[arg-type]
+                               if observation is not None else None)
+        check(got.verdict == want_verdict and got.in_band is want_in,
+              f"{label}: predicted {predicted:+.3f} observed "
+              f"{observation:+.4f} → {got.verdict} (want {want_verdict})")
+    near_zero = score_prediction(slot, _filed("composed", 0.03),
+                                 _obs("alpha", "beta", -0.05))
+    check(near_zero.magnitude_only and not near_zero.sign_scored
+          and near_zero.sign_agrees is False and near_zero.scored_value == 0.05,
+          "the near-zero carve-out scores |observed| and marks the sign "
+          "UNSCORED while still reporting that it disagrees (prereg §3 / E2)")
+    check(near_zero.scored_band == [abs(0.03) - 0.05, abs(0.03) + 0.05],
+          f"magnitude-only moves the comparison onto the band of |predicted| "
+          f"{near_zero.scored_band}")
+    unscored = score_prediction(slot, _filed("star", 0.30), None)
+    check(unscored.verdict == "UNSCORED-NO-OBSERVATION"
+          and unscored.in_band is None and not unscored.scored_of_record,
+          "a slot with no observed â is UNSCORED-NO-OBSERVATION, not a miss")
+    d04_hit = score_prediction(slot, _filed("composed", 0.30, band04=True),
+                               _obs("alpha", "beta", 0.32))
+    d04_miss = score_prediction(slot, _filed("composed", 0.30, band04=True),
+                                _obs("alpha", "beta", 0.345))
+    check(d04_hit.descriptive_04_in_band is True
+          and d04_miss.descriptive_04_in_band is False
+          and d04_miss.verdict == "in-band",
+          "the ±.04 read is DESCRIPTIVE and independent: .345 is in the scored "
+          "±.05 band and outside the descriptive ±.04 one")
+    check(score_prediction(slot, _filed("composed", 0.30),
+                           _obs("alpha", "beta", 0.32)).descriptive_04_in_band
+          is None,
+          "a record that filed no ±.04 band gets none invented for it")
+    cross = score_prediction(slot, _filed("composed", 0.30, sha="a" * 64),
+                             _obs("alpha", "beta", 0.32, sha="b" * 64))
+    check(cross.cross_vintage and not cross.scored_of_record
+          and cross.verdict == "in-band"
+          and any("CALIBRATION READ" in f for f in cross.flags),
+          "prediction and fit on DIFFERENT vintages → verdict computed, slot "
+          "excluded from the aggregates (Addendum G §G2(c))")
+    same = score_prediction(slot, _filed("composed", 0.30, sha="a" * 64),
+                            _obs("alpha", "beta", 0.32, sha="a" * 64))
+    check(not same.cross_vintage and same.scored_of_record
+          and not any("VINTAGE UNVERIFIED" in f for f in same.flags),
+          "same vintage on both sides scores of record with no vintage flag")
+    try:
+        score_prediction(slot, FiledPrediction(
+            predictor="star", prediction_id="star-prediction/bad/native-k128",
+            predicted=0.30, band=[0.25, 0.36], magnitude_only=False),
+            _obs("alpha", "beta", 0.30))
+        check(False, "a band that is not predicted ± .05 must HALT")
+    except ScoringError as exc:
+        check("FROZEN" in str(exc), f"a moved band HALTs: {exc!s:.60}")
+    try:
+        score_prediction(slot, FiledPrediction(
+            predictor="star", prediction_id="star-prediction/bad2/native-k128",
+            predicted=0.03, band=[-0.02, 0.08], magnitude_only=False),
+            _obs("alpha", "beta", 0.03))
+        check(False, "a carve-out flag disagreeing with the frozen rule must HALT")
+    except ScoringError as exc:
+        check("near-zero carve-out" in str(exc),
+              f"a wrong magnitude_only flag HALTs: {exc!s:.60}")
+
+    agg_slots = [
+        score_prediction(_slot("a", "b"), _filed("star", 0.30),
+                         _obs("a", "b", 0.32)),
+        score_prediction(_slot("a", "b"), _filed("composed", 0.30),
+                         _obs("a", "b", 0.32)),
+        score_prediction(_slot("c", "d"), _filed("star", 0.30),
+                         _obs("c", "d", 0.60)),
+        score_prediction(_slot("c", "d"), _filed("composed", 0.30),
+                         _obs("c", "d", 0.32)),
+        score_prediction(_slot("e", "f"), _filed("star", 0.30),
+                         _obs("e", "f", 0.60)),
+        score_prediction(_slot("e", "f"), _filed("composed", 0.30),
+                         _obs("e", "f", 0.60)),
+        score_prediction(_slot("g", "h"), _filed("star", 0.30), None),
+        score_prediction(_slot("g", "h"), _filed("composed", 0.30), None),
+    ]
+    aggs = {a.predictor: a for a in aggregate_scored(agg_slots)}
+    check(aggs["star"].n_filed == 4 and aggs["star"].n_scored_of_record == 3
+          and aggs["star"].n_in_band == 1 and aggs["star"].n_out_of_band == 2
+          and aggs["star"].n_unscored_no_observation == 1
+          and abs((aggs["star"].in_band_fraction or 0) - 1 / 3) < 1e-12,
+          f"star aggregate counts 1/3 in band over the SCORED slots only "
+          f"(fraction {aggs['star'].in_band_fraction})")
+    check(aggs["composed"].n_in_band == 2 and aggs["composed"].n_out_of_band == 1,
+          "composed aggregate counts 2 in band, 1 out")
+    h2h = head_to_head(agg_slots)
+    check((h2h.n_slots_both_scored, h2h.n_both_in_band, h2h.n_star_only,
+           h2h.n_composed_only, h2h.n_both_out_of_band, h2h.n_slots_incomplete)
+          == (3, 1, 0, 1, 1, 1),
+          f"the E3 2×2 over slots where both scored: both {h2h.n_both_in_band}, "
+          f"star-only {h2h.n_star_only}, composed-only {h2h.n_composed_only}, "
+          f"both-out {h2h.n_both_out_of_band}, incomplete "
+          f"{h2h.n_slots_incomplete}")
+
+    print("== selftest 15: scoring is a SEPARATE act — never automatic ==")
+    check(not any(f in ComposedPrediction.model_fields
+                  for f in ("observed", "verdict", "in_band", "scored")),
+          "a ComposedPrediction has no observed/verdict field at all — the "
+          "filing path cannot carry a score even by accident")
+    with tempfile.TemporaryDirectory(prefix="composed_scoring_") as td:
+        root = Path(td)
+        record_path = root / "predictions-synthetic-2026-07-28.json"
+        record_path.write_text(json.dumps({
+            "STATUS": "SYNTHETIC — selftest fixture, files nothing",
+            "filed_utc": "2026-07-28",
+            "corpus_manifest_sha256": "c" * 64,
+            "predictions": [
+                {"source": "alpha", "target": "beta", "arm": "native",
+                 "family": FAMILY_OF_RECORD,
+                 "direction_of_record": "forward as listed",
+                 "star_prediction": {
+                     "id": "star-prediction/alpha→beta/native-k128",
+                     "predicted": 0.30, "band": [0.25, 0.35],
+                     "magnitude_only": False},
+                 "composed_prediction": {
+                     "id": "composed-prediction/alpha→beta/native-k128",
+                     "predicted": 0.34, "band": [0.29, 0.39],
+                     "descriptive_band_04": [0.30, 0.38],
+                     "magnitude_only": False}},
+                {"id": "star-prediction/gamma→delta/native-k128",
+                 "source_model": "gamma", "target_model": "delta",
+                 "arm": "native", "family": FAMILY_OF_RECORD,
+                 "predicted_a_hat": 0.04, "band": [-0.01, 0.09],
+                 "near_zero_carveout": True}],
+        }, indent=1))
+        obs_path = root / "observed.json"
+        obs_path.write_text(json.dumps({
+            "corpus_manifest_sha256": "c" * 64,
+            "observed_utc": "2026-07-28T00:00:00+00:00",
+            "observed": [
+                {"source": "alpha", "target": "beta", "arm": "native",
+                 "family": FAMILY_OF_RECORD, "a_hat": 0.33},
+                {"source": "gamma", "target": "delta", "arm": "native",
+                 "family": FAMILY_OF_RECORD, "a_hat": -0.06}],
+        }, indent=1))
+        scored = score_record(record_path, obs_path)
+        by_id = {s.prediction_id: s for s in scored.slots}
+        check(len(scored.slots) == 3,
+              "both record shapes parse: 2 racing predictors + 1 scalar-flat row")
+        check(by_id["star-prediction/alpha→beta/native-k128"].verdict == "in-band"
+              and by_id["composed-prediction/alpha→beta/native-k128"].verdict
+              == "in-band",
+              "the racing row scores both predictors against their own bands")
+        gamma = by_id["star-prediction/gamma→delta/native-k128"]
+        check(gamma.verdict == "magnitude-only-in-band" and not gamma.sign_scored
+              and gamma.sign_agrees is False,
+              "the scalar-flat row's near-zero carve-out scores on magnitude "
+              "with the sign unscored (observed −.06 vs predicted +.04)")
+        check(all(s.scored_of_record for s in scored.slots)
+              and scored.record_sha256 is not None,
+              "same-vintage slots score of record and the artifact is sha'd")
+        payload = scored.model_dump(mode="json")
+        payload["record_sha256"] = None
+        check(_canonical_sha256(payload) == scored.record_sha256,
+              "record_sha256 recomputes from the document with the field nulled")
+        out = default_scored_path(record_path)
+        check(out.name == "scored-predictions-synthetic-2026-07-28.json",
+              f"the scored record is named for the filing record: {out.name}")
+        write_scored_record(scored, out)
+        check(out.is_file(), "the scored record writes where the desk expects it")
+        try:
+            write_scored_record(scored, out)
+            check(False, "re-scoring must refuse to clobber")
+        except ScoringError as exc:
+            check("already exists" in str(exc),
+                  f"an existing scored record is never silently replaced: "
+                  f"{exc!s:.60}")
+        bad_obs = root / "observed-typo.json"
+        bad_obs.write_text(json.dumps({"observed": [
+            {"source": "beta", "target": "alpha", "arm": "native",
+             "a_hat": 0.33}]}))
+        try:
+            score_record(record_path, bad_obs)
+            check(False, "an observation matching no filed slot must HALT")
+        except ScoringError as exc:
+            check("match no filed slot" in str(exc),
+                  f"a flipped/typo'd observation HALTs rather than scoring "
+                  f"nothing quietly: {exc!s:.60}")
+        partial = root / "observed-partial.json"
+        partial.write_text(json.dumps({"observed": [
+            {"source": "alpha", "target": "beta", "arm": "native",
+             "a_hat": 0.33}]}))
+        part = score_record(record_path, partial)
+        check(sum(1 for s in part.slots
+                  if s.verdict == "UNSCORED-NO-OBSERVATION") == 1
+              and any("UNSCORED-NO-OBSERVATION" in w for w in part.warnings),
+              "a partial first-read names its unscored slots in the warnings")
+        check(all("VINTAGE UNVERIFIED" in " ".join(s.flags) for s in part.slots
+                  if s.verdict != "UNSCORED-NO-OBSERVATION"),
+              "an observed â carrying no corpus sha is flagged VINTAGE "
+              "UNVERIFIED, never silently treated as same-vintage (an "
+              "UNOBSERVED slot has no fit and so no vintage to compare)")
+        try:
+            score_record(record_path, root / "no-such-observations.json")
+            check(False, "scoring without an observed-â artifact must refuse")
+        except ScoringError as exc:
+            check("never auto-scores" in str(exc),
+                  f"there is no path to a verdict without the desk's observed "
+                  f"â: {exc!s:.60}")
+        try:
+            main(["--observed", str(obs_path)])
+            check(False, "--observed without --score-record must not run")
+        except SystemExit as exc:
+            check(exc.code == 2,
+                  f"--observed and --score-record are required together "
+                  f"(argparse exit {exc.code})")
+
     print(f"\nselftest: {len(failures)} failure(s)")
     return 1 if failures else 0
 
@@ -1463,6 +2789,32 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                          "hub map + entropy-gradient bank, against what is "
                          "actually banked on disk. EXITS NONZERO if any banked "
                          "hub map is unreachable from the registry.")
+    ap.add_argument("--v21-root", type=Path, default=None,
+                    help="root of a corpus-v2.1 re-bank mirror (Addendum G "
+                         "§G1's go-forward basis). Its fits_v21_<model>/ hub "
+                         "maps and vectors/<model>/ banks are PREPENDED to the "
+                         "existing probes; the root must prove its vintage via "
+                         "corpus/corpus_manifest.json. MUTUALLY EXCLUSIVE WITH "
+                         "--gate (the gate is a fixed-vintage proof about the "
+                         "archived v1 objects).")
+    ap.add_argument("--v21-corpus-manifest", type=Path,
+                    default=V21_CORPUS_MANIFEST_RELPATH,
+                    help=f"path of the vintage manifest RELATIVE to --v21-root "
+                         f"(default {V21_CORPUS_MANIFEST_RELPATH})")
+    ap.add_argument("--score-record", type=Path, default=None,
+                    help="a FILED prediction record to score. Requires "
+                         "--observed; never runs at filing time.")
+    ap.add_argument("--observed", type=Path, default=None,
+                    help='the desk-supplied observed â artifact: {"corpus_'
+                         'manifest_sha256": "<fit vintage>", "observed": '
+                         '[{"source","target","arm","family","a_hat", '
+                         '"corpus_manifest_sha256","fit_path","observed_utc"}]}')
+    ap.add_argument("--scored-out", type=Path, default=None,
+                    help="where the scored record is written (default: beside "
+                         "the filing record as scored-<record name>)")
+    ap.add_argument("--overwrite-scored", action="store_true",
+                    help="permit replacing an existing scored record — a "
+                         "deliberate desk act, never the default")
     ap.add_argument("--pairs-json", type=Path, default=CANDIDATE_PAIRS_JSON,
                     help=f"candidate-pair enumeration (default {CANDIDATE_PAIRS_JSON})")
     ap.add_argument("--archive-dir", type=Path, default=ARCHIVE_ROOT,
@@ -1482,13 +2834,48 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.selftest:
         return selftest()
 
+    #  THE RESOLUTION-PARITY TRAP, closed at the door. The E1 gate re-resolves
+    #  the five ARCHIVED v1 pairs through this module's own hub_map_dirs and
+    #  asserts parity against the archive's own npz files; a v2.1 root would
+    #  move that leg onto v2.1 objects. `run_gate` guards this too — one guard
+    #  can be bypassed programmatically, and this one cannot be bypassed at all.
+    if args.gate and args.v21_root is not None:
+        ap.error(
+            "--gate and --v21-root are MUTUALLY EXCLUSIVE. The E1 implementation "
+            "gate is a FIXED-VINTAGE proof about the archived v1 "
+            "operationalization: it resolves the five archived pairs through "
+            "the same hub_map_dirs() the predictor uses and asserts RESOLUTION "
+            "PARITY against the archive's own npz files. Under a v2.1 root that "
+            "leg silently moves onto v2.1 objects — the gate would fail for a "
+            "reason that has nothing to do with fidelity, or pass on the wrong "
+            "objects. Run the gate on its own, then run the v2.1 work.")
+    if (args.score_record is None) != (args.observed is None):
+        ap.error(
+            "--score-record and --observed go together. Scoring is a DESK ACT "
+            "against observed â values the desk produces at first-read; this "
+            "tool never observes, never fits, and never auto-scores at filing "
+            "time — it only builds the machine-readable artifact.")
+
     if not (args.gate or args.candidates or args.resolution_sweep
-            or args.source_model):
+            or args.source_model or args.score_record):
         raise SystemExit("pass --selftest, --gate, --candidates, "
-                         "--resolution-sweep, or --source-model/--target-model")
+                         "--resolution-sweep, --source-model/--target-model, "
+                         "or --score-record/--observed")
+
+    if args.v21_root is not None:
+        try:
+            set_v21_root(args.v21_root,
+                         manifest_relpath=args.v21_corpus_manifest)
+        except CorpusVintageError as exc:
+            #  An EXPECTED halt with a meaningful message: the operator pointed
+            #  at something that is not the v2.1 basis of record.
+            print(f"\nVINTAGE HALT — {exc}")
+            return 1
 
     readout = ComposedReadout(generated=date.today().isoformat(), hub=HUB_MODEL,
-                              hub_site=HUB_SITE_OF_RECORD, family=args.family)
+                              hub_site=HUB_SITE_OF_RECORD, family=args.family,
+                              v21_root=None if V21_ROOT is None else str(V21_ROOT),
+                              corpus_manifest_sha256_v21=V21_CORPUS_SHA)
     status = 0
 
     if args.gate:
@@ -1576,6 +2963,46 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             readout.predictions.append(one)
             print(f"{one.pair_id} [{one.arm}::{one.family}] "
                   f"â_comp = {one.a_comp:+.17g}")
+
+    if args.score_record is not None and args.observed is not None:
+        out = args.scored_out or default_scored_path(args.score_record)
+        try:
+            scored = score_record(args.score_record, args.observed)
+            print(f"\n{'scored slot':44s} {'predictor':10s} {'pred':>8s} "
+                  f"{'obs':>8s} {'err':>8s}  verdict")
+            for s in scored.slots:
+                print(f"{s.key:44s} {s.predictor:10s} {s.predicted:+8.4f} "
+                      f"{'—' if s.observed is None else f'{s.observed:+8.4f}'} "
+                      f"{'—' if s.error is None else f'{s.error:+8.4f}'}  "
+                      f"{s.verdict}"
+                      + ("  [NOT SCORED OF RECORD]" if not s.scored_of_record
+                         and s.verdict != "UNSCORED-NO-OBSERVATION" else ""))
+            for agg in scored.aggregates:
+                frac = ("—" if agg.in_band_fraction is None
+                        else f"{agg.in_band_fraction:.3f}")
+                print(f"\n{agg.predictor}: {agg.n_in_band}/"
+                      f"{agg.n_scored_of_record} in band (fraction {frac}); "
+                      f"{agg.n_out_of_band} out "
+                      f"({agg.n_out_of_band_high} high / "
+                      f"{agg.n_out_of_band_low} low); "
+                      f"{agg.n_magnitude_only} magnitude-only; "
+                      f"{agg.n_unscored_no_observation} unobserved; "
+                      f"{agg.n_cross_vintage_excluded} cross-vintage excluded")
+            h = scored.head_to_head
+            print(f"\nhead-to-head over {h.n_slots_both_scored} slot(s) scored "
+                  f"for both: both {h.n_both_in_band} · star-only "
+                  f"{h.n_star_only} · composed-only {h.n_composed_only} · both "
+                  f"out {h.n_both_out_of_band} ({h.n_slots_incomplete} "
+                  f"incomplete)")
+            for warning in scored.warnings:
+                print(f"  WARNING: {warning}")
+            written = write_scored_record(scored, out, args.overwrite_scored)
+            print(f"\nscored record: {written} (sha "
+                  f"{scored.record_sha256}). Campaign gates are NOT evaluated "
+                  f"here — the desk reads these counts.")
+        except ScoringError as exc:
+            print(f"\nSCORING HALT — {exc}")
+            return 1
 
     payload = readout.model_dump_json(indent=1)
     if args.out:
