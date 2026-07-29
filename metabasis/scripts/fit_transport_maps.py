@@ -154,7 +154,20 @@ SITES = {"3b": (13, 14, 18), "8b": (14, 16, 18), "qwen-7b": (19, 21, 23),
          # node's states are collected with per-text truncation to the first 1024
          # tokens, so for the 148 affected texts any gpt2-xl pair compares
          # full-text against truncated-text mean states. Flagged at scoring.
-         "gpt2-xl": (6, 7, 26, 46, 47)}                # ⋆ DEFERRED (L7|L26|L47)
+         "gpt2-xl": (6, 7, 26, 46, 47),                # ⋆ DEFERRED (L7|L26|L47)
+         # --- big-chain graduations (collection phase) -------------------------
+         # mixtral-8x7b-instruct-v0.1 (roster row 19, the few-wide-experts MoE):
+         # ratified by Luxia 2026-07-28 from its own 12-site scan — held-out r² at
+         # proc_k128, hub 8B, same read as wave-1 — peak L15 r²=.7092, clean and
+         # unimodal, flanked by its two neighbouring scanned sites L13/L17.
+         # THE POINT OF THE ROW, and why the site is not a surprise: its dense
+         # family-mate mistral-7b-instruct-v0.3 has the SAME grid and the SAME
+         # site of record (32 layers each, ⋆L15 each, identical fractional
+         # depth), while the MoE's peak r² is materially higher (.7092 vs .6609)
+         # — the sparsity raises the CEILING, it does not move the SITE. The raw
+         # arm is healthy here and in fact beats native (.7248), unlike the Qwen
+         # raw arms affected by the corpus finding.
+         "mixtral-8x7b-instruct-v0.1": (13, 15, 17)}   # ⋆ L15
 
 # Every model key the CLIs will accept. SITES = models whose FIT grid is fixed;
 # metabasis.roster.SCAN_GRIDS = the 12-site alignment-curve scan grids (prereg §4,
