@@ -7915,10 +7915,82 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                   f"a non-strict pin lets an unfiled key probe the ORDINARY "
                   f"list, in order ({len(loose.probed_paths)} of "
                   f"{len(ordinary)} probed before it stopped)")
-            check(loose_prov[0].source == "probe"
+            #  THE INVARIANT, asserted with NO dependence on the ambient data
+            #  tree: whatever answered, the resolve sits at its own ledger
+            #  position, it did NOT come from the pin, and it carries the
+            #  UNPINNED note. That is the whole contract — "permitted, warned,
+            #  never silent" — and `resolve_hub_map` attaches the note on BOTH
+            #  its probe-hit and its every-probe-missed branch, so neither
+            #  outcome can be silent.
+            check(len(loose_prov) == 1
+                  and loose_prov[0].kind == "hub map"
+                  and loose_prov[0].model == probe_model
+                  and loose_prov[0].source != "pin"
+                  and loose_prov[0].pin_record == str(rec22)
                   and any("UNPINNED" in n for n in loose_prov[0].notes),
-                  "and the resolve is RECORDED as unpinned — permitted, "
-                  "warned, never silent")
+                  f"the resolve is RECORDED as unpinned at its own ledger "
+                  f"position — permitted, warned, never silent (source "
+                  f"{loose_prov[0].source!r}, naming the pin it fell outside)")
+            #  ...and `source` itself is asserted per CONFIGURATION rather than
+            #  assumed, because whether a probe can hit depends on whether the
+            #  data tree is present at cwd — which is a property of the
+            #  invocation, not of the resolver (rake M15's family). Before this
+            #  the clause read `source == "probe"` unconditionally and therefore
+            #  passed only where `outputs/` happened to exist; run from a
+            #  worktree (which has no data tree) it failed on MAIN too.
+            check(loose_prov[0].source == ("probe" if loose.available
+                                           else "absent"),
+                  f"and its `source` is the honest one for this checkout: "
+                  f"{loose_prov[0].source!r} because the probe "
+                  f"{'HIT' if loose.available else 'found nothing'} "
+                  f"({len(loose.probed_paths)} path(s) tried)")
+
+        #  THE PROBE-HIT BRANCH, MADE DATA-INDEPENDENT. The check above is honest
+        #  in both configurations but only pins `source == "probe"` where a map
+        #  happens to be banked. A verified v2.1 root holding ONE synthetic map
+        #  for `probe_model` is prepended to the probe list by `hub_map_dirs`, so
+        #  the hit branch now fires from ANY cwd — the configuration this contract
+        #  actually cares about is exercised everywhere rather than wherever the
+        #  data tree is.
+        probe_root22 = root22 / "v21-probe-root"
+        (probe_root22 / V21_CORPUS_MANIFEST_RELPATH.parent).mkdir(
+            parents=True, exist_ok=True)
+        (probe_root22 / V21_CORPUS_MANIFEST_RELPATH).write_text(
+            '{"note": "selftest 22 probe-hit fixture"}')
+        synth_dir22 = probe_root22 / f"fits_v21_{probe_model}"
+        synth_dir22.mkdir(parents=True, exist_ok=True)
+        synth_map22 = fit_path_for(synth_dir22, HUB_MODEL, HUB_SITE_OF_RECORD,
+                                   probe_model, probe_site, "native",
+                                   FAMILY_OF_RECORD)
+        synth_map22.write_bytes(b"synthetic v2.1 hub map for the probe-hit branch")
+        with v21_root_scope(
+                probe_root22,
+                expected_corpus_sha=sha256_of(
+                    probe_root22 / V21_CORPUS_MANIFEST_RELPATH)):
+            with filed_paths_scope(pin_loose), provenance_scope() as hit_prov:
+                hit = resolve_hub_map(probe_model, probe_site, "native",
+                                      FAMILY_OF_RECORD)
+                check(hit.available and hit.resolved == str(synth_map22)
+                      and hit.corpus == "v21",
+                      f"the prepended v2.1 root answers first, so the probe HITS "
+                      f"regardless of cwd: {Path(hit.resolved or '').name}")
+                check(hit_prov[0].source == "probe"
+                      and any("UNPINNED" in n for n in hit_prov[0].notes)
+                      and hit_prov[0].probe_index == 0
+                      and hit_prov[0].pin_record == str(rec22),
+                      f"and THE PROBE-HIT RESOLVE IS RECORDED AS UNPINNED — the "
+                      f"contract this block exists for, now pinned with no "
+                      f"dependence on the ambient data tree (source "
+                      f"{hit_prov[0].source!r}, probe_index "
+                      f"{hit_prov[0].probe_index}, tree "
+                      f"{hit_prov[0].corpus!r})")
+                check(not hit_prov[0].cross_vintage_fallback,
+                      "a hit ON the v2.1 root is not a cross-vintage fallback — "
+                      "the go-forward vintage answered, which is the point of "
+                      "prepending it")
+        check(V21_ROOT is None and FILED_PATHS is None,
+              "and both scopes restore, so the probe-hit fixture leaks neither a "
+              "root nor a pin into the checks that follow")
 
         #  A record that files two different paths for one key cannot be pinned.
         conflict_block = {
