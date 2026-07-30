@@ -298,6 +298,7 @@ import hashlib
 import importlib.util
 import json
 import logging
+import os
 import sys
 from contextlib import contextmanager
 from datetime import date, datetime, timezone
@@ -3473,6 +3474,50 @@ class ResolutionSweep(BaseModel):
         return not self.unreachable
 
 
+def find_following_symlinks(root: Path, name: str) -> list[Path]:
+    """`find -L <root> -name <name>` — the symlink-FOLLOWING recursive search.
+
+    RAKE M38, at Python grain. `find . -type f` is blind to symlinked files and
+    never descends symlinked directories, and `Path.rglob` has EXACTLY the same
+    blindness: it does not recurse through a symlinked directory (and the 3.13
+    `recurse_symlinks=True` keyword is unavailable on the 3.11/3.12 floor this
+    package targets). Under the /models data-placement rule a relocated tree is
+    reached through a symlink, so a naive walk silently DROPS it — which for the
+    resolution sweep means a banked-but-unreachable chart reads as "nothing
+    banked", the exact reverse of what the sweep exists to detect.
+
+    Measured on a fixture mirroring the placement pattern: `rglob` found 1 of 2
+    matching files, missing the one under the symlinked directory;
+    `os.walk(followlinks=True)` found both (selftest 28).
+
+    LINK CYCLES are guarded, per M38(a): a followed symlink can point at an
+    ancestor, and `os.walk(followlinks=True)` will loop forever on one. Each
+    directory's (st_dev, st_ino) is recorded and a second visit prunes that
+    branch rather than raising — a cycle is a filesystem fact about someone
+    else's tree, not a reason for a reachability sweep to die.
+    """
+    hits: list[Path] = []
+    seen: set[tuple[int, int]] = set()
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=True):
+        here = Path(dirpath)
+        try:
+            stat = here.stat()
+            key = (stat.st_dev, stat.st_ino)
+        except OSError:                             # vanished or unreadable
+            dirnames[:] = []
+            continue
+        if key in seen:
+            #  Already walked this real directory by another path: prune, so a
+            #  symlink cycle terminates instead of spinning.
+            dirnames[:] = []
+            continue
+        seen.add(key)
+        for filename in filenames:
+            if filename == name:
+                hits.append(here / filename)
+    return sorted(hits)
+
+
 def _sweep_arm(model: str) -> str:
     """The arm a same-identity pair of `model` with itself would resolve to."""
     return applicable_arm(model, model)[0]
@@ -3498,7 +3543,12 @@ def registry_resolution_sweep(family: str = FAMILY_OF_RECORD,
         vectors = resolve_vector_bank(model, site)
         name = fit_path_for(Path(), HUB_MODEL, HUB_SITE_OF_RECORD, model, site,
                             arm, family).name
-        on_disk = sorted(str(p) for p in root.rglob(name)) if do_search else []
+        #  SYMLINK-FOLLOWING (rake M38): under the /models placement rule a
+        #  banked fits tree is reached through a symlink, and a walk that does not
+        #  follow one would report the chart as absent — turning an UNREACHABLE
+        #  finding into a silent "named gap", the exact reverse of the truth.
+        on_disk = ([str(p) for p in find_following_symlinks(root, name)]
+                   if do_search else [])
         row = ResolutionRow(model=model, site=site, arm=arm, family=family,
                             hub_map=hub_map, vector_bank=vectors,
                             on_disk_hub_maps=on_disk,
@@ -8179,6 +8229,43 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                                      f"{exc.code})")
         check(FILED_PATHS is None and V21_ROOT is None,
               "and no refused emission combination left a pin or a root set")
+
+    print("== selftest 28: RAKE M38 — the on-disk sweep FOLLOWS symlinks ==")
+    with _tempfile.TemporaryDirectory(prefix="m38_sweep_") as td28:
+        root28 = Path(td28) / "arm"
+        name28 = "fit_8bL16__someML37_native_proc_k128.npz"
+        (root28 / "fits_v21_local").mkdir(parents=True)
+        (root28 / "fits_v21_local" / name28).write_bytes(b"local")
+        #  The /models placement pattern (Luxia ruling 2026-07-29): the real tree
+        #  lives on the RAID and the arm reaches it through a symlinked directory.
+        store28 = Path(td28) / "models-store" / "fits_v21_relocated"
+        store28.mkdir(parents=True)
+        (store28 / name28).write_bytes(b"relocated")
+        (root28 / "fits_v21_relocated").symlink_to(store28,
+                                                   target_is_directory=True)
+        naive28 = sorted(p.name for p in root28.rglob(name28))
+        found28 = find_following_symlinks(root28, name28)
+        check(len(naive28) == 1 and len(found28) == 2,
+              f"`Path.rglob` finds {len(naive28)} of {len(found28)} banked "
+              f"chart(s) — it never descends a symlinked directory, exactly as "
+              f"`find` without -L does not (rake M38); the following walk finds "
+              f"both")
+        check(any("fits_v21_relocated" in str(p) for p in found28),
+              "and the one it misses is the RELOCATED tree — under the /models "
+              "placement rule that is the normal case, not the exotic one")
+        check(found28 == sorted(found28),
+              "results are sorted, so a sweep row's on-disk list is stable "
+              "across runs")
+        #  A CYCLE must terminate (M38(a)). A symlink pointing at an ancestor
+        #  makes `os.walk(followlinks=True)` loop forever unless visits are
+        #  tracked; this is the branch that proves the guard runs.
+        (root28 / "fits_v21_local" / "loop").symlink_to(
+            root28, target_is_directory=True)
+        looped28 = find_following_symlinks(root28, name28)
+        check(len(looped28) == 2,
+              f"a symlink cycle back to the root TERMINATES and does not "
+              f"double-count: {len(looped28)} hit(s) — the (st_dev, st_ino) "
+              f"visit guard, not a recursion limit")
 
     print(f"\nselftest: {len(failures)} failure(s)")
     return 1 if failures else 0
