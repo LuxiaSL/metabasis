@@ -31,6 +31,16 @@ single-card path byte for byte (same loader, same hooks, same reductions, same
 stamp keys). The realized sharding layout goes into the trunk stamp; cross-layout
 determinism is certified by the collect+spot-replay-in-one-job gate, never assumed.
 
+Node of origin (rake M41, 2026-07-29): the trunk stamp carries `hostname`, so every
+banked artifact can be attributed to the machine that produced it. Before this, no
+bank identified its node and "where does artifact X live" was answerable only by
+filesystem probe — which is how a 405B readout came to expect scan fits on one node
+that lived on the other. The field is UNCONDITIONAL (a hostname is an identity, not
+a deviation); it can never fail a run (rake M19 — it degrades to the named sentinel
+`HOSTNAME_UNRESOLVED`); and READERS tolerate its absence through `stamp_hostname`,
+which returns None for every pre-M41 stamp and keeps that case distinct from a
+collector that ran and could not name its host.
+
 Dtype regime (prereg ADDENDUM 2026-07-26-A, roster row 21): a checkpoint whose own
 config carries a block-wise FP8 `quantization_config` would load its NATIVE FP8
 forward — a different object from every other bank, and not differentiable. The
@@ -61,6 +71,7 @@ import argparse
 import hashlib
 import json
 import logging
+import os
 import sys
 import time
 from dataclasses import dataclass
@@ -294,6 +305,28 @@ def load_model_and_tok(model_path: str, device: str, dequantize_fp8: bool = Fals
 # failure on a checkpoint that carries no FP8 quantization_config: passing it there is a
 # staging error, and `assert_dequantized` surfaces it rather than banking a surprise.
 DEQUANTIZED_STAMP_KEY = "fp8_dequantize"
+
+# RAKE M41 (2026-07-29): the trunk stamp records the NODE OF ORIGIN. Before this,
+# no banked artifact identified the machine that produced it, so "where does
+# artifact X live" was answerable only by filesystem probe — and the 405B readout
+# block paid for it, expecting scan fits on one node that lived on the other, with
+# an enactor's plausible inference retracted after a cross-node probe found them.
+#
+# The field is UNCONDITIONAL. Every other stamp deviation (`sharding`,
+# `fp8_dequantize`, `truncation`) is conditional so that an absent key means "the
+# deviation was not taken" and historical stamps stay comparable key-for-key. A
+# hostname is not a deviation — it is the identity of the machine — and making it
+# conditional would leave exactly the gap M41 was filed for.
+#
+# BACKWARD COMPATIBILITY is the READER's contract, not the writer's: every stamp
+# banked before this date has no hostname, and `stamp_hostname` distinguishes
+# "predates the field" (None) from "the collector could not resolve one"
+# (HOSTNAME_UNRESOLVED). Named per rake M26 so a mechanical sweep can see both.
+HOSTNAME_STAMP_KEY = "hostname"
+#: Recorded when the collector ran but could not name its host. Deliberately a
+#: NAMED sentinel rather than None or "": degraded instrumentation and an absent
+#: field demand different responses, and a reader must be able to tell them apart.
+HOSTNAME_UNRESOLVED = "HOSTNAME_UNRESOLVED"
 
 
 class Fp8RegimeError(RuntimeError):
@@ -759,6 +792,38 @@ def load_model_and_tok_sharded(model_path: str, spec: ShardSpec, sites: tuple[in
     return model, AutoTokenizer.from_pretrained(model_path), device, sharding
 
 
+def collecting_hostname() -> str:
+    """The node this process is running on — `HOSTNAME_UNRESOLVED` if it cannot say.
+
+    RAKE M41: `trunk_stamp` recorded no hostname, so NO banked artifact identified
+    its node of origin and every "where does artifact X live" question had to be
+    settled by filesystem probe. The 405B readout block was exactly that: the scan
+    fits were expected on one node's arm and lived on the other, the stamps could
+    confirm the scan lane's 8-card provenance but NOT the node, and a plausible
+    "pull-then-clean" inference had to be retracted after a cross-node probe found
+    the tree.
+
+    Rake M19: instrumentation that only DESCRIBES a run must never be able to FAIL
+    it. A hostname is pure description — it cannot change one banked number — so
+    every way of failing to get one degrades to a NAMED sentinel rather than
+    raising. `HOSTNAME_UNRESOLVED` is deliberately not an empty string and not
+    `None`: a reader must be able to tell "this collector could not resolve a
+    hostname" from "this stamp predates the field" (rake M41's backward
+    compatibility, from the other side).
+
+    `socket.gethostname()` is the node's own name as the kernel knows it, which is
+    what the scheduler's job records and the /net paths agree with. FQDN
+    resolution is deliberately NOT attempted: it can block on DNS, and a stamp
+    writer that can hang is worse than one that is terse.
+    """
+    import socket
+    try:
+        name = socket.gethostname()
+    except OSError:                                # pragma: no cover — degraded
+        return HOSTNAME_UNRESOLVED
+    return name.strip() or HOSTNAME_UNRESOLVED
+
+
 def trunk_stamp(model_path: str, tok, device: str,
                 sharding: Optional[dict] = None,
                 fp8: Optional[dict] = None) -> dict:
@@ -778,10 +843,19 @@ def trunk_stamp(model_path: str, tok, device: str,
              "attn_implementation": "eager", "device": device,
              "cuda_device_name": dev_name,
              "cuda_visible_devices":
-                 __import__("os").environ.get("CUDA_VISIBLE_DEVICES", "(unset)")}
+                 os.environ.get("CUDA_VISIBLE_DEVICES", "(unset)"),
+             # RAKE M41: the node of origin. APPENDED at the end of the mapping so
+             # a stamp read as an ordered document still opens with the historical
+             # keys in their historical order; readers key by NAME, and a reader
+             # that must tolerate its absence does so with
+             # `stamp["trunk"].get("hostname")` — see `stamp_hostname`.
+             HOSTNAME_STAMP_KEY: collecting_hostname()}
     # Single-card stamps keep EXACTLY the historical key set (the banked smalls compare
-    # against them); the sharding record is appended only on the opt-in sharded path,
-    # and the dtype-regime witness only on the opt-in --dequantize-fp8 path. Same
+    # against them) EXCEPT for the M41 hostname, which is unconditional by design:
+    # the whole point is that EVERY artifact can be attributed to its node, so a
+    # conditional hostname would leave precisely the gap M41 was filed for. The
+    # sharding record is appended only on the opt-in sharded path, and the
+    # dtype-regime witness only on the opt-in --dequantize-fp8 path. Same
     # discipline as `truncation` in the collection stamp: an absent key means the
     # deviation was not taken, so historical stamps stay comparable key-for-key.
     if sharding is not None:
@@ -789,6 +863,35 @@ def trunk_stamp(model_path: str, tok, device: str,
     if fp8 is not None:
         stamp[DEQUANTIZED_STAMP_KEY] = fp8
     return stamp
+
+
+def stamp_hostname(stamp: dict) -> Optional[str]:
+    """The node a stamp was written on, or None for a PRE-M41 stamp.
+
+    THE BACKWARD-COMPATIBLE READER, and the only one any consumer should use.
+    Every artifact banked before 2026-07-29 has no hostname at all, and the three
+    states a reader must keep apart are:
+
+        None                    the stamp PREDATES the field — the node is
+                                unknown and must be established by probing BOTH
+                                nodes' stores (rake M41(a)), never inferred
+        HOSTNAME_UNRESOLVED     the collector RAN but could not name its host —
+                                degraded instrumentation, not a missing field
+        "<name>"                the node of origin, as the kernel knew it
+
+    Accepts either a trunk stamp or a whole collection stamp (which nests the
+    trunk under `trunk`), because both are handed around and a reader that only
+    understood one shape would silently return None for the other — which is the
+    "unknown node" answer, i.e. the wrong one for the commonest input.
+    """
+    if not isinstance(stamp, dict):
+        return None
+    trunk = stamp.get("trunk")
+    if isinstance(trunk, dict) and HOSTNAME_STAMP_KEY in trunk:
+        value = trunk.get(HOSTNAME_STAMP_KEY)
+    else:
+        value = stamp.get(HOSTNAME_STAMP_KEY)
+    return value if isinstance(value, str) and value else None
 
 
 # ---------------------------------------------------------------- collect mode
@@ -945,10 +1048,15 @@ def cp1_summary(arm_root: Path, models: list[str]) -> int:
                 continue
             st = json.loads(sp.read_text())
             norms[(model, arm)] = st["median_mean_state_norms"]
+            #  RAKE M41: the node of origin, read through the tolerant reader —
+            #  every bank predating 2026-07-29 has no hostname, and a QC table
+            #  that crashed on one would be unusable on the whole existing tree.
+            host = stamp_hostname(st)
             lines.append(
                 f"  {model}/{arm}: n={st['n_texts']} strata={st['counts_per_stratum']}"
                 f" norms={ {k: round(v, 2) for k, v in norms[(model, arm)].items()} }"
-                f" seq_len={st['seq_len']['mean']} wall={st['wall_seconds']}s")
+                f" seq_len={st['seq_len']['mean']} wall={st['wall_seconds']}s"
+                f" host={host or 'PRE-M41 (unstamped node; probe BOTH stores)'}")
         spr = states_dir / f"spot_replay_{model}.json"
         if spr.exists():
             r = json.loads(spr.read_text())
@@ -1005,6 +1113,79 @@ def selftest() -> int:
     check("fp8 stamp adds exactly that one key",
           set(with_fp8) - set(base) == {DEQUANTIZED_STAMP_KEY},
           str(sorted(set(with_fp8) - set(base))))
+
+    print("== selftest 3b: RAKE M41 — the trunk stamp names its NODE ==")
+    import socket as _socket
+
+    check("every trunk stamp carries a hostname, UNCONDITIONALLY",
+          HOSTNAME_STAMP_KEY in base and HOSTNAME_STAMP_KEY in with_fp8
+          and HOSTNAME_STAMP_KEY in trunk_stamp(
+              ".", _Tok(), "cpu", {"n_compute_devices": 2}),
+          f"{HOSTNAME_STAMP_KEY}={base[HOSTNAME_STAMP_KEY]!r} on the plain, "
+          f"sharded and fp8 paths alike — an identity, not a deviation, so it is "
+          f"never conditional")
+    check("the hostname is this machine's own, as the kernel knows it",
+          base[HOSTNAME_STAMP_KEY] == _socket.gethostname()
+          and base[HOSTNAME_STAMP_KEY] != HOSTNAME_UNRESOLVED,
+          "socket.gethostname() — no FQDN resolution, which could block on DNS; "
+          "a stamp writer that can hang is worse than one that is terse")
+    check("the hostname is APPENDED, so the historical keys keep their order",
+          list(base)[:-1] == [k for k in base if k != HOSTNAME_STAMP_KEY]
+          and list(base)[-1] == HOSTNAME_STAMP_KEY,
+          f"last key is {list(base)[-1]!r}")
+    check("and the historical key SET is otherwise untouched",
+          set(base) - {HOSTNAME_STAMP_KEY} == {
+              "model_path", "config_sha256", "chat_template_sha256",
+              "transformers", "torch", "dtype_forward", "dtype_banked",
+              "attn_implementation", "device", "cuda_device_name",
+              "cuda_visible_devices"},
+          str(sorted(set(base) - {HOSTNAME_STAMP_KEY})))
+
+    #  RAKE M19: instrumentation that only DESCRIBES a run must never FAIL it.
+    #  The failing branch is EXERCISED here — an unexercised degradation path is
+    #  not known to work (M19(c) in miniature).
+    real_gethostname = _socket.gethostname
+    try:
+        _socket.gethostname = lambda: (_ for _ in ()).throw(  # type: ignore[assignment]
+            OSError("selftest: name resolution unavailable"))
+        degraded = collecting_hostname()
+        check("a hostname lookup that RAISES degrades to the named sentinel",
+              degraded == HOSTNAME_UNRESOLVED,
+              f"{degraded!r} — the stamp still writes, because a description can "
+              f"never fail a collection (rake M19)")
+        _socket.gethostname = lambda: "   "     # type: ignore[assignment]
+        blank = collecting_hostname()
+        check("and a BLANK hostname degrades the same way, never to ''",
+              blank == HOSTNAME_UNRESOLVED,
+              f"{blank!r} — an empty string would read as a missing field")
+    finally:
+        _socket.gethostname = real_gethostname  # type: ignore[assignment]
+
+    #  THE READER'S CONTRACT: three states, kept apart. Every artifact banked
+    #  before 2026-07-29 has no hostname at all, and "unknown node" demands the
+    #  M41(a) response (probe BOTH stores) while "unresolved" does not.
+    check("stamp_hostname reads a trunk stamp directly",
+          stamp_hostname(base) == _socket.gethostname())
+    check("and a whole COLLECTION stamp, which nests the trunk",
+          stamp_hostname({"model": "3b", "trunk": base})
+          == _socket.gethostname(),
+          "both shapes are handed around; a reader that understood only one "
+          "would silently answer 'unknown node' for the commonest input")
+    pre_m41 = {k: v for k, v in base.items() if k != HOSTNAME_STAMP_KEY}
+    check("a PRE-M41 stamp reads as None — backward compatible, never a raise",
+          stamp_hostname(pre_m41) is None
+          and stamp_hostname({"model": "3b", "trunk": pre_m41}) is None,
+          "the whole existing bank tree has no hostname; a reader that crashed "
+          "on one would be unusable on every artifact the campaign holds")
+    check("an UNRESOLVED hostname is distinguishable from an absent one",
+          stamp_hostname({HOSTNAME_STAMP_KEY: HOSTNAME_UNRESOLVED})
+          == HOSTNAME_UNRESOLVED,
+          "degraded instrumentation and a missing field demand different "
+          "responses, so the sentinel is a value and not None")
+    check("and a malformed stamp reads as None rather than raising",
+          stamp_hostname({}) is None and stamp_hostname(None) is None  # type: ignore[arg-type]
+          and stamp_hostname({"trunk": "not a dict"}) is None,
+          "a stamp reader is instrumentation too (rake M19)")
 
     print("== selftest 4: the post-load witness passes on a clean bf16 model ==")
 
