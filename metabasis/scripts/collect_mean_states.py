@@ -49,6 +49,22 @@ addendum rules DeepSeek-V3 into the standard bf16 regime via dequantize-on-load;
 every float parameter is bfloat16) asserted and banked in the trunk stamp. Unset =
 the historical from_pretrained call, byte for byte.
 
+CPU self-test (no weights, no GPU, no data tree):
+
+  python -m metabasis.scripts.collect_mean_states --selftest
+
+RAKE M44 — THE CONFIGURATION MATRIX IS THE MERGE BAR. Two things the self-test
+reaches for are properties OF THE ENVIRONMENT rather than of the code under test,
+and each is present in some legitimate configuration and absent in another: the
+deep-learning stack (torch + transformers, which `trunk_stamp` and the post-load
+witness need, and which the desk's own repo `.venv` does not carry), and a WORKING
+fp8 dequantize (transformers 4.51.3's `FineGrainedFP8Config` accepts
+`dequantize=True` and silently drops it, so `fp8_dequantize_config()` refuses —
+correctly, at runtime). Neither absence is a test failure. Each is therefore
+branched on ONE availability probe and degrades to a NAMED skip counted in the
+tail, so coverage is REPORTED per configuration rather than inferred, and the
+self-test exits 0 in all four cells of {stack, no stack} x {fp8, no fp8}.
+
 Modes (one model per invocation; run once per model on the assigned card):
   --collect              full pass over the corpus, both arms (or --arms native)
   --spot-replay K        FRESH-PROCESS re-run of K stratified texts per arm, byte-
@@ -1081,65 +1097,152 @@ def selftest() -> int:
     Everything here is about one property: with `--dequantize-fp8` unset the loader
     call is byte-identical to the one that produced every banked node, and with it set
     the bf16 regime is either established or the run DIES. No GPU, no weights.
-    """
-    import torch
-    import torch.nn as nn
 
+    RAKE M44: the two environment axes (deep-learning stack, working fp8 dequantize)
+    are branched on the availability probes below and degrade to NAMED skips. A skip
+    is a THIRD state, distinct from pass and fail, and never a non-zero exit code —
+    nothing was asserted and found wanting. See the module docstring for the matrix.
+    """
     fails: list[str] = []
+    checks: list[str] = []
+    skips: list[str] = []
 
     def check(name: str, ok: bool, detail: str = "") -> None:
+        checks.append(name)
         print(f"  [{'ok ' if ok else 'FAIL'}] {name}{(' — ' + detail) if detail else ''}")
         if not ok:
             fails.append(name)
+
+    def skip(name: str, why: str) -> None:
+        """A NAMED skip (rake M44): a block that cannot run in THIS configuration.
+
+        Recorded as run-and-absent rather than crashed or failed, counted in the tail
+        so a sweep can report coverage per configuration, and NEVER a non-zero exit
+        code. The reason names the TRIGGERING CONDITION: a skip that does not say why
+        is the defect coming back in a quieter form.
+        """
+        skips.append(name)
+        checks.append(f"SKIPPED: {name}")
+        print(f"  [SKIP] {name} — {why}")
+
+    # ---- the availability probes (rake M44) ----------------------------------
+    #  AXIS 1 — the deep-learning stack. `trunk_stamp` reads torch.__version__ and
+    #  transformers.__version__, and the post-load witness builds real nn.Modules, so
+    #  blocks 3, 3b(stamp) and 4-6 need it. Blocks 1, 2, 3b(reader/M19) and 7 do NOT,
+    #  and must stay provable in a configuration with no deep-learning stack at all —
+    #  which the desk's own repo .venv (numpy/scipy/pydantic only) is.
+    torch: Any = None
+    nn: Any = None
+    try:
+        import torch as _torch_mod
+        import torch.nn as _nn_mod
+        import transformers as _transformers_mod
+        torch, nn = _torch_mod, _nn_mod
+        stack_ok, stack_why = True, ""
+        print(f"[config] deep-learning stack: torch {_torch_mod.__version__} + "
+              f"transformers {_transformers_mod.__version__}")
+    except ImportError as exc:
+        stack_ok = False
+        stack_why = (f"this interpreter has no deep-learning stack "
+                     f"({type(exc).__name__}: {exc})")
+        print(f"[config] deep-learning stack: ABSENT ({type(exc).__name__}: {exc})")
+
+    def _fp8_environment() -> str:
+        """Name the transformers build the fp8 verdict is ABOUT, and how it falls short.
+
+        NEVER raises: a probe that can itself raise is the same defect one level up.
+        """
+        try:
+            import transformers
+            return (f"transformers {transformers.__version__} lacks a working fp8 "
+                    f"dequantize")
+        except Exception as exc:                    # noqa: BLE001 — a probe never raises
+            return f"transformers is not importable here ({type(exc).__name__}: {exc})"
+
+    #  AXIS 2 — the fp8 dequantize regime. THE DEFECT THIS BLOCK CLOSES: transformers
+    #  4.51.3's FineGrainedFP8Config accepts `dequantize=True` and does not set it, so
+    #  `fp8_dequantize_config()` refuses (correctly — the difference is a native-FP8
+    #  forward vs a bf16 one). A build that cannot offer the regime is a legitimate
+    #  environment, not a test failure, and every non-FP8 node is one.
+    try:
+        fp8_dequantize_config()
+        fp8_ok, fp8_why = True, ""
+        print("[config] fp8 dequantize: available")
+    except Fp8RegimeError as exc:
+        fp8_ok = False
+        fp8_why = f"{_fp8_environment()} (Fp8RegimeError: {exc})"
+        print(f"[config] fp8 dequantize: ABSENT — {fp8_why}")
+    except Exception as exc:                        # noqa: BLE001 — a probe never raises
+        fp8_ok = False
+        fp8_why = (f"{_fp8_environment()}; FineGrainedFP8Config raised "
+                   f"{type(exc).__name__}: {exc}")
+        print(f"[config] fp8 dequantize: ABSENT — {fp8_why}")
 
     print("== selftest 1: the historical loader call is untouched when opted out ==")
     check("_fp8_kwargs(False) contributes NO kwargs", _fp8_kwargs(False) == {},
           repr(_fp8_kwargs(False)))
 
     print("== selftest 2: opting in produces FineGrainedFP8Config(dequantize=True) ==")
-    kw = _fp8_kwargs(True)
-    check("exactly one kwarg, named quantization_config", list(kw) == ["quantization_config"],
-          str(list(kw)))
-    check("dequantize is True", getattr(kw.get("quantization_config"), "dequantize", None) is True)
+    if fp8_ok:
+        kw = _fp8_kwargs(True)
+        check("exactly one kwarg, named quantization_config", list(kw) == ["quantization_config"],
+              str(list(kw)))
+        check("dequantize is True",
+              getattr(kw.get("quantization_config"), "dequantize", None) is True)
+    else:
+        skip("fp8-dequantize: --dequantize-fp8 adds exactly one kwarg, "
+             "FineGrainedFP8Config(dequantize=True)", fp8_why)
 
     print("== selftest 3: stamp key sets — absent deviation means absent key ==")
 
     class _Tok:
         chat_template = "{{ 'x' }}"
 
-    base = trunk_stamp(".", _Tok(), "cpu")
-    with_fp8 = trunk_stamp(".", _Tok(), "cpu", None, {"requested": "probe"})
-    check("plain stamp carries no fp8 key", DEQUANTIZED_STAMP_KEY not in base)
-    check("fp8 stamp adds exactly that one key",
-          set(with_fp8) - set(base) == {DEQUANTIZED_STAMP_KEY},
-          str(sorted(set(with_fp8) - set(base))))
+    base: dict = {}
+    with_fp8: dict = {}
+    if stack_ok:
+        base = trunk_stamp(".", _Tok(), "cpu")
+        with_fp8 = trunk_stamp(".", _Tok(), "cpu", None, {"requested": "probe"})
+        check("plain stamp carries no fp8 key", DEQUANTIZED_STAMP_KEY not in base)
+        check("fp8 stamp adds exactly that one key",
+              set(with_fp8) - set(base) == {DEQUANTIZED_STAMP_KEY},
+              str(sorted(set(with_fp8) - set(base))))
+    else:
+        skip("trunk-stamp key sets: an absent deviation means an absent key",
+             stack_why + " — trunk_stamp reads torch.__version__ and "
+                         "transformers.__version__")
 
     print("== selftest 3b: RAKE M41 — the trunk stamp names its NODE ==")
     import socket as _socket
 
-    check("every trunk stamp carries a hostname, UNCONDITIONALLY",
-          HOSTNAME_STAMP_KEY in base and HOSTNAME_STAMP_KEY in with_fp8
-          and HOSTNAME_STAMP_KEY in trunk_stamp(
-              ".", _Tok(), "cpu", {"n_compute_devices": 2}),
-          f"{HOSTNAME_STAMP_KEY}={base[HOSTNAME_STAMP_KEY]!r} on the plain, "
-          f"sharded and fp8 paths alike — an identity, not a deviation, so it is "
-          f"never conditional")
-    check("the hostname is this machine's own, as the kernel knows it",
-          base[HOSTNAME_STAMP_KEY] == _socket.gethostname()
-          and base[HOSTNAME_STAMP_KEY] != HOSTNAME_UNRESOLVED,
-          "socket.gethostname() — no FQDN resolution, which could block on DNS; "
-          "a stamp writer that can hang is worse than one that is terse")
-    check("the hostname is APPENDED, so the historical keys keep their order",
-          list(base)[:-1] == [k for k in base if k != HOSTNAME_STAMP_KEY]
-          and list(base)[-1] == HOSTNAME_STAMP_KEY,
-          f"last key is {list(base)[-1]!r}")
-    check("and the historical key SET is otherwise untouched",
-          set(base) - {HOSTNAME_STAMP_KEY} == {
-              "model_path", "config_sha256", "chat_template_sha256",
-              "transformers", "torch", "dtype_forward", "dtype_banked",
-              "attn_implementation", "device", "cuda_device_name",
-              "cuda_visible_devices"},
-          str(sorted(set(base) - {HOSTNAME_STAMP_KEY})))
+    if stack_ok:
+        check("every trunk stamp carries a hostname, UNCONDITIONALLY",
+              HOSTNAME_STAMP_KEY in base and HOSTNAME_STAMP_KEY in with_fp8
+              and HOSTNAME_STAMP_KEY in trunk_stamp(
+                  ".", _Tok(), "cpu", {"n_compute_devices": 2}),
+              f"{HOSTNAME_STAMP_KEY}={base[HOSTNAME_STAMP_KEY]!r} on the plain, "
+              f"sharded and fp8 paths alike — an identity, not a deviation, so it is "
+              f"never conditional")
+        check("the hostname is this machine's own, as the kernel knows it",
+              base[HOSTNAME_STAMP_KEY] == _socket.gethostname()
+              and base[HOSTNAME_STAMP_KEY] != HOSTNAME_UNRESOLVED,
+              "socket.gethostname() — no FQDN resolution, which could block on DNS; "
+              "a stamp writer that can hang is worse than one that is terse")
+        check("the hostname is APPENDED, so the historical keys keep their order",
+              list(base)[:-1] == [k for k in base if k != HOSTNAME_STAMP_KEY]
+              and list(base)[-1] == HOSTNAME_STAMP_KEY,
+              f"last key is {list(base)[-1]!r}")
+        check("and the historical key SET is otherwise untouched",
+              set(base) - {HOSTNAME_STAMP_KEY} == {
+                  "model_path", "config_sha256", "chat_template_sha256",
+                  "transformers", "torch", "dtype_forward", "dtype_banked",
+                  "attn_implementation", "device", "cuda_device_name",
+                  "cuda_visible_devices"},
+              str(sorted(set(base) - {HOSTNAME_STAMP_KEY})))
+    else:
+        skip("the WRITER's half of M41: a real trunk stamp names its node "
+             "unconditionally, appends the key last, and leaves the historical key "
+             "set otherwise untouched", stack_why)
 
     #  RAKE M19: instrumentation that only DESCRIBES a run must never FAIL it.
     #  The failing branch is EXERCISED here — an unexercised degradation path is
@@ -1164,19 +1267,23 @@ def selftest() -> int:
     #  THE READER'S CONTRACT: three states, kept apart. Every artifact banked
     #  before 2026-07-29 has no hostname at all, and "unknown node" demands the
     #  M41(a) response (probe BOTH stores) while "unresolved" does not.
-    check("stamp_hostname reads a trunk stamp directly",
-          stamp_hostname(base) == _socket.gethostname())
-    check("and a whole COLLECTION stamp, which nests the trunk",
-          stamp_hostname({"model": "3b", "trunk": base})
-          == _socket.gethostname(),
-          "both shapes are handed around; a reader that understood only one "
-          "would silently answer 'unknown node' for the commonest input")
-    pre_m41 = {k: v for k, v in base.items() if k != HOSTNAME_STAMP_KEY}
-    check("a PRE-M41 stamp reads as None — backward compatible, never a raise",
-          stamp_hostname(pre_m41) is None
-          and stamp_hostname({"model": "3b", "trunk": pre_m41}) is None,
-          "the whole existing bank tree has no hostname; a reader that crashed "
-          "on one would be unusable on every artifact the campaign holds")
+    if stack_ok:
+        check("stamp_hostname reads a trunk stamp directly",
+              stamp_hostname(base) == _socket.gethostname())
+        check("and a whole COLLECTION stamp, which nests the trunk",
+              stamp_hostname({"model": "3b", "trunk": base})
+              == _socket.gethostname(),
+              "both shapes are handed around; a reader that understood only one "
+              "would silently answer 'unknown node' for the commonest input")
+        pre_m41 = {k: v for k, v in base.items() if k != HOSTNAME_STAMP_KEY}
+        check("a PRE-M41 stamp reads as None — backward compatible, never a raise",
+              stamp_hostname(pre_m41) is None
+              and stamp_hostname({"model": "3b", "trunk": pre_m41}) is None,
+              "the whole existing bank tree has no hostname; a reader that crashed "
+              "on one would be unusable on every artifact the campaign holds")
+    else:
+        skip("stamp_hostname against a REAL trunk stamp: the direct shape, the "
+             "nested collection shape, and the pre-M41 shape", stack_why)
     check("an UNRESOLVED hostname is distinguishable from an absent one",
           stamp_hostname({HOSTNAME_STAMP_KEY: HOSTNAME_UNRESOLVED})
           == HOSTNAME_UNRESOLVED,
@@ -1188,47 +1295,55 @@ def selftest() -> int:
           "a stamp reader is instrumentation too (rake M19)")
 
     print("== selftest 4: the post-load witness passes on a clean bf16 model ==")
+    if stack_ok:
+        class _Clean(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.lin = nn.Linear(4, 4).to(torch.bfloat16)
 
-    class _Clean(nn.Module):
-        def __init__(self) -> None:
-            super().__init__()
-            self.lin = nn.Linear(4, 4).to(torch.bfloat16)
-
-    rec = assert_dequantized(_Clean(), "<stub>")
-    check("witness records zero surviving FP8 modules", rec["fp8_modules_remaining"] == 0)
-    check("dtype census is bf16-only",
-          set(rec["param_dtype_census"]) == {"torch.bfloat16"},
-          str(rec["param_dtype_census"]))
+        rec = assert_dequantized(_Clean(), "<stub>")
+        check("witness records zero surviving FP8 modules", rec["fp8_modules_remaining"] == 0)
+        check("dtype census is bf16-only",
+              set(rec["param_dtype_census"]) == {"torch.bfloat16"},
+              str(rec["param_dtype_census"]))
+    else:
+        skip("the post-load witness PASSES on a clean bf16 model (zero surviving FP8 "
+             "modules, a bf16-only dtype census)",
+             stack_why + " — the witness walks real nn.Module parameters")
 
     print("== selftest 5: a surviving FP8 module is FATAL, not a warning ==")
+    if stack_ok:
+        class FP8Linear(nn.Module):        # name is the witness, per FP8_MODULE_TYPE_NAMES
+            pass
 
-    class FP8Linear(nn.Module):            # name is the witness, per FP8_MODULE_TYPE_NAMES
-        pass
+        class _Native(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.q = FP8Linear()
 
-    class _Native(nn.Module):
-        def __init__(self) -> None:
-            super().__init__()
-            self.q = FP8Linear()
-
-    try:
-        assert_dequantized(_Native(), "<stub>")
-        check("raises Fp8RegimeError on a surviving FP8Linear", False, "no raise")
-    except Fp8RegimeError as exc:
-        check("raises Fp8RegimeError on a surviving FP8Linear", True, str(exc)[:60])
+        try:
+            assert_dequantized(_Native(), "<stub>")
+            check("raises Fp8RegimeError on a surviving FP8Linear", False, "no raise")
+        except Fp8RegimeError as exc:
+            check("raises Fp8RegimeError on a surviving FP8Linear", True, str(exc)[:60])
+    else:
+        skip("a surviving FP8 module is FATAL, not a warning", stack_why)
 
     print("== selftest 6: a non-bf16 float parameter is FATAL ==")
+    if stack_ok:
+        class _Mixed(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.a = nn.Linear(4, 4).to(torch.bfloat16)
+                self.b = nn.Linear(4, 4).to(torch.float16)
 
-    class _Mixed(nn.Module):
-        def __init__(self) -> None:
-            super().__init__()
-            self.a = nn.Linear(4, 4).to(torch.bfloat16)
-            self.b = nn.Linear(4, 4).to(torch.float16)
-
-    try:
-        assert_dequantized(_Mixed(), "<stub>")
-        check("raises Fp8RegimeError on an fp16 parameter", False, "no raise")
-    except Fp8RegimeError as exc:
-        check("raises Fp8RegimeError on an fp16 parameter", True, str(exc)[:60])
+        try:
+            assert_dequantized(_Mixed(), "<stub>")
+            check("raises Fp8RegimeError on an fp16 parameter", False, "no raise")
+        except Fp8RegimeError as exc:
+            check("raises Fp8RegimeError on an fp16 parameter", True, str(exc)[:60])
+    else:
+        skip("a non-bf16 float parameter is FATAL", stack_why)
 
     print("== selftest 7: CLI wiring — the flag reaches BOTH modes, and only if passed ==")
     real_collect, real_spot, real_argv = collect, spot_replay, sys.argv
@@ -1269,6 +1384,11 @@ def selftest() -> int:
     print(f"\nselftest: {len(fails)} failures")
     for f in fails:
         print(f"  FAILED: {f}")
+    # RAKE M44: coverage is part of the verdict, per configuration. A bare pass count
+    # cannot be read without knowing which cell of the matrix produced it.
+    print(f"selftest checks run: {len(checks)} ({len(skips)} named skip(s))")
+    for name in skips:
+        print(f"  SKIPPED {name}")
     return 1 if fails else 0
 
 
