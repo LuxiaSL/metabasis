@@ -220,6 +220,45 @@ the adopted gauge's. Supply it with `--alpha-companion` against the named schema
 `constant-alpha-companion/v1`; supply nothing and the scored record NAMES the
 companion as OWED, with D2/D3's frozen text attached.
 
+────────────────────────────────────────────────────────────────────────────────
+THE SYMMETRIC STAR COLUMN, AND EMITTING THE FILING RECORD (RAKE M33(b))
+────────────────────────────────────────────────────────────────────────────────
+Until now this module produced two of the three racing columns and CONSUMED the
+record they were filed in; the record itself, and the symmetric star column
+inside it, were assembled by per-batch staging glue. Batches 5, 6 and 7 each
+named the gap in their own `emission.named_gap` block ("the tool has no
+--emit-record CLI; the symmetric star is the one column it does not produce"),
+and the batch-7 report booked the generalization: "a pure header variant three
+generations running — a future logic change is the signal to generalize, not
+fork a fourth copy."
+
+Both halves now live here:
+
+  * `--star-constants` reads a `symmetric-constants-extension/v1` artifact
+    (`load_symmetric_constants`) and `run_star` emits
+    `star-prediction/<src>→<tgt>/<arm>-k128` = c_A·c_B, filed at 4 dp with the
+    frozen ±.05 band OF THE FILED VALUE. prereg §3's TERMS are untouched
+    (Addendum H item 2) — only the arithmetic's home moved.
+  * `--emit-record` builds a whole racing record: all three columns produced
+    in-process, the desk's selection rule applied AND PROVED (the forced set is
+    asserted to BE the §3 audit enumeration by identity and orientation; where
+    the ruling forces nothing, the population is proved to contain no forcible
+    pair), every block pre-flighted through the CONSUMER's own
+    `_check_filed_band` / `_check_carve_out`, and the written record re-read
+    through `parse_filing_record` before the call returns.
+
+The DESK'S PROSE does not live here and must not: a ruling, an authority
+citation and a disclosure are Luxia's and the desk's words, and a tool that
+generated them would be inventing the authority for its own output. They arrive
+as a `--narrative` sidecar, merged at NAMED keys only, with an unrecognized key a
+HALT rather than a dropped paragraph. Emit with no narrative and the record NAMES
+its missing prose.
+
+`--verify-against <banked record>` is the reproduction proof for the move: two
+records compared on NUMBERS AND SLOT IDENTITIES ONLY, timestamps and prose
+excluded by construction, tolerance exactly 0.0. The desk's words are the desk's;
+every number in a filed record must come back out of the tool unchanged.
+
 Run (repo root, PYTHONPATH=.):
   python -m metabasis.scripts.read_composed_predictions --selftest
   python -m metabasis.scripts.read_composed_predictions --gate
@@ -234,6 +273,19 @@ Run (repo root, PYTHONPATH=.):
       --filed-paths outputs/collection/predictions/<record>.json \
       --filed-paths-allow-unpinned \
       --provenance-out /tmp/claude-output/resolution_provenance.json
+  python -m metabasis.scripts.read_composed_predictions --candidates \
+      --star-constants <symmetric constants>.json \
+      --star-out /tmp/claude-output/star_slots.json
+  python -m metabasis.scripts.read_composed_predictions --emit-record \
+      --v21-root <v2.1 re-bank root> --pairs-json <candidate enumeration>.json \
+      --star-constants <symmetric constants>.json \
+      --directional-constants <directional constants>.json \
+      --slate <ranked slate>.json --gate-column <this batch's E4.1 column>.json \
+      --batch batch-8 --slate-size 14 \
+      [--forced-hub <audit hub> --audit-set <m1,m2,…>] \
+      [--narrative <desk prose>.json] \
+      --out /tmp/claude-output/predictions-batch8.json \
+      [--verify-against outputs/collection/predictions/<banked>.json]
   python -m metabasis.scripts.read_composed_predictions \
       --score-record outputs/collection/predictions/<record>.json \
       --observed /tmp/claude-output/observed-<batch>.json \
@@ -254,7 +306,7 @@ from types import ModuleType
 from typing import Any, Iterator, Literal, Optional, Sequence
 
 import numpy as np
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from metabasis.roster import ROSTER
 from metabasis.scripts.fit_transport_maps import (
@@ -2783,6 +2835,588 @@ def run_directional(constants: DirectionalConstants,
     return readout
 
 
+# ------------------------------------ the SYMMETRIC star column (prereg §3)
+#  THE NAMED GAP, CLOSED. Every racing filing record since batch 4 carried a
+#  `star_prediction` block that this module did not produce: the per-batch
+#  staging glue read the desk's constants artifact by hand and assembled c_A·c_B
+#  itself, and each emitter's own `emission.named_gap` said so — "the symmetric
+#  star is the one column it does not produce (there is no star producer in
+#  it)". Three generations of that glue agreed today; nothing made them agree
+#  tomorrow, and rake M33(b) wants filing records emitted THROUGH the tool that
+#  consumes them, which means every column comes from the tool.
+#
+#  Addendum H item 2 leaves the symmetric column's TERMS untouched, and so does
+#  this: c_A·c_B, the 4-dp filing convention (`FILED_DECIMALS`, of record since
+#  the canary batch), the frozen ±.05 band OF THE FILED VALUE, and
+#  `NEAR_ZERO_CARVE_OUT` evaluated on the filed value — which is exactly what
+#  the consumer's own `_check_filed_band` / `_check_carve_out` re-derive. What
+#  moves is only where the arithmetic lives.
+#
+#  THE SCHEMA OF RECORD — `symmetric-constants-extension/v1`
+#  ─────────────────────────────────────────────────────────────────────────────
+#  Produced by the DESK's constants-extension lane (the hub-derived c-column on
+#  corpus-v2.1); consumed here, never derived here — the same division of labour
+#  `load_directional_constants` keeps with its own lane. The shape is the one the
+#  batch-5/6/7 artifacts already carry, so the contract DESCRIBES the artifacts
+#  of record rather than asking them to move:
+#
+#    {
+#      "schema": "symmetric-constants-extension/v1",   OPTIONAL, exact if present
+#      "corpus": {"vintage": "v2.1",                   REQUIRED (or top-level
+#                 "manifest_sha256": "<64 hex>"},       `corpus_manifest_sha256`)
+#      "hub":    {"model": "8b", "site": 16},          OPTIONAL, CHECKED
+#      "family_of_record": "proc_k128",                OPTIONAL
+#      "columns": {                                    REQUIRED, non-empty
+#        "<arm>::<family>": {
+#           "DERIVED": true,                           REQUIRED, boolean
+#           "anchor_c_8B": 0.8082,                     OPTIONAL, recorded
+#           "symmetric": {                             REQUIRED when DERIVED
+#             "derivation": "<free text>",             OPTIONAL, recorded
+#             "coefficients": {"<model>": 0.526, …}}   REQUIRED, non-empty
+#        },
+#        "<arm>::<family>": {"DERIVED": false, "why": "<free text>"}
+#      }
+#    }
+#
+#  `DERIVED: false` is DATA, not a failure: the batch-7 artifact carries
+#  `raw::proc_k32` that way because the banked anchor system did not solve for
+#  it. Such a column contributes no constant and every slot needing it is
+#  N/A-AT-FILING — the same first-class result the composed and directional
+#  columns report, never a silent zero.
+#
+#  WHY THE HUB IS AN ALLOWED COEFFICIENT KEY (rake M34). The coefficient tables
+#  of record carry `8b`: the gauge anchor c_8B is what every other constant is
+#  divided by, so it is IN the column by construction while having no candidate
+#  slot. `SITE_OF_RECORD` deliberately excludes the hub, so a model check that
+#  consulted only it would HALT on a legitimate artifact — M34's "structurally
+#  blind" failure, at registry grain. Both registries are consulted and which one
+#  answered is recorded on the row.
+
+#: prereg §3 / ADDENDUM 2026-07-28-E §E2 — the desk's symmetric hub-derived
+#: c-column artifact, by NAME and VERSION. Named WITH its version per rake M26 so
+#: a schema bump is visible to a mechanical sweep. The `schema` key itself is
+#: OPTIONAL because the three artifacts already filed against (batches 5/6/7)
+#: predate the name; present, it must match exactly, and a DIFFERENT name HALTs.
+SCHEMA_SYMMETRIC_CONSTANTS_V1 = "symmetric-constants-extension/v1"
+#: A portability coefficient is a cosine-scale quantity, so |c| > 1 is FLAGGED on
+#: the slot rather than refused — the same treatment, and the same threshold, the
+#: directional column gives c^out / c^in. One constant, one rule.
+SYMMETRIC_CONSTANT_FLAG_ABS = DIRECTIONAL_CONSTANT_FLAG_ABS
+
+
+class SymmetricConstantsError(ComposedPathError):
+    """A constants artifact is not `symmetric-constants-extension/v1`.
+
+    ALWAYS LOUD, and always by naming the contract — the same discipline
+    `DirectionalConstantsError` keeps. The failure a reader must never see is a
+    filed star â that silently rode a mis-keyed, mis-armed or half-parsed
+    coefficient table, which is precisely what three generations of hand-rolled
+    per-batch glue could have produced without anything erroring.
+    """
+
+
+class SymmetricConstantRow(BaseModel):
+    """One model's symmetric portability coefficient in ONE arm × family."""
+    model: str
+    arm: str
+    family: str
+    c: float = Field(description="the model's portability coefficient c_M; the "
+                                 "star is â(A→B) = c_A · c_B, role-symmetric")
+    site: Optional[int] = Field(
+        default=None, description="the model's site of record — the HUB's site "
+                                  "for the hub row (rake M34: the hub is in the "
+                                  "column and has no candidate slot)")
+    registry: Literal["candidate", "hub"] = Field(
+        default="candidate",
+        description="which registry answered for this model — SITE_OF_RECORD "
+                    "(candidate) or the hub column (hub). Recorded because the "
+                    "two are deliberately split and a sweep must union them")
+
+    model_config = {"protected_namespaces": ()}
+
+    @property
+    def key(self) -> str:
+        return f"{self.model}/{self.arm}-{self.family}"
+
+
+class SymmetricConstantsColumn(BaseModel):
+    """One `<arm>::<family>` column of the constants artifact, derived or not."""
+    label: str
+    arm: str
+    family: str
+    derived: bool
+    why_not_derived: str = ""
+    derivation: str = ""
+    anchor_c_hub: Optional[float] = None
+    n_coefficients: int = 0
+
+
+class SymmetricConstants(BaseModel):
+    """A parsed, validated symmetric-constants artifact.
+
+    Holds the artifact's own provenance beside the rows — which file, which sha,
+    which corpus vintage, which derivation — so a filed star slot can be traced
+    to the table it rode without consulting a ledger row. The same discipline
+    `DirectionalConstants` and `HubMapRef` apply.
+    """
+    schema_name: str = SCHEMA_SYMMETRIC_CONSTANTS_V1
+    path: str
+    sha256: str
+    generated: Optional[str] = None
+    corpus_manifest_sha256: str
+    corpus_vintage: Optional[str] = None
+    derivation: str = Field(
+        default="", description="the derivation prose of the FAMILY-OF-RECORD "
+                                "column, quoted onto every slot it backs")
+    hub: str = HUB_MODEL
+    hub_site: int = HUB_SITE_OF_RECORD
+    columns: list[SymmetricConstantsColumn] = []
+    rows: list[SymmetricConstantRow] = []
+    notes: list[str] = []
+
+    def row(self, model: str, arm: str, family: str
+            ) -> Optional[SymmetricConstantRow]:
+        """The coefficient for this model IN THIS ARM, or None. NEVER cross-arm.
+
+        prereg §3's arm rule is no weaker for a scalar than for a map: a constant
+        fit in the raw system is not the native system's constant, and a per-role
+        N/A is never proxied from the other arm (the desk's standing order,
+        restated in every batch emitter).
+        """
+        for candidate in self.rows:
+            if (candidate.model == model and candidate.arm == arm
+                    and candidate.family == family):
+                return candidate
+        return None
+
+    def column(self, arm: str, family: str
+               ) -> Optional[SymmetricConstantsColumn]:
+        for col in self.columns:
+            if col.arm == arm and col.family == family:
+                return col
+        return None
+
+    @property
+    def arms(self) -> list[str]:
+        return sorted({row.arm for row in self.rows})
+
+
+def _symmetric_schema_halt(path: Path, problem: str) -> SymmetricConstantsError:
+    """One place that builds the contract-quoting halt, so every failure path
+    says exactly the same thing about what was expected."""
+    return SymmetricConstantsError(
+        f"{path}: {problem}\n"
+        f"EXPECTED `{SCHEMA_SYMMETRIC_CONSTANTS_V1}`:\n"
+        f"  top level  : object with REQUIRED non-empty `columns`; REQUIRED "
+        f"corpus manifest sha as `corpus.manifest_sha256` OR top-level "
+        f"`corpus_manifest_sha256` (64 lowercase hex); OPTIONAL `schema` (must "
+        f"equal {SCHEMA_SYMMETRIC_CONSTANTS_V1!r} if present), `generated`, "
+        f"`corpus.vintage`, `hub` (must be {{'model': {HUB_MODEL!r}, 'site': "
+        f"{HUB_SITE_OF_RECORD}}} if present), `family_of_record`.\n"
+        f"  `columns`  : object keyed '<arm>::<family>' with arm in {ARMS} and "
+        f"family in {FAMILIES}. Each value carries a REQUIRED boolean `DERIVED`; "
+        f"a DERIVED column REQUIRES `symmetric.coefficients` as a non-empty "
+        f"model -> number map and may carry `symmetric.derivation` / "
+        f"`anchor_c_8B`; a non-derived column is DATA (its slots file "
+        f"N/A-AT-FILING) and may carry `why`.\n"
+        f"  each model : a key of SITE_OF_RECORD, or the hub {HUB_MODEL!r} "
+        f"(rake M34 — the gauge anchor is in the column by construction and has "
+        f"no candidate slot, so the two registries are UNIONED here). Every "
+        f"coefficient must be finite; (model, arm, family) must be UNIQUE.\n"
+        f"This module CONSUMES the artifact and never derives it: if the desk's "
+        f"constants lane emits something different from the above, the contract "
+        f"is what must be reconciled — not the parse.")
+
+
+def _symmetric_model_site(model: str) -> tuple[int, Literal["candidate", "hub"]]:
+    """The model's site, unioning the candidate registry with the hub (rake M34).
+
+    `SITE_OF_RECORD` deliberately omits the hub — the hub is the mediator, never
+    a candidate side — while every coefficient table of record contains `8b`,
+    because c_8B is the gauge every other constant is divided by. A check that
+    consulted only one registry would HALT on a legitimate artifact, so both are
+    consulted and which one answered is recorded on the row.
+    """
+    if model == HUB_MODEL:
+        return HUB_SITE_OF_RECORD, "hub"
+    return site_of_record(model), "candidate"
+
+
+def load_symmetric_constants(path: Path) -> SymmetricConstants:
+    """Read and VALIDATE a symmetric-constants artifact.
+
+    Every failure raises `SymmetricConstantsError` quoting the whole expected
+    contract, so a mismatch with the desk's constants lane is legible from the
+    error alone. Nothing is defaulted, inferred, or carried from another
+    artifact — a coefficient that is not in the file does not exist.
+    """
+    if not path.is_file():
+        raise _symmetric_schema_halt(
+            path, "symmetric-constants artifact absent. prereg §3's star column "
+                  "cannot file without one, and no coefficient is ever "
+                  "defaulted, inferred or carried from another readout")
+    try:
+        doc = json.loads(path.read_text())
+    except (OSError, ValueError) as exc:
+        raise _symmetric_schema_halt(path, f"unreadable as JSON: {exc}") from exc
+    if not isinstance(doc, dict):
+        raise _symmetric_schema_halt(
+            path, f"top level is {type(doc).__name__}, not an object")
+
+    declared = doc.get("schema")
+    if declared is not None and declared != SCHEMA_SYMMETRIC_CONSTANTS_V1:
+        raise _symmetric_schema_halt(
+            path, f"declares schema {declared!r}, not "
+                  f"{SCHEMA_SYMMETRIC_CONSTANTS_V1!r}. A readout of another name "
+                  f"or version is NEVER parsed on the assumption that its fields "
+                  f"still mean what they meant here")
+
+    corpus_block = doc.get("corpus")
+    corpus_sha = (corpus_block.get("manifest_sha256")
+                  if isinstance(corpus_block, dict) else None)
+    if corpus_sha is None:
+        corpus_sha = doc.get("corpus_manifest_sha256")
+    if not _is_sha256_hex(corpus_sha):
+        raise _symmetric_schema_halt(
+            path, f"corpus manifest sha is {corpus_sha!r}, not 64 lowercase hex. "
+                  f"Addendum G §G2(a) rides a corpus manifest sha on every "
+                  f"quoted â; an unverifiable tag is worse than a missing one")
+    hub_block = doc.get("hub")
+    if isinstance(hub_block, dict):
+        if hub_block.get("model", HUB_MODEL) != HUB_MODEL:
+            raise _symmetric_schema_halt(
+                path, f"`hub.model` is {hub_block.get('model')!r}, but this "
+                      f"module's hub of record is {HUB_MODEL!r}")
+        if int(hub_block.get("site", HUB_SITE_OF_RECORD)) != HUB_SITE_OF_RECORD:
+            raise _symmetric_schema_halt(
+                path, f"`hub.site` is {hub_block.get('site')!r}, but the hub "
+                      f"column of record is L{HUB_SITE_OF_RECORD} (rebuilt-L16)")
+
+    raw_columns = doc.get("columns")
+    if not isinstance(raw_columns, dict) or not raw_columns:
+        raise _symmetric_schema_halt(
+            path, f"`columns` is "
+                  f"{type(raw_columns).__name__ if raw_columns is not None else 'absent'}"
+                  f", not a non-empty '<arm>::<family>' -> column object")
+
+    columns: list[SymmetricConstantsColumn] = []
+    rows: list[SymmetricConstantRow] = []
+    seen: dict[str, str] = {}
+    notes: list[str] = []
+    for label, body in raw_columns.items():
+        if not isinstance(body, dict):
+            raise _symmetric_schema_halt(
+                path, f"`columns[{label!r}]` is {type(body).__name__}, not an "
+                      f"object")
+        parts = str(label).split("::")
+        if len(parts) != 2 or parts[0] not in ARMS or parts[1] not in FAMILIES:
+            raise _symmetric_schema_halt(
+                path, f"`columns` key {label!r} is not '<arm>::<family>' with arm "
+                      f"in {ARMS} and family in {FAMILIES}")
+        arm, family = parts
+        derived = body.get("DERIVED")
+        if not isinstance(derived, bool):
+            raise _symmetric_schema_halt(
+                path, f"`columns[{label!r}].DERIVED` is {derived!r}, not a "
+                      f"boolean. Whether a column solved is the one fact that "
+                      f"decides between a filable slot and N/A-AT-FILING, and it "
+                      f"is never inferred from the presence of coefficients")
+        anchor = body.get("anchor_c_8B")
+        column = SymmetricConstantsColumn(
+            label=str(label), arm=arm, family=family, derived=derived,
+            why_not_derived=("" if derived else str(body.get("why", ""))),
+            anchor_c_hub=(None if anchor is None else float(anchor)))
+        if not derived:
+            columns.append(column)
+            notes.append(
+                f"COLUMN NOT DERIVED: {label} — "
+                f"{column.why_not_derived or 'no reason given'}. Every slot "
+                f"needing it files N/A-AT-FILING; it is never proxied from "
+                f"another column and never read as zero")
+            continue
+        symmetric = body.get("symmetric")
+        if not isinstance(symmetric, dict):
+            raise _symmetric_schema_halt(
+                path, f"`columns[{label!r}]` is DERIVED but carries no "
+                      f"`symmetric` object (got "
+                      f"{type(symmetric).__name__ if symmetric is not None else 'absent'})")
+        coefficients = symmetric.get("coefficients")
+        if not isinstance(coefficients, dict) or not coefficients:
+            raise _symmetric_schema_halt(
+                path, f"`columns[{label!r}].symmetric.coefficients` is "
+                      f"{type(coefficients).__name__ if coefficients is not None else 'absent'}"
+                      f", not a non-empty model -> number map")
+        column.derivation = str(symmetric.get("derivation", ""))
+        column.n_coefficients = len(coefficients)
+        for model, value in coefficients.items():
+            if not isinstance(model, str) or not model:
+                raise _symmetric_schema_halt(
+                    path, f"`columns[{label!r}].symmetric.coefficients` has a "
+                          f"non-string model key {model!r}")
+            try:
+                as_float = float(value)                 # type: ignore[arg-type]
+            except (TypeError, ValueError) as exc:
+                raise _symmetric_schema_halt(
+                    path, f"`columns[{label!r}]` ({model}): coefficient is "
+                          f"{value!r}, which is not a number") from exc
+            if not np.isfinite(as_float):
+                raise _symmetric_schema_halt(
+                    path, f"`columns[{label!r}]` ({model}): coefficient is "
+                          f"{as_float!r} — a non-finite constant has no product "
+                          f"that can be banded, so it is refused rather than "
+                          f"filed")
+            try:
+                site, registry = _symmetric_model_site(model)
+            except (ComposedPathError, FitGridError) as exc:
+                raise _symmetric_schema_halt(
+                    path, f"`columns[{label!r}]` ({model}): {exc}") from exc
+            row = SymmetricConstantRow(model=model, arm=arm, family=family,
+                                       c=as_float, site=site, registry=registry)
+            if row.key in seen:
+                raise _symmetric_schema_halt(
+                    path, f"duplicate coefficient for {row.key} — rake M18: key "
+                          f"by the FULL identity and assert no duplicates; which "
+                          f"c_M is of record cannot be guessed")
+            seen[row.key] = column.label
+            rows.append(row)
+        columns.append(column)
+
+    if not rows:
+        raise _symmetric_schema_halt(
+            path, "no DERIVED column carries a single coefficient — an artifact "
+                  "that names no constant cannot back one star slot")
+    of_record = next((c for c in columns
+                      if c.family == FAMILY_OF_RECORD and c.derived), None)
+    logger.info("symmetric constants: %d row(s) over %d column(s), arms %s, "
+                "corpus %s… (%s)", len(rows), len(columns),
+                sorted({r.arm for r in rows}), corpus_sha[:8],
+                SCHEMA_SYMMETRIC_CONSTANTS_V1)
+    for note in notes:
+        logger.info("  %s", note)
+    return SymmetricConstants(
+        path=str(path), sha256=sha256_of(path), generated=doc.get("generated"),
+        corpus_manifest_sha256=corpus_sha,
+        corpus_vintage=(corpus_block.get("vintage")
+                        if isinstance(corpus_block, dict) else None),
+        derivation=("" if of_record is None else of_record.derivation),
+        columns=columns, rows=rows, notes=notes)
+
+
+class StarPrediction(BaseModel):
+    """One â(A→B) = c_A · c_B, filable under prereg §3 / Addendum E §E2.
+
+    Carries the FILED value and the FILED band together, at the 4-dp convention
+    of record: the symmetric column has filed that way since the canary batch,
+    so the value that files and the band that files are rounded in ONE place and
+    no downstream glue can pair a rounded prediction with an unrounded band.
+    `predicted_full_precision` is a NAMED rounding echo (rake M33(c)), never a
+    second value of record.
+    """
+    prediction_id: str = Field(
+        description="E2's ID shape: star-prediction/<src>→<tgt>/<arm>-k128")
+    pair_id: str
+    source_model: str
+    source_site: int
+    target_model: str
+    target_site: int
+    arm: str
+    arm_rule: str
+    family: str
+    estimand: str = (
+        "â(A→B) = c_A · c_B — prereg §3's symmetric scalar star, left UNTOUCHED "
+        "by Addendum H item 2")
+    c_source: float
+    c_target: float
+    predicted: float = Field(
+        description=f"c_A · c_B at the {FILED_DECIMALS}-dp filing convention of "
+                    f"record — the value that files")
+    band: list[float] = Field(
+        description="the FROZEN ±.05 absolute band OF THE FILED VALUE, [lo, hi], "
+                    "rounded to the same convention")
+    predicted_full_precision: float = Field(
+        description="the unrounded product — a NAMED rounding echo (rake "
+                    "M33(c)), never a second value of record")
+    magnitude_only: bool = Field(
+        description="prereg §3 / E2: |predicted| < .08 → sign unscored, "
+                    "MAGNITUDE-ONLY. Evaluated on the FILED value, which is what "
+                    "the consumer's `_check_carve_out` re-derives")
+    corpus_manifest_sha256: Optional[str] = Field(
+        default=None, description="Addendum G §G2(a) — the corpus vintage this â "
+                                  "rides, taken from the constants artifact")
+    constants_source: str = Field(description="the constants artifact consumed")
+    constants_source_sha256: str
+    constants_derivation: str = Field(
+        default="", description="the column's own derivation prose, quoted from "
+                                "the artifact — never composed here")
+    flags: list[str] = []
+
+
+class StarNotFilable(BaseModel):
+    """A star slot with no coefficient behind it — N/A-AT-FILING.
+
+    Distinct from `NotFilable` (a missing MAP) and `DirectionalNotFilable` (a
+    missing DIRECTIONAL constant), and deliberately so: the three columns race,
+    their availability is independent, and reporting them under one model would
+    let a reader conclude a pair is unfilable for all three when it is unfilable
+    for one.
+    """
+    pair_id: str
+    source_model: str
+    source_site: int
+    target_model: str
+    target_site: int
+    arm: str
+    arm_rule: str
+    family: str
+    verdict: Literal["N/A-AT-FILING"] = "N/A-AT-FILING"
+    missing_sides: list[str]
+    constants_source: str
+    constants_source_sha256: str
+    available_keys: list[str] = Field(
+        default=[], description="every (model/arm-family) the artifact DOES "
+                                "carry, so the gap is legible without opening it")
+    reason: str = (
+        "prereg §3's star column files only where BOTH roles have a coefficient "
+        "in the pair's applicable arm. A missing constant files as N/A; it is "
+        "NEVER proxied from another arm, from the other role, or from another "
+        "column (the desk's standing order, restated in every batch emitter).")
+
+
+class StarReadout(BaseModel):
+    """The symmetric star column for a set of candidate slots.
+
+    A SEPARATE artifact from `ComposedReadout` and `DirectionalReadout`, for the
+    reason the directional readout is separate from the composed one: neither
+    existing document's shape moves so that a third column can arrive.
+    """
+    STATUS: str = (
+        "UNSTAMPED — computation only. Fits nothing, refits nothing, FILES NO "
+        "PREDICTION, moves no band, writes nothing under outputs/. The column's "
+        "TERMS are prereg §3's, untouched by Addendum H item 2 — only the "
+        "arithmetic's home moved. The desk rules.")
+    estimand: str = (
+        "â(A→B) = c_A · c_B, per-model symmetric portability coefficients read "
+        f"from a {SCHEMA_SYMMETRIC_CONSTANTS_V1} artifact in the pair's "
+        f"applicable arm; filed at {FILED_DECIMALS} dp with the frozen ±.05 "
+        "absolute band of the filed value; |predicted| < .08 MAGNITUDE-ONLY")
+    generated: str
+    hub: str = HUB_MODEL
+    hub_site: int = HUB_SITE_OF_RECORD
+    family: str
+    direction_rule: str = (
+        "source→target AS ENUMERATED. The symmetric star is direction-INVARIANT "
+        "by construction (c_A·c_B = c_B·c_A), so the orientation changes no "
+        "number here; it is still carried verbatim, because the slot it files "
+        "into is oriented and the other two columns are not symmetric")
+    constants_source: str
+    constants_source_sha256: str
+    constants_corpus_manifest_sha256: str
+    constants_derivation: str = ""
+    constants_notes: list[str] = []
+    predictions: list[StarPrediction] = []
+    na_at_filing: list[StarNotFilable] = []
+
+
+def star_pair(source_model: str, target_model: str,
+              constants: SymmetricConstants,
+              family: str = FAMILY_OF_RECORD,
+              arm: Optional[str] = None,
+              ) -> StarPrediction | StarNotFilable:
+    """â(A→B) = c_A · c_B for one slot, or its N/A-AT-FILING record.
+
+    `arm` defaults to the pair's applicable arm (prereg §3); overriding it is a
+    diagnostic and is echoed into the record with a flag, exactly as
+    `compose_pair` and `directional_pair` do. The filing path never overrides.
+    """
+    s_site = site_of_record(source_model)
+    t_site = site_of_record(target_model)
+    resolved_arm, arm_rule = applicable_arm(source_model, target_model)
+    if arm is not None and arm != resolved_arm:
+        arm_rule = (f"OVERRIDDEN to {arm!r} (applicable arm by prereg §3 is "
+                    f"{resolved_arm!r}: {arm_rule})")
+    use_arm = arm or resolved_arm
+    if use_arm not in ARMS:
+        raise ComposedPathError(f"unknown arm {use_arm!r}; known: {ARMS}")
+
+    pair_id = f"{source_model}L{s_site}->{target_model}L{t_site}"
+    row_src = constants.row(source_model, use_arm, family)
+    row_tgt = constants.row(target_model, use_arm, family)
+    missing = [label for label, row in
+               ((f"source c_M ({source_model}/{use_arm}-{family})", row_src),
+                (f"target c_M ({target_model}/{use_arm}-{family})", row_tgt))
+               if row is None]
+    if missing:
+        return StarNotFilable(
+            pair_id=pair_id, source_model=source_model, source_site=s_site,
+            target_model=target_model, target_site=t_site, arm=use_arm,
+            arm_rule=arm_rule, family=family, missing_sides=missing,
+            constants_source=constants.path,
+            constants_source_sha256=constants.sha256,
+            available_keys=sorted(row.key for row in constants.rows))
+
+    assert row_src is not None and row_tgt is not None
+    exact = float(row_src.c) * float(row_tgt.c)
+    filed = round(exact, FILED_DECIMALS)
+
+    flags: list[str] = []
+    for role, row in (("source", row_src), ("target", row_tgt)):
+        if abs(row.c) > SYMMETRIC_CONSTANT_FLAG_ABS:
+            flags.append(
+                f"OUT-OF-RANGE CONSTANT — {row.model}'s c_M is {row.c:+.6f}, "
+                f"|c| > {SYMMETRIC_CONSTANT_FLAG_ABS}. A gauge-divided "
+                f"chain-break read can legitimately exceed 1, so this is "
+                f"reported on the slot rather than refused; the desk rules "
+                f"whether the {role} constant is usable")
+    if arm is not None and arm != resolved_arm:
+        flags.append("ARM OVERRIDDEN — diagnostic only; not a filable slot.")
+
+    column = constants.column(use_arm, family)
+    return StarPrediction(
+        prediction_id=f"star-prediction/{source_model}→{target_model}"
+                      f"/{use_arm}-k128",
+        pair_id=pair_id, source_model=source_model, source_site=s_site,
+        target_model=target_model, target_site=t_site, arm=use_arm,
+        arm_rule=arm_rule, family=family,
+        c_source=float(row_src.c), c_target=float(row_tgt.c),
+        predicted=filed,
+        band=[round(b, FILED_DECIMALS) for b in _frozen_band(filed)],
+        predicted_full_precision=exact,
+        magnitude_only=bool(abs(filed) < NEAR_ZERO_CARVE_OUT),
+        corpus_manifest_sha256=constants.corpus_manifest_sha256,
+        constants_source=constants.path,
+        constants_source_sha256=constants.sha256,
+        constants_derivation=("" if column is None else column.derivation),
+        flags=flags)
+
+
+def run_star(constants: SymmetricConstants,
+             family: str = FAMILY_OF_RECORD,
+             pairs_json: Path = CANDIDATE_PAIRS_JSON) -> StarReadout:
+    """The symmetric star column for every current candidate slot."""
+    readout = StarReadout(
+        generated=date.today().isoformat(), family=family,
+        constants_source=constants.path,
+        constants_source_sha256=constants.sha256,
+        constants_corpus_manifest_sha256=constants.corpus_manifest_sha256,
+        constants_derivation=constants.derivation,
+        constants_notes=list(constants.notes))
+    for slot in load_candidate_slots(pairs_json):
+        result = star_pair(slot.model_a, slot.model_b, constants, family=family)
+        if isinstance(result, StarNotFilable):
+            readout.na_at_filing.append(result)
+            logger.warning("N/A-AT-FILING %-52s %s::%s — missing %s",
+                           result.pair_id, result.arm, family,
+                           ", ".join(result.missing_sides))
+            continue
+        readout.predictions.append(result)
+        logger.info("â_star %-52s %s::%-9s = %+.4f  band [%+.4f, %+.4f]%s%s",
+                    result.pair_id, result.arm, family, result.predicted,
+                    result.band[0], result.band[1],
+                    "  MAGNITUDE-ONLY" if result.magnitude_only else "",
+                    "  FLAGGED" if result.flags else "")
+    return readout
+
+
 # ------------------------------------------------------- the resolution sweep
 class ResolutionRow(BaseModel):
     """What this module's registries can reach for ONE model, and what they miss.
@@ -4433,6 +5067,860 @@ def write_scored_record(record: ScoredRecord, out: Path,
     logger.info("wrote scored record %s (%d slot(s), sha %s…)", out,
                 len(record.slots), (record.record_sha256 or "")[:12])
     return out
+
+
+# -------------------------------------------- EMITTING A FILING RECORD (M33b)
+#  Rake M33(b): "emit filing records THROUGH the tool that will consume them."
+#  Batches 5, 6 and 7 honoured that in every load-bearing sense through
+#  per-batch staging glue — three near-identical copies of one emitter, each
+#  naming its own gap ("the tool has no --emit-record CLI"). The batch-7 report
+#  recorded the design note: "the batch-N script is a pure header variant three
+#  generations running — a future logic change is the signal to generalize, not
+#  fork a fourth copy." This is the generalization.
+#
+#  WHAT MOVED, AND WHAT DID NOT
+#    * ALL THREE COLUMNS are now the tool's own producers — `run_star`
+#      (new, above), `run_directional`, `run_candidates` — so a filed block is a
+#      dumped pydantic object in every column, never a hand-typed number and
+#      never a re-parse of a readout JSON.
+#    * The SELECTION ARITHMETIC (the spread rule and the protocol-forced set's
+#      identity assertion) moved here verbatim, so the rule that picked the
+#      slate is code the desk can re-run rather than glue that is rewritten per
+#      batch.
+#    * The BANDS and CARVE-OUTS are the consumer's own (`_frozen_band`,
+#      `FROZEN_BAND_HALF_WIDTH`, `NEAR_ZERO_CARVE_OUT`), and every block is
+#      pre-flighted through the consumer's own private `_check_filed_band` /
+#      `_check_carve_out` and then through `parse_filing_record` BEFORE the file
+#      is written — a contract violation cannot reach disk (M33(a)).
+#    * The DESK'S PROSE did not move and must not: the ruling that authorized a
+#      slate, the disclosures, the interpretation clauses are Luxia's and the
+#      desk's words. They arrive as a `--narrative` sidecar and are merged at
+#      NAMED keys only. This tool composes no ruling and invents no disclosure;
+#      a record emitted with no narrative says so, in the record.
+#
+#  WHY THE NUMBERS ARE THE VERIFIABLE PART. `--verify-against <banked record>`
+#  compares a freshly emitted record to a banked one on the NUMBERS AND THE SLOT
+#  IDENTITIES ONLY, excluding timestamps and prose. That is the reproduction
+#  proof of record for this promotion: the desk's words are the desk's, but every
+#  number in three filed records must come back out of the tool unchanged.
+
+#: The record key each predictor's block is written under — the SAME mapping the
+#: consumer reads a record with (`RACING_BLOCK_KEYS`). Emitting and parsing
+#: through one constant is the point: a block key that drifted would produce a
+#: record that parses to fewer predictors without anything erroring.
+RACING_EMIT_ORDER: tuple[Predictor, ...] = ("star", "directional", "composed")
+#: Fields inside a predictor block that are NUMBERS OR IDENTITIES of record, and
+#: are therefore compared by `--verify-against`. Everything else in a block is
+#: prose, provenance paths, or a timestamp.
+VERIFIED_BLOCK_FIELDS: tuple[str, ...] = (
+    "id", "predicted", "band", "magnitude_only",
+    "c_source", "c_target", "predicted_full_precision",         # star
+    "c_out_source", "c_in_target", "filed_predicted", "filed_band",  # directional
+    "descriptive_reverse_predicted", "descriptive_asymmetry_ratio",
+    "a_comp", "ceiling_target_hub_map", "dim_source", "dim_target",  # composed
+    "dim_hub_side", "corpus_vintage", "corpus_manifest_sha256")
+#: Slot-level fields that are identities of record (never prose).
+VERIFIED_SLOT_FIELDS: tuple[str, ...] = (
+    "rank", "residual_rank", "source", "target", "arm", "family",
+    "quad_hub", "audit_hub", "audit_set_member")
+#: `--verify-against` tolerance. Both records are JSON round-trips of the same
+#: float64 arithmetic, so the only admissible difference is zero; the tolerance
+#: exists to name that fact rather than to absorb drift.
+VERIFY_TOLERANCE = 0.0
+
+
+class RecordEmissionError(RuntimeError):
+    """A filing record cannot be emitted as what it claims to be.
+
+    Filing is a ONE-WAY act — a record's sha gets ledgered and its bands never
+    move — so every disagreement between the ruling, the slate and the data is a
+    HALT here rather than something the emitter files through. Rake M4: the
+    enactor never adjudicates a live halt, and neither does this.
+    """
+
+
+class SpreadPlacement(BaseModel):
+    """One slot of the even-spread rule, with the trail that placed it."""
+    i: int
+    formula_rank: int
+    assigned_rank: int
+    steps: int
+
+
+def spread_ranks(n: int, size: int) -> tuple[list[int], list[SpreadPlacement]]:
+    """The desk's even-spread rule: `rank_i = round(1 + (i−1)(n−1)/(size−1))`.
+
+    Ranks evenly spaced over a ranked population from 1 to n INCLUSIVE, `size`
+    of them, collisions resolved by stepping to the next unused rank (and
+    downward if the top is exhausted). Lifted verbatim from the batch-5/6/7
+    emitters so a re-emission reproduces their slates exactly; the trail is
+    returned because the record files it (a selection rule nobody can replay is
+    a selection nobody can audit).
+    """
+    if size < 1:
+        raise RecordEmissionError(f"spread size must be >= 1, got {size}")
+    if n < size:
+        raise RecordEmissionError(
+            f"cannot spread {size} slots over a population of {n} — the rule "
+            f"assigns distinct ranks and there are not enough to assign")
+    if size == 1:
+        return [1], [SpreadPlacement(i=1, formula_rank=1, assigned_rank=1, steps=0)]
+    ranks: list[int] = []
+    used: set[int] = set()
+    trail: list[SpreadPlacement] = []
+    for i in range(1, size + 1):
+        raw = round(1 + (i - 1) * (n - 1) / (size - 1))
+        r, moved = raw, 0
+        while r in used and r <= n:
+            r += 1
+            moved += 1
+        if r > n:
+            r = raw
+            while r in used and r >= 1:
+                r -= 1
+                moved -= 1
+        if r in used or not (1 <= r <= n):
+            raise RecordEmissionError(
+                f"cannot place spread slot {i} near rank {raw} over a "
+                f"population of {n}: every neighbouring rank is taken")
+        used.add(r)
+        ranks.append(r)
+        trail.append(SpreadPlacement(i=i, formula_rank=raw, assigned_rank=r,
+                                     steps=moved))
+    return ranks, trail
+
+
+class SlatePolicy(BaseModel):
+    """The desk's ruling about WHICH slots a batch files, as data.
+
+    Every field is a ruling the desk made, and the emitter's job is to APPLY it
+    and to prove it was applied — never to choose. `forced_hub` + `audit_set`
+    reproduce the batch-5/7 protocol-forced shape; both absent reproduces batch
+    6's pure spread, and the emitter then PROVES no forcible pair was left in the
+    population instead of assuming it (batch 6's own check, kept).
+    """
+    model_config = {"frozen": True}
+
+    batch: str = Field(min_length=1, description="the batch label of record")
+    size: int = Field(gt=0, description="how many slots the ruling files")
+    forced_hub: Optional[str] = Field(
+        default=None, description="an audit hub whose prereg §3 audit pairs are "
+                                  "PROTOCOL-FORCED into the slate")
+    audit_set: tuple[str, ...] = Field(
+        default=(), description="prereg §3's audit set — the models the forced "
+                                "hub must be paired with, named by MODEL "
+                                "IDENTITY (a protocol fact), never by rank")
+    ranking_key: str = Field(
+        default="|â_comp(corpus-v2.1, hub 8bL16, proc_k128)| DESCENDING, ties by "
+                "pair_id",
+        description="the ranking the slate was drawn over, quoted from the "
+                    "slate artifact's own statement of it where present")
+
+    @model_validator(mode="after")
+    def _forcing_is_complete(self) -> "SlatePolicy":
+        if (self.forced_hub is None) != (not self.audit_set):
+            raise ValueError(
+                "a protocol-forced slate needs BOTH `forced_hub` and a non-empty "
+                "`audit_set`: the forcing is named by (hub, audit set) identity, "
+                "and half of that names nothing checkable")
+        return self
+
+    @property
+    def n_spread(self) -> int:
+        return self.size - len(self.audit_set)
+
+
+class EmittedRecord(BaseModel):
+    """The emission's own report: what was filed, and every proof that ran."""
+    path: str
+    sha256: str
+    batch: str
+    n_slots: int
+    n_forced: int
+    n_spread: int
+    population_n_remaining: int
+    population_n_residual: int
+    forced_ranks_in_full_remaining: list[int] = []
+    spread_residual_ranks: list[int] = []
+    n_blocks_preflighted: int
+    n_blocks_parsed: int
+    star_na_at_filing: list[str] = []
+    directional_na_at_filing: list[str] = []
+    composed_na_at_filing: list[str] = []
+    narrative_keys_merged: list[str] = []
+    warnings: list[str] = []
+
+
+def load_narrative(path: Optional[Path]) -> dict[str, Any]:
+    """The DESK'S PROSE for a record, read from a sidecar. Never composed here.
+
+    A ruling, an authority citation, a disclosure and an interpretation clause
+    are the desk's and Luxia's words; a tool that generated them would be
+    inventing the authority for its own output. Recognized keys are fixed, and
+    an unrecognized key is a HALT rather than a silently ignored paragraph —
+    prose the desk wrote and the record dropped is the worst of both.
+    """
+    if path is None:
+        return {}
+    if not path.is_file():
+        raise RecordEmissionError(
+            f"narrative sidecar absent: {path}. Omit --narrative entirely to "
+            f"emit a record that NAMES its prose as not supplied; pointing at a "
+            f"file that is not there is never the same thing")
+    try:
+        doc = json.loads(path.read_text())
+    except (OSError, ValueError) as exc:
+        raise RecordEmissionError(
+            f"{path}: narrative sidecar unreadable as JSON: {exc}") from exc
+    if not isinstance(doc, dict):
+        raise RecordEmissionError(
+            f"{path}: narrative top level is {type(doc).__name__}, not an object")
+    known = {"STATUS", "authority", "selection_slate", "selection_ruling",
+             "forced_why", "disclosures", "columns_notes", "vintage_note",
+             "direction_of_record", "flag_clauses", "emitter"}
+    unknown = sorted(set(doc) - known)
+    if unknown:
+        raise RecordEmissionError(
+            f"{path}: narrative carries unrecognized key(s) {unknown}. "
+            f"Recognized: {sorted(known)}. An unknown key is a HALT rather than "
+            f"a silently dropped paragraph — desk prose that the record does not "
+            f"carry is worse than prose the record refuses")
+    for key in ("disclosures", "columns_notes", "flag_clauses"):
+        if key in doc and not isinstance(doc[key], dict):
+            raise RecordEmissionError(
+                f"{path}: narrative `{key}` is {type(doc[key]).__name__}, not an "
+                f"object of named passages")
+    return doc
+
+
+def _slate_rows(slate: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """The ranked remaining population from the desk's slate artifact.
+
+    Rank uniqueness is ASSERTED (rake M18: a comparison dict gets a duplicate-key
+    assertion) because a duplicated rank would make the spread rule silently
+    place two slots on one row.
+    """
+    try:
+        doc = json.loads(slate.read_text())
+    except (OSError, ValueError) as exc:
+        raise RecordEmissionError(
+            f"{slate}: slate artifact unreadable as JSON: {exc}") from exc
+    rows = doc.get("remaining_ranked")
+    if not isinstance(rows, list) or not rows:
+        raise RecordEmissionError(
+            f"{slate}: `remaining_ranked` is "
+            f"{type(rows).__name__ if rows is not None else 'absent'}, not a "
+            f"non-empty ranked list. The slate is the DESK's ruling and this "
+            f"tool reads it; it never re-ranks and never re-derives a population")
+    by_rank: dict[int, dict[str, Any]] = {}
+    for row in rows:
+        for field in ("rank", "pair_id", "source_model", "target_model", "arm"):
+            if field not in row:
+                raise RecordEmissionError(
+                    f"{slate}: a `remaining_ranked` row has no {field!r}")
+        rank = int(row["rank"])
+        if rank in by_rank:
+            raise RecordEmissionError(
+                f"{slate}: duplicate rank {rank} in the remaining population "
+                f"({by_rank[rank]['pair_id']} and {row['pair_id']}) — rake M18: "
+                f"which pair holds that rank cannot be guessed, and the spread "
+                f"rule would place two slots on one row")
+        by_rank[rank] = row
+    return list(rows), doc
+
+
+def _gate_column(gate_column: Path) -> tuple[dict[tuple[str, str], dict[str, Any]], str]:
+    """The batch's E4.1 naive-gate column, keyed by the UNORDERED model pair.
+
+    Keyed by the sorted (model_a, model_b) tuple with a duplicate assertion —
+    never by basename or by one direction (rake M18, and M42(d)'s cousin: a
+    comparison whose key can collapse two rows reports a false pass).
+    """
+    try:
+        doc = json.loads(gate_column.read_text())
+    except (OSError, ValueError) as exc:
+        raise RecordEmissionError(
+            f"{gate_column}: gate column unreadable as JSON: {exc}") from exc
+    rows = doc.get("rows", doc.get("pairs"))
+    if not isinstance(rows, list) or not rows:
+        raise RecordEmissionError(
+            f"{gate_column}: neither `rows` nor `pairs` is a non-empty list; the "
+            f"E4.1 column of record must carry this batch's own rows")
+    out: dict[tuple[str, str], dict[str, Any]] = {}
+    for row in rows:
+        try:
+            key = (str(row["model_a"]), str(row["model_b"]))
+        except (KeyError, TypeError) as exc:
+            raise RecordEmissionError(
+                f"{gate_column}: a gate row has no model_a/model_b") from exc
+        ordered = (min(key), max(key))
+        if ordered in out:
+            raise RecordEmissionError(
+                f"{gate_column}: duplicate gate row for {ordered} — rake M18")
+        out[ordered] = row
+    return out, sha256_of(gate_column)
+
+
+def emit_filing_record(
+        *, policy: SlatePolicy, slate: Path, gate_column: Path,
+        star: SymmetricConstants, directional: DirectionalConstants,
+        pairs_json: Path, out: Path, family: str = FAMILY_OF_RECORD,
+        narrative: Optional[dict[str, Any]] = None,
+        repo_root: Optional[Path] = None,
+        overwrite: bool = False) -> EmittedRecord:
+    """Build, PROVE and write one racing filing record. All three columns.
+
+    The proof chain, in order, and none of it skippable:
+      1. the three columns are computed IN THIS PROCESS by this module's own
+         producers, so every block is a dumped pydantic object;
+      2. the protocol-forced set (if the ruling names one) is asserted to BE the
+         §3 audit enumeration by MODEL IDENTITY and orientation, or the emission
+         HALTs — and where the ruling forces nothing, the population is proved to
+         contain no forcible pair rather than assumed to;
+      3. every block passes the CONSUMER's own `_check_filed_band` and
+         `_check_carve_out` before anything is written;
+      4. the written record is re-read through `parse_filing_record` and must
+         come back with every slot carrying all three predictors (rake M33(a)).
+    """
+    if out.exists() and not overwrite:
+        raise RecordEmissionError(
+            f"a record already exists at {out}. Filing happens ONCE per batch "
+            f"and its sha is ledgered; re-emitting over it would replace a "
+            f"record that may already be filed. Pass --overwrite-record "
+            f"deliberately, or write elsewhere")
+    root = (repo_root or Path.cwd()).resolve()
+
+    def rel(path: Path) -> str:
+        """Repo-relative where possible, absolute otherwise — never invented."""
+        try:
+            return str(path.resolve().relative_to(root))
+        except ValueError:
+            return str(path.resolve())
+
+    narrative = dict(narrative or {})
+    warnings: list[str] = []
+
+    # ---------------------------------------------------- 1. the three columns
+    star_readout = run_star(star, family, pairs_json)
+    dir_readout = run_directional(directional, family, pairs_json)
+    comp_readout = run_candidates(family, pairs_json)
+    by_pair: dict[Predictor, dict[str, Any]] = {"star": {}, "directional": {},
+                                                "composed": {}}
+    for predictor, preds in (("star", star_readout.predictions),
+                             ("directional", dir_readout.predictions),
+                             ("composed", comp_readout.predictions)):
+        for pred in preds:
+            if pred.pair_id in by_pair[predictor]:               # rake M18
+                raise RecordEmissionError(
+                    f"duplicate {predictor} prediction for {pred.pair_id} — "
+                    f"which value is of record cannot be guessed")
+            by_pair[predictor][pred.pair_id] = pred
+    logger.info("columns: star %d filable / %d N/A · directional %d / %d · "
+                "composed %d / %d", len(star_readout.predictions),
+                len(star_readout.na_at_filing), len(dir_readout.predictions),
+                len(dir_readout.na_at_filing), len(comp_readout.predictions),
+                len(comp_readout.na_at_filing))
+
+    # ------------------------------------------- 2. the slate — the DESK's own
+    rows, slate_doc = _slate_rows(slate)
+    n_remaining = len(rows)
+    forced: list[dict[str, Any]] = []
+    if policy.forced_hub is not None:
+        want = {(policy.forced_hub, m) for m in policy.audit_set}
+        forced = [r for r in rows
+                  if (r["source_model"], r["target_model"]) in want]
+        got = {(r["source_model"], r["target_model"]) for r in forced}
+        if got != want:
+            raise RecordEmissionError(
+                f"the prereg §3 audit enumeration for {policy.forced_hub} is "
+                f"{sorted(want)} but the remaining population offers "
+                f"{sorted(got)}; missing {sorted(want - got)}. Every missing "
+                f"pair is either already filed, burnt, or enumerated in the "
+                f"OTHER orientation — and â is orientation-dependent, so a pair "
+                f"enumerated the other way is not the audit leg. Reported, never "
+                f"filed through")
+        for r in forced:
+            if not r.get("quad_hub_pair"):
+                raise RecordEmissionError(
+                    f"{r['pair_id']} is in the protocol-forced set but does not "
+                    f"register as a quad-hub pair in the slate — a ruling/data "
+                    f"disagreement, never something to file through")
+        logger.info("§3 audit check: all %d %s audit pairs present in the "
+                    "remaining population, hub-as-source, and forced",
+                    len(forced), policy.forced_hub)
+    else:
+        #  The ruling says "nothing to force". That is a claim ABOUT THE DATA and
+        #  it is CHECKED: a pure spread would silently drop a still-unfiled audit
+        #  leg and the §3 audit would stall with nobody noticing (batch 6's own
+        #  check, kept verbatim in behaviour).
+        still = sorted(r["rank"] for r in rows if r.get("quad_hub_pair"))
+        if still:
+            raise RecordEmissionError(
+                f"the ruling forces nothing, but the §3 quad-hub set still "
+                f"REMAINING in the slate is {still} "
+                f"({[r['pair_id'] for r in rows if r.get('quad_hub_pair')]}) — a "
+                f"pure spread would drop an audit-set leg. Reported, never filed "
+                f"through")
+        logger.info("quad-hub check: 0 audit-set-feeding pairs remain unfiled — "
+                    "the ruling's premise holds, pure spread is correct")
+
+    forced_ranks = sorted(int(r["rank"]) for r in forced)
+    residual = sorted((r for r in rows if int(r["rank"]) not in set(forced_ranks)),
+                      key=lambda r: int(r["rank"]))
+    for i, r in enumerate(residual, 1):
+        r["residual_rank"] = i
+    n_res = len(residual)
+    spread, trail = spread_ranks(n_res, policy.n_spread)
+    picked = [residual[i - 1] for i in spread]
+    slots = sorted(forced + picked, key=lambda r: int(r["rank"]))
+    distinct = {r["pair_id"] for r in slots}
+    if len(distinct) != policy.size:
+        raise RecordEmissionError(
+            f"the ruling files {policy.size} slots but the slate produced "
+            f"{len(distinct)} distinct pair(s) from {len(slots)} row(s) "
+            f"({len(forced)} forced + {len(picked)} spread). A count that is off "
+            f"by one is rake M18 until shown otherwise — a collapsed key, or a "
+            f"forced pair the spread also selected")
+    logger.info("slate: %d FORCED (full ranks %s) + %d spread over residual "
+                "N=%d (residual ranks %s)", len(forced), forced_ranks,
+                len(picked), n_res, spread)
+
+    # ------------------------------------------------------ 3. the record body
+    gate_rows, gate_sha = _gate_column(gate_column)
+    predictions: list[dict[str, Any]] = []
+    for row in slots:
+        pid = str(row["pair_id"])
+        src, tgt = str(row["source_model"]), str(row["target_model"])
+        blocks: dict[str, dict[str, Any]] = {}
+        for predictor in RACING_EMIT_ORDER:
+            pred = by_pair[predictor].get(pid)
+            if pred is None:
+                raise RecordEmissionError(
+                    f"{pid}: the {predictor} column has no filable prediction "
+                    f"for a slot the ruling files. A slate slot with a missing "
+                    f"column is a ruling/data disagreement: either the column's "
+                    f"input is incomplete or the slate names a pair that is "
+                    f"N/A-AT-FILING. Reported, never filed through")
+            block = pred.model_dump(mode="json")
+            #  The SCORER's filing-block contract, emitted at filing time (rake
+            #  M33): `id`/`predicted`/`band`/`magnitude_only`. Each producer
+            #  already carries `predicted`/`band`/`magnitude_only` under those
+            #  names EXCEPT the composed column, whose own names are `a_comp` and
+            #  (no band); those are kept BESIDE the contract keys as provenance,
+            #  never instead of them — the batch-4 record carried only the
+            #  readout names, which is why it needed a derived scoring input.
+            block["id"] = pred.prediction_id
+            if predictor == "composed":
+                block["predicted"] = pred.a_comp
+                block["band"] = _frozen_band(pred.a_comp)
+                block["magnitude_only"] = bool(
+                    abs(pred.a_comp) < NEAR_ZERO_CARVE_OUT)
+                block["contract_note"] = (
+                    "`id` / `predicted` / `band` / `magnitude_only` are the "
+                    "SCORER's filing-block contract and are emitted here at "
+                    "filing time. `prediction_id` / `a_comp` are the producing "
+                    "readout's own names, kept BESIDE them as provenance and "
+                    "carrying identical values (rake M33).")
+            if predictor == "directional":
+                block["rounding_echo_note"] = (
+                    f"`predicted` / `band` are FULL PRECISION and are the values "
+                    f"of record. `filed_predicted` / `filed_band` are DISPLAY "
+                    f"ROUNDINGS of them at the {FILED_DECIMALS}-dp convention — "
+                    f"a rounding echo, not a second value of record. A checker "
+                    f"finding two values must measure their difference against "
+                    f"rounding before calling it a conflict (rake M33(c)).")
+            if predictor == "star":
+                block["predictor"] = "star-symmetric"
+                block["rounding_echo_note"] = (
+                    f"`predicted` and `band` are the {FILED_DECIMALS}-dp filing "
+                    f"convention of record for the symmetric star (canary / "
+                    f"batch 2 / batch 3 / batch 4). "
+                    f"`predicted_full_precision` is the unrounded product and is "
+                    f"NOT a second value of record — any difference between them "
+                    f"must be measured against rounding before it is called a "
+                    f"conflict (rake M33(c)).")
+            blocks[RACING_BLOCK_KEYS[predictor]] = block
+
+        gate_key = (min(src, tgt), max(src, tgt))
+        gate = gate_rows.get(gate_key)
+        if gate is None:
+            raise RecordEmissionError(
+                f"{pid}: the gate column {gate_column.name} has no row for "
+                f"{gate_key}. The E4.1 gate is a STANDING PRE-FILING gate; a "
+                f"slot with no gate row has not been through it")
+        exposed = bool(gate.get("EXPOSED_E41_v21", gate.get("EXPOSED", False)))
+        flags: list[str] = []
+        clauses = narrative.get("flag_clauses", {})
+        if exposed:
+            clause = clauses.get("E4_1_artifact_exposed")
+            if not clause:
+                warnings.append(
+                    f"{pid} is E4.1 ARTIFACT-EXPOSED but the narrative supplies "
+                    f"no `flag_clauses.E4_1_artifact_exposed` passage. The flag "
+                    f"is filed; the frozen interpretation clause is the DESK's "
+                    f"text and this tool will not compose one")
+            flags.append("E4.1 ARTIFACT-EXPOSED"
+                         + (f" — {clause}" if clause else
+                            " — clause OWED (desk text not supplied at emission)"))
+        if row.get("quad_hub_pair"):
+            clause = clauses.get("quad_hub_forced")
+            flags.append("QUAD-HUB — force-included by prereg §3 protocol (the "
+                         "audit-set enumeration), not by rank."
+                         + (f" {clause}" if clause else ""))
+
+        predictions.append({
+            "rank": int(row["rank"]),
+            "residual_rank": row.get("residual_rank"),
+            "selection_basis": (
+                f"PROTOCOL-FORCED (prereg §3 audit set for the "
+                f"{policy.forced_hub} hub)" if row.get("quad_hub_pair")
+                and policy.forced_hub is not None
+                else f"SPREAD (even ranks over the residual {n_res})"),
+            "source": src,
+            "target": tgt,
+            "arm": str(row["arm"]),
+            "family": family,
+            "direction_of_record": narrative.get(
+                "direction_of_record", "forward as enumerated (source->target)"),
+            "naive_gate": {
+                "verdict_of_record": "ARTIFACT-EXPOSED" if exposed else "clean",
+                "gate_abs_cos": gate.get("gate_abs_cos"),
+                "gate_null_q95": gate.get("gate_null_q95"),
+                "exposure_multiple": gate.get("exposure_multiple"),
+                "column_of_record": rel(gate_column),
+                "column_of_record_sha256": gate_sha,
+                "row_is_new_this_batch": bool(gate.get("IS_NEW_ROW", False)),
+                "flag_rule": "E4.1 FROZEN: ARTIFACT-EXPOSED iff |bare cos| > q95 "
+                             "AND |bare cos| >= 0.10; the gate quantity is the "
+                             "larger |cos|/q95 of the two directed reads",
+            },
+            "quad_hub": bool(row.get("quad_hub_pair", False)),
+            "audit_hub": row.get("touches_audit_hub"),
+            "audit_set_member": row.get("touches_audit_set"),
+            **blocks,
+            "flags": flags,
+        })
+
+    n_forced = sum(1 for p in predictions if p["quad_hub"])
+    record: dict[str, Any] = {
+        "STATUS": narrative.get(
+            "STATUS", "FILED — held-out predictions; bands frozen at filing; no "
+                      "band moves after this timestamp"),
+        "filed_utc": datetime.now(timezone.utc).isoformat(),
+        "batch": policy.batch,
+        "selection": {
+            "slate": narrative.get("selection_slate",
+                                   "NOT SUPPLIED AT EMISSION — the slate's own "
+                                   "one-line name is desk prose"),
+            "ruling": narrative.get("selection_ruling",
+                                    "NOT SUPPLIED AT EMISSION — the authorizing "
+                                    "ruling is the DESK's text and this tool "
+                                    "composes none"),
+            "size": len(predictions),
+            "population_N_remaining": n_remaining,
+            "forced_by_protocol": {
+                "n": n_forced,
+                "why": narrative.get(
+                    "forced_why",
+                    "prereg §3's audit-set enumeration is a FROZEN PROTOCOL "
+                    "FACT; the emitter asserts the forced set IS that "
+                    "enumeration, by model identity and orientation, and HALTs "
+                    "otherwise" if policy.forced_hub is not None else
+                    "NONE — the emitter PROVED that no §3 audit-set-feeding pair "
+                    "remains unfiled in the ranked population, rather than "
+                    "assuming it"),
+                "hub": policy.forced_hub,
+                "audit_set": list(policy.audit_set),
+                "ranks_in_full_remaining": forced_ranks,
+                "pairs": [f"{p['source']}->{p['target']}"
+                          for p in predictions if p["quad_hub"]],
+            },
+            "spread": {
+                "n": policy.n_spread,
+                "population_N": n_res,
+                "rule": f"rank_i = round(1 + (i−1)·({n_res}−1)/"
+                        f"({policy.n_spread}−1)) for i = 1…{policy.n_spread} "
+                        f"over the RESIDUAL ranked list (the remaining "
+                        f"population minus any protocol-forced slots), dedup "
+                        f"collisions by stepping to the next unused rank",
+                "residual_ranks": spread,
+                "rank_assignment_trail": [t.model_dump() for t in trail],
+                "n_collisions_resolved": sum(1 for t in trail if t.steps != 0),
+            },
+            "ranking_key": policy.ranking_key,
+            "selection_source": rel(slate),
+            "selection_source_sha256": sha256_of(slate),
+        },
+        "authority": narrative.get(
+            "authority", "NOT SUPPLIED AT EMISSION — the standing authority "
+                         "chain is the DESK's citation and this tool composes "
+                         "none"),
+        "vintage": {
+            "corpus_manifest_sha256": star.corpus_manifest_sha256,
+            "corpus": star.corpus_vintage,
+            "note": narrative.get(
+                "vintage_note",
+                "every predictor block carries its own corpus manifest sha; "
+                "Addendum G §G2's vintage rule applies per block, not only here"),
+            "v21_root": None if V21_ROOT is None else rel(V21_ROOT),
+        },
+        "emission": {
+            "EMITTED_THROUGH_THE_TOOL": True,
+            "rake": "M33(b) — filing records are emitted through the tool that "
+                    "will consume them, never hand-assembled from readout rows",
+            "how": "all THREE columns are produced in-process by this module's "
+                   "own producers — run_star (symmetric), run_directional and "
+                   "run_candidates — and every block is a dumped pydantic "
+                   "object. Block keys are RACING_BLOCK_KEYS; bands are "
+                   "_frozen_band / FROZEN_BAND_HALF_WIDTH; carve-outs are "
+                   "NEAR_ZERO_CARVE_OUT; every block was pre-flighted through "
+                   "the consumer's own _check_filed_band and _check_carve_out, "
+                   "and the written record was re-read through "
+                   "parse_filing_record, BEFORE this emission returned",
+            "named_gap_CLOSED": "the symmetric star column now has a producer "
+                                "in the tool (run_star / load_symmetric "
+                                "constants). Batches 5/6/7 named its absence in "
+                                "their own emission blocks; per-batch staging "
+                                "glue is no longer the star column's home",
+            "emitter": narrative.get(
+                "emitter", "metabasis.scripts.read_composed_predictions "
+                           "--emit-record"),
+            "pairs_json": rel(pairs_json),
+            "pairs_json_sha256": sha256_of(pairs_json),
+            "desk_prose_supplied": sorted(narrative),
+        },
+        "columns": {
+            "star": {
+                "estimand": "â(A→B) = c_A · c_B (prereg §3 symmetric; Addendum H "
+                            "item 2 leaves it untouched)",
+                "constants": rel(Path(star.path)),
+                "constants_sha256": star.sha256,
+                "derivation": star.derivation,
+                "filing_precision": f"{FILED_DECIMALS} dp — the convention of "
+                                    f"record since the canary batch",
+            },
+            "directional": {
+                "estimand": "â(A→B) = c_A^out · c_B^in (Addendum H item 3)",
+                "constants": rel(Path(directional.path)),
+                "constants_sha256": directional.sha256,
+                "gauge": directional.gauge,
+                "filing_precision": "full precision; `filed_*` fields are "
+                                    "rounding echoes, named per block",
+            },
+            "composed": {
+                "estimand": "â_comp(A→B) = cos(M_hub→B(M_hub→A^rev(v_A)), v_B) "
+                            "(Addendum E §E1)",
+                "hub": f"{HUB_MODEL}L{HUB_SITE_OF_RECORD} (rebuilt-L16)",
+                "filing_precision": "full precision",
+            },
+            "per_role_NA_policy": "a predictor with no constant or no map for a "
+                                  "role files N/A; it is NEVER proxied from the "
+                                  "other arm, the other role, or the other column",
+            **({"notes": narrative["columns_notes"]}
+               if "columns_notes" in narrative else {}),
+        },
+        "disclosures": narrative.get(
+            "disclosures",
+            {"NOT_SUPPLIED_AT_EMISSION": "disclosures are the DESK's text. This "
+                                         "record was emitted without them; the "
+                                         "desk attaches them before the record's "
+                                         "sha is ledgered, and this key names "
+                                         "their absence rather than hiding it"}),
+        "predictions": predictions,
+    }
+
+    # ------------------------- 4. pre-flight through the CONSUMER's own checks
+    n_blocks = 0
+    for slot in predictions:
+        for predictor, block_key in RACING_BLOCK_KEYS.items():
+            block = slot.get(block_key)
+            if not isinstance(block, dict):
+                raise RecordEmissionError(
+                    f"{slot['source']}->{slot['target']}: no {block_key} block")
+            _check_filed_band(block["id"], float(block["predicted"]),
+                              block["band"])
+            _check_carve_out(block["id"], float(block["predicted"]),
+                             bool(block["magnitude_only"]))
+            n_blocks += 1
+    logger.info("pre-flight: %d block(s) pass the consumer's own "
+                "_check_filed_band + _check_carve_out", n_blocks)
+
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(record, indent=1, ensure_ascii=False))
+    record_sha = sha256_of(out)
+
+    # ------------------------------------------- 5. the parse proof (M33(a))
+    parsed = parse_filing_record(out)
+    n_parsed = sum(len(s.predictions) for s in parsed.slots)
+    if len(parsed.slots) != len(predictions):
+        raise RecordEmissionError(
+            f"parse proof: the written record parses to {len(parsed.slots)} "
+            f"slot(s) but {len(predictions)} were emitted")
+    if n_parsed != len(predictions) * len(RACING_EMIT_ORDER):
+        raise RecordEmissionError(
+            f"parse proof: {n_parsed} predictor block(s) parsed, expected "
+            f"{len(predictions) * len(RACING_EMIT_ORDER)}")
+    for slot in parsed.slots:
+        got = sorted(p.predictor for p in slot.predictions)
+        if got != sorted(RACING_EMIT_ORDER):
+            raise RecordEmissionError(
+                f"parse proof: {slot.key} carries predictors {got}, expected all "
+                f"of {sorted(RACING_EMIT_ORDER)}")
+    logger.info("PARSE PROOF: %d slot(s), %d predictor block(s), record sha %s…",
+                len(parsed.slots), n_parsed, record_sha[:12])
+
+    for warning in warnings:
+        logger.warning("%s", warning)
+    return EmittedRecord(
+        path=str(out), sha256=record_sha, batch=policy.batch,
+        n_slots=len(predictions), n_forced=n_forced, n_spread=policy.n_spread,
+        population_n_remaining=n_remaining, population_n_residual=n_res,
+        forced_ranks_in_full_remaining=forced_ranks,
+        spread_residual_ranks=spread,
+        n_blocks_preflighted=n_blocks, n_blocks_parsed=n_parsed,
+        star_na_at_filing=[na.pair_id for na in star_readout.na_at_filing],
+        directional_na_at_filing=[na.pair_id
+                                  for na in dir_readout.na_at_filing],
+        composed_na_at_filing=[na.pair_id for na in comp_readout.na_at_filing],
+        narrative_keys_merged=sorted(narrative), warnings=warnings)
+
+
+class RecordDelta(BaseModel):
+    """One numeric or identity disagreement between two filing records."""
+    where: str
+    field: str
+    banked: Any = None
+    emitted: Any = None
+    abs_delta: Optional[float] = None
+
+
+class RecordComparison(BaseModel):
+    """`--verify-against`: two records compared on NUMBERS AND IDENTITIES only.
+
+    Timestamps and prose are EXCLUDED by construction, not by tolerance: the
+    desk's words are the desk's, and a record re-emitted a day later carries a
+    different `filed_utc` by definition. What must be identical is every number
+    and every slot identity — that is what makes a promoted producer a promotion
+    rather than a rewrite.
+    """
+    banked: str
+    banked_sha256: str
+    emitted: str
+    emitted_sha256: str
+    n_slots_banked: int
+    n_slots_emitted: int
+    n_fields_compared: int
+    max_abs_delta: float = 0.0
+    deltas: list[RecordDelta] = []
+    excluded: list[str] = Field(
+        default=["filed_utc", "every prose field (STATUS, authority, ruling, "
+                 "disclosures, notes, estimand, contract/rounding notes)",
+                 "provenance PATHS (absolute vs repo-relative is an invocation "
+                 "detail); the sha256 of every provenance artifact IS compared"],
+        description="what this comparison deliberately does not read")
+
+    @property
+    def agree(self) -> bool:
+        return not self.deltas
+
+
+def _slot_index(record: dict[str, Any], label: str) -> dict[str, dict[str, Any]]:
+    """Slots keyed by `source->target/arm-family` with a duplicate assertion."""
+    out: dict[str, dict[str, Any]] = {}
+    for slot in record.get("predictions", []):
+        key = slot_key(str(slot.get("source")), str(slot.get("target")),
+                       str(slot.get("arm")), str(slot.get("family")))
+        if key in out:
+            raise RecordEmissionError(
+                f"{label}: duplicate slot {key} — rake M18: a comparison dict "
+                f"gets a duplicate-key assertion, because a collapsed key "
+                f"reports a false pass at n−1")
+        out[key] = slot
+    return out
+
+
+def compare_filing_records(banked: Path, emitted: Path) -> RecordComparison:
+    """Compare two filing records on the numbers and the slot identities.
+
+    Used as the reproduction proof when a producer moves: the promoted CLI must
+    reproduce a banked record's every number, and this is the check that says so
+    in figures rather than in prose.
+    """
+    docs: list[dict[str, Any]] = []
+    for path in (banked, emitted):
+        try:
+            doc = json.loads(path.read_text())
+        except (OSError, ValueError) as exc:
+            raise RecordEmissionError(
+                f"{path}: not readable as a filing record: {exc}") from exc
+        if not isinstance(doc, dict):
+            raise RecordEmissionError(
+                f"{path}: top level is {type(doc).__name__}, not an object")
+        docs.append(doc)
+    b_doc, e_doc = docs
+    b_slots = _slot_index(b_doc, str(banked))
+    e_slots = _slot_index(e_doc, str(emitted))
+    result = RecordComparison(
+        banked=str(banked), banked_sha256=sha256_of(banked),
+        emitted=str(emitted), emitted_sha256=sha256_of(emitted),
+        n_slots_banked=len(b_slots), n_slots_emitted=len(e_slots),
+        n_fields_compared=0)
+
+    def note(where: str, field: str, b_val: Any, e_val: Any) -> None:
+        delta: Optional[float] = None
+        if isinstance(b_val, (int, float)) and isinstance(e_val, (int, float)):
+            delta = abs(float(b_val) - float(e_val))
+            result.max_abs_delta = max(result.max_abs_delta, delta)
+            if delta <= VERIFY_TOLERANCE:
+                return
+        elif b_val == e_val:
+            return
+        result.deltas.append(RecordDelta(where=where, field=field, banked=b_val,
+                                         emitted=e_val, abs_delta=delta))
+
+    def compare(where: str, field: str, b_val: Any, e_val: Any) -> None:
+        result.n_fields_compared += 1
+        if isinstance(b_val, list) and isinstance(e_val, list):
+            if len(b_val) != len(e_val):
+                result.deltas.append(RecordDelta(
+                    where=where, field=field, banked=b_val, emitted=e_val))
+                return
+            for i, (b_i, e_i) in enumerate(zip(b_val, e_val)):
+                note(where, f"{field}[{i}]", b_i, e_i)
+            return
+        note(where, field, b_val, e_val)
+
+    for key in sorted(set(b_slots) | set(e_slots)):
+        b_slot, e_slot = b_slots.get(key), e_slots.get(key)
+        if b_slot is None or e_slot is None:
+            result.deltas.append(RecordDelta(
+                where=key, field="slot presence",
+                banked="present" if b_slot else "ABSENT",
+                emitted="present" if e_slot else "ABSENT"))
+            continue
+        for field in VERIFIED_SLOT_FIELDS:
+            if field in b_slot or field in e_slot:
+                compare(key, field, b_slot.get(field), e_slot.get(field))
+        for block_key in RACING_BLOCK_KEYS.values():
+            b_block, e_block = b_slot.get(block_key), e_slot.get(block_key)
+            if not isinstance(b_block, dict) or not isinstance(e_block, dict):
+                result.deltas.append(RecordDelta(
+                    where=f"{key}/{block_key}", field="block presence",
+                    banked=type(b_block).__name__,
+                    emitted=type(e_block).__name__))
+                continue
+            for field in VERIFIED_BLOCK_FIELDS:
+                if field in b_block or field in e_block:
+                    compare(f"{key}/{block_key}", field, b_block.get(field),
+                            e_block.get(field))
+            #  Provenance is compared by DIGEST, never by path: an absolute path
+            #  and a repo-relative one name the same artifact, and only the sha
+            #  says whether it is the same bytes.
+            for field in ("constants_source_sha256", "constants_readout_sha256"):
+                if field in b_block or field in e_block:
+                    compare(f"{key}/{block_key}", field, b_block.get(field),
+                            e_block.get(field))
+    return result
 
 
 # ---------------------------------------------------------------- selftest
@@ -6111,6 +7599,587 @@ def selftest() -> int:                                   # noqa: C901 — a chec
         check(FILED_PATHS is None and V21_ROOT is None,
               "no refused CLI combination left a pin or a root set")
 
+    print("== selftest 23: the SYMMETRIC STAR producer — the named gap, closed ==")
+
+    def _sym_doc(**overrides: Any) -> dict[str, Any]:
+        doc: dict[str, Any] = {
+            "schema": SCHEMA_SYMMETRIC_CONSTANTS_V1,
+            "generated": "2026-07-29",
+            "corpus": {"vintage": "v2.1", "manifest_sha256": CORPUS_SHA_V21},
+            "hub": {"model": HUB_MODEL, "site": HUB_SITE_OF_RECORD},
+            "family_of_record": FAMILY_OF_RECORD,
+            "columns": {
+                f"native::{FAMILY_OF_RECORD}": {
+                    "DERIVED": True, "anchor_c_8B": 0.8082,
+                    "symmetric": {
+                        "derivation": "c_M = â(8bL16 → M L_site) / c_8B "
+                                      "(synthetic selftest fixture)",
+                        "coefficients": {HUB_MODEL: 0.8082, "phi-4": 0.6000,
+                                         "qwen2.5-32b-instruct": 0.7000,
+                                         "qwen2.5-3b-instruct": 0.1000}}},
+                f"raw::{FAMILY_OF_RECORD}": {
+                    "DERIVED": True, "anchor_c_8B": 0.8365,
+                    "symmetric": {"derivation": "raw column",
+                                  "coefficients": {HUB_MODEL: 0.8365,
+                                                   "pythia-6.9b": 0.4000}}},
+                f"raw::{FAMILIES[0]}": {
+                    "DERIVED": False,
+                    "why": "the banked closed in-lineage anchor system did not "
+                           "solve — no anchor, no gauge"},
+            },
+        }
+        doc.update(overrides)
+        return doc
+
+    with _tempfile.TemporaryDirectory(prefix="symmetric_star_") as td23:
+        root23 = Path(td23)
+
+        def _w23(name: str, payload: Any) -> Path:
+            p = root23 / name
+            p.write_text(payload if isinstance(payload, str)
+                         else json.dumps(payload, indent=1))
+            return p
+
+        sym_path = _w23("constants.json", _sym_doc())
+        sym = load_symmetric_constants(sym_path)
+        check(sym.schema_name == SCHEMA_SYMMETRIC_CONSTANTS_V1
+              and len(sym.rows) == 6 and sym.sha256 == sha256_of(sym_path)
+              and sym.corpus_manifest_sha256 == CORPUS_SHA_V21,
+              f"a well-formed {SCHEMA_SYMMETRIC_CONSTANTS_V1} artifact loads: "
+              f"{len(sym.rows)} rows over {len(sym.columns)} columns, own sha "
+              f"carried, corpus vintage {sym.corpus_vintage!r}")
+        check(sym.derivation.startswith("c_M = â(8bL16"),
+              "the FAMILY-OF-RECORD column's derivation prose is quoted from the "
+              "artifact, never composed here")
+        hub_row = sym.row(HUB_MODEL, "native", FAMILY_OF_RECORD)
+        check(hub_row is not None and hub_row.registry == "hub"
+              and hub_row.site == HUB_SITE_OF_RECORD,
+              f"RAKE M34 — the hub {HUB_MODEL!r} is an allowed coefficient key "
+              f"(the gauge anchor is in the column by construction) and resolves "
+              f"through the HUB registry, recorded as such")
+        check(sym.row("phi-4", "native", FAMILY_OF_RECORD) is not None
+              and sym.row("phi-4", "raw", FAMILY_OF_RECORD) is None,
+              "a coefficient resolves IN ITS ARM only — prereg §3's arm rule is "
+              "no weaker for a scalar than for a map")
+        not_derived = sym.column("raw", FAMILIES[0])
+        check(not_derived is not None and not not_derived.derived
+              and any("COLUMN NOT DERIVED" in n for n in sym.notes),
+              "a DERIVED:false column is DATA, carried with its reason and "
+              "backing no coefficient — never read as zero")
+
+        pred23 = star_pair("phi-4", "qwen2.5-32b-instruct", sym)
+        assert isinstance(pred23, StarPrediction)
+        check(pred23.prediction_id
+              == f"star-prediction/phi-4→qwen2.5-32b-instruct/native-k128",
+              f"the E2 ID shape is emitted verbatim: {pred23.prediction_id}")
+        check(abs(pred23.predicted_full_precision - 0.42) < 1e-15
+              and pred23.predicted == round(0.42, FILED_DECIMALS),
+              f"â_star = c_A·c_B = {pred23.predicted_full_precision:.6f}, filed "
+              f"at {FILED_DECIMALS} dp as {pred23.predicted}")
+        check(pred23.band == [round(0.42 - FROZEN_BAND_HALF_WIDTH, FILED_DECIMALS),
+                              round(0.42 + FROZEN_BAND_HALF_WIDTH, FILED_DECIMALS)],
+              f"the band is the frozen ±{FROZEN_BAND_HALF_WIDTH} OF THE FILED "
+              f"VALUE, rounded to the same convention: {pred23.band}")
+        check(_check_filed_band(pred23.prediction_id, pred23.predicted,
+                                pred23.band) == pred23.band,
+              "and the filed pair survives the CONSUMER's own frozen-band check, "
+              "so a slot this tool emits can be scored by this tool")
+        _check_carve_out(pred23.prediction_id, pred23.predicted,
+                         pred23.magnitude_only)
+        check(not pred23.magnitude_only,
+              f"|{pred23.predicted:.4f}| >= {NEAR_ZERO_CARVE_OUT} → sign SCORED")
+        near23 = star_pair("qwen2.5-3b-instruct", "qwen2.5-3b-instruct", sym)
+        assert isinstance(near23, StarPrediction)
+        check(near23.magnitude_only and near23.predicted == 0.01,
+              f"|{near23.predicted:.4f}| < {NEAR_ZERO_CARVE_OUT} → "
+              f"MAGNITUDE-ONLY, on the same carve-out constant the other two "
+              f"columns use")
+        check(pred23.corpus_manifest_sha256 == CORPUS_SHA_V21,
+              "Addendum G §G2(a) — the corpus vintage rides the star â too")
+        rev23 = star_pair("qwen2.5-32b-instruct", "phi-4", sym)
+        assert isinstance(rev23, StarPrediction)
+        check(rev23.predicted == pred23.predicted
+              and rev23.predicted_full_precision
+              == pred23.predicted_full_precision,
+              "the symmetric star is direction-INVARIANT by construction "
+              "(c_A·c_B = c_B·c_A) — unlike the other two columns, and the "
+              "readout says so rather than leaving it to be noticed")
+        check(not any(f in StarPrediction.model_fields
+                      for f in ("observed", "verdict", "in_band", "a_hat")),
+              "a StarPrediction has no observed/verdict field — the filing path "
+              "cannot carry a score even by accident")
+        na23 = star_pair("phi-4", "pythia-6.9b", sym)
+        check(isinstance(na23, StarNotFilable)
+              and "NEVER proxied" in na23.reason,        # type: ignore[union-attr]
+              f"an instruct↔base pair resolves to the RAW arm, where phi-4 has "
+              f"no coefficient: N/A-AT-FILING, missing "
+              f"{getattr(na23, 'missing_sides', None)}")
+
+        for payload23, needle23, why23 in (
+                (_sym_doc(schema="symmetric-constants-extension/v2"),
+                 "not 'symmetric-constants-extension/v1'",
+                 "a DIFFERENT schema name HALTs (a v2 parsed as v1 would file "
+                 "numbers whose meaning moved under their names)"),
+                (_sym_doc(corpus={"vintage": "v2.1", "manifest_sha256": "nope"}),
+                 "not 64 lowercase hex",
+                 "a corpus tag that is not a digest HALTs (G2(a))"),
+                (_sym_doc(hub={"model": "3b", "site": 14}), "hub of record",
+                 "a foreign hub HALTs"),
+                (_sym_doc(hub={"model": HUB_MODEL, "site": 14}),
+                 "hub column of record",
+                 "a foreign hub SITE HALTs"),
+                (_sym_doc(columns={}), "not a non-empty",
+                 "an artifact with no columns HALTs"),
+                (_sym_doc(columns={"sideways::proc_k128": {"DERIVED": True}}),
+                 "not '<arm>::<family>'",
+                 "an unparseable column key HALTs"),
+                (_sym_doc(columns={f"native::{FAMILY_OF_RECORD}":
+                                   {"symmetric": {"coefficients": {"phi-4": 1}}}}),
+                 "not a boolean",
+                 "a column with no DERIVED flag HALTs — whether it solved is "
+                 "never inferred from the presence of coefficients"),
+                (_sym_doc(columns={f"native::{FAMILY_OF_RECORD}":
+                                   {"DERIVED": True}}), "carries no `symmetric`",
+                 "a DERIVED column with no symmetric block HALTs"),
+                (_sym_doc(columns={f"native::{FAMILY_OF_RECORD}": {
+                    "DERIVED": True,
+                    "symmetric": {"coefficients": {"phi-4": "six tenths"}}}}),
+                 "not a number", "a non-numeric coefficient HALTs"),
+                (_sym_doc(columns={f"native::{FAMILY_OF_RECORD}": {
+                    "DERIVED": True,
+                    "symmetric": {"coefficients": {"phi-4": None}}}}),
+                 "not a number", "a null coefficient HALTs"),
+                (_sym_doc(columns={f"native::{FAMILY_OF_RECORD}": {
+                    "DERIVED": True,
+                    "symmetric": {"coefficients": {"phi-4": float("nan")}}}}),
+                 "non-finite", "a non-finite coefficient is REFUSED, never "
+                               "banded"),
+                (_sym_doc(columns={f"native::{FAMILY_OF_RECORD}": {
+                    "DERIVED": True,
+                    "symmetric": {"coefficients": {"gpt2-xl": 0.5}}}}),
+                 "no site of record",
+                 "a model with no site of record HALTs (gpt2-xl is DEFERRED and "
+                 "has no candidate slot, so a constant for it is a lane "
+                 "disagreement)")):
+            try:
+                load_symmetric_constants(_w23("bad.json", payload23))
+                check(False, f"{why23} — must HALT")
+            except SymmetricConstantsError as exc:
+                check(needle23 in str(exc),
+                      f"{why23} [{needle23!r} in the halt]")
+        try:
+            load_symmetric_constants(root23 / "absent.json")
+            check(False, "an absent artifact must HALT")
+        except SymmetricConstantsError as exc:
+            check("absent" in str(exc),
+                  "an absent constants artifact HALTs rather than defaulting a "
+                  "single coefficient")
+        check(SCHEMA_SYMMETRIC_CONSTANTS_V1 in str(
+                  _symmetric_schema_halt(Path("x"), "why")),
+              "every symmetric-constants halt quotes the whole expected contract, "
+              "so a lane mismatch is legible from the error alone")
+        no_schema = load_symmetric_constants(_w23(
+            "no-schema.json", {k: v for k, v in _sym_doc().items()
+                               if k != "schema"}))
+        check(len(no_schema.rows) == 6,
+              "the `schema` key is OPTIONAL — the three artifacts already filed "
+              "against (batches 5/6/7) predate the name, and refusing them would "
+              "make the promotion unable to reproduce the records it must")
+        stringy = load_symmetric_constants(_w23(
+            "stringy.json", _sym_doc(columns={f"native::{FAMILY_OF_RECORD}": {
+                "DERIVED": True,
+                "symmetric": {"coefficients": {"phi-4": "0.6"}}}})))
+        row_s = stringy.row("phi-4", "native", FAMILY_OF_RECORD)
+        check(row_s is not None and row_s.c == 0.6,
+              "a coefficient serialized as a NUMERIC STRING is coerced exactly as "
+              "load_directional_constants coerces its own — the two lanes' "
+              "readers agree by construction, not by coincidence; a string that "
+              "is not a number still HALTs (above)")
+
+    print("== selftest 24: the even-spread rule and the slate policy ==")
+    ranks24, trail24 = spread_ranks(54, 9)
+    check(ranks24 == [1, 8, 14, 21, 28, 34, 41, 47, 54],
+          f"the batch-7 slate's own residual ranks reproduce exactly: {ranks24}")
+    check(len(trail24) == 9 and all(t.steps == 0 for t in trail24)
+          and [t.formula_rank for t in trail24] == ranks24,
+          "the placement trail records formula rank, assigned rank and steps for "
+          "every slot — a selection rule nobody can replay is a selection nobody "
+          "can audit")
+    ranks24b, trail24b = spread_ranks(59, 14)
+    check(ranks24b == [1, 5, 10, 14, 19, 23, 28, 32, 37, 41, 46, 50, 55, 59],
+          f"and batch 6's pure spread of 14 over 59 reproduces: {ranks24b}")
+    check(len(set(spread_ranks(9, 9)[0])) == 9,
+          "a spread that exactly fills its population assigns 9 distinct ranks")
+    small24, _ = spread_ranks(3, 3)
+    check(small24 == [1, 2, 3], f"a saturated spread is the identity: {small24}")
+    for n24, size24, why24 in ((3, 5, "more slots than population"),
+                               (10, 0, "a non-positive size")):
+        try:
+            spread_ranks(n24, size24)
+            check(False, f"{why24} must be refused")
+        except RecordEmissionError:
+            check(True, f"{why24} is refused by the spread rule")
+    pol24 = SlatePolicy(batch="batch-7", size=14,
+                        forced_hub="llama-3.1-405b-instruct",
+                        audit_set=("3b", "olmo2-7b-instruct",
+                                   "qwen2.5-32b-instruct",
+                                   "mixtral-8x7b-instruct-v0.1", "phi-4"))
+    check(pol24.n_spread == 9,
+          f"a policy forcing 5 of 14 leaves {pol24.n_spread} spread slots — the "
+          f"batch-7 split, derived rather than restated")
+    check(SlatePolicy(batch="b", size=14).n_spread == 14,
+          "and a policy forcing nothing spreads all 14 (batch 6's shape)")
+    for kwargs24, why24 in (
+            ({"batch": "b", "size": 14, "forced_hub": "x"},
+             "a forced hub with no audit set"),
+            ({"batch": "b", "size": 14, "audit_set": ("x",)},
+             "an audit set with no forced hub"),
+            ({"batch": "", "size": 14}, "an empty batch label"),
+            ({"batch": "b", "size": 0}, "a zero-slot ruling")):
+        try:
+            SlatePolicy(**kwargs24)                     # type: ignore[arg-type]
+            check(False, f"{why24} must be refused")
+        except Exception:                               # noqa: BLE001
+            check(True, f"{why24} is refused by SlatePolicy")
+
+    print("== selftest 25: the narrative sidecar — desk prose in, nothing invented ==")
+    with _tempfile.TemporaryDirectory(prefix="narrative_") as td25:
+        root25 = Path(td25)
+        check(load_narrative(None) == {},
+              "no sidecar means NO prose — and the record then NAMES its absence "
+              "rather than a tool composing a ruling")
+        good25 = root25 / "narrative.json"
+        good25.write_text(json.dumps({
+            "authority": "Desk ruling 2026-07-29", "selection_ruling": "…",
+            "disclosures": {"quad_hub_forcing": "…"},
+            "flag_clauses": {"E4_1_artifact_exposed": "shared residual frame…"}}))
+        loaded25 = load_narrative(good25)
+        check(sorted(loaded25) == ["authority", "disclosures", "flag_clauses",
+                                   "selection_ruling"],
+              f"a well-formed sidecar loads its named passages: {sorted(loaded25)}")
+        for payload25, needle25, why25 in (
+                ({"ruling": "…"}, "unrecognized key",
+                 "an unrecognized key HALTs — desk prose the record silently "
+                 "dropped is worse than prose the record refuses"),
+                ({"disclosures": "a string"}, "not an object",
+                 "a scalar where named passages belong HALTs")):
+            bad25 = root25 / "bad.json"
+            bad25.write_text(json.dumps(payload25))
+            try:
+                load_narrative(bad25)
+                check(False, f"{why25} — must HALT")
+            except RecordEmissionError as exc:
+                check(needle25 in str(exc), f"{why25} [{needle25!r}]")
+        try:
+            load_narrative(root25 / "absent.json")
+            check(False, "pointing --narrative at a missing file must HALT")
+        except RecordEmissionError as exc:
+            check("Omit --narrative entirely" in str(exc),
+                  "a MISSING sidecar HALTs and says how to mean 'no prose' — "
+                  "pointing at a file that is not there is never the same thing "
+                  "as supplying none")
+
+    print("== selftest 26: --emit-record end to end, and the checks it cannot skip ==")
+    with _tempfile.TemporaryDirectory(prefix="emit_record_") as td26:
+        root26 = Path(td26)
+        #  A two-model synthetic world: one native pair, both columns complete,
+        #  banked maps and vectors written so the composed column resolves. The
+        #  point is the EMISSION's proof chain, not the algebra (selftests 1-8).
+        d_hub, d_x, d_y, k26 = 48, 32, 40, 16
+        rng26 = np.random.default_rng(A8_SEED + 26)
+        collection26 = root26 / "collection"
+        for model, dim in (("phi-4", d_x), ("qwen2.5-32b-instruct", d_y)):
+            site = SITE_OF_RECORD[model]
+            fits = collection26 / f"fits_v21_{model}"
+            fits.mkdir(parents=True, exist_ok=True)
+            tm26 = _proc_map(rng26, d_hub, dim, k26, src_norm=5.0,
+                             tgt_norm=2.0, scale=1.0)
+            np.savez(fits / f"fit_8bL{HUB_SITE_OF_RECORD}__{model}L{site}"
+                            f"_native_{FAMILY_OF_RECORD}.npz",
+                     **{key: getattr(tm26, key) for key in
+                        ("va", "vb", "omega")},
+                     scale=np.float64(tm26.scale),
+                     src_norm=np.float64(tm26.src_norm),
+                     tgt_norm=np.float64(tm26.tgt_norm),
+                     kind=np.str_(tm26.kind))
+            vecs = collection26 / "vectors" / model
+            vecs.mkdir(parents=True, exist_ok=True)
+            np.savez(vecs / f"entropy_gradient_{model}_L{site}.npz",
+                     **{f"entropy_gradient_L{site}": unit(
+                         rng26.standard_normal(dim)).astype(np.float32)})
+        corpus26 = collection26 / "corpus"
+        corpus26.mkdir(parents=True, exist_ok=True)
+        manifest26 = corpus26 / "corpus_manifest.json"
+        manifest26.write_text("{}")
+
+        pairs26 = root26 / "pairs.json"
+        pairs26.write_text(json.dumps({"pairs": [
+            {"pair_id": "phi-4L19 <-> qwen2.5-32b-instructL46",
+             "model_a": "phi-4", "site_a": 19,
+             "model_b": "qwen2.5-32b-instruct", "site_b": 46}]}))
+        slate26 = root26 / "slate.json"
+        slate26.write_text(json.dumps({
+            "ranking_key": "synthetic selftest ranking",
+            "remaining_ranked": [
+                {"rank": 1, "pair_id": "phi-4L19->qwen2.5-32b-instructL46",
+                 "source_model": "phi-4", "target_model": "qwen2.5-32b-instruct",
+                 "arm": "native", "quad_hub_pair": False,
+                 "touches_audit_hub": [], "touches_audit_set": []}]}))
+        gate26 = root26 / "gate.json"
+        gate26.write_text(json.dumps({"rows": [
+            {"pair_id": "phi-4L19 <-> qwen2.5-32b-instructL46",
+             "model_a": "phi-4", "model_b": "qwen2.5-32b-instruct",
+             "gate_abs_cos": 0.02, "gate_null_q95": 0.04,
+             "exposure_multiple": 0.5, "EXPOSED_E41_v21": False,
+             "IS_NEW_ROW": True}]}))
+        sym26 = root26 / "sym.json"
+        sym26.write_text(json.dumps({
+            "corpus": {"vintage": "v2.1", "manifest_sha256": CORPUS_SHA_V21},
+            "columns": {f"native::{FAMILY_OF_RECORD}": {
+                "DERIVED": True,
+                "symmetric": {"derivation": "synthetic",
+                              "coefficients": {"phi-4": 0.6,
+                                               "qwen2.5-32b-instruct": 0.7}}}}}))
+        dir26 = root26 / "dir.json"
+        dir26.write_text(json.dumps(_constants_doc(constants=[
+            {"model": "phi-4", "c_out": 0.6, "c_in": 0.5},
+            {"model": "qwen2.5-32b-instruct", "c_out": 0.8, "c_in": 0.7}])))
+        out26 = root26 / "record.json"
+
+        #  The composed column needs the maps and vectors to RESOLVE, which they
+        #  only do under a verified v2.1 root; the fixture's manifest cannot hash
+        #  to the real vintage, so the root is set with its own sha asserted.
+        emitted26: Optional[EmittedRecord] = None
+        try:
+            with v21_root_scope(collection26,
+                               expected_corpus_sha=sha256_of(manifest26)):
+                emitted26 = emit_filing_record(
+                    policy=SlatePolicy(batch="selftest-26", size=1),
+                    slate=slate26, gate_column=gate26,
+                    star=load_symmetric_constants(sym26),
+                    directional=load_directional_constants(dir26),
+                    pairs_json=pairs26, out=out26, repo_root=root26)
+        except ComposedPathError as exc:                # pragma: no cover
+            check(False, f"the synthetic emission should resolve: {exc}")
+        if emitted26 is not None:
+            check(emitted26.n_slots == 1 and emitted26.n_forced == 0
+                  and emitted26.n_spread == 1,
+                  f"one slot emitted, spread rule applied: "
+                  f"{emitted26.n_slots} slot(s)")
+            check(emitted26.n_blocks_preflighted == 3
+                  and emitted26.n_blocks_parsed == 3,
+                  f"ALL THREE columns filed and both proofs ran over all three: "
+                  f"{emitted26.n_blocks_preflighted} pre-flighted / "
+                  f"{emitted26.n_blocks_parsed} parsed")
+            doc26 = json.loads(out26.read_text())
+            slot26 = doc26["predictions"][0]
+            check(sorted(k for k in slot26 if k.endswith("_prediction"))
+                  == sorted(RACING_BLOCK_KEYS.values()),
+                  f"the block keys are the CONSUMER's own RACING_BLOCK_KEYS: "
+                  f"{sorted(k for k in slot26 if k.endswith('_prediction'))}")
+            for predictor26, key26 in RACING_BLOCK_KEYS.items():
+                block26 = slot26[key26]
+                check(all(f in block26 for f in
+                          ("id", "predicted", "band", "magnitude_only")),
+                      f"the {predictor26} block carries the SCORER's filing "
+                      f"contract keys FROM EMISSION (rake M33) — "
+                      f"{block26['id']}")
+            check(slot26["composed_prediction"]["predicted"]
+                  == slot26["composed_prediction"]["a_comp"],
+                  "the composed block's contract key and the producing readout's "
+                  "own `a_comp` carry IDENTICAL values, kept beside each other "
+                  "as provenance (the batch-4 record carried only the readout "
+                  "name, which is why it needed a derived scoring input)")
+            check(slot26["star_prediction"]["predicted"] == round(0.42, 4)
+                  and slot26["star_prediction"]["band"] == [0.37, 0.47],
+                  f"the STAR block is the tool's own product now: "
+                  f"{slot26['star_prediction']['predicted']} band "
+                  f"{slot26['star_prediction']['band']}")
+            check(doc26["batch"] == "selftest-26",
+                  "the batch label is the one the caller named — never defaulted "
+                  "(three banked records carry a stale label because a per-batch "
+                  "copy of this logic defaulted one)")
+            check("NOT SUPPLIED AT EMISSION" in doc26["authority"]
+                  and "NOT_SUPPLIED_AT_EMISSION" in doc26["disclosures"],
+                  "with no narrative the record NAMES its missing prose in every "
+                  "prose slot — this tool composes no ruling and invents no "
+                  "disclosure")
+            check(doc26["emission"]["EMITTED_THROUGH_THE_TOOL"] is True
+                  and "named_gap_CLOSED" in doc26["emission"],
+                  "the emission block asserts M33(b) and records that the star "
+                  "column's named gap is closed")
+            #  Re-emission over a filed record is refused (a filed sha is
+            #  ledgered), and the comparison of a record with ITSELF is the
+            #  zero-delta anchor for --verify-against.
+            try:
+                with v21_root_scope(collection26,
+                                    expected_corpus_sha=sha256_of(manifest26)):
+                    emit_filing_record(
+                        policy=SlatePolicy(batch="selftest-26", size=1),
+                        slate=slate26, gate_column=gate26,
+                        star=load_symmetric_constants(sym26),
+                        directional=load_directional_constants(dir26),
+                        pairs_json=pairs26, out=out26, repo_root=root26)
+                check(False, "re-emitting over an existing record must be refused")
+            except RecordEmissionError as exc:
+                check("already exists" in str(exc),
+                      "re-emission over an existing record is REFUSED by default "
+                      "— a filed record's sha is ledgered")
+            same26 = compare_filing_records(out26, out26)
+            check(same26.agree and same26.max_abs_delta == 0.0
+                  and same26.n_fields_compared > 0,
+                  f"a record compares to ITSELF at max |Δ| = "
+                  f"{same26.max_abs_delta:.1e} over "
+                  f"{same26.n_fields_compared} field(s) — the anchor that proves "
+                  f"the comparison reads anything at all")
+            #  And it can FAIL: a hand-moved number must be caught (rake M19(c)'s
+            #  lesson in miniature — a check whose failing branch never runs is
+            #  not known to work).
+            moved26 = root26 / "record-moved.json"
+            doc_moved = json.loads(out26.read_text())
+            doc_moved["predictions"][0]["star_prediction"]["predicted"] = 0.9999
+            moved26.write_text(json.dumps(doc_moved, indent=1))
+            diff26 = compare_filing_records(out26, moved26)
+            check(not diff26.agree
+                  and any(d.field == "predicted" for d in diff26.deltas),
+                  f"and a single moved number is CAUGHT: "
+                  f"{len(diff26.deltas)} disagreement(s), max |Δ| "
+                  f"{diff26.max_abs_delta:.4f}")
+            #  A record whose band disagrees with the frozen rule cannot be
+            #  emitted at all — the consumer's own check runs before the write.
+            bad_sym26 = root26 / "sym-bad.json"
+            bad_sym26.write_text(json.dumps({
+                "corpus": {"vintage": "v2.1",
+                           "manifest_sha256": CORPUS_SHA_V21},
+                "columns": {f"native::{FAMILY_OF_RECORD}": {
+                    "DERIVED": True,
+                    "symmetric": {"coefficients": {"phi-4": 0.6}}}}}))
+            try:
+                with v21_root_scope(collection26,
+                                    expected_corpus_sha=sha256_of(manifest26)):
+                    emit_filing_record(
+                        policy=SlatePolicy(batch="selftest-26b", size=1),
+                        slate=slate26, gate_column=gate26,
+                        star=load_symmetric_constants(bad_sym26),
+                        directional=load_directional_constants(dir26),
+                        pairs_json=pairs26, out=root26 / "record-b.json",
+                        repo_root=root26)
+                check(False, "a slate slot whose star column is N/A must HALT")
+            except RecordEmissionError as exc:
+                check("has no filable prediction" in str(exc),
+                      "a slate slot whose column is N/A-AT-FILING HALTs: either "
+                      "the column's input is incomplete or the slate names an "
+                      "unfilable pair, and neither is filed through")
+            #  The forced-set assertion, both ways.
+            try:
+                with v21_root_scope(collection26,
+                                    expected_corpus_sha=sha256_of(manifest26)):
+                    emit_filing_record(
+                        policy=SlatePolicy(batch="selftest-26c", size=1,
+                                           forced_hub="llama-3.1-405b-instruct",
+                                           audit_set=("phi-4",)),
+                        slate=slate26, gate_column=gate26,
+                        star=load_symmetric_constants(sym26),
+                        directional=load_directional_constants(dir26),
+                        pairs_json=pairs26, out=root26 / "record-c.json",
+                        repo_root=root26)
+                check(False, "a forced pair absent from the population must HALT")
+            except RecordEmissionError as exc:
+                check("audit enumeration" in str(exc)
+                      and "orientation-dependent" in str(exc),
+                      "a protocol-forced pair the population does not offer HALTs, "
+                      "and the message names the orientation trap")
+            quad_slate26 = root26 / "slate-quad.json"
+            quad_slate26.write_text(json.dumps({"remaining_ranked": [
+                {"rank": 1, "pair_id": "phi-4L19->qwen2.5-32b-instructL46",
+                 "source_model": "phi-4", "target_model": "qwen2.5-32b-instruct",
+                 "arm": "native", "quad_hub_pair": True,
+                 "touches_audit_hub": [], "touches_audit_set": []}]}))
+            try:
+                with v21_root_scope(collection26,
+                                    expected_corpus_sha=sha256_of(manifest26)):
+                    emit_filing_record(
+                        policy=SlatePolicy(batch="selftest-26d", size=1),
+                        slate=quad_slate26, gate_column=gate26,
+                        star=load_symmetric_constants(sym26),
+                        directional=load_directional_constants(dir26),
+                        pairs_json=pairs26, out=root26 / "record-d.json",
+                        repo_root=root26)
+                check(False, "an unfiled quad-hub pair under a pure spread must "
+                             "HALT")
+            except RecordEmissionError as exc:
+                check("would drop an audit-set leg" in str(exc),
+                      "a ruling that forces NOTHING is checked against the data: "
+                      "a still-unfiled §3 audit pair HALTs rather than being "
+                      "silently dropped by the spread (batch 6's own check)")
+            dup_slate26 = root26 / "slate-dup.json"
+            dup_slate26.write_text(json.dumps({"remaining_ranked": [
+                {"rank": 1, "pair_id": "a", "source_model": "phi-4",
+                 "target_model": "qwen2.5-32b-instruct", "arm": "native"},
+                {"rank": 1, "pair_id": "b", "source_model": "phi-4",
+                 "target_model": "qwen2.5-32b-instruct", "arm": "native"}]}))
+            try:
+                _slate_rows(dup_slate26)
+                check(False, "a duplicated slate rank must HALT")
+            except RecordEmissionError as exc:
+                check("duplicate rank" in str(exc) and "M18" in str(exc),
+                      "a duplicated rank in the ranked population HALTs (rake "
+                      "M18) — the spread rule would place two slots on one row")
+            no_gate26 = root26 / "gate-empty.json"
+            no_gate26.write_text(json.dumps({"rows": [
+                {"model_a": "3b", "model_b": "qwen-7b",
+                 "EXPOSED_E41_v21": False}]}))
+            try:
+                with v21_root_scope(collection26,
+                                    expected_corpus_sha=sha256_of(manifest26)):
+                    emit_filing_record(
+                        policy=SlatePolicy(batch="selftest-26e", size=1),
+                        slate=slate26, gate_column=no_gate26,
+                        star=load_symmetric_constants(sym26),
+                        directional=load_directional_constants(dir26),
+                        pairs_json=pairs26, out=root26 / "record-e.json",
+                        repo_root=root26)
+                check(False, "a slot with no gate row must HALT")
+            except RecordEmissionError as exc:
+                check("has not been through it" in str(exc),
+                      "a slot with no E4.1 gate row HALTs — the gate is a "
+                      "STANDING pre-filing gate and a slot without one has not "
+                      "passed it")
+
+    print("== selftest 27: --emit-record's CLI refusals ==")
+    with _tempfile.TemporaryDirectory(prefix="emit_cli_") as td27:
+        root27 = Path(td27)
+        stub27 = root27 / "stub.json"
+        stub27.write_text("{}")
+        for argv27, why27 in (
+                (["--emit-record"], "--emit-record with no inputs"),
+                (["--emit-record", "--star-constants", str(stub27),
+                  "--directional-constants", str(stub27), "--slate", str(stub27),
+                  "--gate-column", str(stub27), "--batch", "b",
+                  "--slate-size", "1", "--out", str(root27 / "r.json"),
+                  "--gate"], "--emit-record beside --gate"),
+                (["--emit-record", "--star-constants", str(stub27),
+                  "--directional-constants", str(stub27), "--slate", str(stub27),
+                  "--gate-column", str(stub27), "--batch", "b",
+                  "--slate-size", "1", "--out", str(root27 / "r.json"),
+                  "--forced-hub", "x"], "--forced-hub with no --audit-set"),
+                (["--candidates", "--slate", str(stub27)],
+                 "--slate without --emit-record"),
+                (["--candidates", "--batch", "b"],
+                 "--batch without --emit-record"),
+                (["--candidates", "--star-out", str(root27 / "s.json")],
+                 "--star-out with no --star-constants"),
+                (["--star-constants", str(stub27)],
+                 "--star-constants with no slots to compute")):
+            try:
+                main(argv27)
+                check(False, f"{why27} — argparse must refuse")
+            except SystemExit as exc:
+                check(exc.code == 2, f"{why27} is refused (argparse exit "
+                                     f"{exc.code})")
+        check(FILED_PATHS is None and V21_ROOT is None,
+              "and no refused emission combination left a pin or a root set")
+
     print(f"\nselftest: {len(failures)} failure(s)")
     return 1 if failures else 0
 
@@ -6179,6 +8248,74 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     help="write the directional readout JSON here. A SEPARATE "
                          "artifact from --out on purpose: the composed "
                          "readout's shape does not move for the new column.")
+    ap.add_argument("--star-constants", type=Path, default=None,
+                    help=f"a {SCHEMA_SYMMETRIC_CONSTANTS_V1} artifact of "
+                         f"per-model symmetric coefficients c_M (prereg §3). "
+                         f"With --candidates or --source-model/--target-model it "
+                         f"emits the SYMMETRIC STAR column: "
+                         f"star-prediction/<src>→<tgt>/<arm>-k128, predicted = "
+                         f"c_src · c_tgt at {FILED_DECIMALS} dp with the frozen "
+                         f"±.05 band of the filed value. The column's TERMS are "
+                         f"untouched (Addendum H item 2) — only the arithmetic's "
+                         f"home moved into the tool.")
+    ap.add_argument("--star-out", type=Path, default=None,
+                    help="write the symmetric-star readout JSON here. A SEPARATE "
+                         "artifact from --out and --directional-out, for the "
+                         "same reason: no existing readout's shape moves so a "
+                         "column can arrive.")
+    ap.add_argument("--emit-record", action="store_true",
+                    help="EMIT A RACING FILING RECORD (rake M33(b)): all three "
+                         "predictor columns produced in-process, the selection "
+                         "rule applied and proved, every block pre-flighted "
+                         "through the CONSUMER's own band/carve-out checks and "
+                         "the written record re-parsed before this returns. "
+                         "Requires --star-constants, --directional-constants, "
+                         "--slate, --gate-column, --batch and --out.")
+    ap.add_argument("--slate", type=Path, default=None,
+                    help="the DESK's ranked-slate artifact (its "
+                         "`remaining_ranked` list is the population of record). "
+                         "This tool reads it; it never re-ranks and never "
+                         "re-derives a population.")
+    ap.add_argument("--gate-column", type=Path, default=None,
+                    help="this batch's E4.1 naive-transplant gate column — the "
+                         "verdict of record. Every filed slot must have a row in "
+                         "it; a slot with no gate row has not been through the "
+                         "standing pre-filing gate.")
+    ap.add_argument("--batch", default=None,
+                    help="the batch label of record (e.g. 'batch-8'). REQUIRED "
+                         "with --emit-record and never defaulted: three banked "
+                         "records carry a stale label because a per-batch copy "
+                         "of the emitter did default it.")
+    ap.add_argument("--slate-size", type=int, default=None,
+                    help="how many slots the ruling files (14 for batches 5-7)")
+    ap.add_argument("--forced-hub", default=None,
+                    help="an audit hub whose prereg §3 audit pairs are "
+                         "PROTOCOL-FORCED into the slate. Needs --audit-set; the "
+                         "forced set is asserted to BE that enumeration by model "
+                         "identity and orientation, or the emission HALTs.")
+    ap.add_argument("--audit-set", default=None,
+                    help="comma list of prereg §3's audit-set models, for "
+                         "--forced-hub")
+    ap.add_argument("--narrative", type=Path, default=None,
+                    help="a JSON sidecar of the DESK's PROSE (ruling, authority, "
+                         "disclosures, the frozen E4.1 clause). Merged at NAMED "
+                         "keys only; an unrecognized key HALTs. Omit it and the "
+                         "record NAMES its prose as not supplied — this tool "
+                         "composes no ruling and invents no disclosure.")
+    ap.add_argument("--verify-against", type=Path, default=None,
+                    help="after emitting, compare the new record to this BANKED "
+                         "one on the NUMBERS AND SLOT IDENTITIES ONLY "
+                         "(timestamps and prose excluded by construction). "
+                         "EXITS NONZERO on any disagreement — the reproduction "
+                         "proof for a moved producer.")
+    ap.add_argument("--overwrite-record", action="store_true",
+                    help="permit replacing an existing filing record — a "
+                         "deliberate desk act, never the default (a filed "
+                         "record's sha is ledgered)")
+    ap.add_argument("--repo-root", type=Path, default=None,
+                    help="root the record's provenance paths are relativized "
+                         "against (default: cwd, which is where the data tree's "
+                         "relative `outputs/` already resolves from)")
     ap.add_argument("--score-record", type=Path, default=None,
                     help="a FILED prediction record to score. Requires "
                          "--observed; never runs at filing time.")
@@ -6211,7 +8348,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     help="DIAGNOSTIC override of the applicable arm; the filing "
                          "path never overrides (draft E1 forbids arm proxying)")
     ap.add_argument("--out", type=Path, default=None,
-                    help="write the readout JSON here (parents created). Never "
+                    help="write the readout JSON here (parents created). Under "
+                         "--emit-record this names the FILING RECORD instead and "
+                         "the composed readout is NOT written — one path, one "
+                         "artifact (each column has its own out-flag). Never "
                          "point this inside outputs/ — this tool is read-only "
                          "over the data tree.")
     args = ap.parse_args(argv)
@@ -6282,17 +8422,72 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "empty, which would look like 'no slots file' rather than 'no "
             "constants were supplied'.")
     if (args.directional_constants is not None
-            and not (args.candidates or args.source_model)):
+            and not (args.candidates or args.source_model
+                     or args.emit_record)):
         ap.error(
-            "--directional-constants needs --candidates or "
+            "--directional-constants needs --candidates, --emit-record or "
             "--source-model/--target-model — it names the constants, not the "
             "slots to compute.")
+    if args.star_out is not None and args.star_constants is None:
+        ap.error(
+            "--star-out needs --star-constants: the symmetric star column is "
+            f"COMPUTED FROM a {SCHEMA_SYMMETRIC_CONSTANTS_V1} artifact and is "
+            "never emitted empty, which would look like 'no slots file' rather "
+            "than 'no constants were supplied'.")
+    if (args.star_constants is not None
+            and not (args.candidates or args.source_model
+                     or args.emit_record)):
+        ap.error(
+            "--star-constants needs --candidates, --emit-record or "
+            "--source-model/--target-model — it names the constants, not the "
+            "slots to compute.")
+    #  EMISSION IS A ONE-WAY ACT and every input to it is named explicitly.
+    #  Nothing here is defaulted: a filing record whose batch label, slate,
+    #  gate column or constants were guessed is a record nobody can audit, and
+    #  three banked records carry a stale batch label because a per-batch copy of
+    #  this logic defaulted one.
+    if args.emit_record:
+        missing = [flag for flag, value in
+                   (("--star-constants", args.star_constants),
+                    ("--directional-constants", args.directional_constants),
+                    ("--slate", args.slate),
+                    ("--gate-column", args.gate_column),
+                    ("--batch", args.batch),
+                    ("--slate-size", args.slate_size),
+                    ("--out", args.out)) if value is None]
+        if missing:
+            ap.error(
+                f"--emit-record needs {', '.join(missing)}. A filing record is "
+                f"emitted ONCE, its sha is ledgered and its bands never move, so "
+                f"every input is named explicitly and none is defaulted.")
+        if args.gate:
+            ap.error(
+                "--emit-record and --gate are MUTUALLY EXCLUSIVE. The E1 gate is "
+                "a fixed-vintage proof ABOUT THE ARCHIVE and asserts resolution "
+                "parity against the archive's own v1 npz files; a filing "
+                "emission runs on the go-forward vintage. Run the gate on its "
+                "own — it is a precondition of filing, not a part of it.")
+        if (args.forced_hub is None) != (args.audit_set is None):
+            ap.error(
+                "--forced-hub and --audit-set go together: the protocol forcing "
+                "is named by (hub, audit set) IDENTITY — a protocol fact — and "
+                "half of that names nothing the emitter can check.")
+    for flag, value in (("--slate", args.slate),
+                        ("--gate-column", args.gate_column),
+                        ("--batch", args.batch),
+                        ("--forced-hub", args.forced_hub),
+                        ("--audit-set", args.audit_set),
+                        ("--narrative", args.narrative),
+                        ("--verify-against", args.verify_against),
+                        ("--slate-size", args.slate_size)):
+        if value is not None and not args.emit_record:
+            ap.error(f"{flag} only means anything with --emit-record.")
 
     if not (args.gate or args.candidates or args.resolution_sweep
-            or args.source_model or args.score_record):
+            or args.source_model or args.score_record or args.emit_record):
         raise SystemExit("pass --selftest, --gate, --candidates, "
                          "--resolution-sweep, --source-model/--target-model, "
-                         "or --score-record/--observed")
+                         "--emit-record, or --score-record/--observed")
 
     directional_constants: Optional[DirectionalConstants] = None
     if args.directional_constants is not None:
@@ -6304,6 +8499,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             #  is not the contract this module consumes. Reported cleanly and
             #  nonzero so the derivation lane can be reconciled from the error.
             print(f"\nDIRECTIONAL CONSTANTS HALT — {exc}")
+            return 1
+
+    star_constants: Optional[SymmetricConstants] = None
+    if args.star_constants is not None:
+        try:
+            star_constants = load_symmetric_constants(args.star_constants)
+        except SymmetricConstantsError as exc:
+            #  An EXPECTED halt with a meaningful message: the constants artifact
+            #  is not the contract this module consumes. Reported cleanly and
+            #  nonzero so the desk's constants lane can be reconciled from it.
+            print(f"\nSYMMETRIC CONSTANTS HALT — {exc}")
             return 1
 
     if args.v21_root is not None:
@@ -6411,11 +8617,69 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(f"\ncandidates: {len(computed.predictions)}/{total} filable, "
               f"{len(computed.na_at_filing)}/{total} N/A-AT-FILING")
 
+    #  THE SYMMETRIC STAR COLUMN (prereg §3). Emitted only when the constants
+    #  artifact is supplied, into its OWN readout: nothing above this point
+    #  changes shape, and the column's TERMS are untouched (Addendum H item 2).
+    star_readout: Optional[StarReadout] = None
+    if star_constants is not None and (args.candidates or args.source_model):
+        star_readout = StarReadout(
+            generated=date.today().isoformat(), family=args.family,
+            constants_source=star_constants.path,
+            constants_source_sha256=star_constants.sha256,
+            constants_corpus_manifest_sha256=(
+                star_constants.corpus_manifest_sha256),
+            constants_derivation=star_constants.derivation,
+            constants_notes=list(star_constants.notes))
+        if args.candidates:
+            computed_star = run_star(star_constants, args.family, args.pairs_json)
+            star_readout.predictions.extend(computed_star.predictions)
+            star_readout.na_at_filing.extend(computed_star.na_at_filing)
+        if args.source_model:
+            if not args.target_model:
+                raise SystemExit("--source-model needs --target-model")
+            one_star = star_pair(args.source_model, args.target_model,
+                                 star_constants, family=args.family,
+                                 arm=args.arm)
+            if isinstance(one_star, StarNotFilable):
+                star_readout.na_at_filing.append(one_star)
+            else:
+                star_readout.predictions.append(one_star)
+        total_star = (len(star_readout.predictions)
+                      + len(star_readout.na_at_filing))
+        print(f"\n{'symmetric star slot (prereg §3)':52s} {'arm':7s} "
+              f"{'c_src':>9s} {'c_tgt':>9s} {'â_star':>9s} "
+              f"{'band lo':>9s} {'band hi':>9s} verdict")
+        for pred in star_readout.predictions:
+            print(f"{pred.pair_id:52s} {pred.arm:7s} "
+                  f"{pred.c_source:+9.4f} {pred.c_target:+9.4f} "
+                  f"{pred.predicted:+9.4f} "
+                  f"{pred.band[0]:+9.4f} {pred.band[1]:+9.4f} "
+                  + ("MAGNITUDE-ONLY " if pred.magnitude_only else "")
+                  + ("FLAGGED" if pred.flags else "filable"))
+        for na_star in star_readout.na_at_filing:
+            print(f"{na_star.pair_id:52s} {na_star.arm:7s} {'—':>9s} {'—':>9s} "
+                  f"{'—':>9s} {'—':>9s} {'—':>9s} N/A-AT-FILING "
+                  f"({', '.join(na_star.missing_sides)})")
+        for note in star_readout.constants_notes:
+            print(f"  CONSTANTS NOTE: {note}")
+        print(f"\nsymmetric star: {len(star_readout.predictions)}/{total_star} "
+              f"filable, {len(star_readout.na_at_filing)}/{total_star} "
+              f"N/A-AT-FILING; constants {star_constants.path} sha "
+              f"{star_constants.sha256[:12]}…, corpus "
+              f"{star_constants.corpus_manifest_sha256[:8]}…")
+        if args.star_out:
+            args.star_out.parent.mkdir(parents=True, exist_ok=True)
+            args.star_out.write_text(star_readout.model_dump_json(indent=1))
+            logger.info("wrote %s (%d star prediction(s), %d N/A-at-filing)",
+                        args.star_out, len(star_readout.predictions),
+                        len(star_readout.na_at_filing))
+
     #  THE DIRECTIONAL COLUMN (Addendum 2026-07-29-H). Emitted only when the
     #  constants readout is supplied, into its OWN readout: nothing above this
     #  point changes shape, and the symmetric star column is untouched.
     directional_readout: Optional[DirectionalReadout] = None
-    if directional_constants is not None:
+    if directional_constants is not None and (args.candidates
+                                              or args.source_model):
         directional_readout = DirectionalReadout(
             generated=date.today().isoformat(), family=args.family,
             constants_readout=directional_constants.path,
@@ -6490,6 +8754,74 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             readout.predictions.append(one)
             print(f"{one.pair_id} [{one.arm}::{one.family}] "
                   f"â_comp = {one.a_comp:+.17g}")
+
+    #  EMITTING THE FILING RECORD (rake M33(b)). Runs after every column's own
+    #  mode above, so a single invocation can both print the columns and file.
+    if args.emit_record:
+        assert (star_constants is not None
+                and directional_constants is not None)      # argparse enforced
+        try:
+            slate_doc = json.loads(args.slate.read_text())
+            ranking_key = slate_doc.get("ranking_key")
+            policy = SlatePolicy(
+                batch=args.batch, size=args.slate_size,
+                forced_hub=args.forced_hub,
+                audit_set=tuple(m.strip() for m in args.audit_set.split(",")
+                                if m.strip()) if args.audit_set else (),
+                **({} if not isinstance(ranking_key, str)
+                   else {"ranking_key": ranking_key}))
+            emitted = emit_filing_record(
+                policy=policy, slate=args.slate, gate_column=args.gate_column,
+                star=star_constants, directional=directional_constants,
+                pairs_json=args.pairs_json, out=args.out, family=args.family,
+                narrative=load_narrative(args.narrative),
+                repo_root=args.repo_root, overwrite=args.overwrite_record)
+        except (RecordEmissionError, ScoringError, ValueError) as exc:
+            #  An EXPECTED halt: the ruling, the slate and the data disagree, or a
+            #  block would have violated the consumer's own contract. Reported
+            #  cleanly and nonzero — nothing partial is left on disk beyond the
+            #  file the write step may already have produced, which the parse
+            #  proof would then have refused.
+            print(f"\nEMISSION HALT — {exc}")
+            return 1
+        print(f"\nEMITTED {emitted.path}\nrecord sha256 {emitted.sha256}")
+        print(f"batch {emitted.batch}: {emitted.n_slots} slot(s) = "
+              f"{emitted.n_forced} PROTOCOL-FORCED + {emitted.n_spread} spread "
+              f"over residual N={emitted.population_n_residual} "
+              f"(remaining N={emitted.population_n_remaining})")
+        print(f"pre-flight {emitted.n_blocks_preflighted} block(s) through the "
+              f"consumer's own checks · parse proof {emitted.n_blocks_parsed} "
+              f"block(s) over {emitted.n_slots} slot(s)")
+        prose = (", ".join(emitted.narrative_keys_merged)
+                 if emitted.narrative_keys_merged
+                 else "NONE — the record NAMES its missing prose")
+        print(f"desk prose supplied: {prose}")
+        for warning in emitted.warnings:
+            print(f"  WARNING: {warning}")
+        if args.verify_against is not None:
+            try:
+                cmp_result = compare_filing_records(args.verify_against, args.out)
+            except RecordEmissionError as exc:
+                print(f"\nVERIFY HALT — {exc}")
+                return 1
+            print(f"\nVERIFY AGAINST {cmp_result.banked}")
+            print(f"  banked sha {cmp_result.banked_sha256[:12]}… "
+                  f"({cmp_result.n_slots_banked} slots) vs emitted "
+                  f"{cmp_result.emitted_sha256[:12]}… "
+                  f"({cmp_result.n_slots_emitted} slots)")
+            print(f"  {cmp_result.n_fields_compared} number/identity field(s) "
+                  f"compared, max |Δ| = {cmp_result.max_abs_delta:.3e}, "
+                  f"tolerance {VERIFY_TOLERANCE:.0e}")
+            for excluded in cmp_result.excluded:
+                print(f"  EXCLUDED: {excluded}")
+            for delta in cmp_result.deltas:
+                print(f"  DISAGREES {delta.where} :: {delta.field} — banked "
+                      f"{delta.banked!r} vs emitted {delta.emitted!r}"
+                      + ("" if delta.abs_delta is None
+                         else f" (|Δ| {delta.abs_delta:.3e})"))
+            print(f"  VERDICT: {'AGREE — every number reproduces' if cmp_result.agree else f'{len(cmp_result.deltas)} DISAGREEMENT(S)'}")
+            if not cmp_result.agree:
+                status = 1
 
     if args.score_record is not None and args.observed is not None:
         out = args.scored_out or default_scored_path(args.score_record)
@@ -6590,8 +8922,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             logger.info("wrote %s (%d resolve record(s))", args.provenance_out,
                         prov.n_resolves)
 
+    #  `--out` names the FILING RECORD under --emit-record and the COMPOSED
+    #  READOUT otherwise. Writing the readout here as well would clobber the
+    #  record that was just emitted, verified and parse-proved — and the clobber
+    #  would be invisible, because the verification ran against the record's
+    #  in-memory content before this line. Each column has its own out-flag
+    #  (`--star-out`, `--directional-out`) precisely so no artifact shares a path.
     payload = readout.model_dump_json(indent=1)
-    if args.out:
+    if args.out and not args.emit_record:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(payload)
         logger.info("wrote %s (%d prediction(s), %d N/A-at-filing)", args.out,
