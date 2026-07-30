@@ -47,6 +47,17 @@ called continuity rather than reconstruction.
 CPU self-test (no weights, no GPU, no data tree):
 
     python -m metabasis.scripts.capability_battery --selftest
+
+RAKE M44 — THE CONFIGURATION MATRIX IS THE MERGE BAR. This selftest is verified in
+all four cells of {torch, no torch} x {data tree, no data tree} and every cell
+must exit 0 with either real passes or NAMED skips. Two environments differ in ways
+a single run cannot see: the repo `.venv` has NO torch (numpy/pydantic/scipy only)
+while `/usr/bin/python` has torch + transformers, and the data tree is gitignored so
+a fresh worktree has none. A bare `import torch` at a point of use passes in one
+environment and CRASHES in another, and a crash is indistinguishable from a failure
+while saying less. Every torch-dependent BLOCK here therefore branches on one
+availability probe and degrades to a named skip, counted in the tail so coverage is
+reported per configuration rather than inferred.
     python -m metabasis.scripts.capability_battery --item-set   # the frozen sha
 """
 from __future__ import annotations
@@ -414,16 +425,96 @@ def score_format_probe(texts_by_item: dict[str, str]) -> dict:
 
 
 # ---------------------------------------------------------------- coherence panel
+#: RAKE M44. `trait_probe` imports torch at module level (it also owns generation
+#: helpers), so reaching the banked `_coherence` through it makes a PURE-PYTHON
+#: string metric torch-dependent. That is not merely a selftest inconvenience: §10's
+#: verification recipe is "Coherence panel (CPU): recompute all five metrics from
+#: banked texts", a DESK act, and the desk's own repo .venv has no torch. A recipe
+#: that cannot run in the environment it is written for is not a recipe.
+#:
+#: The resolution keeps ONE source of truth without making the metric unavailable:
+#: the banked implementation is used whenever it imports, and this vetted copy of
+#: its body is used when it does not — with `assert_coherence_provenance_agrees`
+#: proving the two IDENTICAL on every configuration that can import both. So the
+#: copy cannot drift silently: the moment torch is present, equality is asserted.
+_COHERENCE_BANKED_SOURCE = "metabasis.scripts.trait_probe._coherence"
+#: Recorded on every panel so a banked artifact says which path produced its number
+#: (M19: degraded provenance is DESCRIBED, never silent).
+COHERENCE_PROVENANCE_BANKED = f"{_COHERENCE_BANKED_SOURCE} (the banked guard)"
+COHERENCE_PROVENANCE_LOCAL = (
+    f"vetted local copy of {_COHERENCE_BANKED_SOURCE}'s body — the banked module "
+    "imports torch and torch is unavailable here; equality with the banked "
+    "implementation is asserted by the selftest wherever both are importable")
+
+
+def _local_coherence(text: str) -> float:
+    """A byte-for-byte copy of `trait_probe._coherence`'s body. Do not 'improve' it.
+
+    Whitespace-split and case-SENSITIVE, exactly as banked: the .45 floor is defined
+    against THIS arithmetic, so any change here silently redefines what the floor
+    means for every node in the column.
+    """
+    w = text.split()
+    return len(set(w)) / max(len(w), 1)
+
+
+def coherence_implementation() -> tuple[Callable[[str], float], str]:
+    """(callable, provenance) for the distinct-word ratio — banked if importable."""
+    try:
+        from metabasis.scripts.trait_probe import _coherence
+        return _coherence, COHERENCE_PROVENANCE_BANKED
+    except ImportError:
+        return _local_coherence, COHERENCE_PROVENANCE_LOCAL
+
+
 def distinct_word_ratio(text: str) -> float:
     """The banked degeneracy guard, floor .45 of record — `trait_probe._coherence`.
 
-    Imported at call time so this module holds no copy of the metric that the .45
-    floor is defined against. Whitespace-split and case-SENSITIVE, which is the
-    banked convention and is deliberately not harmonized with the 4-gram metric's
-    tokenizer (see the module docstring).
+    Resolved through `coherence_implementation`, so the metric is available with or
+    without a deep-learning stack (rake M44) and the path taken is reportable rather
+    than silent. Deliberately NOT harmonized with the 4-gram metric's tokenizer:
+    each is the banked convention for its own metric.
     """
-    from metabasis.scripts.trait_probe import _coherence
-    return float(_coherence(text))
+    impl, _ = coherence_implementation()
+    return float(impl(text))
+
+
+def assert_coherence_provenance_agrees(
+        probes: Optional[Sequence[str]] = None,
+        local: Optional[Callable[[str], float]] = None) -> str:
+    """Prove the local copy IS the banked metric, wherever both can be imported.
+
+    Returns the provenance in force. Raises if the two implementations disagree on
+    any probe — which would mean the vetted copy had drifted from the body the .45
+    floor is defined against, and every capability number banked since the drift
+    would be uninterpretable.
+
+    `local` is injectable so the SELFTEST can prove this guard actually bites: a
+    check that can only ever pass is decoration, not a check.
+    """
+    impl = local or _local_coherence
+    try:
+        from metabasis.scripts.trait_probe import _coherence
+    except ImportError:
+        return COHERENCE_PROVENANCE_LOCAL
+    cases = list(probes) if probes else [
+        "", " ", "a", "a a", "a b", "a a a a", "a b c d",
+        "the quick brown fox jumps over the lazy dog",
+        "loop loop loop loop loop loop loop loop",
+        "A a B b",                                  # case sensitivity is load-bearing
+        "one\ttwo\nthree   four",                   # whitespace-split, not regex
+        "Ġthe Ġquick",                              # byte-BPE markers survive split()
+    ]
+    for case in cases:
+        banked, mine = float(_coherence(case)), float(impl(case))
+        if banked != mine:
+            raise BatteryError(
+                f"the vetted local distinct-word-ratio copy has DRIFTED from "
+                f"{_COHERENCE_BANKED_SOURCE} on {case!r}: banked={banked!r} vs "
+                f"local={mine!r}. The .45 coherence floor is defined against the "
+                "banked arithmetic, so a drift makes every banked capability number "
+                "uninterpretable — HALT.")
+    return COHERENCE_PROVENANCE_BANKED
 
 
 def four_gram_repetition_rate(text: str) -> float:
@@ -513,6 +604,10 @@ class CoherencePanel(BaseModel):
     #: §6: below the floor → the entropy read is FILED BUT NOT QUOTABLE.
     coherence_label: Optional[str] = None
     quotable: bool = True
+    #: which implementation produced `distinct_word_ratio` (rake M44). Banked on the
+    #: panel so a desk recomputation can be compared against the same arithmetic
+    #: that produced the filed number, instead of assuming they match.
+    distinct_word_ratio_provenance: str = COHERENCE_PROVENANCE_BANKED
 
     @model_validator(mode="after")
     def _label_tracks_the_floor(self) -> "CoherencePanel":
@@ -541,7 +636,8 @@ def coherence_panel(texts: Sequence[str],
         raise BatteryError("coherence panel over zero generations")
     from metabasis.text_decode import maybe_decode
     decoded = [maybe_decode(t) for t in texts]
-    dwr = float(np.mean([distinct_word_ratio(t) for t in decoded]))
+    impl, provenance = coherence_implementation()
+    dwr = float(np.mean([float(impl(t)) for t in decoded]))
     rates = [four_gram_repetition_rate(t) for t in decoded]
     finite = [r for r in rates if np.isfinite(r)]
     cycles = [repetition_cycle(t) for t in decoded]
@@ -561,7 +657,8 @@ def coherence_panel(texts: Sequence[str],
             (sum(bool(e) for e in eos) / len(eos)) if eos else 0.0, 4),
         mean_generation_length_words=round(float(np.mean(lengths)), 2),
         coherence_label=PAST_COHERENCE_COLLAPSE if collapsed else None,
-        quotable=not collapsed)
+        quotable=not collapsed,
+        distinct_word_ratio_provenance=provenance)
 
 
 # ---------------------------------------------------------------- the cell block
@@ -931,10 +1028,22 @@ def _rec(cell_id: str, gid: int, prompt_id: str) -> GenerationRecord:
 def selftest() -> int:                                   # noqa: C901 — a checklist
     """CPU-only, data-independent verification of the battery and the panel."""
     checks: list[tuple[str, bool, str]] = []
+    skips: list[str] = []
 
     def check(name: str, ok: bool, detail: str = "") -> None:
         checks.append((name, bool(ok), detail))
         logger.info("%s %s %s", "PASS" if ok else "MISS", name, detail)
+
+    def skip(name: str, why: str) -> None:
+        """A NAMED skip (rake M44): a block that cannot run in THIS configuration.
+
+        Recorded as run-and-absent rather than crashed or failed, counted in the
+        tail so a sweep can report coverage per configuration, and NEVER a non-zero
+        exit code — nothing was asserted and found wanting.
+        """
+        skips.append(name)
+        checks.append((f"SKIPPED: {name}", True, why))
+        logger.info("SKIP %s — %s", name, why)
 
     # ---- 1. the frozen 32-item set -------------------------------------------
     print("== selftest 1: the 32-item set, sha'd and frozen (§6) ==")
@@ -1043,7 +1152,26 @@ def selftest() -> int:                                   # noqa: C901 — a chec
     check("distinct-word ratio IS the banked guard (trait_probe._coherence)",
           distinct_word_ratio("a b c d") == 1.0
           and distinct_word_ratio("a a a a") == 0.25,
-          "reused at call time, so this module holds no copy of the .45 metric")
+          "the .45 floor's own arithmetic")
+    # RAKE M44: the metric must be computable with NO deep-learning stack, because
+    # §10's coherence-panel recipe is a DESK act and the desk .venv has no torch.
+    # The vetted local copy makes that possible; this check is what stops it drifting.
+    provenance = assert_coherence_provenance_agrees()
+    check("the local copy and the banked guard AGREE exactly, wherever both import",
+          True, provenance)
+    check("the metric is available with or without torch (rake M44)",
+          callable(coherence_implementation()[0])
+          and _local_coherence("a a b") == 2 / 3,
+          f"in force here: {provenance.split(' —')[0]}")
+    if provenance == COHERENCE_PROVENANCE_BANKED:
+        check("a DRIFTED local copy IS caught (the guard bites, injectably proven)",
+              _raises(lambda: assert_coherence_provenance_agrees(
+                  local=lambda t: _local_coherence(t) + 0.01), BatteryError))
+    else:
+        skip("drift guard bites (needs the banked module to compare against)",
+             "trait_probe unimportable here; the guard is proven on the torch axis")
+    check("the panel RECORDS which implementation produced its number (M19)",
+          coherence_panel(["a b c d"]).distinct_word_ratio_provenance == provenance)
     # 8 word tokens -> 5 four-grams, of which 4 are distinct (the first repeats
     # once), so the banked definition gives 1 - 4/5 = 0.2.
     check("4-gram repetition rate IS expression_coupling.f_rep_rate",
@@ -1331,7 +1459,10 @@ def selftest() -> int:                                   # noqa: C901 — a chec
     print(f"\nselftest: {len(failures)} failure(s)")
     for name, _, detail in failures:
         print(f"  MISS {name} {detail}")
-    print(f"selftest checks run: {len(checks)}")
+    # RAKE M44: coverage is part of the verdict, per configuration.
+    print(f"selftest checks run: {len(checks)} ({len(skips)} named skip(s))")
+    for name in skips:
+        print(f"  SKIPPED {name}")
     return 1 if failures else 0
 
 

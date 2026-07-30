@@ -73,6 +73,17 @@ CPU self-test (no weights, no GPU, no data tree):
 
     python -m metabasis.scripts.run_behavioral_cells --selftest
 
+RAKE M44 — THE CONFIGURATION MATRIX IS THE MERGE BAR. This selftest is verified in
+all four cells of {torch, no torch} x {data tree, no data tree} and every cell
+must exit 0 with either real passes or NAMED skips. Two environments differ in ways
+a single run cannot see: the repo `.venv` has NO torch (numpy/pydantic/scipy only)
+while `/usr/bin/python` has torch + transformers, and the data tree is gitignored so
+a fresh worktree has none. A bare `import torch` at a point of use passes in one
+environment and CRASHES in another, and a crash is indistinguishable from a failure
+while saying less. Every torch-dependent BLOCK here therefore branches on one
+availability probe and degrades to a named skip, counted in the tail so coverage is
+reported per configuration rather than inferred.
+
 Node-side run (§2.1; Heimdall CLI only, the HTTP API is read-only verification):
 
     OMP_NUM_THREADS=1 CUDA_VISIBLE_DEVICES=3 \
@@ -1933,10 +1944,41 @@ def selftest() -> int:                                   # noqa: C901 — a chec
     import tempfile
 
     checks: list[tuple[str, bool, str]] = []
+    skips: list[str] = []
 
     def check(name: str, ok: bool, detail: str = "") -> None:
         checks.append((name, bool(ok), detail))
         logger.info("%s %s %s", "PASS" if ok else "MISS", name, detail)
+
+    def skip(name: str, why: str) -> None:
+        """A NAMED skip: a block that cannot run here, recorded as run-and-absent.
+
+        RAKE M44: a selftest that CRASHES in a configuration is indistinguishable
+        from a selftest that FAILS, and neither says which. A named skip is a
+        third state — the check did not run, the reason is on the record, and the
+        suite's exit code stays 0 because nothing FAILED. The skip is counted in
+        the tail so a sweep can report coverage per configuration rather than
+        inferring it.
+        """
+        skips.append(name)
+        checks.append((f"SKIPPED: {name}", True, why))
+        logger.info("SKIP %s — %s", name, why)
+
+    # THE AVAILABILITY PROBE (rake M44). torch is absent from the desk's own repo
+    # .venv, so every torch-dependent BLOCK below is branched on this one probe
+    # rather than on a bare import at its point of use. The properties that make
+    # the harness legitimate — the seed table, the layout invariance, the dose
+    # ladder, the stamp checklist, the replay-gate logic — are numpy-only BY
+    # DESIGN and must stay provable in a configuration with no deep-learning
+    # stack at all; only the entropy fixture and the real-forward
+    # characterization genuinely need torch.
+    try:
+        import torch
+        _torch: Any = torch
+        _no_torch = ""
+    except ImportError as exc:                       # the desk .venv configuration
+        _torch = None
+        _no_torch = f"torch unavailable ({exc})"
 
     corpus = CORPUS_SHA_V21
     node = "qwen2.5-3b-instruct"
@@ -2096,28 +2138,32 @@ def selftest() -> int:                                   # noqa: C901 — a chec
 
     # ---- 4. the entropy convention fixture -----------------------------------
     print("== selftest 4: entropy convention (§2.6) ==")
-    import torch
-
-    V, T, P = 8, 7, 4
-    torch.manual_seed(20260729)
-    fixture = torch.randn(T, V)
-    seq = [3, 1, 4, 1, 5, 7, 2]                # every id < V, so the NLL gather is real
-    ent, nll = per_position_entropy_and_nll(fixture, seq, P, T - P)
-    lp = torch.log_softmax(fixture.float(), dim=-1)
-    want_ent = np.array([float(-(lp[p].exp() * lp[p]).sum()) for p in (3, 4, 5)],
-                        dtype=np.float32)
-    want_nll = np.array([float(-lp[p, seq[p + 1]]) for p in (3, 4, 5)],
-                        dtype=np.float32)
-    check("entropy slice is [P-1, T-1): the distributions that PRODUCED the span",
-          ent.shape == (3,) and np.allclose(ent, want_ent, atol=0, rtol=1e-6),
-          f"{ent.tolist()}")
-    check("NLL is the surprisal of the ACTUAL generated token (the likelihood rung)",
-          np.allclose(nll, want_nll, atol=0, rtol=1e-6), f"{nll.tolist()}")
-    check("probe arrays are float32 (the §2.7 digest's dtype)",
-          ent.dtype == np.float32 and nll.dtype == np.float32)
-    check("a zero-length generated span is refused, never averaged over nothing",
-          _raises(lambda: per_position_entropy_and_nll(fixture, seq, P, 0),
-                  ValueError))
+    # The FIXTURE half needs torch (`per_position_entropy_and_nll` is a torch
+    # kernel); the aggregation and digest half below is numpy-only and always runs.
+    if _torch is None:
+        skip("entropy convention fixture (§2.6): per-position entropy/NLL against a "
+             "hand-computed log_softmax", _no_torch)
+    else:
+        V, T, P = 8, 7, 4
+        _torch.manual_seed(20260729)
+        fixture = _torch.randn(T, V)
+        seq = [3, 1, 4, 1, 5, 7, 2]            # every id < V, so the NLL gather is real
+        ent, nll = per_position_entropy_and_nll(fixture, seq, P, T - P)
+        lp = _torch.log_softmax(fixture.float(), dim=-1)
+        want_ent = np.array([float(-(lp[p].exp() * lp[p]).sum()) for p in (3, 4, 5)],
+                            dtype=np.float32)
+        want_nll = np.array([float(-lp[p, seq[p + 1]]) for p in (3, 4, 5)],
+                            dtype=np.float32)
+        check("entropy slice is [P-1, T-1): the distributions that PRODUCED the span",
+              ent.shape == (3,) and np.allclose(ent, want_ent, atol=0, rtol=1e-6),
+              f"{ent.tolist()}")
+        check("NLL is the surprisal of the ACTUAL generated token (the likelihood rung)",
+              np.allclose(nll, want_nll, atol=0, rtol=1e-6), f"{nll.tolist()}")
+        check("probe arrays are float32 (the §2.7 digest's dtype)",
+              ent.dtype == np.float32 and nll.dtype == np.float32)
+        check("a zero-length generated span is refused, never averaged over nothing",
+              _raises(lambda: per_position_entropy_and_nll(fixture, seq, P, 0),
+                      ValueError))
     rows = [ProbeRow(generation_id=i, n_positions=3, mean_entropy_steered=2.0 + i,
                      mean_entropy_unsteered=1.0 + i, entropy_rise=1.0,
                      base_model_nll=3.0, probe_group=0, probe_group_size=2)
@@ -2179,8 +2225,15 @@ def selftest() -> int:                                   # noqa: C901 — a chec
           == [f"gentropy_gradient_L{site}_a-0.30",
               f"gentropy_gradient_L{site}_a-0.10"],
           laddered[0][0].cell_id)
-    check("score_entropy_writes.parse_cell round-trips every laddered cell id",
-          _parse_roundtrip([c.cell_id for c, _ in laddered], site))
+    # the banked parser lives behind `entropy_write_probe`, which imports torch, so
+    # this one check inherits the availability branch rather than the whole block.
+    if _torch is None:
+        skip("score_entropy_writes.parse_cell round-trips every laddered cell id",
+             f"{_no_torch} — the banked parser is reached through "
+             "entropy_write_probe, which imports torch")
+    else:
+        check("score_entropy_writes.parse_cell round-trips every laddered cell id",
+              _parse_roundtrip([c.cell_id for c, _ in laddered], site))
     check("an off-ladder dose is REFUSED (no extension, no interpolation)",
           _raises(lambda: resolve_alpha(0.2, norm), ValueError)
           and _raises(lambda: CellSpec(
@@ -2485,86 +2538,98 @@ def selftest() -> int:                                   # noqa: C901 — a chec
 
     # ---- 13. real-model characterization (availability-branched, M19) ---------
     print("== selftest 13: real-forward characterization (never a gate) ==")
-    try:
-        from transformers import LlamaConfig, LlamaForCausalLM
+    if _torch is None:
+        skip("real-forward characterization: the REAL HF path, the batch-invariance\n         characterization, §2.4 on the real hook, and the hook-admissibility preflight",
+             f"{_no_torch} — the stub-stepper proofs above are the GATE; this "
+             "block only ever CHARACTERIZED (M19), so its absence costs no "
+             "assertion")
+    else:
+      try:
+          from transformers import LlamaConfig, LlamaForCausalLM
 
-        torch.manual_seed(20260729)
-        cfg = LlamaConfig(vocab_size=61, hidden_size=32, intermediate_size=64,
-                          num_hidden_layers=2, num_attention_heads=4,
-                          num_key_value_heads=2, max_position_embeddings=128,
-                          tie_word_embeddings=False)
-        real = LlamaForCausalLM(cfg).to(torch.float32).eval()
-        real.requires_grad_(False)
-        small = CanonicalLayout(batch_size=10, dtype="float32", max_new_tokens=5,
-                               frozen=True)
-        r10 = generate_cell(lambda: HFStepper(real, "cpu"), cell=cell, pool=pool,
-                            tokenize=lambda p: render_prompt(p, tok, arm),
-                            layout=small, pad_token_id=0, eos_token_id=None,
-                            corpus_sha=corpus, node_key=node, arm=arm, n=20)
-        small20 = CanonicalLayout(batch_size=20, dtype="float32", max_new_tokens=5,
-                                  frozen=True)
-        r20 = generate_cell(lambda: HFStepper(real, "cpu"), cell=cell, pool=pool,
-                            tokenize=lambda p: render_prompt(p, tok, arm),
-                            layout=small20, pad_token_id=0, eos_token_id=None,
-                            corpus_sha=corpus, node_key=node, arm=arm, n=20)
-        check("the REAL HF path runs through the same loop and stepper protocol",
-              len(r10) == 20 and all(len(r.generated_ids) == 5 for r in r10),
-              f"20 generations × 5 tokens through HFStepper")
-        same = token_id_digest(r10) == token_id_digest(r20)
-        first_div = None
-        if not same:
-            for a, b in zip(sorted(r10, key=lambda x: x.generation_id),
-                            sorted(r20, key=lambda x: x.generation_id)):
-                for i, (x, y) in enumerate(zip(a.generated_ids, b.generated_ids)):
-                    if x != y:
-                        first_div = i if first_div is None else min(first_div, i)
-                        break
-        # M19: DESCRIPTIVE. A real forward's reductions are not batch-invariant, so
-        # this can only be characterized. The stub-stepper proof above is what
-        # asserts the harness's own §2.2 contract.
-        check("real-forward B=10 vs B=20 CHARACTERIZED (M19: cannot fail a gate)",
-              True,
-              f"bitwise={same}"
-              + ("" if same else f", first divergent token index {first_div} — "
-                                 "EXPECTED; §2.7 defines replay IN the canonical "
-                                 "layout for exactly this reason"))
-        # the α=0 short-circuit, on the real hook
-        from metabasis.extraction.hooks import (ResidualWriteSpec,
-                                                attach_residual_write)
-        ids0 = torch.as_tensor([render_prompt(pool.prompts[0], tok, arm)],
-                               dtype=torch.long)
-        with torch.no_grad():
-            plain = real(ids0, use_cache=False).logits.detach().numpy()
-        h = attach_residual_write(real, ResidualWriteSpec(
-            layer_idx=1, vector=torch.randn(32), alpha=0.0,
-            start_pos=int(ids0.shape[1]), end_pos=None, normalize=True))
-        try:
-            with torch.no_grad():
-                hooked = real(ids0, use_cache=False).logits.detach().numpy()
-        finally:
-            h.remove()
-        check("§2.4 on the REAL hook: α=0 with the hook attached is bitwise no-hook",
-              _ok(lambda: assert_alpha_zero_is_no_hook(hooked, plain)),
-              "the baseline cell is shared between §4 and §5 because of this")
-        adm = ssm_hook_admissibility_preflight(
-            real, node_key="toy-llama", site=1, vector=np.ones(32, dtype=np.float32),
-            n_tokens=4, prompt_ids=render_prompt(pool.prompts[0], tok, arm))
-        check("hook-admissibility preflight PASSES on a cache_position architecture",
-              adm.admissible and adm.saw_cache_position
-              and adm.positions_injected == adm.positions_expected, adm.detail)
-        check("preflight refuses a site that is not a decoder-layer index",
-              _raises(lambda: ssm_hook_admissibility_preflight(
-                  real, node_key="toy-llama", site=99,
-                  vector=np.ones(32, dtype=np.float32)), SiteNotOfRecord))
-    except ImportError as exc:                      # availability branch
-        check("real-forward characterization SKIPPED (transformers unavailable)",
-              True, f"{exc} — the stub-stepper proofs above are the gate")
+          _torch.manual_seed(20260729)
+          cfg = LlamaConfig(vocab_size=61, hidden_size=32, intermediate_size=64,
+                            num_hidden_layers=2, num_attention_heads=4,
+                            num_key_value_heads=2, max_position_embeddings=128,
+                            tie_word_embeddings=False)
+          real = LlamaForCausalLM(cfg).to(_torch.float32).eval()
+          real.requires_grad_(False)
+          small = CanonicalLayout(batch_size=10, dtype="float32", max_new_tokens=5,
+                                 frozen=True)
+          r10 = generate_cell(lambda: HFStepper(real, "cpu"), cell=cell, pool=pool,
+                              tokenize=lambda p: render_prompt(p, tok, arm),
+                              layout=small, pad_token_id=0, eos_token_id=None,
+                              corpus_sha=corpus, node_key=node, arm=arm, n=20)
+          small20 = CanonicalLayout(batch_size=20, dtype="float32", max_new_tokens=5,
+                                    frozen=True)
+          r20 = generate_cell(lambda: HFStepper(real, "cpu"), cell=cell, pool=pool,
+                              tokenize=lambda p: render_prompt(p, tok, arm),
+                              layout=small20, pad_token_id=0, eos_token_id=None,
+                              corpus_sha=corpus, node_key=node, arm=arm, n=20)
+          check("the REAL HF path runs through the same loop and stepper protocol",
+                len(r10) == 20 and all(len(r.generated_ids) == 5 for r in r10),
+                f"20 generations × 5 tokens through HFStepper")
+          same = token_id_digest(r10) == token_id_digest(r20)
+          first_div = None
+          if not same:
+              for a, b in zip(sorted(r10, key=lambda x: x.generation_id),
+                              sorted(r20, key=lambda x: x.generation_id)):
+                  for i, (x, y) in enumerate(zip(a.generated_ids, b.generated_ids)):
+                      if x != y:
+                          first_div = i if first_div is None else min(first_div, i)
+                          break
+          # M19: DESCRIPTIVE. A real forward's reductions are not batch-invariant, so
+          # this can only be characterized. The stub-stepper proof above is what
+          # asserts the harness's own §2.2 contract.
+          check("real-forward B=10 vs B=20 CHARACTERIZED (M19: cannot fail a gate)",
+                True,
+                f"bitwise={same}"
+                + ("" if same else f", first divergent token index {first_div} — "
+                                   "EXPECTED; §2.7 defines replay IN the canonical "
+                                   "layout for exactly this reason"))
+          # the α=0 short-circuit, on the real hook
+          from metabasis.extraction.hooks import (ResidualWriteSpec,
+                                                  attach_residual_write)
+          ids0 = _torch.as_tensor([render_prompt(pool.prompts[0], tok, arm)],
+                                 dtype=_torch.long)
+          with _torch.no_grad():
+              plain = real(ids0, use_cache=False).logits.detach().numpy()
+          h = attach_residual_write(real, ResidualWriteSpec(
+              layer_idx=1, vector=_torch.randn(32), alpha=0.0,
+              start_pos=int(ids0.shape[1]), end_pos=None, normalize=True))
+          try:
+              with _torch.no_grad():
+                  hooked = real(ids0, use_cache=False).logits.detach().numpy()
+          finally:
+              h.remove()
+          check("§2.4 on the REAL hook: α=0 with the hook attached is bitwise no-hook",
+                _ok(lambda: assert_alpha_zero_is_no_hook(hooked, plain)),
+                "the baseline cell is shared between §4 and §5 because of this")
+          adm = ssm_hook_admissibility_preflight(
+              real, node_key="toy-llama", site=1, vector=np.ones(32, dtype=np.float32),
+              n_tokens=4, prompt_ids=render_prompt(pool.prompts[0], tok, arm))
+          check("hook-admissibility preflight PASSES on a cache_position architecture",
+                adm.admissible and adm.saw_cache_position
+                and adm.positions_injected == adm.positions_expected, adm.detail)
+          check("preflight refuses a site that is not a decoder-layer index",
+                _raises(lambda: ssm_hook_admissibility_preflight(
+                    real, node_key="toy-llama", site=99,
+                    vector=np.ones(32, dtype=np.float32)), SiteNotOfRecord))
+      except ImportError as exc:                    # transformers availability
+        skip("real-forward characterization (transformers unavailable)",
+             f"{exc} — the stub-stepper proofs above are the gate")
 
     failures = [c for c in checks if not c[1]]
     print(f"\nselftest: {len(failures)} failure(s)")
     for name, _, detail in failures:
         print(f"  MISS {name} {detail}")
-    print(f"selftest checks run: {len(checks)}")
+    # RAKE M44: the tail states coverage as well as the verdict, because a suite
+    # that ran 120 of 127 checks in this configuration and one that ran all 127 are
+    # different facts, and only the first needs the other configuration to close it.
+    print(f"selftest checks run: {len(checks)} ({len(skips)} named skip(s))")
+    for name in skips:
+        print(f"  SKIPPED {name}")
+    # A named skip is NOT a failure: nothing was asserted and found wanting. rc=0.
     return 1 if failures else 0
 
 

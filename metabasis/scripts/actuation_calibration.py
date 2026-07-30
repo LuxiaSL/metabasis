@@ -43,6 +43,17 @@ CPU self-test (no weights, no GPU, no data tree):
 
     python -m metabasis.scripts.actuation_calibration --selftest
 
+RAKE M44 — THE CONFIGURATION MATRIX IS THE MERGE BAR. This selftest is verified in
+all four cells of {torch, no torch} x {data tree, no data tree} and every cell
+must exit 0 with either real passes or NAMED skips. Two environments differ in ways
+a single run cannot see: the repo `.venv` has NO torch (numpy/pydantic/scipy only)
+while `/usr/bin/python` has torch + transformers, and the data tree is gitignored so
+a fresh worktree has none. A bare `import torch` at a point of use passes in one
+environment and CRASHES in another, and a crash is indistinguishable from a failure
+while saying less. Every torch-dependent BLOCK here therefore branches on one
+availability probe and degrades to a named skip, counted in the tail so coverage is
+reported per configuration rather than inferred.
+
 Desk-side read of a live registry table (GPU-free, §4.3's preflight shape):
 
     python -m metabasis.scripts.actuation_calibration --who-can-calibrate
@@ -1052,10 +1063,22 @@ def selftest() -> int:                                   # noqa: C901 — a chec
     import tempfile
 
     checks: list[tuple[str, bool, str]] = []
+    skips: list[str] = []
 
     def check(name: str, ok: bool, detail: str = "") -> None:
         checks.append((name, bool(ok), detail))
         logger.info("%s %s %s", "PASS" if ok else "MISS", name, detail)
+
+    def skip(name: str, why: str) -> None:
+        """A NAMED skip (rake M44): a block that cannot run in THIS configuration.
+
+        Recorded as run-and-absent rather than crashed or failed, counted in the
+        tail so a sweep can report coverage per configuration, and NEVER a non-zero
+        exit code — nothing was asserted and found wanting.
+        """
+        skips.append(name)
+        checks.append((f"SKIPPED: {name}", True, why))
+        logger.info("SKIP %s — %s", name, why)
 
     # ---- 1. the §4.1 cell structure ------------------------------------------
     print("== selftest 1: §4.1's cell structure (1 + 6 + 18 = 25) ==")
@@ -1475,7 +1498,10 @@ def selftest() -> int:                                   # noqa: C901 — a chec
     print(f"\nselftest: {len(failures)} failure(s)")
     for name, _, detail in failures:
         print(f"  MISS {name} {detail}")
-    print(f"selftest checks run: {len(checks)}")
+    # RAKE M44: coverage is part of the verdict, per configuration.
+    print(f"selftest checks run: {len(checks)} ({len(skips)} named skip(s))")
+    for name in skips:
+        print(f"  SKIPPED {name}")
     return 1 if failures else 0
 
 
