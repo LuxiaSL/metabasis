@@ -290,6 +290,8 @@ Run (repo root, PYTHONPATH=.):
       --score-record outputs/collection/predictions/<record>.json \
       --observed /tmp/claude-output/observed-<batch>.json \
       [--alpha-companion /tmp/claude-output/constant-alpha-<batch>.json]
+  python -m metabasis.scripts.read_composed_predictions \
+      --manifest-audit manifests outputs staging      # rake M42, exits nonzero
 """
 from __future__ import annotations
 
@@ -3586,6 +3588,322 @@ def sha256_of(path: Path) -> str:
     return h.hexdigest()
 
 
+# ---------------------------------------------- sha256 manifests (rake M42)
+#  A MANIFEST THAT LISTS ITSELF CAN NEVER VERIFY CLEAN. A file cannot contain its
+#  own hash, so every future checker reads a guaranteed mismatch on that row and
+#  has to adjudicate a false alarm — which the ρ-of-record run duly did, HALTing
+#  correctly on `MANIFEST-quadhub-qwen7b.sha256`'s self-row and paying for the
+#  diagnosis in a detour.
+#
+#  M42 has four parts and three of them are a PARSER's business, which is why this
+#  lives here rather than only in the shell that generates manifests:
+#    (a) generators exclude their own name — the `-not -name "MANIFEST-*"`
+#        convention. A generator is a shell script and is not committable from
+#        here; what IS committable is the checker that DIAGNOSES a self-row instead
+#        of reporting it as corruption.
+#    (b) the manifest is generated LAST, after every covered artifact's final
+#        write. The observable symptom is an artifact whose mtime POSTDATES its
+#        manifest, which `audit_manifest` reports.
+#    (c) a checker hitting exactly one mismatch on a manifest-named row checks for
+#        this rake BEFORE suspecting the data. Implemented literally below: a
+#        self-row is EXCLUDED from verification and reported as a generator defect,
+#        never as a digest failure — the artifacts are innocent.
+#    (d) TWO banked manifest dialects exist — bare (`<digest>  name`) and
+#        `./`-prefixed with `#` header lines — and "parsers accept both explicitly
+#        or a header line becomes a phantom missing artifact". The old parser here
+#        did neither: it keyed rows verbatim (so a `./`-dialect manifest made every
+#        lookup miss and read as "not listed") and it accepted any two-token line
+#        (so a two-word `# comment` became a phantom row named after its own second
+#        word). Both are fixed and both are selftested.
+
+#: The name pattern a manifest generator must EXCLUDE from its own enumeration.
+#: Named per rake M26 so a sweep can find every consumer of the convention.
+MANIFEST_NAME_PREFIX = "MANIFEST-"
+
+
+class ManifestRow(BaseModel):
+    """One `<digest>  <path>` row, normalized across both banked dialects."""
+    digest: str
+    #: the path AS WRITTEN, so a report can quote the manifest verbatim.
+    raw_name: str
+    #: `raw_name` with a `./` prefix and a binary-mode `*` marker removed — the
+    #: key any lookup must use, because the two dialects name the same artifact.
+    name: str
+    line_number: int
+    #: True when this row's path resolves to the manifest FILE ITSELF (rake M42).
+    is_self_row: bool = False
+
+
+class ManifestListing(BaseModel):
+    """A parsed sha256 manifest, with every M42 hazard surfaced as data."""
+    path: str
+    dialect: Literal["bare", "dot-prefixed", "mixed", "empty"]
+    rows: list[ManifestRow] = []
+    self_rows: list[str] = Field(
+        default=[], description="rows naming the manifest itself — rake M42. "
+                                "EXCLUDED from `by_name`, because a file cannot "
+                                "contain its own hash and treating the row as a "
+                                "digest failure blames innocent artifacts")
+    n_header_lines: int = 0
+    unparsed_lines: list[str] = Field(
+        default=[], description="non-empty, non-comment lines that are not a "
+                                "<digest>  <path> pair. Reported, never silently "
+                                "dropped: a line a parser cannot read may be the "
+                                "row a checker needed")
+
+    @property
+    def by_name(self) -> dict[str, str]:
+        """name -> digest, self-rows excluded. The lookup every checker uses."""
+        return {row.name: row.digest for row in self.rows if not row.is_self_row}
+
+    @property
+    def lists_itself(self) -> bool:
+        return bool(self.self_rows)
+
+
+class ManifestAudit(BaseModel):
+    """The M42 verdict for one manifest: does it list itself, and is it LAST?"""
+    listing: ManifestListing
+    n_rows: int
+    self_rows: list[str] = []
+    #: the directory the manifest's rows are RELATIVE TO — chosen, not assumed
+    #: (rake M15). A manifest under `manifests/` whose rows read `outputs/...` is
+    #: anchored at the repo root, not at its own parent.
+    anchor: Optional[str] = None
+    n_resolved: int = 0
+    #: covered artifacts whose mtime POSTDATES the manifest's own (M42(b)): the
+    #: manifest was not generated last, so an honest artifact reads as tampered.
+    postdating_artifacts: list[str] = []
+    missing_artifacts: list[str] = []
+    clean: bool = True
+    findings: list[str] = []
+
+
+def parse_sha256_manifest(path: Path) -> ManifestListing:
+    """Parse a sha256 manifest, accepting BOTH banked dialects explicitly (M42(d)).
+
+    Bare (`<digest>  name`) and `./`-prefixed with `#` headers are both of record
+    in this tree, so both are named here rather than one being discovered by a
+    checker that mysteriously finds nothing. A `#` line is a COMMENT and is counted,
+    never parsed as a row — the phantom-artifact failure M42(d) warns about.
+    Duplicate names are a HALT (rake M18: a comparison dict gets a duplicate-key
+    assertion, because which digest is of record cannot be guessed).
+    """
+    if not path.is_file():
+        raise ArchiveIntegrityError(f"manifest absent: {path}")
+    resolved_manifest = path.resolve()
+    anchor = path.parent
+    rows: list[ManifestRow] = []
+    self_rows: list[str] = []
+    unparsed: list[str] = []
+    n_headers = 0
+    seen: dict[str, int] = {}
+    dotted = bare = 0
+    for number, line in enumerate(path.read_text(errors="replace").splitlines(), 1):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("#"):
+            n_headers += 1
+            continue
+        parts = stripped.split(None, 1)
+        if len(parts) != 2 or not _is_sha256_hex(parts[0]):
+            unparsed.append(f"line {number}: {line!r}")
+            continue
+        digest, raw_name = parts[0], parts[1].strip()
+        name = raw_name[1:] if raw_name.startswith("*") else raw_name
+        if name.startswith("./"):
+            name = name[2:]
+            dotted += 1
+        else:
+            bare += 1
+        if name in seen:
+            raise ArchiveIntegrityError(
+                f"{path}: duplicate manifest row for {name!r} (lines "
+                f"{seen[name]} and {number}) — rake M18: which digest is of "
+                f"record cannot be guessed, and a comparison dict that can "
+                f"collapse two rows reports a false pass at n−1")
+        seen[name] = number
+        #  A SELF-ROW is judged by BASENAME first and confirmed by resolution
+        #  second. Basename-first matters because a manifest's own ANCHOR is not
+        #  always its parent directory (rake M15) — `manifests/outputs.sha256`
+        #  lists `outputs/...` relative to the repo root — so a resolution-only
+        #  test would miss a self-row in any manifest anchored elsewhere, and
+        #  missing one is the failure this whole section exists to prevent.
+        is_self = Path(name).name == path.name
+        if is_self:
+            try:
+                #  Confirm where it is confirmable; a row naming the manifest by a
+                #  DIFFERENT directory is a different file and not a self-row.
+                is_self = ((anchor / name).resolve() == resolved_manifest
+                           or Path(name).parent in (Path(""), Path(".")))
+            except OSError:                          # pragma: no cover — unreadable
+                is_self = True
+        if is_self:
+            self_rows.append(raw_name)
+        rows.append(ManifestRow(digest=digest, raw_name=raw_name, name=name,
+                                line_number=number, is_self_row=is_self))
+    dialect: Literal["bare", "dot-prefixed", "mixed", "empty"] = (
+        "empty" if not rows else
+        "mixed" if dotted and bare else
+        "dot-prefixed" if dotted else "bare")
+    return ManifestListing(path=str(path), dialect=dialect, rows=rows,
+                           self_rows=self_rows, n_header_lines=n_headers,
+                           unparsed_lines=unparsed)
+
+
+#: How many ancestor directories above a manifest are tried as candidate anchors.
+#: Four covers every banked layout (`manifests/outputs.sha256` anchored at the repo
+#: root is one level; a nodeside manifest copied two levels down is two).
+MANIFEST_ANCHOR_SEARCH_DEPTH = 4
+#: Below this fraction of rows resolving, the ANCHOR is reported as unresolved
+#: rather than the rows as missing. Rake M15: "a scary mass-non-OK result means
+#: CHECK YOUR CWD FIRST, before investigating corruption." A manifest whose rows
+#: mostly do not resolve is being read from the wrong directory far more often
+#: than it is describing a vanished tree.
+MANIFEST_ANCHOR_MIN_HIT_RATE = 0.5
+
+
+def resolve_manifest_anchor(path: Path, listing: ManifestListing,
+                            anchor: Optional[Path] = None
+                            ) -> tuple[Optional[Path], int, dict[str, int]]:
+    """The directory a manifest's rows are RELATIVE TO. Chosen, never assumed.
+
+    RAKE M15(a): `sha256sum -c` must run from the manifest's own anchor, and that
+    anchor is NOT always the manifest's parent — `manifests/outputs.sha256` lists
+    `outputs/...` relative to the REPO ROOT, and a pull-side manifest may list
+    `staging/<leg>/...` from the same place. Resolving rows against the parent and
+    reporting the misses as MISSING ARTIFACTS is precisely the false corruption
+    alarm M15 was filed for; that rake cost two separate investigations.
+
+    Returns `(anchor, n_resolved, scores)`: the best candidate, how many rows
+    resolve under it, and every candidate's score so a report can show the
+    operator why one was chosen. `anchor` is None when nothing resolves a
+    meaningful fraction — an honest "I do not know where to read this from",
+    which is a different finding from "the artifacts are gone".
+    """
+    covered = [row for row in listing.rows if not row.is_self_row]
+    candidates: list[Path] = []
+    if anchor is not None:
+        candidates.append(anchor)
+    here = path.parent
+    for _ in range(MANIFEST_ANCHOR_SEARCH_DEPTH + 1):
+        candidates.append(here)
+        if here.parent == here:
+            break
+        here = here.parent
+    candidates.append(Path.cwd())
+    scores: dict[str, int] = {}
+    best: Optional[Path] = None
+    best_score = -1
+    for candidate in candidates:
+        key = str(candidate)
+        if key in scores:
+            continue
+        score = sum(1 for row in covered if (candidate / row.name).exists())
+        scores[key] = score
+        if score > best_score:
+            best, best_score = candidate, score
+    if not covered:
+        return (anchor or path.parent), 0, scores
+    if best_score < MANIFEST_ANCHOR_MIN_HIT_RATE * len(covered):
+        return None, max(best_score, 0), scores
+    return best, best_score, scores
+
+
+def audit_manifest(path: Path, check_mtimes: bool = True,
+                   anchor: Optional[Path] = None) -> ManifestAudit:
+    """Rake M42 for one manifest: self-rows, write ordering, missing artifacts.
+
+    A first-class AUDIT rather than a side effect of verifying digests, because
+    the two questions have different answers: a self-row is a GENERATOR defect
+    (the manifest can never verify clean and no artifact is at fault), while a
+    digest mismatch is a DATA question. Conflating them is what cost the ρ-of-record
+    run its detour.
+
+    The ANCHOR is resolved first (rake M15) and a manifest whose anchor cannot be
+    found reports THAT, not a tree of missing artifacts. Digests are deliberately
+    NOT recomputed — that is a separate, expensive act, and this audit must be
+    cheap enough to run over every manifest in a tree.
+    """
+    listing = parse_sha256_manifest(path)
+    findings: list[str] = []
+    if listing.lists_itself:
+        findings.append(
+            f"SELF-LISTING (rake M42): {len(listing.self_rows)} row(s) name the "
+            f"manifest itself — {listing.self_rows}. A file cannot contain its own "
+            f"hash, so this manifest can NEVER verify clean and every future "
+            f"checker must adjudicate a guaranteed mismatch. The generator must "
+            f"exclude {MANIFEST_NAME_PREFIX}* (or its own output name) from its "
+            f"enumeration; the row is excluded from `by_name` here so the "
+            f"artifacts are not blamed for it")
+    if listing.unparsed_lines:
+        findings.append(
+            f"UNPARSED LINE(S): {listing.unparsed_lines} — reported, never "
+            f"silently dropped, because a line a parser cannot read may be the "
+            f"row a checker needed")
+    chosen, n_resolved, scores = resolve_manifest_anchor(path, listing, anchor)
+    covered = [row for row in listing.rows if not row.is_self_row]
+    postdating: list[str] = []
+    missing: list[str] = []
+    if chosen is None and covered:
+        findings.append(
+            f"ANCHOR UNRESOLVED (rake M15): only {n_resolved}/{len(covered)} row(s) "
+            f"resolve under ANY candidate directory "
+            f"({ {k: v for k, v in scores.items()} }), so this audit cannot say "
+            f"whether the artifacts are present. `sha256sum -c` must run from the "
+            f"manifest's own anchor and that is not always its parent — the tree "
+            f"may simply not be checked out here. Reported as an ANCHOR question, "
+            f"NEVER as missing data: a mass non-OK result means check the "
+            f"directory first, before investigating corruption")
+    elif chosen is not None:
+        if chosen.resolve() != path.parent.resolve():
+            findings.append(
+                f"ANCHOR IS NOT THE MANIFEST'S PARENT (informational, rake M15): "
+                f"rows resolve under {chosen} ({n_resolved}/{len(covered)}), not "
+                f"under {path.parent}. Any `sha256sum -c` of this manifest must "
+                f"run from there")
+        if check_mtimes:
+            try:
+                manifest_mtime: Optional[float] = path.stat().st_mtime
+            except OSError:                          # pragma: no cover
+                manifest_mtime = None
+            for row in covered:
+                artifact = chosen / row.name
+                try:
+                    stat = artifact.stat()           # follows symlinks (rake M38)
+                except OSError:
+                    missing.append(row.name)
+                    continue
+                #  One second of slack: a manifest and the last artifact written
+                #  just before it can share a timestamp on a coarse filesystem,
+                #  and that is correct ordering, not a slip.
+                if (manifest_mtime is not None
+                        and stat.st_mtime > manifest_mtime + 1.0):
+                    postdating.append(
+                        f"{row.name} (+{stat.st_mtime - manifest_mtime:.0f}s)")
+            if postdating:
+                findings.append(
+                    f"WRITE-ORDERING SLIP (rake M42(b)): {len(postdating)} covered "
+                    f"artifact(s) were written AFTER this manifest — "
+                    f"{postdating[:6]}. The manifest must be generated LAST, after "
+                    f"every covered artifact's final write; re-running any producer "
+                    f"re-runs the manifest. Until then an HONEST artifact reads as "
+                    f"tampered")
+            if missing:
+                findings.append(
+                    f"MISSING ARTIFACT(S): {len(missing)}/{len(covered)} row(s) "
+                    f"have no file under the resolved anchor {chosen} — "
+                    f"{missing[:6]}. The anchor DID resolve for the rest, so this "
+                    f"is not rake M15; under the /models placement rule check for "
+                    f"a relocated tree before concluding data loss (rake M38(b))")
+    return ManifestAudit(
+        listing=listing, n_rows=len(listing.rows), self_rows=listing.self_rows,
+        anchor=None if chosen is None else str(chosen), n_resolved=n_resolved,
+        postdating_artifacts=postdating, missing_artifacts=missing,
+        clean=not findings, findings=findings)
+
+
 def verify_archive(manifest: Path = ARCHIVE_MANIFEST,
                    names: Sequence[str] = ("wp_composition.py",
                                            "wp_composition.json"),
@@ -3595,14 +3913,27 @@ def verify_archive(manifest: Path = ARCHIVE_MANIFEST,
     A sha mismatch on a NUMBER-BEARING artifact is a HALT: the gate compares
     against the archive, so an archive that is not the archive of record makes
     the comparison meaningless rather than merely stale.
+
+    RAKE M42, on the way in. The manifest is parsed by `parse_sha256_manifest`,
+    which accepts both banked dialects and excludes any self-row; a self-listing
+    manifest is WARNED about as a generator defect and does NOT block the gate,
+    because the archived artifacts are innocent of it and blocking would be exactly
+    the false alarm M42(c) tells a checker to look for first.
     """
-    if not manifest.exists():
-        raise ArchiveIntegrityError(f"archive manifest absent: {manifest}")
-    expected: dict[str, str] = {}
-    for line in manifest.read_text().splitlines():
-        parts = line.split()
-        if len(parts) == 2:
-            expected[parts[1].lstrip("*")] = parts[0]
+    listing = parse_sha256_manifest(manifest)
+    if listing.lists_itself:
+        #  Rake M42(c): recognized, reported, and NOT treated as a digest failure.
+        #  The row is already excluded from `by_name`, so nothing downstream can
+        #  compare an artifact against a hash that cannot exist.
+        logger.warning(
+            "SELF-LISTING MANIFEST (rake M42) — %s lists itself (%s). A file "
+            "cannot contain its own hash, so that row can never verify; it is "
+            "EXCLUDED and the archived artifacts are verified normally. The "
+            "generator owes the %s* exclusion", manifest, listing.self_rows,
+            MANIFEST_NAME_PREFIX)
+    for note in listing.unparsed_lines:
+        logger.warning("manifest %s: unparsed %s", manifest, note)
+    expected = listing.by_name
     digests: dict[str, str] = {}
     verified: dict[str, bool] = {}
     bad: list[str] = []
@@ -3615,15 +3946,20 @@ def verify_archive(manifest: Path = ARCHIVE_MANIFEST,
         want = expected.get(name)
         if want is None:
             raise ArchiveIntegrityError(
-                f"{name} is not listed in {manifest} (has {sorted(expected)}) — "
-                f"provenance of the operationalization of record is unverifiable")
+                f"{name} is not listed in {manifest} (has {sorted(expected)}; "
+                f"dialect {listing.dialect!r}, {listing.n_header_lines} header "
+                f"line(s)) — provenance of the operationalization of record is "
+                f"unverifiable")
         verified[name] = digest == want
         if digest != want:
             bad.append(f"{name}: manifest {want}, on disk {digest}")
     if bad:
         raise ArchiveIntegrityError(
             "HALT — the archived operationalization does not match its manifest:\n  "
-            + "\n  ".join(bad))
+            + "\n  ".join(bad)
+            + (f"\n  (this manifest also LISTS ITSELF — rake M42 — but that row "
+               f"was excluded and is not the cause)" if listing.lists_itself
+               else ""))
     return digests, verified
 
 
@@ -8267,6 +8603,169 @@ def selftest() -> int:                                   # noqa: C901 — a chec
               f"double-count: {len(looped28)} hit(s) — the (st_dev, st_ino) "
               f"visit guard, not a recursion limit")
 
+    print("== selftest 29: RAKE M42 — a manifest that lists itself, and both dialects ==")
+    with _tempfile.TemporaryDirectory(prefix="m42_manifest_") as td29:
+        root29 = Path(td29)
+        (root29 / "wp_composition.py").write_text("# archived glue\n")
+        (root29 / "wp_composition.json").write_text('{"a": 1}\n')
+        sha_py = sha256_of(root29 / "wp_composition.py")
+        sha_js = sha256_of(root29 / "wp_composition.json")
+
+        #  DIALECT 1: bare `<digest>  name`, the shape `sha256sum *` writes.
+        bare29 = root29 / "MANIFEST-bare.sha256"
+        bare29.write_text(f"{sha_py}  wp_composition.py\n"
+                          f"{sha_js}  wp_composition.json\n")
+        listing_bare = parse_sha256_manifest(bare29)
+        check(listing_bare.dialect == "bare" and len(listing_bare.rows) == 2
+              and listing_bare.by_name["wp_composition.py"] == sha_py,
+              f"the BARE dialect parses: {len(listing_bare.rows)} rows, "
+              f"dialect {listing_bare.dialect!r}")
+
+        #  DIALECT 2: `./`-prefixed WITH `#` headers, the shape `find . | xargs
+        #  sha256sum` writes. Rake M42(d): the old parser keyed rows verbatim, so
+        #  every lookup missed and a good manifest read as "not listed"; and it
+        #  accepted any two-token line, so a two-word `#` comment became a phantom
+        #  row named after its own second word. Both are asserted fixed.
+        dotted29 = root29 / "MANIFEST-dotted.sha256"
+        dotted29.write_text(
+            "# corpus-v2.1 node-side manifest\n"
+            "# generated 2026-07-29\n"
+            "# phantom\n"                     # exactly TWO tokens — the M42(d) trap
+            f"{sha_py}  ./wp_composition.py\n"
+            f"{sha_js}  ./wp_composition.json\n")
+        listing_dot = parse_sha256_manifest(dotted29)
+        check(listing_dot.dialect == "dot-prefixed"
+              and listing_dot.n_header_lines == 3
+              and sorted(listing_dot.by_name) == ["wp_composition.json",
+                                                  "wp_composition.py"],
+              f"the ./-PREFIXED dialect parses to the SAME keys as the bare one "
+              f"({sorted(listing_dot.by_name)}) with "
+              f"{listing_dot.n_header_lines} header line(s) counted, not parsed")
+        check("phantom" not in listing_dot.by_name
+              and not any("phantom" in r.name for r in listing_dot.rows),
+              "and a two-word `#` comment does NOT become a phantom artifact — "
+              "rake M42(d)'s exact failure, which the old two-token parser had")
+        check(listing_bare.by_name == listing_dot.by_name,
+              "the two dialects yield IDENTICAL lookups, which is what 'parsers "
+              "accept both explicitly' has to mean")
+
+        #  THE SELF-ROW. The ρ-of-record run HALTed on exactly this and paid for
+        #  the diagnosis; the checker now recognizes it.
+        selfy29 = root29 / "MANIFEST-selfy.sha256"
+        selfy29.write_text(f"{sha_py}  wp_composition.py\n"
+                           f"{sha_js}  wp_composition.json\n"
+                           f"{'0' * 64}  ./MANIFEST-selfy.sha256\n")
+        listing_self = parse_sha256_manifest(selfy29)
+        check(listing_self.lists_itself
+              and listing_self.self_rows == ["./MANIFEST-selfy.sha256"],
+              f"a self-row is DETECTED by resolving the row against the manifest "
+              f"file itself, in either dialect: {listing_self.self_rows}")
+        check("MANIFEST-selfy.sha256" not in listing_self.by_name
+              and len(listing_self.by_name) == 2,
+              "and it is EXCLUDED from the lookup, so no checker can compare an "
+              "artifact against a hash that cannot exist — rake M42(c): the row "
+              "is a GENERATOR defect and the artifacts are innocent")
+        audit_self = audit_manifest(selfy29)
+        check(not audit_self.clean and audit_self.self_rows
+              and any("SELF-LISTING (rake M42)" in f for f in audit_self.findings)
+              and any(MANIFEST_NAME_PREFIX in f for f in audit_self.findings),
+              "the AUDIT reports it as a self-listing finding and names the "
+              "exclusion the generator owes")
+        digests29, verified29 = verify_archive(selfy29)
+        check(all(verified29.values()) and len(digests29) == 2,
+              f"and `verify_archive` still verifies the ARCHIVED ARTIFACTS "
+              f"({sum(verified29.values())}/2 exact) on a self-listing manifest "
+              f"rather than blocking on a false alarm — blocking would be exactly "
+              f"the mistake M42(c) tells a checker to look for first")
+
+        clean29 = audit_manifest(bare29)
+        check(clean29.clean and not clean29.findings,
+              "a well-formed manifest generated LAST audits clean, with no "
+              "findings at all")
+
+        #  M42(b): the write-ordering slip. An artifact written after its manifest
+        #  makes an honest file read as tampered.
+        import time as _time
+        late29 = root29 / "MANIFEST-late.sha256"
+        late29.write_text(f"{sha_py}  wp_composition.py\n")
+        _time.sleep(0.01)
+        os.utime(root29 / "wp_composition.py",
+                 (late29.stat().st_mtime + 300, late29.stat().st_mtime + 300))
+        audit_late = audit_manifest(late29)
+        check(not audit_late.clean and audit_late.postdating_artifacts
+              and any("WRITE-ORDERING SLIP" in f for f in audit_late.findings),
+              f"an artifact whose mtime POSTDATES its manifest is reported: "
+              f"{audit_late.postdating_artifacts} — the manifest must be "
+              f"generated LAST, and until then an honest artifact reads as "
+              f"tampered")
+        check(audit_manifest(late29, check_mtimes=False).clean,
+              "and the mtime leg is separable, because a manifest travelling "
+              "between machines loses its timestamps and that is not a finding")
+
+        missing29 = root29 / "MANIFEST-missing.sha256"
+        missing29.write_text(f"{sha_py}  wp_composition.py\n"
+                             f"{'1' * 64}  gone.npz\n")
+        audit_missing = audit_manifest(missing29)
+        check(not audit_missing.clean
+              and audit_missing.missing_artifacts == ["gone.npz"]
+              and any("relocated tree" in f for f in audit_missing.findings),
+              "a manifest row with no file on disk is reported, and the finding "
+              "names the /models relocation check BEFORE concluding data loss "
+              "(rake M38(b))")
+
+        dupe29 = root29 / "MANIFEST-dupe.sha256"
+        dupe29.write_text(f"{sha_py}  wp_composition.py\n"
+                          f"{sha_js}  ./wp_composition.py\n")
+        try:
+            parse_sha256_manifest(dupe29)
+            check(False, "a duplicate manifest row must HALT")
+        except ArchiveIntegrityError as exc:
+            check("M18" in str(exc) and "duplicate manifest row" in str(exc),
+                  "the SAME artifact listed once bare and once ./-prefixed is a "
+                  "DUPLICATE after normalization and HALTs (rake M18) — which is "
+                  "only visible to a parser that normalizes both dialects")
+        junk29 = root29 / "MANIFEST-junk.sha256"
+        junk29.write_text(f"{sha_py}  wp_composition.py\n"
+                          "not-a-digest  wp_composition.json\n")
+        listing_junk = parse_sha256_manifest(junk29)
+        check(len(listing_junk.rows) == 1 and listing_junk.unparsed_lines,
+              f"a line whose first token is not a 64-hex digest is UNPARSED and "
+              f"REPORTED, never taken as a row: {listing_junk.unparsed_lines}")
+        try:
+            parse_sha256_manifest(root29 / "MANIFEST-absent.sha256")
+            check(False, "an absent manifest must HALT")
+        except ArchiveIntegrityError as exc:
+            check("manifest absent" in str(exc),
+                  "an absent manifest HALTs rather than parsing to zero rows, "
+                  "which would audit clean")
+
+        #  THE CLI: a directory sweep, exiting nonzero on any finding, and 0 on a
+        #  tree of clean manifests. Both branches, because an audit that cannot
+        #  fail proves nothing (rake M19(c)).
+        check(main(["--manifest-audit", str(root29)]) == 1,
+              "--manifest-audit over a tree WITH findings exits nonzero, so a "
+              "desk sweep can be a gate rather than a report nobody reads")
+        clean_dir29 = root29 / "clean"
+        clean_dir29.mkdir()
+        (clean_dir29 / "art.json").write_text("{}\n")
+        (clean_dir29 / "MANIFEST-clean.sha256").write_text(
+            f"{sha256_of(clean_dir29 / 'art.json')}  ./art.json\n")
+        check(main(["--manifest-audit", str(clean_dir29)]) == 0,
+              "and a tree of clean manifests exits 0")
+        empty29 = root29 / "no-manifests-here"
+        empty29.mkdir()
+        try:
+            main(["--manifest-audit", str(empty29)])
+            check(False, "a sweep over a directory with NO manifests must refuse")
+        except SystemExit as exc:
+            check("found no" in str(exc.code),
+                  "a sweep that finds no manifest REFUSES rather than reporting a "
+                  "clean audit of nothing — an empty denominator is the one result "
+                  "that must never read as a pass")
+        check(main(["--manifest-audit", str(root29 / "MANIFEST-absent.sha256")]) == 1,
+              "and a named manifest that is not there is a FINDING, not a crash — "
+              "the sweep reports it and carries on over the rest")
+
     print(f"\nselftest: {len(failures)} failure(s)")
     return 1 if failures else 0
 
@@ -8403,6 +8902,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     help="root the record's provenance paths are relativized "
                          "against (default: cwd, which is where the data tree's "
                          "relative `outputs/` already resolves from)")
+    ap.add_argument("--manifest-audit", type=Path, nargs="+", default=None,
+                    metavar="PATH",
+                    help="RAKE M42 audit over sha256 manifests: each PATH is a "
+                         "manifest file, or a DIRECTORY swept (following "
+                         "symlinks, rake M38) for *.sha256. Reports manifests "
+                         "that LIST THEMSELVES (which can never verify clean), "
+                         "covered artifacts written AFTER their manifest (the "
+                         "manifest must be generated LAST), missing rows and "
+                         "unparseable lines. Digests are NOT recomputed — this is "
+                         "the cheap structural audit, not a verification. EXITS "
+                         "NONZERO if any manifest is not clean.")
     ap.add_argument("--score-record", type=Path, default=None,
                     help="a FILED prediction record to score. Requires "
                          "--observed; never runs at filing time.")
@@ -8570,11 +9080,57 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if value is not None and not args.emit_record:
             ap.error(f"{flag} only means anything with --emit-record.")
 
+    #  THE M42 AUDIT is a standalone structural read over manifests: it loads no
+    #  map, resolves no registry and needs no vintage, so it runs before every
+    #  other mode's setup and returns on its own.
+    if args.manifest_audit is not None:
+        manifests: list[Path] = []
+        for target in args.manifest_audit:
+            if target.is_dir():
+                #  Symlink-following (rake M38): under the /models placement rule a
+                #  manifest can sit inside a relocated subtree, and a sweep that
+                #  missed it would report a clean audit of the trees it could see.
+                for dirpath, _dirs, files in os.walk(target, followlinks=True):
+                    manifests.extend(sorted(Path(dirpath) / f for f in files
+                                            if f.endswith(".sha256")))
+            else:
+                manifests.append(target)
+        if not manifests:
+            raise SystemExit(f"--manifest-audit found no *.sha256 under "
+                             f"{[str(t) for t in args.manifest_audit]}")
+        n_unclean = 0
+        n_self = 0
+        print(f"\nMANIFEST AUDIT (rake M42) — {len(manifests)} manifest(s)")
+        for target in sorted(set(manifests)):
+            try:
+                audit = audit_manifest(target)
+            except ArchiveIntegrityError as exc:
+                n_unclean += 1
+                print(f"\n{target}\n  UNREADABLE: {exc}")
+                continue
+            if audit.clean:
+                continue
+            n_unclean += 1
+            n_self += 1 if audit.self_rows else 0
+            print(f"\n{target}\n  dialect {audit.listing.dialect}, "
+                  f"{audit.n_rows} row(s), "
+                  f"{audit.listing.n_header_lines} header line(s), anchor "
+                  f"{audit.anchor or 'UNRESOLVED'} "
+                  f"({audit.n_resolved} row(s) resolve)")
+            for finding in audit.findings:
+                print(f"  {finding}")
+        print(f"\nmanifest audit: {len(manifests)} scanned, "
+              f"{len(manifests) - n_unclean} clean, {n_unclean} with finding(s), "
+              f"{n_self} SELF-LISTING — "
+              f"{'PASSED' if n_unclean == 0 else 'FINDINGS'}")
+        return 0 if n_unclean == 0 else 1
+
     if not (args.gate or args.candidates or args.resolution_sweep
             or args.source_model or args.score_record or args.emit_record):
         raise SystemExit("pass --selftest, --gate, --candidates, "
                          "--resolution-sweep, --source-model/--target-model, "
-                         "--emit-record, or --score-record/--observed")
+                         "--emit-record, --manifest-audit, or "
+                         "--score-record/--observed")
 
     directional_constants: Optional[DirectionalConstants] = None
     if args.directional_constants is not None:
