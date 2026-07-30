@@ -1,0 +1,66 @@
+{
+ "name": "formality_topics_v1",
+ "description": "The 20 contrast topics of the formality-contrast (CAA difference-of-means) vector class. ORDER IS LOAD-BEARING: the topic index drives the per-(topic, template) generation seed, so this list must be consumed exactly as written (set_a then set_b, each in its own source order).",
+ "n_topics": 20,
+ "topic_sets_in_order": [
+  "set_a",
+  "set_b"
+ ],
+ "topic_sets": {
+  "set_a": [
+   "The nature of consciousness",
+   "How to debug a segfault",
+   "The history of bread",
+   "Climate change mitigation strategies",
+   "What makes a good friendship",
+   "How neural networks learn",
+   "The appeal of horror fiction",
+   "Urban planning challenges",
+   "Teaching a child to ride a bike",
+   "The future of space exploration"
+  ],
+  "set_b": [
+   "How memory works in the brain",
+   "The ethics of genetic engineering",
+   "Why music moves us",
+   "Building a house from scratch",
+   "The mathematics of infinity",
+   "The evolution of language",
+   "Why we dream",
+   "How markets determine prices",
+   "The art of persuasion",
+   "Cooking as chemistry"
+  ]
+ },
+ "topics": [
+  "The nature of consciousness",
+  "How to debug a segfault",
+  "The history of bread",
+  "Climate change mitigation strategies",
+  "What makes a good friendship",
+  "How neural networks learn",
+  "The appeal of horror fiction",
+  "Urban planning challenges",
+  "Teaching a child to ride a bike",
+  "The future of space exploration",
+  "How memory works in the brain",
+  "The ethics of genetic engineering",
+  "Why music moves us",
+  "Building a house from scratch",
+  "The mathematics of infinity",
+  "The evolution of language",
+  "Why we dream",
+  "How markets determine prices",
+  "The art of persuasion",
+  "Cooking as chemistry"
+ ],
+ "provenance": {
+  "source": "anamnesis pipeline/anamnesis/prompts/prompt_sets.json",
+  "source_sha256": "2feeb2b63a535ee5684beee160600b0f1367741a9935e0435ff85f3307853b73",
+  "source_selection": "topics = concat(d['topics'][s] for s in d['vmb_stage0_strata']['topic_sets']) — the Stage-0 protocol loader's rule (vmb_stage0_generate.load_stage0_protocol). Iterating d['topics'] directly yields the 4 SET KEYS, not the topics, which is the 8-pairs-instead-of-40 rake this file exists to make impossible.",
+  "copied_by": "BRIEF-class-probe-v1-2026-07-29.md section 1",
+  "brief_sha256": "568dcb610cc6c9df38fafca597ab3af16fb5609eda6f00b0a2010778b72d19c7",
+  "copied_on": "2026-07-29",
+  "named_limit": "TOPIC LEAKAGE: these topics ARE the frozen transport corpus's topic universe (set_a + set_b), so the transport maps were fit on text from the same topics the contrast is built from. Every readout that consumes a vector built from this file names that limit."
+ }
+}
