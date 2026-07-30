@@ -45,11 +45,14 @@ linear regime) and takes the best rung; a matched-support random band direction 
 measured beside it as a direction-specificity control.
 
 Known traps, all guarded here (REPORT-dsv3-fp8-lane-design 2026-07-26 section 5):
-  * leaf-hook RE-ENTRY — the pre-hook counts its calls per forward and raises if a
-    layer forward fires more than once (activation checkpointing would silently
-    overwrite the leaf). Checkpointing is therefore never enabled: with
-    `requires_grad_(False)` on every parameter, autograd builds a graph only from
-    the leaf onward, so only layers >= site retain activations anyway.
+  * leaf-hook RE-ENTRY — the pre-hook counts its calls per forward and raises if the
+    SITE layer's forward fires more than once, because a second call would replace
+    the leaf with a recompute pass's copy and the gradient would then be taken with
+    respect to a tensor that never fed the loss. Whole-model activation
+    checkpointing therefore cannot be used, and is not: `--checkpoint-above-site`
+    wraps `layers[site+1:]` ONLY (see below), and the guard is re-asserted AFTER
+    the backward on every text, which is what proves the recompute stayed above
+    the site.
   * `requires_grad_(False)` on everything but the leaf — no per-parameter gradient
     buffers are ever allocated (the difference between ~20 GB peak and OOM on a
     32B), and `autograd.grad(S, leaf)` never touches `.backward()`.
@@ -89,6 +92,21 @@ no-op when unset, so every historical build is reproduced byte-for-byte without 
     weights plus the retained autograd graph do not fit one card. The layer activations
     of every layer >= site are retained for the leaf gradient, and eager attention is
     O(n^2) per layer, so the peak is well above the weights alone.
+  * `--checkpoint-above-site` — prereg §4's "input-gradient extraction with
+    checkpointing", made implementable. As written that phrase was NOT: whole-model
+    checkpointing wraps the site layer too and trips the re-entry guard by
+    construction, and REENTRANT checkpointing (torch's historical default) requires
+    `.backward()` while this builder uses `autograd.grad` — which is the whole reason
+    no per-parameter grad buffers are ever allocated. The named fix wraps
+    `layers[site+1:]` in NON-REENTRANT checkpointing (`use_reentrant=False`, passed
+    explicitly) for the GRADIENT PASS ONLY: layers at and below the site are never
+    wrapped, so the substituted leaf and its gradient are untouched, the site
+    layer's forward still fires exactly once, and the guard is RE-ASSERTED after the
+    backward — the only place a recompute-driven re-entry could show up. The
+    agreement of the two paths is MEASURED end to end in the selftest, never argued
+    from the reasoning above. This is what unblocks the DeepSeek-V3 native target
+    build, whose gradient pass runs out of memory on the retained per-layer graph
+    rather than on the weights or the logits.
 """
 from __future__ import annotations
 
@@ -102,7 +120,8 @@ import logging
 import sys
 import time
 from pathlib import Path
-from typing import Any, Optional, Sequence
+from contextlib import ExitStack, contextmanager
+from typing import Any, Iterator, Optional, Sequence
 
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -131,6 +150,28 @@ FD_REL_TOL = 0.25
 
 CANONICAL_VECTOR_KEY = "entropy_gradient_L{site}"
 CANONICAL_RANDOM_KEY = "random_band{i}_L{site}"
+
+#: THE AGREEMENT TOLERANCE for `--checkpoint-above-site` (selftest block 6).
+#:
+#: WHY A TOLERANCE AT ALL, when the measurement is BITWISE. On CPU float32 the
+#: recomputed forward runs the same kernels in the same order on the same saved
+#: boundary tensors, so the built vector comes out byte-identical — measured, and
+#: the selftest asserts that strictly, because a torch release that changed
+#: recompute semantics should fail loudly rather than drift inside a tolerance.
+#: But byte-equality is NOT guaranteed where the flag is actually FOR: a bf16
+#: forward on a GPU may select a different kernel or reduction order on the second
+#: pass, and the honest contract for a banked vector has to be numeric.
+#:
+#: WHY THIS VALUE. The vector is unit-norm float32, so a component's own
+#: representation error is already ~1.2e-7 (float32 eps). 1e-6 is ~8 eps: loose
+#: enough that kernel-level reassociation across a handful of layers cannot trip
+#: it, tight enough to be ~5 orders of magnitude below anything that could move a
+#: transported cosine at the 4-dp filing convention, and ~5 orders below the FD
+#: gate's own 0.25 relative tolerance — so any disagreement big enough to matter
+#: scientifically would be caught by the gate long before it approached this bound.
+#: A violation here means the two paths are computing different things, which is a
+#: HALT, not a rounding difference.
+CHECKPOINT_AGREEMENT_ATOL = 1e-6
 
 
 # ---------------------------------------------------------------- error taxonomy
@@ -212,6 +253,14 @@ class BuildRequest(BaseModel):
                     "first). Overridden only when a build must sit BESIDE an existing "
                     "vector of the same model — e.g. the 8bL16 construction-lineage "
                     "rebuild, which must not overwrite the legacy L16 bank.")
+    checkpoint_above_site: bool = Field(
+        default=False,
+        description="wrap layers[site+1:] in NON-REENTRANT activation checkpointing "
+                    "for the gradient pass, trading recompute for the retained "
+                    "activations of every layer above the site. Layers AT and BELOW "
+                    "the site are never wrapped, so the leaf and its gradient are "
+                    "untouched — see `checkpoint_above_site` for why that is the whole "
+                    "design and why non-reentrant is the only workable mode.")
 
     @property
     def stem(self) -> str:
@@ -397,6 +446,12 @@ class ConstructionDiagnostics(BaseModel):
     sigma_band_eigenvalue_lo: float
     sigma_band_eigenvalue_hi: float
     mean_entropy_nats: float
+    #: how many layers above the site ran under NON-REENTRANT activation
+    #: checkpointing during the gradient pass. 0 = the flag was not passed, or the
+    #: site is the top layer and there was nothing above it to wrap. Recorded so a
+    #: banked vector says whether it was built with the memory deviation, and a
+    #: comparison between two banks can name the difference.
+    n_layers_checkpointed_above_site: int = 0
 
 
 class BuildResult(BaseModel):
@@ -514,6 +569,132 @@ class _LeafSubstitution:
         self._handle.remove()
 
 
+class CheckpointModeError(EntropyGradientBuildError):
+    """Activation checkpointing could not be established in the required mode."""
+
+
+@contextmanager
+def checkpoint_above_site(layers: Any, site: int) -> Iterator[int]:
+    """Wrap `layers[site+1:]` in NON-REENTRANT activation checkpointing.
+
+    ─── WHY THIS EXISTS ────────────────────────────────────────────────────────
+    The gradient pass retains the activations of every layer at or above the site
+    (that is where autograd's graph lives, because `requires_grad_(False)` on the
+    parameters means the graph starts at the substituted leaf and nowhere else).
+    On a deep enough model with eager O(n²) attention that alone exhausts a card:
+    DeepSeek-V3's entropy-gradient vector cannot be built without help, and the
+    prereg §4 phrase "input-gradient extraction with checkpointing" was
+    UNIMPLEMENTABLE as written — for a reason worth stating exactly, because it is
+    the reason this function has the shape it has.
+
+    ─── WHY THE OBVIOUS THING IS FORBIDDEN ─────────────────────────────────────
+    Two independent obstacles, and each one alone is fatal:
+
+    1. THE LEAF-HOOK RE-ENTRY GUARD. `_LeafSubstitution` counts the site layer's
+       forward calls and raises if it fires more than once, because a second call
+       would REPLACE the leaf with the recompute pass's copy and the gradient would
+       then be taken with respect to a tensor that never fed the loss. Ordinary
+       whole-model checkpointing (or `model.gradient_checkpointing_enable()`) wraps
+       EVERY layer including the site's, so it trips that guard by construction —
+       correctly. Hence `layers[site+1:]` and not `layers[:]`: layers at and below
+       the site are never wrapped, the site layer's forward fires exactly once, and
+       the leaf and its gradient are bit-for-bit what they were.
+
+    2. REENTRANT CHECKPOINTING NEEDS `.backward()`. `use_reentrant=True` (the
+       historical default) implements the recompute through a custom autograd
+       Function that requires the backward pass to be driven by
+       `Tensor.backward()`; under `torch.autograd.grad(S, leaf)` — which is what
+       this builder uses, precisely so that no per-parameter grad buffers are ever
+       allocated — it either raises or silently produces no gradient for inputs it
+       cannot see. `use_reentrant=False` uses the saved-tensor-hooks machinery,
+       composes with `autograd.grad`, and is the only mode that works here. It is
+       passed EXPLICITLY rather than relied on as a default, because the default
+       has changed across torch versions and a silent flip back to reentrant would
+       turn a working build into a confusing failure.
+
+    ─── WHY WRAPPING `.forward` AND NOT THE MODULE ──────────────────────────────
+    This wraps each target module's `.forward` attribute, not the module itself,
+    and that choice is load-bearing rather than stylistic. Forward pre-hooks fire
+    in `Module.__call__`; a recompute that re-runs the captured `forward` never
+    passes through `__call__`, so no pre-hook fires twice ANYWHERE in the stack —
+    a second, independent guarantee beside the site-exclusion above.
+    `model.gradient_checkpointing_enable()` does the opposite: it recomputes
+    through the layer's `__call__`, which DOES re-invoke pre-hooks. Both behaviours
+    are MEASURED in the selftest, because they differ and the difference is exactly
+    what makes one approach safe and the other silently wrong.
+
+    ─── WHAT IS PRESERVED ──────────────────────────────────────────────────────
+    Checkpointing changes WHEN a forward runs, not WHAT it computes. The layers
+    above the site run twice (once forward, once recomputed during the backward)
+    and the recompute is fed the same inputs from the same saved boundary tensors,
+    so the gradient reaching the leaf is the same gradient. `preserve_rng_state`
+    is left at its default True so any stochastic op would replay identically —
+    the model is in `eval()` and the builder allocates no dropout, so this is
+    belt-and-braces rather than load-bearing, but a builder that relied on
+    "there is no randomness here" would be one refactor from being wrong.
+
+    The AGREEMENT is not argued from that reasoning — it is MEASURED, on a real
+    end-to-end build, in the selftest.
+
+    ─── YIELDS ─────────────────────────────────────────────────────────────────
+    the number of layers wrapped. Zero is a legitimate result (a site at the top
+    of the stack has nothing above it) and is NOT an error: the flag then costs
+    nothing and changes nothing, which is the honest behaviour.
+    """
+    import torch.utils.checkpoint as _ckpt
+
+    if not hasattr(_ckpt, "checkpoint"):             # pragma: no cover — defensive
+        raise CheckpointModeError(
+            "torch.utils.checkpoint.checkpoint is unavailable in this torch "
+            "build; --checkpoint-above-site cannot be honoured, and the build "
+            "REFUSES rather than silently running without it — an OOM that the "
+            "flag was passed to avoid must not read as a model too big for the "
+            "node")
+    n_layers = len(layers)
+    if not 0 <= site < n_layers:
+        raise SiteOutOfRangeError(
+            f"cannot checkpoint above site L{site}: the stack has {n_layers} "
+            f"decoder layers")
+    targets = list(range(site + 1, n_layers))
+    originals: list[tuple[Any, Any]] = []
+
+    def _wrap(module: Any) -> Any:
+        original = module.forward
+
+        def _checkpointed(*args: Any, **kwargs: Any) -> Any:
+            #  use_reentrant=False EXPLICITLY (see the docstring): the reentrant
+            #  implementation requires .backward() and this builder uses
+            #  autograd.grad. The default has moved across torch versions, so it is
+            #  never left to the library to decide.
+            return _ckpt.checkpoint(original, *args, use_reentrant=False, **kwargs)
+
+        return original, _checkpointed
+
+    try:
+        for index in targets:
+            module = layers[index]
+            original, wrapped = _wrap(module)
+            originals.append((module, original))
+            module.forward = wrapped                 # type: ignore[method-assign]
+        if targets:
+            logger.info("activation checkpointing ON for layers[%d:%d] "
+                        "(%d layer(s)), NON-REENTRANT; site L%d and every layer "
+                        "below it are UNWRAPPED so the leaf gradient is untouched",
+                        site + 1, n_layers, len(targets), site)
+        else:
+            logger.info("activation checkpointing requested but site L%d is the "
+                        "TOP layer — 0 layers above it, so the flag is a no-op "
+                        "and the build is byte-identical to one without it", site)
+        yield len(targets)
+    finally:
+        #  Restored on EVERY exit path. A module left carrying a wrapped forward
+        #  would silently checkpoint the FD gate's no-grad passes and any later
+        #  build in the same process — and the second of those would be a
+        #  different object from the first without anything erroring.
+        for module, original in originals:
+            module.forward = original                # type: ignore[method-assign]
+
+
 def _forward_entropy(model: Any, ids: Any, p: int, n: int, chunk: int) -> float:
     """One no-grad forward -> scalar mean completion entropy (nats)."""
     import torch
@@ -609,51 +790,73 @@ def build_entropy_gradient(model: Any, tok: Any, entries: Sequence[dict],
                     request.band_lo, request.band_hi)
 
         # ── gradient pass: leaf gradient of the mean completion entropy ──
+        #  ACTIVATION CHECKPOINTING, if asked for, wraps ONLY this pass. The
+        #  covariance pass above runs under `no_grad`, where nothing is retained
+        #  and checkpointing is pure overhead; the FD gate below runs no-grad
+        #  forwards for the same reason. Scoping it here keeps every other forward
+        #  in the build byte-identical to one made without the flag.
         Ge: list[np.ndarray] = []
         probe_meta: list[dict] = []
         entropies: list[float] = []
         n_grad_positions = 0
-        for i, e in enumerate(grad_entries):
-            ids_list, p = build_ids(tok, e, request.arm, date_string,
-                                   max_length=request.max_seq_len)
-            n = len(ids_list)
-            if n - p <= 0:
-                raise CorpusSelectionError(f"{e['text_id']}: no completion positions")
-            ids = torch.tensor([ids_list], dtype=torch.long, device=device)
-            hook.arm()
-            with torch.enable_grad():
-                out = model(ids, use_cache=False, return_dict=True)
-                S = _mean_next_token_entropy(out.logits[0], p, n, request.entropy_chunk)
-                leaf = hook.check_single_call(f"gradient pass, {e['text_id']}")
-                try:
-                    (grad_leaf,) = torch.autograd.grad(S, leaf, allow_unused=False)
-                except RuntimeError as exc:
+        n_checkpointed = 0
+        with ExitStack() as grad_stack:
+            if request.checkpoint_above_site:
+                n_checkpointed = grad_stack.enter_context(
+                    checkpoint_above_site(layers, site))
+            for i, e in enumerate(grad_entries):
+                ids_list, p = build_ids(tok, e, request.arm, date_string,
+                                        max_length=request.max_seq_len)
+                n = len(ids_list)
+                if n - p <= 0:
+                    raise CorpusSelectionError(f"{e['text_id']}: no completion positions")
+                ids = torch.tensor([ids_list], dtype=torch.long, device=device)
+                hook.arm()
+                with torch.enable_grad():
+                    out = model(ids, use_cache=False, return_dict=True)
+                    S = _mean_next_token_entropy(out.logits[0], p, n,
+                                                 request.entropy_chunk)
+                    leaf = hook.check_single_call(f"gradient pass, {e['text_id']}")
+                    try:
+                        (grad_leaf,) = torch.autograd.grad(S, leaf, allow_unused=False)
+                    except RuntimeError as exc:
+                        raise GradientPathError(
+                            f"{e['text_id']}: autograd.grad(S_entropy, leaf) failed ({exc}). "
+                            "The substituted leaf never reached the loss — the layer's "
+                            "forward ignored the hook's returned hidden_states, or the "
+                            "forward has no autograd nodes at all.") from exc
+                    #  THE RE-ENTRY GUARD, RE-ASSERTED AFTER THE BACKWARD. This is
+                    #  the load-bearing check for `--checkpoint-above-site`: the
+                    #  recompute happens INSIDE autograd.grad, after
+                    #  check_single_call has already run, so only a second look can
+                    #  prove the recompute never re-entered the site layer. It is
+                    #  unconditional — the flag is not what makes a second call
+                    #  possible, it is only the most likely way to cause one.
+                    hook.check_single_call(
+                        f"gradient pass AFTER backward, {e['text_id']} "
+                        f"(checkpointed layers above site: {n_checkpointed})")
+                    if grad_leaf is None:                      # pragma: no cover
+                        raise GradientPathError(f"{e['text_id']}: gradient is None")
+                    g = grad_leaf[0, p:n, :].float().mean(0).cpu().numpy().astype(np.float64)
+                    s_value = float(S.detach().item())
+                if not np.all(np.isfinite(g)):
                     raise GradientPathError(
-                        f"{e['text_id']}: autograd.grad(S_entropy, leaf) failed ({exc}). "
-                        "The substituted leaf never reached the loss — the layer's "
-                        "forward ignored the hook's returned hidden_states, or the "
-                        "forward has no autograd nodes at all.") from exc
-                if grad_leaf is None:                          # pragma: no cover
-                    raise GradientPathError(f"{e['text_id']}: gradient is None")
-                g = grad_leaf[0, p:n, :].float().mean(0).cpu().numpy().astype(np.float64)
-                s_value = float(S.detach().item())
-            if not np.all(np.isfinite(g)):
-                raise GradientPathError(
-                    f"{e['text_id']}: gradient contains non-finite entries")
-            if float(np.linalg.norm(g)) == 0.0:
-                raise GradientPathError(
-                    f"{e['text_id']}: gradient is exactly zero — no autograd path "
-                    "reached the leaf through the layers above the site")
-            if gradient_saboteur is not None:
-                g = np.asarray(gradient_saboteur(g), dtype=np.float64)
-            Ge.append(g)
-            entropies.append(s_value)
-            n_grad_positions += n - p
-            if i < request.fd_n_probe:
-                probe_meta.append({"text_id": e["text_id"], "ids": ids_list,
-                                   "p": p, "n": n, "grad": g})
-            logger.info("gradient %d/%d texts (|g| %.4g, S %.4f nats)",
-                        i + 1, len(grad_entries), float(np.linalg.norm(g)), s_value)
+                        f"{e['text_id']}: gradient contains non-finite entries")
+                if float(np.linalg.norm(g)) == 0.0:
+                    raise GradientPathError(
+                        f"{e['text_id']}: gradient is exactly zero — no autograd path "
+                        "reached the leaf through the layers above the site")
+                if gradient_saboteur is not None:
+                    g = np.asarray(gradient_saboteur(g), dtype=np.float64)
+                Ge.append(g)
+                entropies.append(s_value)
+                n_grad_positions += n - p
+                if i < request.fd_n_probe:
+                    probe_meta.append({"text_id": e["text_id"], "ids": ids_list,
+                                       "p": p, "n": n, "grad": g})
+                logger.info("gradient %d/%d texts (|g| %.4g, S %.4f nats)",
+                            i + 1, len(grad_entries), float(np.linalg.norm(g)),
+                            s_value)
     finally:
         hook.remove()
 
@@ -720,6 +923,7 @@ def build_entropy_gradient(model: Any, tok: Any, entries: Sequence[dict],
         sigma_band_eigenvalue_lo=float(band_evals[0]),
         sigma_band_eigenvalue_hi=float(band_evals[-1]),
         mean_entropy_nats=float(np.mean(entropies)),
+        n_layers_checkpointed_above_site=n_checkpointed,
     )
     return BuildResult(
         request=request, vector=vector, random_band=random_band,
@@ -959,6 +1163,31 @@ def bank(result: BuildResult, trunk: dict, corpus_sha: str, date_string: str,
         stamp["n_truncated"] = t.n_truncated
         stamp["truncated_text_ids"] = t.truncated_text_ids
         stamp["truncation_audit"] = t.model_dump(exclude={"truncated_text_ids"})
+    # The memory deviation, recorded ONLY when it was taken — same discipline as
+    # `truncation` and the collector's `sharding`, so every historical build stamp
+    # keeps exactly its key set and an absent key means the deviation was not
+    # taken. Its presence says the gradient pass ran with layers above the site
+    # recomputed; the agreement of that path with the un-checkpointed one is a
+    # property of the BUILDER, proved in its selftest, not re-proved per bank.
+    if req.checkpoint_above_site:
+        stamp["checkpoint_above_site"] = {
+            "n_layers_checkpointed": (
+                result.diagnostics.n_layers_checkpointed_above_site),
+            "layers": f"[{site + 1}:{result.diagnostics.n_decoder_layers}]",
+            "mode": "torch.utils.checkpoint, use_reentrant=False (NON-REENTRANT: "
+                    "the reentrant implementation requires .backward() and this "
+                    "builder uses autograd.grad)",
+            "site_layer_unwrapped": True,
+            "why": "layers AT and BELOW the site are never wrapped, so the site "
+                   "layer's forward fires exactly once and the substituted leaf "
+                   "and its gradient are untouched. The re-entry guard is "
+                   "re-asserted AFTER the backward on every text, which is what "
+                   "proves the recompute did not re-enter the site layer",
+            "agreement": "gradients with and without this flag agree to the "
+                         "tolerance documented in the builder's selftest; "
+                         "checkpointing changes WHEN a forward runs, not WHAT it "
+                         "computes",
+        }
     if saboteur_used:
         stamp["SELFTEST_SABOTEUR_APPLIED"] = True
     stamp_path = out / f"{stem}_stamps.json"
@@ -1118,6 +1347,191 @@ def selftest() -> int:
           stride_indices(780, 60, False)[:4] == [0, 13, 26, 39])
     check("stride rule matches the precedent's _grad_gids",
           stride_indices(780, 20, True)[:4] == [19, 58, 97, 136])
+
+    # ------- --checkpoint-above-site: THE AGREEMENT GATE (prereg §4, made real) -----
+    #  A DEEPER toy than the one above, so several layers sit above the site and the
+    #  recompute machinery is actually exercised: 6 layers, site 2 => layers[3:6]
+    #  wrapped. The whole build runs twice and the two results are compared.
+    torch.manual_seed(20260729)
+    cfg_ck = LlamaConfig(vocab_size=128, hidden_size=64, intermediate_size=128,
+                         num_hidden_layers=6, num_attention_heads=4,
+                         num_key_value_heads=2, max_position_embeddings=256,
+                         tie_word_embeddings=False)
+    model_ck = LlamaForCausalLM(cfg_ck).to(torch.float32).eval()
+    model_ck.requires_grad_(False)
+    req_ck = req.model_copy(update={"site": 2})
+    plain_ck = build_entropy_gradient(model_ck, tok, entries, req_ck,
+                                      "12 Jul 2026", "cpu")
+    with_ck = build_entropy_gradient(
+        model_ck, tok, entries,
+        req_ck.model_copy(update={"checkpoint_above_site": True}),
+        "12 Jul 2026", "cpu")
+
+    n_wrapped = with_ck.diagnostics.n_layers_checkpointed_above_site
+    check("the flag wraps exactly the layers ABOVE the site, and nothing else",
+          n_wrapped == cfg_ck.num_hidden_layers - req_ck.site - 1 == 3
+          and plain_ck.diagnostics.n_layers_checkpointed_above_site == 0,
+          f"{n_wrapped} of {cfg_ck.num_hidden_layers} layers wrapped "
+          f"(layers[{req_ck.site + 1}:{cfg_ck.num_hidden_layers}]); the "
+          f"un-checkpointed build reports 0")
+    v_plain = plain_ck.vector.astype(np.float64)
+    v_ckpt = with_ck.vector.astype(np.float64)
+    max_dev = float(np.max(np.abs(v_plain - v_ckpt)))
+    check("THE AGREEMENT GATE: the built vector is BITWISE identical with and "
+          "without checkpointing",
+          np.array_equal(plain_ck.vector, with_ck.vector),
+          f"max |Δ| = {max_dev:.3e} over {v_plain.size} components "
+          f"(float32 eps {float(np.finfo(np.float32).eps):.3e}); on CPU fp32 the "
+          f"recompute runs the same kernels in the same order on the same saved "
+          f"boundary tensors, so equality is exact — asserted strictly so a torch "
+          f"release that changed recompute semantics fails loudly")
+    check("and it satisfies the documented numeric CONTRACT tolerance",
+          max_dev <= CHECKPOINT_AGREEMENT_ATOL,
+          f"max |Δ| {max_dev:.3e} <= {CHECKPOINT_AGREEMENT_ATOL:.0e} — the bound a "
+          f"bf16 GPU build is held to, where the recompute may pick a different "
+          f"kernel and byte-equality is not guaranteed")
+    check("the two vectors are parallel to machine precision",
+          abs(1.0 - float(v_plain @ v_ckpt) / (np.linalg.norm(v_plain)
+                                               * np.linalg.norm(v_ckpt))) < 1e-12,
+          f"1 − cos = "
+          f"{abs(1.0 - float(v_plain @ v_ckpt) / (np.linalg.norm(v_plain) * np.linalg.norm(v_ckpt))):.3e} "
+          f"— the direction is the object of record, so its agreement is asserted "
+          f"separately from the components'")
+    for field in ("mean_gradient_norm", "band_projected_norm",
+                  "band_energy_fraction", "per_text_band_pairwise_coherence",
+                  "mean_entropy_nats", "vector_norm", "sigma_top_eigenvalue",
+                  "n_grad_positions", "n_sigma_positions"):
+        a_val = getattr(plain_ck.diagnostics, field)
+        b_val = getattr(with_ck.diagnostics, field)
+        check(f"diagnostic `{field}` agrees exactly",
+              abs(float(a_val) - float(b_val)) == 0.0,
+              f"{a_val} vs {b_val}")
+    check("per-text band sign consistency is unchanged",
+          plain_ck.diagnostics.per_text_band_sign_consistency
+          == with_ck.diagnostics.per_text_band_sign_consistency,
+          plain_ck.diagnostics.per_text_band_sign_consistency)
+    check("and the MANDATORY FD gate reaches the same verdict, at the same rung",
+          plain_ck.fd_gate.passed == with_ck.fd_gate.passed
+          and plain_ck.fd_gate.best_eps_fraction == with_ck.fd_gate.best_eps_fraction
+          and abs(plain_ck.fd_gate.best_median_rel_error
+                  - with_ck.fd_gate.best_median_rel_error) == 0.0,
+          f"passed={with_ck.fd_gate.passed}, median rel.err "
+          f"{with_ck.fd_gate.best_median_rel_error:.6e} at eps_frac "
+          f"{with_ck.fd_gate.best_eps_fraction} — identical, which also shows the "
+          f"wrapped forwards were RESTORED before the gate's no-grad passes ran")
+
+    #  THE RE-ENTRY GUARD is what makes the design safe, so its two halves are
+    #  demonstrated rather than described: the site layer's forward fires exactly
+    #  once even under checkpointing (proved by the build above completing — the
+    #  guard raises otherwise, before AND after the backward), and wrapping the
+    #  SITE layer itself would trip it.
+    layers_ck = _decoder_layers(model_ck)
+    with checkpoint_above_site(layers_ck, req_ck.site) as wrapped_now:
+        check("inside the scope, only layers above the site carry a wrapped forward",
+              wrapped_now == 3
+              and all(layers_ck[i].forward.__qualname__.endswith("_checkpointed")
+                      for i in range(req_ck.site + 1, len(layers_ck)))
+              and not any(
+                  layers_ck[i].forward.__qualname__.endswith("_checkpointed")
+                  for i in range(0, req_ck.site + 1)),
+              f"{wrapped_now} wrapped; layers[0:{req_ck.site + 1}] untouched — the "
+              f"site layer's own forward is NEVER wrapped, which is what keeps the "
+              f"leaf substitution single-call")
+    check("and every forward is RESTORED on scope exit",
+          not any(getattr(layer.forward, "__qualname__", "").endswith("_checkpointed")
+                  for layer in layers_ck),
+          "a module left carrying a wrapped forward would silently checkpoint the "
+          "FD gate's no-grad passes and any later build in the same process")
+    with checkpoint_above_site(layers_ck, len(layers_ck) - 1) as top_wrapped:
+        check("a site at the TOP of the stack wraps 0 layers and is not an error",
+              top_wrapped == 0,
+              "the flag then costs nothing and changes nothing, which is the "
+              "honest behaviour rather than a refusal")
+    try:
+        with checkpoint_above_site(layers_ck, len(layers_ck)):
+            check("an out-of-range site must be refused", False)
+    except SiteOutOfRangeError:
+        check("an out-of-range site is refused by the checkpoint scope too", True)
+    #  WHY THE SITE LAYER MUST NEVER BE WRAPPED — demonstrated at unit grain on the
+    #  REAL hook class, rather than asserted in a comment. Two mechanisms exist and
+    #  they behave differently, which is exactly why this needs a measurement:
+    #
+    #    * wrapping a module's `.forward` (what `checkpoint_above_site` does) does
+    #      NOT re-invoke forward pre-hooks, because pre-hooks fire in `__call__` and
+    #      the recompute re-runs the captured `forward` directly. A second,
+    #      independent reason the design is safe.
+    #    * wrapping a module's `__call__` — which is what
+    #      `model.gradient_checkpointing_enable()` does in transformers, and what
+    #      prereg §4's bare phrase reads as — DOES re-invoke the pre-hook on
+    #      recompute, so the leaf is replaced with the recompute pass's copy and the
+    #      gradient would be taken w.r.t. a tensor that never fed the loss.
+    #
+    #  The second case is reproduced here on a version-proof stand-in module (a real
+    #  Llama decoder layer's standalone signature moves across transformers
+    #  releases; the hook and the hazard do not).
+    import torch.nn as _nn
+    import torch.utils.checkpoint as _ckpt_mod
+
+    class _Passthrough(_nn.Module):
+        #  `x * x` and NOT `x * 2` on purpose: non-reentrant checkpointing
+        #  recomputes LAZILY, when a saved tensor is unpacked, and a multiply by a
+        #  constant saves nothing — so a passthrough would never trigger a
+        #  recompute and the demonstration would pass for the wrong reason.
+        def forward(self, hidden_states: Any) -> Any:    # noqa: D102
+            return hidden_states * hidden_states
+
+    probe_module = _Passthrough()
+    probe_hook = _LeafSubstitution(probe_module)
+    try:
+        probe_hook.arm()
+        x_probe = torch.randn(1, 3, 4, requires_grad=True)
+        out_probe = _ckpt_mod.checkpoint(probe_module.__call__, x_probe,
+                                         use_reentrant=False)
+        leaf_probe = probe_hook.check_single_call("probe forward")
+        check("a __call__-level checkpoint leaves the guard clean BEFORE the "
+              "backward", probe_hook.calls == 1,
+              "which is exactly why the guard must be re-asserted afterwards — "
+              "one look cannot see a recompute that has not happened yet")
+        torch.autograd.grad(out_probe.sum(), leaf_probe, allow_unused=True)
+        probe_hook.check_single_call("probe AFTER backward")
+        check("checkpointing at __call__ level must trip the re-entry guard",
+              False, f"no raise — hook fired {probe_hook.calls} time(s)")
+    except LeafHookError as exc:
+        check("checkpointing at __call__ level TRIPS the re-entry guard, loudly, "
+              "and only the POST-BACKWARD look catches it",
+              "fired 2 times" in str(exc),
+              f"{str(exc)[:118]}… — which is why the flag wraps `.forward` of "
+              f"layers[site+1:] and never the site module's `__call__`")
+    finally:
+        probe_hook.remove()
+
+    with tempfile.TemporaryDirectory() as td_ck:
+        paths_ck = bank(with_ck.model_copy(update={
+            "request": req_ck.model_copy(update={"out_dir": Path(td_ck),
+                                                 "checkpoint_above_site": True})}),
+            {"device": "cpu", "cuda_visible_devices": "(unset)"}, "0" * 64,
+            "12 Jul 2026")
+        st_ck = json.loads(paths_ck["stamp"].read_text())
+        check("a checkpointed build RECORDS the deviation in its stamp",
+              st_ck["checkpoint_above_site"]["n_layers_checkpointed"] == 3
+              and "use_reentrant=False" in st_ck["checkpoint_above_site"]["mode"]
+              and st_ck["checkpoint_above_site"]["site_layer_unwrapped"] is True,
+              str(st_ck["checkpoint_above_site"]["layers"]))
+        paths_plain = bank(plain_ck.model_copy(update={
+            "request": req_ck.model_copy(update={"out_dir": Path(td_ck),
+                                                 "out_stem": "plain"})}),
+            {"device": "cpu", "cuda_visible_devices": "(unset)"}, "0" * 64,
+            "12 Jul 2026")
+        check("and an UN-checkpointed build's stamp has no such key at all",
+              "checkpoint_above_site" not in json.loads(
+                  paths_plain["stamp"].read_text()),
+              "an absent key means the deviation was not taken — the same "
+              "discipline `truncation` and the collector's `sharding` keep, so "
+              "every historical stamp is unchanged key-for-key")
+    check("the request field defaults OFF, so every historical build is reproduced",
+          BuildRequest(model_key="x", model_path="p", arm_root=Path("."),
+                       out_dir=Path("."), site=0,
+                       arm="native").checkpoint_above_site is False)
 
     # ---------------- ADDENDUM 2026-07-27-B: the position-ceiling truncation --------
     # Five texts whose NATIVE-arm lengths are 13/23/33/43/53 tokens under the toy
@@ -1315,6 +1729,23 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--entropy-chunk", type=int, default=0,
                     help="OOM fallback: compute the entropy in position blocks of this "
                          "size (same algebra, different fp32 summation order)")
+    ap.add_argument("--checkpoint-above-site", action="store_true",
+                    help="OOM fallback for the GRADIENT PASS: run layers[site+1:] "
+                         "under NON-REENTRANT activation checkpointing "
+                         "(torch.utils.checkpoint, use_reentrant=False), trading "
+                         "one extra forward of those layers for their retained "
+                         "activations. Layers AT and BELOW the site are NEVER "
+                         "wrapped, so the substituted leaf and its gradient are "
+                         "untouched and the re-entry guard still sees exactly one "
+                         "site-layer call — re-asserted after the backward on "
+                         "every text. Non-reentrant is not a preference: the "
+                         "reentrant implementation requires .backward() and this "
+                         "builder uses autograd.grad, which is what keeps "
+                         "per-parameter grad buffers unallocated. Unset = the "
+                         "historical path, byte for byte. Reach for this when "
+                         "--entropy-chunk was not enough and the pressure is the "
+                         "retained per-layer graph rather than the logits (the "
+                         "DeepSeek-V3 case).")
     ap.add_argument("--allow-fd-gate-not-passed", action="store_true",
                     help="bank the vector and exit 0 even if the FD gate does not pass "
                          "(diagnostic runs ONLY — a build without its gate does not exist)")
@@ -1338,7 +1769,8 @@ def main(argv: Optional[list[str]] = None) -> int:
             fd_eps_fractions=_parse_fractions(args.fd_eps_fractions),
             fd_n_probe=args.fd_n_probe, fd_rel_tol=args.fd_rel_tol,
             entropy_chunk=args.entropy_chunk, max_seq_len=args.max_seq_len,
-            expect_n_truncated=args.assert_n_truncated, out_stem=args.out_name)
+            expect_n_truncated=args.assert_n_truncated, out_stem=args.out_name,
+            checkpoint_above_site=args.checkpoint_above_site)
     except ValueError as exc:
         raise SystemExit(f"invalid build request: {exc}") from exc
     if args.assert_n_truncated is not None and args.max_seq_len is None:
@@ -1396,10 +1828,13 @@ def main(argv: Optional[list[str]] = None) -> int:
             logger.error("CUDA OOM: %s", exc)
             print(f"ENTROPY-GRADIENT-BUILD-INCOMPLETE model={request.model_key} "
                   "reason=OOM — nothing was banked. Retry with --entropy-chunk 256 "
-                  "(same algebra, chunked log_softmax) if the logits are the pressure, "
-                  "or with --shard-across (the certified sharded loader) if the weights "
-                  "plus the retained per-layer autograd graph simply exceed one card. "
-                  "NEVER free memory by touching another process.")
+                  "(same algebra, chunked log_softmax) if the logits are the pressure; "
+                  "with --checkpoint-above-site if the pressure is the RETAINED "
+                  "per-layer graph above the site (one extra forward of those layers "
+                  "instead of their activations; the leaf and its gradient are "
+                  "untouched, agreement proved in --selftest); or with --shard-across "
+                  "(the certified sharded loader) if the weights themselves exceed one "
+                  "card. NEVER free memory by touching another process.")
             return 4
         raise
 
@@ -1433,6 +1868,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     if sharding is not None:
         summary["n_compute_devices"] = sharding["n_compute_devices"]
         summary["compute_devices"] = sharding["compute_devices"]
+    if request.checkpoint_above_site:
+        summary["n_layers_checkpointed_above_site"] = (
+            d.n_layers_checkpointed_above_site)
     summary["banked_stem"] = request.stem
     print(json.dumps(summary, indent=1))
     if not g.passed:
