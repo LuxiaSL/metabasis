@@ -11,9 +11,25 @@ canonical-layout determination → all calibration cells → all transported cel
 battery → entropy probe → in-job replay gate → stamps → manifest, with the model
 loaded exactly once. This file owns the generation/injection/probe/replay mechanics
 and the stamp. The §4 verdict logic lives in `actuation_calibration.py`; the §6
-battery and coherence panel live in `capability_battery.py`; §2's CPU staging
-(`build_behavioral_banks.py`) and scoring (`score_behavioral_column.py`) are
-separate modules and are NOT in this batch.
+battery and coherence panel live in `capability_battery.py`; §2's CPU staging is
+`build_behavioral_banks.py` (whose `CellsDocument` is this module's `--run` input) and
+scoring is `score_behavioral_column.py`, which is NOT in this batch — the desk scores
+and this module never self-scores (C§8).
+
+THE JOB IS WIRED, AND ITS ORCHESTRATION IS PROVED WITHOUT A GPU. `run_column` is the
+§2.1 job; it is written against the narrow `NodeRuntime` surface so the SAME
+orchestration runs under `HFNodeRuntime` on a node and under a numpy-only stub in
+`--selftest`. That is what keeps the fire ORDER (calibration before transported,
+because §4 is a gate), the per-cell §2.8 stamps, the completeness guard and the replay
+gate proven in a configuration with no deep-learning stack — while the torch block
+additionally drives the REAL runtime end to end on a tiny CPU Llama, so the hook, the
+two-forward probe, the in-job norm measurement and the battery-under-injection are
+exercised against a genuine forward rather than described.
+
+BASIS-AGNOSTIC AT RUN TIME. `CORPUS_SHA_V21` is this module's DEFAULT expectation and
+nothing more: `run_column` takes `corpus_sha_of_record` as a parameter and the CLI
+defaults it to the cells document's own basis, so re-pointing the harness at another
+corpus/basis is a staging act, never an edit here.
 
 THE FOUR PROPERTIES THAT MAKE THE FAST PATH LEGITIMATE, and where each is proved:
 
@@ -110,7 +126,7 @@ from pathlib import Path
 from typing import Any, Callable, Literal, Optional, Protocol, Sequence
 
 import numpy as np
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("run_behavioral_cells")
@@ -393,14 +409,32 @@ class CanonicalLayout(BaseModel):
     #: the CONSERVATIVE bound was taken (the smallest rung), never a gamble.
     measured: bool = True
     headroom_note: str = ""
+    #: §2.7's batch-invariance characterization asks for a cell re-run "at B=8 and
+    #: B=1" — NEITHER of which is on §2.2's frozen ladder {80, 40, 20, 10}. The two
+    #: clauses are both in the brief and both meant: the ladder governs the LAYOUT OF
+    #: RECORD, the characterization deliberately steps OFF it to measure what stepping
+    #: off costs. This flag is the named resolution: an off-ladder size is admissible
+    #: ONLY on a characterization layout, and a characterization layout can never be
+    #: FROZEN — so no cell of record can ever be produced at one.
+    characterization_only: bool = False
 
-    @field_validator("batch_size")
-    @classmethod
-    def _on_the_ladder(cls, v: int) -> int:
-        if v not in BATCH_LADDER:
+    @model_validator(mode="after")
+    def _ladder_governs_the_layout_of_record(self) -> "CanonicalLayout":
+        if self.characterization_only:
+            if self.frozen:
+                raise ValueError(
+                    "a characterization layout is never FROZEN: §2.7 defines replay IN "
+                    "the canonical layout, and a frozen off-ladder layout would be a "
+                    "second layout of record (§9 item 13's silent split)")
+            if self.batch_size <= 0:
+                raise ValueError("batch size must be positive")
+            return self
+        if self.batch_size not in BATCH_LADDER:
             raise ValueError(
-                f"batch size {v} is not on the frozen ladder {BATCH_LADDER} (§2.2)")
-        return v
+                f"batch size {self.batch_size} is not on the frozen ladder "
+                f"{BATCH_LADDER} (§2.2). §2.7's B=8/B=1 characterization is the one "
+                "exception and must set `characterization_only=True`.")
+        return self
 
     def sub_batch_of(self, gen_id: int) -> tuple[int, int]:
         """§2.2's deterministic, total sub-batch map: (sub_batch, row)."""
@@ -1819,6 +1853,1059 @@ class HFStepper:
         self._past = None
 
 
+# ---------------------------------------------------------------- the column job (§2.1)
+#: §2.1's fire order, as data. Calibration runs BEFORE anything transported because §4
+#: is a GATE and not a warm-up: a node whose site fails it gets no transported-write
+#: cell there, and a column that fired the transported half first would have spent the
+#: budget before the gate could refuse it.
+CELL_KIND_ORDER: tuple[CellKind, ...] = (
+    "baseline", "calibration", "calibration_band", "transported", "transported_band",
+    "naive", "bridge", "judged")
+
+#: §2.7's descriptive batch-invariance sizes. Both are OFF the frozen ladder, on
+#: purpose — see `CanonicalLayout.characterization_only`.
+CHARACTERIZATION_BATCH_SIZES: tuple[int, ...] = (8, 1)
+
+#: How a cell's entropy digest is composed (§2.7 says "the probe's per-position
+#: float32 entropy arrays" without fixing an order; an unnamed order would make the
+#: digest unreproducible by anyone but this file).
+ENTROPY_DIGEST_ORDER = (
+    "sha256 over float32 .tobytes() of: every generation's STEERED per-position entropy "
+    "array in gen_id order, followed by every generation's UNSTEERED array in gen_id "
+    "order. Both halves are in the digest because the rise is their difference and a "
+    "gate on only one half could pass while the read moved.")
+
+#: §6(1)/§6(2): the battery's own injection span. The brief fixes the hook, the α and
+#: the site but not the SPAN, and the span is what makes the read a capability-under-
+#: dose rather than a model fact — so it is named here rather than assumed.
+BATTERY_INJECTION_SPAN = (
+    "the battery injects over the SCORED span only — the continuation positions of a "
+    "likelihood item, the generated positions of a format item — mirroring §2.4's "
+    "'generated positions only' for the column's own cells. A battery injected over "
+    "the item's prompt would measure a different intervention from the one the cell's "
+    "entropy read measures.")
+
+#: The battery's format probe is GREEDY. §6 wants the battery deterministic ("no
+#: sampling noise on top of the effect being measured") and only the likelihood half is
+#: deterministic by construction, so the generated half is pinned rather than sampled.
+BATTERY_SAMPLING = SamplingConfig(
+    name="greedy", do_sample=False, provenance=(
+        "§6: the battery must add no sampling variance to the effect being measured; "
+        "the likelihood half is exactly deterministic by construction and the format "
+        "half is pinned greedy to match. NOT the column's sampling of record (ruling "
+        "4's pure ancestral), and never used for a science cell."))
+
+
+class NodeRuntime(Protocol):
+    """Everything the column job needs from a loaded node — and nothing more.
+
+    The orchestration (`run_column`) is the part that has to be right and the part no
+    GPU can be spared to test, so it is written against this narrow surface: the SAME
+    orchestration runs under `HFNodeRuntime` on a node and under a numpy-only stub in
+    `--selftest`, which is how the §2.1 order, the stamps, the completeness guard and
+    the replay gate stay proven in a configuration with no deep-learning stack at all.
+    """
+
+    def trunk(self) -> dict:
+        """§2.8's trunk facts: transformers/torch versions, node, GPU model, driver."""
+
+    def model_config_sha256(self) -> Optional[str]:
+        """§2.8's M9 drift anchor."""
+
+    def tokenize(self, prompt: BehavioralPrompt) -> list[int]:
+        ...
+
+    def pad_token_id(self) -> int:
+        ...
+
+    def eos_token_id(self) -> Optional[int]:
+        ...
+
+    def position_ceiling(self) -> Optional[int]:
+        """A learned-position ceiling (gpt2-xl: 1024), or None."""
+
+    def vram_probe(self, batch_size: int) -> float:
+        """Fraction of device memory used at `batch_size` and max sequence length."""
+
+    def measure_per_token_median_resid_norm(
+            self, *, site: int, prompt_ids: Sequence[Sequence[int]]) -> float:
+        """§2.5's in-job measurement — the convention that sets α."""
+
+    def begin_cell(self, *, cell: CellSpec, alpha: float) -> None:
+        """Attach/point the injection for one cell (one hook, mutated per cell)."""
+
+    def start_pos_sink(self, padded_prompt_length: int) -> None:
+        """Receive each sub-batch's padded prompt length (the live `start_pos`)."""
+
+    def stepper(self) -> Stepper:
+        ...
+
+    def probe(self, records: Sequence[GenerationRecord], *, steered: bool
+              ) -> list[tuple[np.ndarray, np.ndarray]]:
+        """(entropy, nll) float32 arrays per record, right-padded and masked (§2.6)."""
+
+    def decode(self, ids: Sequence[int]) -> str:
+        ...
+
+    def likelihood_nll(self) -> Callable[[str, str], float]:
+        """NLL(prompt, continuation) UNDER the current cell's injection (§6(1))."""
+
+    def format_probe_texts(self) -> dict[str, str]:
+        """item_id → generated text under the current cell's injection (§6(2))."""
+
+    def alpha_zero_equivalence(self) -> Optional[tuple[Any, Any]]:
+        """(hooked-at-α0 logits, unhooked logits), or None if not measurable."""
+
+    def hook_admissibility(self, site: int) -> Optional[HookAdmissibility]:
+        """§4.4's preflight, or None on an architecture already known to pass."""
+
+    def end_cell(self) -> None:
+        ...
+
+    def close(self) -> None:
+        ...
+
+
+class CellOutcome(BaseModel):
+    """One completed cell: its read, its digests, and where its raw sits."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    cell_id: str
+    kind: CellKind
+    alpha_frac: float
+    alpha: float
+    n: int
+    tokens_generated: int
+    elapsed_s: float
+    entropy: dict
+    probe_rows: list[ProbeRow]
+    token_id_sha256: str
+    entropy_array_sha256: str
+    capability: Optional[dict] = None
+    coherence: Optional[dict] = None
+    stamp: dict = Field(default_factory=dict)
+    raw_paths: dict[str, str] = Field(default_factory=dict)
+
+
+class ColumnResult(BaseModel):
+    """The whole node job: layout, norms, cells, gate, table, custody (§2.1)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    node_key: str
+    arm: str
+    site: int
+    corpus_manifest_sha256: str
+    label: str = ""
+    layout: CanonicalLayout
+    norms: NormConventions
+    site_cross_check: dict
+    hook_admissibility: Optional[HookAdmissibility] = None
+    alpha_zero_is_no_hook: Optional[bool] = None
+    cells: list[CellOutcome]
+    replay_gate: ReplayGateResult
+    batch_invariance: Optional[BatchInvarianceCharacterization] = None
+    fresh_process_replay: dict = Field(default_factory=dict)
+    capability_table: Optional[dict] = None
+    n_generations: int
+    work_root: Optional[str] = None
+    manifest: dict = Field(default_factory=dict)
+    grade: str = GRADE_LINE
+    brief_of_record: str = BRIEF_OF_RECORD
+    brief_sha256: str = BRIEF_SHA256
+
+
+def trunk_stamp(runtime: NodeRuntime) -> dict:
+    """§2.8's trunk facts with M19 framing: a degraded read is described, not dropped."""
+    try:
+        trunk = dict(runtime.trunk())
+    except Exception as exc:                             # noqa: BLE001 — M19(a)
+        logger.warning("trunk facts unavailable (%s: %s) — recorded as degraded",
+                       type(exc).__name__, exc)
+        return {"measured": False,
+                "note": f"trunk instrumentation degraded ({type(exc).__name__}: {exc}); "
+                        "M19: the consumer blocks on this bound rather than on a hope"}
+    trunk.setdefault("measured", True)
+    return trunk
+
+
+def site_cross_check(node_key: str, site: int) -> dict:
+    """§2.8's `SITES` ∧ `SITE_OF_RECORD` cross-check, re-derived at run time.
+
+    Delegates to the staging module so the two halves of the campaign cannot disagree
+    about what "the site of record" means. Imported inside the function because the
+    staging module imports THIS one (the engine owns the primitives, the staging module
+    owns the composition), and because §4.3 forbids trusting a module-level snapshot of
+    registries that change nightly.
+    """
+    from metabasis.scripts.build_behavioral_banks import site_cross_check as _cross
+    return _cross(node_key, site)
+
+
+def order_cells(cells: Sequence[CellSpec]) -> list[CellSpec]:
+    """§2.1's fire order: calibration first, then transported, naive last of the reads."""
+    rank = {k: i for i, k in enumerate(CELL_KIND_ORDER)}
+    return sorted(cells, key=lambda c: (rank.get(c.kind, len(rank)),
+                                        c.alpha_frac, c.cell_id))
+
+
+def assert_column_complete(outcomes: Sequence[CellOutcome], expected_cells: int,
+                           *, n_per_cell: int, node_key: str = "") -> None:
+    """§7's completeness guard / §9 item 10 — a count one short is a rake (M23)."""
+    if len(outcomes) != expected_cells:
+        raise ExpectedNShortfall(
+            f"{node_key or 'column'}: {len(outcomes)} cells completed, {expected_cells} "
+            "planned (§9 item 10 / M23: a count one short is a rake, not a rounding)")
+    short = [o.cell_id for o in outcomes if o.n != n_per_cell]
+    if short:
+        raise ExpectedNShortfall(
+            f"{node_key or 'column'}: cell(s) {short} are short of n={n_per_cell} "
+            "(§7's expected-N completeness guard)")
+
+
+def cell_entropy_arrays(rows: Sequence[GenerationRecord],
+                        steered: dict[int, np.ndarray],
+                        unsteered: dict[int, np.ndarray]) -> list[np.ndarray]:
+    """The digest's array sequence, in the order `ENTROPY_DIGEST_ORDER` names."""
+    order = sorted(r.generation_id for r in rows)
+    return ([steered[g] for g in order] + [unsteered[g] for g in order])
+
+
+def probe_cell(runtime: NodeRuntime, records: Sequence[GenerationRecord], *,
+               layout: CanonicalLayout
+               ) -> tuple[list[ProbeRow], dict[int, np.ndarray],
+                          dict[int, np.ndarray]]:
+    """§2.6's batched two-forward probe over one cell, under `PROBE_GROUPING_READING`.
+
+    Steered and unsteered run over the SAME token ids by construction (the records'
+    `input_ids`), so the rise is a difference of two reads of one text, never of two
+    texts. Padding cannot enter a mean: each row's span is sliced by its own
+    `prompt_length` and its own generated count, inside a group where every row's
+    prompt length is equal.
+    """
+    groups = probe_groups(records, max_group=layout.probe_batch_size)
+    rows: list[ProbeRow] = []
+    ent_s: dict[int, np.ndarray] = {}
+    ent_u: dict[int, np.ndarray] = {}
+    for gi, group in enumerate(groups):
+        subset = [records[i] for i in group]
+        steered = runtime.probe(subset, steered=True)
+        unsteered = runtime.probe(subset, steered=False)
+        if not (len(steered) == len(unsteered) == len(subset)):
+            raise BehavioralHarnessError(
+                f"probe returned {len(steered)}/{len(unsteered)} rows for a group of "
+                f"{len(subset)} — a probe that drops rows would silently shorten a "
+                "cell's read (§9 item 10)")
+        for rec, (es, _), (eu, nu) in zip(subset, steered, unsteered):
+            es = np.asarray(es, dtype=np.float32)
+            eu = np.asarray(eu, dtype=np.float32)
+            if es.shape != eu.shape or es.size == 0:
+                raise BehavioralHarnessError(
+                    f"{rec.cell_id}/gen{rec.generation_id}: steered/unsteered entropy "
+                    f"arrays disagree in shape ({es.shape} vs {eu.shape}) or are "
+                    "empty — the rise is their difference and cannot be formed")
+            ent_s[rec.generation_id] = es
+            ent_u[rec.generation_id] = eu
+            rows.append(ProbeRow(
+                generation_id=rec.generation_id, n_positions=int(es.size),
+                mean_entropy_steered=float(np.mean(es)),
+                mean_entropy_unsteered=float(np.mean(eu)),
+                entropy_rise=float(np.mean(es) - np.mean(eu)),
+                base_model_nll=float(np.mean(np.asarray(nu, dtype=np.float32))),
+                probe_group=gi, probe_group_size=len(subset)))
+    rows.sort(key=lambda r: r.generation_id)
+    return rows, ent_s, ent_u
+
+
+def run_cell(runtime: NodeRuntime, cell: CellSpec, *, alpha: float, pool: PromptPool,
+             layout: CanonicalLayout, corpus_sha: str, node_key: str, arm: str,
+             n: int, with_battery: bool = True,
+             baseline_block: Optional[Any] = None) -> tuple[
+                 list[GenerationRecord], list[ProbeRow], dict[int, np.ndarray],
+                 dict[int, np.ndarray], Optional[Any], Optional[Any], float, int]:
+    """One cell end to end: generate → probe → battery → panel.
+
+    Returns everything the caller needs to file the cell and to replay it, rather than
+    filing here: the replay gate re-runs this exact function and compares digests, so
+    it must be free of side effects on disk.
+    """
+    import time
+
+    from metabasis.scripts.capability_battery import (LIKELIHOOD_SUBTESTS,
+                                                      capability_block,
+                                                      coherence_panel,
+                                                      score_format_probe,
+                                                      score_likelihood_subtest)
+
+    t0 = time.monotonic()
+    runtime.begin_cell(cell=cell, alpha=alpha)
+    try:
+        records = generate_cell(
+            runtime.stepper, cell=cell, pool=pool, tokenize=runtime.tokenize,
+            layout=layout, pad_token_id=runtime.pad_token_id(),
+            eos_token_id=runtime.eos_token_id(), corpus_sha=corpus_sha,
+            node_key=node_key, arm=arm, start_pos_sink=runtime.start_pos_sink, n=n)
+        rows, ent_s, ent_u = probe_cell(runtime, records, layout=layout)
+        block = None
+        panel = None
+        if with_battery:
+            # §6 rides EVERY dose cell, including the bands — that is the point: the
+            # band rows at the same dose are the dose-matched capability floor.
+            texts = [runtime.decode(r.generated_ids) for r in records]
+            panel = coherence_panel(texts, [r.finished_with_eos for r in records])
+            nll_of = runtime.likelihood_nll()
+            likelihood = [score_likelihood_subtest(s, nll_of)
+                          for s in LIKELIHOOD_SUBTESTS]
+            fmt = score_format_probe(runtime.format_probe_texts())
+            block = capability_block(cell=cell, likelihood=likelihood,
+                                     format_result=fmt, panel=panel,
+                                     baseline=baseline_block)
+    finally:
+        runtime.end_cell()
+    elapsed = time.monotonic() - t0
+    tokens = sum(len(r.generated_ids) for r in records)
+    # M22: "the job is running" is not evidence of progress — the per-cell line IS the
+    # progress record, and it carries rc/tokens/elapsed exactly as §8 requires.
+    logger.info("CELL %s rc=0 tokens_generated=%d elapsed=%.1fs n=%d",
+                cell.cell_id, tokens, elapsed, len(records))
+    return records, rows, ent_s, ent_u, block, panel, elapsed, tokens
+
+
+def characterize_layout_invariance(runtime: NodeRuntime, cell: CellSpec, *,
+                                   alpha: float, pool: PromptPool,
+                                   layout: CanonicalLayout, corpus_sha: str,
+                                   node_key: str, arm: str, n: int
+                                   ) -> BatchInvarianceCharacterization:
+    """§2.7's DESCRIPTIVE B=8/B=1 re-run. M19: it cannot fail a gate.
+
+    GPU reductions are not batch-size invariant; a divergence here is EXPECTED and is
+    documented once per node so nobody later reads it as a defect. Any failure of the
+    instrumentation itself degrades to `measured=false` rather than taking the column
+    down with it — the characterization is not allowed to be the thing that stops a
+    job whose gate it cannot fail.
+    """
+    reference: list[np.ndarray] = []
+    comparisons: dict[int, list[np.ndarray]] = {}
+    measured = True
+    try:
+        ref, *_ = run_cell(runtime, cell, alpha=alpha, pool=pool, layout=layout,
+                           corpus_sha=corpus_sha, node_key=node_key, arm=arm, n=n,
+                           with_battery=False)
+        reference = [np.asarray(r.generated_ids, dtype=np.int64)
+                     for r in sorted(ref, key=lambda x: x.generation_id)]
+        for B in CHARACTERIZATION_BATCH_SIZES:
+            alt_layout = layout.model_copy(update={
+                "batch_size": B, "frozen": False, "characterization_only": True})
+            alt, *_ = run_cell(runtime, cell, alpha=alpha, pool=pool,
+                               layout=alt_layout, corpus_sha=corpus_sha,
+                               node_key=node_key, arm=arm, n=n, with_battery=False)
+            comparisons[B] = [np.asarray(r.generated_ids, dtype=np.int64)
+                              for r in sorted(alt, key=lambda x: x.generation_id)]
+    except Exception as exc:                             # noqa: BLE001 — M19(a)
+        logger.warning("batch-invariance characterization degraded (%s: %s) — "
+                       "recorded as measured=false; it cannot fail a gate (M19)",
+                       type(exc).__name__, exc)
+        measured = False
+    return characterize_probe_batch_invariance(
+        reference, {b: v for b, v in comparisons.items()}, layout.batch_size,
+        measured=measured)
+
+
+def run_column(runtime: NodeRuntime, *, doc: Any, pool: PromptPool,
+               work_root: Optional[Path] = None,
+               corpus_sha_of_record: str = CORPUS_SHA_V21,
+               n_per_cell: Optional[int] = None,
+               actuation_calibration_stamp: Optional[dict] = None,
+               characterize: bool = True, write: bool = True,
+               scheduler_card_index: Optional[str] = None) -> ColumnResult:
+    """§2.1's one-load-per-node job, in order, with every §9 HALT live.
+
+    preflight → norm calibration → canonical-layout determination → all calibration
+    cells → all transported cells → battery → entropy probe → in-job replay gate →
+    stamps → manifest. The model is loaded exactly once, by the caller, and this
+    function never loads or reloads it.
+
+    `doc` is a `build_behavioral_banks.CellsDocument`. Everything basis-shaped — the
+    corpus sha, the vector paths, the map's vintage — arrives through it, so this
+    function is as basis-agnostic as the document it is handed;
+    `corpus_sha_of_record` is the expectation the chain is asserted AGAINST and is a
+    parameter, not a constant read from this module.
+    """
+    node_key, arm, site = doc.node_key, doc.arm, doc.site
+    n = int(n_per_cell or doc.n_per_cell)
+
+    # ---- preflight (M10: a first-class phase, never output truncation) --------
+    corpus_sha = assert_corpus_vintage(
+        *[v for v in doc.vintage_links() if v is not None],
+        expected=corpus_sha_of_record) if any(
+            v is not None for v in doc.vintage_links()) else assert_corpus_vintage(
+                doc.corpus_manifest_sha256, expected=corpus_sha_of_record)
+    cross = site_cross_check(node_key, site)
+    if pool.sha256 and doc.prompt_pool_sha256 and pool.sha256 != doc.prompt_pool_sha256:
+        raise ArtifactShaMismatch(
+            f"prompt pool sha {pool.sha256[:12]}… does not match the staged document's "
+            f"{doc.prompt_pool_sha256[:12]}… (M4). The pool of record is sha-frozen "
+            "(ruling 10) and a cell generated against another pool is another read.")
+    prompt_ids = [runtime.tokenize(p) for p in pool.prompts]
+    assert_position_budget(max(len(i) for i in prompt_ids), doc.max_new_tokens,
+                           runtime.position_ceiling(), node_key)
+    admissibility = runtime.hook_admissibility(site)
+    B, measured, note = choose_batch_size(runtime.vram_probe)
+    trunk = trunk_stamp(runtime)
+    layout = freeze_layout(B, dtype=str(trunk.get("dtype", "bfloat16")),
+                           measured=measured, headroom_note=note,
+                           max_new_tokens=doc.max_new_tokens)
+    alpha0_ok: Optional[bool] = None
+    equivalence = runtime.alpha_zero_equivalence()
+    if equivalence is not None:
+        assert_alpha_zero_is_no_hook(*equivalence)          # raises on mismatch
+        alpha0_ok = True
+
+    # ---- norm calibration (§2.5) ---------------------------------------------
+    sample = prompt_ids[:NORM_SAMPLE_SIZE]
+    measured_norm = float(runtime.measure_per_token_median_resid_norm(
+        site=site, prompt_ids=sample))
+    norms = resolve_norms(
+        site=site, measured=measured_norm,
+        measured_provenance=(
+            f"MEASURED in-job over a fixed {len(sample)}-prompt sample of the "
+            f"behavioral pool (sha {pool.sha256[:12]}…), per-token residual norms at "
+            f"L{site}, median (§2.5)"),
+        banked_per_token=doc.banked_norms.get("per_token_median"),
+        banked_provenance=doc.banked_norm_provenance or None,
+        banked_mean_state=doc.banked_norms.get("mean_state_median"),
+        banked_mean_state_provenance=(
+            "the collection stamps' median-of-MEAN-STATE norm — a DIFFERENT convention, "
+            "recorded beside and never used for α (§2.5, rake M21b)"))
+
+    # ---- the cells, in §2.1's order ------------------------------------------
+    specs = order_cells(doc.cell_specs())
+    seed_roots = {c.cell_id: cell_seed_root(corpus_sha=corpus_sha, node_key=node_key,
+                                            arm=arm, site=site, cell_id=c.cell_id)
+                  for c in specs}
+    outcomes: list[CellOutcome] = []
+    raw: dict[str, tuple[list[GenerationRecord], dict, dict]] = {}
+    blocks = []
+    baseline_block = None
+    token_first: dict[str, str] = {}
+    entropy_first: dict[str, str] = {}
+    for spec in specs:
+        alpha = resolve_alpha(spec.alpha_frac, norms.measured_per_token_median)
+        (records, rows, ent_s, ent_u, block, panel, elapsed,
+         tokens) = run_cell(runtime, spec, alpha=alpha, pool=pool, layout=layout,
+                            corpus_sha=corpus_sha, node_key=node_key, arm=arm, n=n,
+                            baseline_block=baseline_block)
+        if block is not None:
+            blocks.append(block)
+            if spec.is_baseline and baseline_block is None:
+                baseline_block = block
+        tdigest = token_id_digest(records)
+        edigest = entropy_array_digest(cell_entropy_arrays(records, ent_s, ent_u))
+        token_first[spec.cell_id] = tdigest
+        entropy_first[spec.cell_id] = edigest
+        raw[spec.cell_id] = (records, ent_s, ent_u)
+        staged = _staged_cell(doc, spec.cell_id)
+        stamp = build_stamp(
+            cell=spec, alpha=alpha, layout=layout, pool=pool, norms=norms,
+            corpus_sha=corpus_sha, node_key=node_key, arm=arm,
+            site_cross_check=cross,
+            model_config_sha256=runtime.model_config_sha256(),
+            vector_npz_sha256=(staged.vector_sha256 if staged else None)
+            or doc.vectors_npz_sha256,
+            vector_fd_gate=(staged.fd_gate if staged else None)
+            or doc.bank_stamp.get("vector_fd_gate"),
+            vector_build_stamp=(staged.build_stamp if staged else None)
+            or doc.bank_stamp.get("vector_build_stamp"),
+            transport_map=(staged.transport_map if staged else None),
+            naive_row=(staged.naive_row if staged else None),
+            trunk=trunk,
+            replay_gate_digests={"token_ids": tdigest, "entropy_arrays": edigest,
+                                 "order": ENTROPY_DIGEST_ORDER},
+            battery_item_set_sha256=doc.battery_item_set_sha256,
+            actuation_calibration=actuation_calibration_stamp or {
+                "verdict": "OWED",
+                "note": "§4.2 requires every §5 cell to NAME its site's actuation "
+                        "calibration by job id + verdict + the three criterion values; "
+                        "this column ran before that verdict was filed, which is an "
+                        "OWED state (§10), never a silent absence."},
+            per_cell_seed_roots={spec.cell_id: seed_roots[spec.cell_id]},
+            scheduler_card_index=scheduler_card_index,
+            extra={"label": doc.label or None,
+                   "battery_injection_span": BATTERY_INJECTION_SPAN,
+                   "entropy_digest_order": ENTROPY_DIGEST_ORDER})
+        outcomes.append(CellOutcome(
+            cell_id=spec.cell_id, kind=spec.kind, alpha_frac=spec.alpha_frac,
+            alpha=alpha, n=len(records), tokens_generated=tokens, elapsed_s=elapsed,
+            entropy=entropy_rise_from_rows(rows), probe_rows=rows,
+            token_id_sha256=tdigest, entropy_array_sha256=edigest,
+            capability=block.model_dump() if block is not None else None,
+            coherence=panel.model_dump() if panel is not None else None,
+            stamp=stamp))
+
+    assert_column_complete(outcomes, len(specs), n_per_cell=n, node_key=node_key)
+
+    # ---- the in-job replay gate (§2.7) ---------------------------------------
+    selection, strata, digest = select_replay_cells(specs, node_key, corpus_sha)
+    token_replay: dict[str, str] = {}
+    entropy_replay: dict[str, str] = {}
+    by_id = {c.cell_id: c for c in specs}
+    for cell_id in selection:
+        spec = by_id[cell_id]
+        alpha = resolve_alpha(spec.alpha_frac, norms.measured_per_token_median)
+        rrecords, _, rs, ru, *_ = run_cell(
+            runtime, spec, alpha=alpha, pool=pool, layout=layout,
+            corpus_sha=corpus_sha, node_key=node_key, arm=arm, n=n,
+            with_battery=False)
+        token_replay[cell_id] = token_id_digest(rrecords)
+        entropy_replay[cell_id] = entropy_array_digest(
+            cell_entropy_arrays(rrecords, rs, ru))
+    gate = evaluate_replay_gate(
+        selection=selection, strata=strata, digest=digest,
+        token_first={c: token_first[c] for c in selection},
+        token_replay=token_replay,
+        entropy_first={c: entropy_first[c] for c in selection},
+        entropy_replay=entropy_replay)
+
+    # ---- descriptive instrumentation (M19 — never a gate) --------------------
+    invariance = None
+    if characterize:
+        target = by_id[strata["signal_at_0.3"]]
+        invariance = characterize_layout_invariance(
+            runtime, target, alpha=resolve_alpha(
+                target.alpha_frac, norms.measured_per_token_median),
+            pool=pool, layout=layout, corpus_sha=corpus_sha, node_key=node_key,
+            arm=arm, n=min(n, layout.batch_size))
+
+    table = None
+    if blocks:
+        from metabasis.scripts.capability_battery import dose_metric_table
+        try:
+            table = dose_metric_table(blocks)
+        except Exception as exc:                         # noqa: BLE001 — M19(a)
+            logger.warning("capability table not formed (%s: %s) — the per-cell blocks "
+                           "are filed regardless", type(exc).__name__, exc)
+            table = {"measured": False, "note": f"{type(exc).__name__}: {exc}"}
+
+    result = ColumnResult(
+        node_key=node_key, arm=arm, site=site, corpus_manifest_sha256=corpus_sha,
+        label=doc.label, layout=layout, norms=norms, site_cross_check=cross,
+        hook_admissibility=admissibility, alpha_zero_is_no_hook=alpha0_ok,
+        cells=outcomes, replay_gate=gate, batch_invariance=invariance,
+        fresh_process_replay={
+            "state": "OWED",
+            "recipe": "§2.7 descriptive: re-run ONE cell in a NEW process, same "
+                      "canonical layout, CUBLAS_WORKSPACE_CONFIG=:4096:8 and "
+                      "torch.use_deterministic_algorithms(True, warn_only=True), then "
+                      "compare this result's token_id_sha256/entropy_array_sha256 for "
+                      "that cell. Filed as a separate invocation by design: a job "
+                      "cannot fork a fresh process of itself and still be the "
+                      "one-load-per-node job (§2.1). M19: descriptive, never a gate."},
+        capability_table=table, n_generations=sum(o.n for o in outcomes),
+        work_root=str(work_root) if work_root else None)
+
+    if write and work_root is not None:
+        result = _write_column(result, raw=raw, work_root=Path(work_root))
+    return result
+
+
+def _staged_cell(doc: Any, cell_id: str) -> Optional[Any]:
+    try:
+        return doc.by_id(cell_id)
+    except KeyError:                                          # pragma: no cover
+        return None
+
+
+def _write_column(result: ColumnResult, *, raw: dict, work_root: Path) -> ColumnResult:
+    """Bank the column: raw beside every claim, then a manifest over everything.
+
+    Raw generations and per-position entropy arrays are written per cell so a desk
+    recompute has the same inputs the filed numbers came from (§10's recipes), and the
+    manifest's shas are what make M4 checkable without re-running anything.
+    """
+    cells_dir = work_root / "cells"
+    cells_dir.mkdir(parents=True, exist_ok=True)
+    updated: list[CellOutcome] = []
+    for outcome in result.cells:
+        d = cells_dir / outcome.cell_id
+        d.mkdir(parents=True, exist_ok=True)
+        records, ent_s, ent_u = raw[outcome.cell_id]
+        gen_path = d / "generations.jsonl"
+        gen_path.write_text("".join(
+            json.dumps(r.model_dump(), sort_keys=True) + "\n"
+            for r in sorted(records, key=lambda x: x.generation_id)))
+        ent_path = d / "entropy.npz"
+        np.savez(ent_path,
+                 **{f"steered_{g:04d}": a for g, a in sorted(ent_s.items())},
+                 **{f"unsteered_{g:04d}": a for g, a in sorted(ent_u.items())})
+        stamp_path = d / "stamp.json"
+        stamp_path.write_text(json.dumps(outcome.stamp, indent=1, sort_keys=True,
+                                         default=str))
+        probe_path = d / "probe_rows.json"
+        probe_path.write_text(json.dumps(
+            [r.model_dump() for r in outcome.probe_rows], indent=1, sort_keys=True))
+        paths = {"generations": str(gen_path), "entropy": str(ent_path),
+                 "stamp": str(stamp_path), "probe_rows": str(probe_path)}
+        if outcome.capability is not None:
+            cap_path = d / "capability.json"
+            cap_path.write_text(json.dumps(outcome.capability, indent=1, sort_keys=True,
+                                           default=str))
+            paths["capability"] = str(cap_path)
+        updated.append(outcome.model_copy(update={"raw_paths": paths}))
+    result = result.model_copy(update={"cells": updated})
+    column_path = work_root / "column_result.json"
+    column_path.write_text(json.dumps(json.loads(result.model_dump_json()), indent=1,
+                                      sort_keys=True))
+    manifest = {
+        "grade": GRADE_LINE, "engine": "run_behavioral_cells.py",
+        "brief_of_record": BRIEF_OF_RECORD, "brief_sha256": BRIEF_SHA256,
+        "node_key": result.node_key, "arm": result.arm, "site": result.site,
+        "label": result.label or None,
+        "corpus_manifest_sha256": result.corpus_manifest_sha256,
+        "replay_gate_passed": result.replay_gate.passed,
+        "artifacts": {},
+    }
+    for path in sorted(work_root.rglob("*")):
+        if path.is_file() and path.name != "manifest.json":
+            manifest["artifacts"][str(path.relative_to(work_root))] = hashlib.sha256(
+                path.read_bytes()).hexdigest()
+    manifest_path = work_root / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest, indent=1, sort_keys=True))
+    logger.info("column banked: %d cells, %d generations → %s (manifest %s)",
+                len(result.cells), result.n_generations, work_root, manifest_path)
+    return result.model_copy(update={"manifest": manifest})
+
+
+# ---------------------------------------------------------------- the HF runtime
+class HFNodeRuntime:
+    """`NodeRuntime` over a real HF causal LM — the node-side implementation.
+
+    ONE hook is registered for the whole column and its `alpha`/`start_pos` are mutated
+    per cell and per sub-batch (`hooks.py` reads both at every call), so the injection
+    machinery is identical across cells by construction rather than by care. The α=0
+    baseline runs WITH the hook attached, because the short-circuit is what makes it
+    bitwise no-hook (§2.4) and that is the property the shared baseline rests on.
+    """
+
+    def __init__(self, model: Any, tokenizer: Any, *, node_key: str, arm: str,
+                 site: int, vectors: dict[str, np.ndarray],
+                 device: Optional[str] = None, dtype_name: str = "bfloat16",
+                 position_ceiling: Optional[int] = None,
+                 date_string: str = "12 Jul 2026") -> None:
+        import torch
+
+        self.torch = torch
+        self.model = model
+        self.tok = tokenizer
+        self.node_key = node_key
+        self.arm = arm
+        self.site = site
+        self.vectors = dict(vectors)
+        self.dtype_name = dtype_name
+        self._ceiling = position_ceiling
+        self._date_string = date_string
+        self.device = device or str(next(model.parameters()).device)
+        self._handle: Any = None
+        self._alpha = 0.0
+        self._cell: Optional[CellSpec] = None
+        self._hidden = int(
+            getattr(model.config, "hidden_size", 0)
+            or getattr(getattr(model.config, "text_config", None), "hidden_size"))
+
+    # -- custody ------------------------------------------------------------
+    def trunk(self) -> dict:
+        import platform
+
+        torch = self.torch
+        out: dict[str, Any] = {
+            "torch": torch.__version__, "python": platform.python_version(),
+            "hostname": platform.node(), "dtype": self.dtype_name,
+            "device": self.device, "measured": True}
+        try:
+            import transformers
+            out["transformers"] = transformers.__version__
+        except ImportError:                                   # pragma: no cover
+            out["transformers"] = None
+        if torch.cuda.is_available():
+            try:
+                out["gpu"] = torch.cuda.get_device_name(0)
+                out["driver"] = getattr(torch.version, "cuda", None)
+            except Exception as exc:                     # noqa: BLE001 — M19(a)
+                out["gpu"] = f"(unavailable: {type(exc).__name__})"
+                out["measured"] = False
+        return out
+
+    def model_config_sha256(self) -> Optional[str]:
+        try:
+            doc = self.model.config.to_dict()
+        except Exception as exc:                         # noqa: BLE001 — M19(a)
+            logger.warning("model config unavailable (%s) — M9 anchor recorded as "
+                           "absent, never as agreement", exc)
+            return None
+        return hashlib.sha256(
+            json.dumps(doc, sort_keys=True, default=str).encode()).hexdigest()
+
+    def position_ceiling(self) -> Optional[int]:
+        if self._ceiling is not None:
+            return self._ceiling
+        cfg = self.model.config
+        for attr in ("n_positions", "max_position_embeddings"):
+            val = getattr(cfg, attr, None)
+            if isinstance(val, int) and val > 0:
+                return val
+        return None
+
+    # -- tokenization -------------------------------------------------------
+    def tokenize(self, prompt: BehavioralPrompt) -> list[int]:
+        return render_prompt(prompt, self.tok, self.arm, self._date_string)
+
+    def pad_token_id(self) -> int:
+        pad = getattr(self.tok, "pad_token_id", None)
+        if pad is None:
+            pad = getattr(self.tok, "eos_token_id", None)
+        if pad is None:
+            raise BehavioralHarnessError(
+                f"{self.node_key}: the tokenizer has neither a pad nor an eos token, "
+                "so left padding has no filler — a column cannot be batched")
+        return int(pad)
+
+    def eos_token_id(self) -> Optional[int]:
+        eos = getattr(self.tok, "eos_token_id", None)
+        return None if eos is None else int(eos)
+
+    def decode(self, ids: Sequence[int]) -> str:
+        try:
+            return str(self.tok.decode(list(ids), skip_special_tokens=True))
+        except TypeError:                                     # toy/limited tokenizers
+            return str(self.tok.decode(list(ids)))
+
+    # -- the injection ------------------------------------------------------
+    def _vector_for(self, cell: CellSpec) -> Any:
+        torch = self.torch
+        if cell.vector_key is None:
+            # §2.4: the baseline runs WITH the hook attached; α=0 short-circuits, so
+            # the direction is never read. A named placeholder beats a None branch
+            # that would make the baseline a different code path from every other cell.
+            v = np.ones(self._hidden, dtype=np.float32)
+            return torch.as_tensor(v / np.linalg.norm(v))
+        if cell.vector_key not in self.vectors:
+            raise NativeVectorUnavailable(
+                f"{cell.cell_id}: vector key {cell.vector_key!r} is not in the staged "
+                f"bank (keys: {sorted(self.vectors)}) — §9 item 3")
+        v = np.asarray(self.vectors[cell.vector_key], dtype=np.float32).reshape(-1)
+        if v.size != self._hidden:
+            raise BehavioralHarnessError(
+                f"{cell.cell_id}: vector dim {v.size} != model hidden {self._hidden}")
+        return torch.as_tensor(v)
+
+    def begin_cell(self, *, cell: CellSpec, alpha: float) -> None:
+        from metabasis.extraction.hooks import (ResidualWriteSpec,
+                                                attach_residual_write)
+        assert_no_lesion_recipe(cell.vector_provenance, cell.vector_key or "")
+        self.end_cell()
+        self._cell = cell
+        self._alpha = float(alpha)
+        vec = self._vector_for(cell).to(self.device)
+        self._handle = attach_residual_write(self.model, ResidualWriteSpec(
+            layer_idx=self.site, vector=vec, alpha=float(alpha), start_pos=0,
+            end_pos=None, normalize=True))
+
+    def start_pos_sink(self, padded_prompt_length: int) -> None:
+        if self._handle is not None:
+            self._handle.spec.start_pos = int(padded_prompt_length)
+
+    def end_cell(self) -> None:
+        if self._handle is not None:
+            self._handle.remove()
+            self._handle = None
+
+    def close(self) -> None:
+        self.end_cell()
+
+    def stepper(self) -> Stepper:
+        return HFStepper(self.model, self.device)
+
+    # -- measurements -------------------------------------------------------
+    def vram_probe(self, batch_size: int) -> float:
+        """Fraction of device memory a probe at max sequence length uses at `B`.
+
+        Raises on a CPU-only device rather than returning a plausible number: M19's
+        rule is that a degraded probe takes the CONSERVATIVE bound, and
+        `choose_batch_size` implements exactly that when this raises.
+        """
+        torch = self.torch
+        if not torch.cuda.is_available():
+            raise RuntimeError("no CUDA device: VRAM headroom is unmeasurable here")
+        torch.cuda.empty_cache()
+        free, total = torch.cuda.mem_get_info()
+        seq = int(self._ceiling or 0) or 1024
+        ids = torch.ones((int(batch_size), min(seq, 512)), dtype=torch.long,
+                         device=self.device)
+        with torch.no_grad():
+            self.model(input_ids=ids, use_cache=True)
+        after_free, _ = torch.cuda.mem_get_info()
+        del ids
+        torch.cuda.empty_cache()
+        return float((total - after_free) / total)
+
+    def measure_per_token_median_resid_norm(
+            self, *, site: int, prompt_ids: Sequence[Sequence[int]]) -> float:
+        """§2.5: one batched teacher-forced forward; per-token residual norms; median.
+
+        The hook that carries the write is the same hook whose INPUT is measured here —
+        `decoder_layers(model)[site]`'s incoming hidden states — so α is resolved
+        against the very quantity it perturbs.
+        """
+        from metabasis.extraction.hooks import decoder_layers
+
+        torch = self.torch
+        if not prompt_ids:
+            raise ResidualNormDeltaError("no prompts to measure the residual norm over")
+        ids, mask = right_pad(list(prompt_ids), self.pad_token_id())
+        captured: list[Any] = []
+
+        def _capture(_module: Any, args: Any, kwargs: Any) -> None:
+            hidden = args[0] if args else kwargs.get("hidden_states")
+            captured.append(hidden.detach().float())
+
+        layer = decoder_layers(self.model)[site]
+        handle = layer.register_forward_pre_hook(_capture, with_kwargs=True)
+        try:
+            with torch.no_grad():
+                self.model(
+                    input_ids=torch.as_tensor(ids, dtype=torch.long).to(self.device),
+                    attention_mask=torch.as_tensor(mask, dtype=torch.long
+                                                   ).to(self.device),
+                    use_cache=False)
+        finally:
+            handle.remove()
+        if not captured:
+            raise ResidualNormDeltaError(
+                f"L{site}: no hidden states captured — the site cannot be measured, so "
+                "no dose can be resolved against it (§2.5)")
+        hidden = captured[0]
+        norms = hidden.norm(dim=-1).cpu().numpy()
+        keep = np.asarray(mask, dtype=bool)
+        vals = norms[keep]
+        if vals.size == 0:
+            raise ResidualNormDeltaError(f"L{site}: every position was padding")
+        return float(np.median(vals))
+
+    def alpha_zero_equivalence(self) -> Optional[tuple[Any, Any]]:
+        """§2.4's once-per-node check, measured on this node's own first prompt."""
+        from metabasis.extraction.hooks import (ResidualWriteSpec,
+                                                attach_residual_write)
+        torch = self.torch
+        ids = torch.ones((1, 8), dtype=torch.long, device=self.device)
+        with torch.no_grad():
+            plain = self.model(input_ids=ids, use_cache=False).logits.detach().float(
+            ).cpu().numpy()
+        vec = torch.as_tensor(np.ones(self._hidden, dtype=np.float32)).to(self.device)
+        handle = attach_residual_write(self.model, ResidualWriteSpec(
+            layer_idx=self.site, vector=vec, alpha=0.0, start_pos=0, end_pos=None,
+            normalize=True))
+        try:
+            with torch.no_grad():
+                hooked = self.model(input_ids=ids, use_cache=False
+                                    ).logits.detach().float().cpu().numpy()
+        finally:
+            handle.remove()
+        return hooked, plain
+
+    def hook_admissibility(self, site: int) -> Optional[HookAdmissibility]:
+        return ssm_hook_admissibility_preflight(
+            self.model, node_key=self.node_key, site=site,
+            vector=np.ones(self._hidden, dtype=np.float32), n_tokens=4)
+
+    # -- the probe (§2.6) ---------------------------------------------------
+    def probe(self, records: Sequence[GenerationRecord], *, steered: bool
+              ) -> list[tuple[np.ndarray, np.ndarray]]:
+        torch = self.torch
+        if not records:
+            return []
+        lengths = {r.prompt_length for r in records}
+        if len(lengths) != 1:
+            raise BehavioralHarnessError(
+                f"probe group mixes prompt lengths {sorted(lengths)} — one absolute-"
+                "position mask cannot be valid for all of them "
+                f"({PROBE_GROUPING_READING})")
+        prompt_len = lengths.pop()
+        seqs = [r.input_ids for r in records]
+        ids, mask = right_pad(seqs, self.pad_token_id())
+        prev_alpha = None
+        if self._handle is not None:
+            prev_alpha = self._handle.spec.alpha
+            self._handle.spec.alpha = float(self._alpha) if steered else 0.0
+            self._handle.spec.start_pos = int(prompt_len)
+        try:
+            with torch.no_grad():
+                out = self.model(
+                    input_ids=torch.as_tensor(ids, dtype=torch.long).to(self.device),
+                    attention_mask=torch.as_tensor(mask, dtype=torch.long
+                                                   ).to(self.device),
+                    use_cache=False)
+            logits = out.logits.detach().float().cpu()
+        finally:
+            if self._handle is not None and prev_alpha is not None:
+                self._handle.spec.alpha = prev_alpha
+        rows = []
+        for i, rec in enumerate(records):
+            rows.append(per_position_entropy_and_nll(
+                logits[i], rec.input_ids, rec.prompt_length,
+                len(rec.generated_ids)))
+        return rows
+
+    # -- the battery (§6) ---------------------------------------------------
+    def likelihood_nll(self) -> Callable[[str, str], float]:
+        torch = self.torch
+
+        def nll_of(prompt: str, continuation: str) -> float:
+            p_ids = list(self.tok.encode(prompt, add_special_tokens=True))
+            c_ids = list(self.tok.encode(continuation, add_special_tokens=False))
+            if not c_ids:
+                raise BehavioralHarnessError(
+                    f"battery item continuation {continuation!r} tokenizes to nothing")
+            ids = p_ids + c_ids
+            if self._handle is not None:
+                self._handle.spec.start_pos = len(p_ids)   # BATTERY_INJECTION_SPAN
+            with torch.no_grad():
+                logits = self.model(
+                    input_ids=torch.as_tensor([ids], dtype=torch.long).to(self.device),
+                    use_cache=False).logits.detach().float().cpu()[0]
+            _, nll = per_position_entropy_and_nll(logits, ids, len(p_ids), len(c_ids))
+            return float(np.sum(nll))
+
+        return nll_of
+
+    def format_probe_texts(self) -> dict[str, str]:
+        from metabasis.scripts.capability_battery import FORMAT_ITEMS
+
+        out: dict[str, str] = {}
+        for item in FORMAT_ITEMS:
+            ids = list(self.tok.encode(item.prompt, add_special_tokens=True))
+            if self._handle is not None:
+                self._handle.spec.start_pos = len(ids)
+            stepper = self.stepper()
+            try:
+                logits = stepper.prefill(np.asarray([ids], dtype=np.int64),
+                                         np.ones((1, len(ids)), dtype=np.int64))
+                generated: list[int] = []
+                for _ in range(item.max_new_tokens):
+                    tok = sample_token(np.asarray(logits)[0], 0.0, BATTERY_SAMPLING)
+                    generated.append(tok)
+                    if self.eos_token_id() is not None and tok == self.eos_token_id():
+                        break
+                    logits = stepper.step(np.asarray([tok], dtype=np.int64))
+            finally:
+                stepper.close()
+            out[item.item_id] = self.decode(generated)
+        return out
+
+
+def load_vectors(npz_path: Optional[Path]) -> dict[str, np.ndarray]:
+    """The staged vector bank, by key — every failure named (§9 item 3)."""
+    if npz_path is None:
+        return {}
+    path = Path(npz_path)
+    if not path.exists():
+        raise NativeVectorUnavailable(
+            f"staged vector bank absent: {path} (§9 item 3). The cells document names "
+            "it, so its absence is a HALT and not an empty bank.")
+    try:
+        with np.load(path) as z:
+            return {k: np.asarray(z[k], dtype=np.float32) for k in z.files}
+    except (OSError, ValueError, EOFError) as exc:
+        raise NativeVectorUnavailable(
+            f"{path}: unreadable vector bank ({type(exc).__name__}: {exc})") from exc
+
+
+def preflight_report(doc: Any, pool: PromptPool, *,
+                     runtime: Optional[NodeRuntime] = None,
+                     corpus_sha_of_record: str = CORPUS_SHA_V21) -> dict:
+    """M10's first-class exit-early preflight: resolve everything, fire nothing.
+
+    Split deliberately into a WEIGHTLESS half (vintage chain, pool, site cross-check,
+    cell arithmetic, replay-gate constitution, seed roots) and a LOADED half (position
+    budget, VRAM ladder, hook admissibility, the α=0 identity, the measured norm). The
+    weightless half is exactly what the desk can re-run itself, and the loaded half
+    names what it could not check when no model is present — never silently omitting it.
+    """
+    specs = order_cells(doc.cell_specs())
+    kinds: dict[str, int] = {}
+    for spec in specs:
+        kinds[spec.kind] = kinds.get(spec.kind, 0) + 1
+    report: dict[str, Any] = {
+        "grade": GRADE_LINE, "node_key": doc.node_key, "arm": doc.arm,
+        "site": doc.site, "label": doc.label or None,
+        "n_cells": len(specs), "cells_by_kind": kinds,
+        "n_per_cell": doc.n_per_cell,
+        "n_generations": len(specs) * doc.n_per_cell,
+        "dose_ladder": list(DOSE_LADDER),
+        "sampling_of_record": SAMPLING_OF_RECORD.model_dump(),
+        "prompt_pool": {"sha256": pool.sha256, "n": len(pool.prompts),
+                        "matches_document": (doc.prompt_pool_sha256 is None
+                                             or doc.prompt_pool_sha256 == pool.sha256)},
+        "vintage_chain": dict(doc.vintage_chain),
+        "loaded_checks": "NOT RUN (no model handed to the preflight)",
+    }
+    links = [v for v in doc.vintage_links() if v is not None]
+    report["corpus_manifest_sha256"] = assert_corpus_vintage(
+        *(links or [doc.corpus_manifest_sha256]), expected=corpus_sha_of_record)
+    report["site_cross_check"] = site_cross_check(doc.node_key, doc.site)
+    selection, strata, digest = select_replay_cells(
+        specs, doc.node_key, report["corpus_manifest_sha256"])
+    report["replay_gate"] = {"k": REPLAY_GATE_K, "cells": selection,
+                             "strata": strata, "selection_digest": digest,
+                             "constituted": True}
+    report["seed_roots_sample"] = {
+        spec.cell_id: cell_seed_root(
+            corpus_sha=report["corpus_manifest_sha256"], node_key=doc.node_key,
+            arm=doc.arm, site=doc.site, cell_id=spec.cell_id)
+        for spec in specs[:3]}
+    if runtime is not None:
+        prompt_ids = [runtime.tokenize(p) for p in pool.prompts]
+        longest = max(len(i) for i in prompt_ids)
+        assert_position_budget(longest, doc.max_new_tokens,
+                               runtime.position_ceiling(), doc.node_key)
+        B, measured, note = choose_batch_size(runtime.vram_probe)
+        admissibility = runtime.hook_admissibility(doc.site)
+        equivalence = runtime.alpha_zero_equivalence()
+        if equivalence is not None:
+            assert_alpha_zero_is_no_hook(*equivalence)
+        norm = runtime.measure_per_token_median_resid_norm(
+            site=doc.site, prompt_ids=prompt_ids[:NORM_SAMPLE_SIZE])
+        report["loaded_checks"] = {
+            "max_prompt_tokens": longest,
+            "position_budget_ok": True,
+            "canonical_batch_size": B, "batch_size_measured": measured,
+            "headroom_note": note,
+            "hook_admissible": None if admissibility is None
+            else admissibility.admissible,
+            "alpha_zero_is_no_hook": equivalence is not None,
+            "measured_per_token_median_resid_norm": norm,
+            "trunk": trunk_stamp(runtime),
+            "model_config_sha256": runtime.model_config_sha256(),
+        }
+    return report
+
+
+def load_model_and_tokenizer(model_path: str, *, dtype_name: str = "bfloat16"
+                             ) -> tuple[Any, Any, str]:
+    """§2.1's ONE load, with §2.2's frozen attention/dtype choices applied at it."""
+    import torch
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+
+    dtype = getattr(torch, dtype_name, torch.bfloat16)
+    tok = AutoTokenizer.from_pretrained(model_path)
+    tok.padding_side = "left"                                  # §2.2
+    model = AutoModelForCausalLM.from_pretrained(
+        model_path, dtype=dtype, attn_implementation="eager",
+        device_map="auto" if torch.cuda.is_available() else None)
+    model.eval()
+    model.requires_grad_(False)
+    return model, tok, dtype_name
+
+
 # ---------------------------------------------------------------- CPU self-test
 class _StubStepper:
     """A deterministic, PER-ROW-INDEPENDENT stepper — the layout-invariance witness.
@@ -1883,6 +2970,10 @@ class _ToyTokenizer:
         ids = [4 + (ord(c) % (self.vocab_size - 5)) for c in text]
         return ([self.bos_token_id] + ids) if add_special_tokens else ids
 
+    def decode(self, ids: Sequence[int], skip_special_tokens: bool = True) -> str:
+        """Enough of a decode for the coherence panel and the format probe."""
+        return " ".join(f"w{int(i) % 17}" for i in ids)
+
     def apply_chat_template(self, messages: list[dict],
                             add_generation_prompt: bool = True, **kwargs: Any
                             ) -> list[int]:
@@ -1920,6 +3011,159 @@ def _toy_pool(size: int = PROMPT_POOL_SIZE) -> PromptPool:
     return PromptPool(path=None,
                       sha256=hashlib.sha256(body.encode()).hexdigest(),
                       prompts=prompts)
+
+
+class _StubRuntime:
+    """A weightless `NodeRuntime` — the orchestration proof (rake M44).
+
+    The §2.1 ORDER, the per-cell stamps, the completeness guard, the replay gate and
+    the banking are the parts of this module that no GPU can be spared to test and that
+    a mis-wire would corrupt silently. They are therefore proved here against a runtime
+    whose every reading is a deterministic function of its inputs: the same
+    `run_column` that drives a 405B drives this, so the orchestration stays proven in a
+    configuration with no deep-learning stack at all. What it CANNOT prove — that a
+    real forward's numbers are right — is exactly what the torch block below
+    characterizes on a real (tiny) model.
+    """
+
+    def __init__(self, pool: PromptPool, tok: Any, arm: str, site: int, *,
+                 hidden: int = 8, norm: float = 12.2391) -> None:
+        self.pool, self.tok, self.arm, self.site = pool, tok, arm, site
+        self.hidden, self._norm = hidden, norm
+        self.alpha = 0.0
+        self.cell: Optional[CellSpec] = None
+        self.order: list[str] = []
+        self.start_positions: list[int] = []
+
+    def trunk(self) -> dict:
+        return {"torch": None, "transformers": None, "hostname": "selftest",
+                "dtype": "float32", "device": "cpu", "measured": True}
+
+    def model_config_sha256(self) -> Optional[str]:
+        return "a" * 64
+
+    def tokenize(self, prompt: BehavioralPrompt) -> list[int]:
+        return render_prompt(prompt, self.tok, self.arm)
+
+    def pad_token_id(self) -> int:
+        return 0
+
+    def eos_token_id(self) -> Optional[int]:
+        return None
+
+    def position_ceiling(self) -> Optional[int]:
+        return None
+
+    def vram_probe(self, batch_size: int) -> float:
+        return 0.10 * (batch_size / 10.0)
+
+    def measure_per_token_median_resid_norm(self, *, site: int,
+                                            prompt_ids: Sequence[Sequence[int]]
+                                            ) -> float:
+        if not prompt_ids:
+            raise ResidualNormDeltaError("no prompts to measure over")
+        return self._norm
+
+    def begin_cell(self, *, cell: CellSpec, alpha: float) -> None:
+        assert_no_lesion_recipe(cell.vector_provenance, cell.vector_key or "")
+        self.cell, self.alpha = cell, float(alpha)
+        self.order.append(cell.cell_id)
+
+    def start_pos_sink(self, padded_prompt_length: int) -> None:
+        self.start_positions.append(int(padded_prompt_length))
+
+    def end_cell(self) -> None:
+        self.cell = None
+
+    def stepper(self) -> Stepper:
+        return _StubStepper(eos_token_id=None)
+
+    def probe(self, records: Sequence[GenerationRecord], *, steered: bool
+              ) -> list[tuple[np.ndarray, np.ndarray]]:
+        out = []
+        for r in records:
+            base = np.array([abs(t) % 7 + 1 for t in r.generated_ids],
+                            dtype=np.float32) / 7.0
+            # the steered read differs from the unsteered one by the cell's own α, so
+            # a rise is a function of the dose and the digest covers both halves
+            ent = base + (np.float32(self.alpha) * np.float32(0.01) if steered else 0.0)
+            nll = base * np.float32(2.0)
+            out.append((ent.astype(np.float32), nll.astype(np.float32)))
+        return out
+
+    def decode(self, ids: Sequence[int]) -> str:
+        return " ".join(f"w{int(i) % 23}" for i in ids)
+
+    def likelihood_nll(self) -> Callable[[str, str], float]:
+        def nll_of(prompt: str, continuation: str) -> float:
+            # deterministic, and mildly α-sensitive so a capability delta is non-zero
+            h = int(hashlib.sha256((prompt + "|" + continuation).encode()
+                                   ).hexdigest()[:8], 16)
+            return float((h % 1000) / 100.0) + abs(self.alpha) * 0.001
+        return nll_of
+
+    def format_probe_texts(self) -> dict[str, str]:
+        from metabasis.scripts.capability_battery import FORMAT_ITEMS
+        return {item.item_id: ("blue" if i % 2 == 0 else "well, it depends")
+                for i, item in enumerate(FORMAT_ITEMS)}
+
+    def alpha_zero_equivalence(self) -> Optional[tuple[Any, Any]]:
+        arr = np.array([1.0, 2.0], dtype=np.float32)
+        return arr, arr.copy()
+
+    def hook_admissibility(self, site: int) -> Optional[HookAdmissibility]:
+        return None
+
+    def close(self) -> None:
+        self.cell = None
+
+
+def _toy_document(pool: PromptPool, *, node: str, arm: str, site: int, corpus: str,
+                  cells: Sequence[CellSpec], n_per_cell: int,
+                  max_new_tokens: int) -> Any:
+    """A `CellsDocument` built in memory — the staging→engine contract, exercised."""
+    from metabasis.scripts.build_behavioral_banks import CellsDocument, StagedCell
+    from metabasis.scripts.capability_battery import BATTERY_ITEM_SET_SHA256
+
+    tmap = {"fit_sha256": "c" * 64, "family": "proc_k128", "arm": arm,
+            "corpus_vintage": corpus}
+    naive = {"pair": "hub->target", "verdict": "CLEAR", "bare_cos": 0.03, "q95": 0.09}
+    staged = []
+    for c in cells:
+        transported = c.kind in ("transported", "transported_band", "naive", "bridge",
+                                 "judged")
+        staged.append(StagedCell(
+            spec=c.model_copy(update={"n": n_per_cell}),
+            transport_map=tmap if transported else None,
+            naive_row=naive if transported else None,
+            vector_sha256="b" * 64,
+            fd_gate={"PASSES_FD_GATE": True, "median_rel_error": 0.011},
+            build_stamp={"corpus_manifest_sha256": corpus, "builder": "selftest"}))
+    return CellsDocument(
+        node_key=node, arm=arm, site=site, source_key="hub", pair="hub->target",
+        corpus_manifest_sha256=corpus, prompt_pool_sha256=pool.sha256,
+        battery_item_set_sha256=BATTERY_ITEM_SET_SHA256, vectors_npz=None,
+        vectors_npz_sha256="b" * 64, n_per_cell=n_per_cell,
+        max_new_tokens=max_new_tokens, label="SELFTEST, NOT A READ",
+        vintage_chain={"corpus_manifest": corpus, "transport_map": corpus},
+        banked_norms={"per_token_median": None, "mean_state_median": 12.1125},
+        cells=tuple(staged),
+        bank_stamp={"vector_fd_gate": {"PASSES_FD_GATE": True},
+                    "vector_build_stamp": {"builder": "selftest"}})
+
+
+def _compact_cells(site: int) -> list[CellSpec]:
+    """The smallest cell set that can constitute the §2.7 gate (all three strata)."""
+    cells = [baseline_cell(site)]
+    for key, kind, band in (("entropy_gradient", "calibration", None),
+                            ("gRband1", "transported_band", "gRband"),
+                            ("gentropy_gradient", "transported", None)):
+        for frac in SCORING_DOSES:
+            cells.append(CellSpec(
+                cell_id=CELL_ID_TEMPLATE.format(vector_key=key, site=site, frac=frac),
+                kind=kind, vector_key=key, site=site, alpha_frac=frac,
+                band_family=band, vector_provenance=f"toy::{key}"))
+    return cells
 
 
 def _toy_cells(site: int = 14) -> list[CellSpec]:
@@ -2615,9 +3859,224 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                 _raises(lambda: ssm_hook_admissibility_preflight(
                     real, node_key="toy-llama", site=99,
                     vector=np.ones(32, dtype=np.float32)), SiteNotOfRecord))
+          # ---- the REAL runtime, end to end ---------------------------------
+          # What the stub runtime proves about §2.1's ORDER and custody, this proves
+          # about the torch plumbing: one hook mutated across cells, the two-forward
+          # probe, the battery under injection, the in-job norm measurement and the
+          # replay gate, all against a genuine (tiny) forward.
+          hidden = int(cfg.hidden_size)
+          basis_vectors = {k: np.eye(hidden, dtype=np.float32)[i]
+                           for i, k in enumerate(("entropy_gradient",
+                                                  "gentropy_gradient", "gRband1"))}
+          # a node key the registries do NOT carry, on purpose: block 14 exercises
+          # a REGISTERED node (the §9-item-4 cross-check must agree there), and this
+          # block exercises the torch plumbing on a model that is not any node.
+          toy_node = "toy-llama"
+          rt = HFNodeRuntime(real, tok, node_key=toy_node, arm=arm, site=1,
+                             vectors=basis_vectors, device="cpu",
+                             dtype_name="float32")
+          cdoc = _toy_document(pool, node=toy_node, arm=arm, site=1, corpus=corpus,
+                               cells=_compact_cells(1), n_per_cell=2,
+                               max_new_tokens=3)
+          with tempfile.TemporaryDirectory(prefix="behav_real_") as rtd:
+              real_column = run_column(rt, doc=cdoc, pool=pool, work_root=Path(rtd),
+                                       corpus_sha_of_record=corpus,
+                                       characterize=False,
+                                       scheduler_card_index="cpu-selftest")
+              banked_manifest = dict(real_column.manifest)
+          check("the REAL runtime runs the whole §2.1 job through one loaded model",
+                len(real_column.cells) == 7 and real_column.n_generations == 14,
+                f"B={real_column.layout.batch_size}, "
+                f"measured norm={real_column.norms.measured_per_token_median:.4f}")
+          check("the §2.7 replay gate is bitwise on a REAL forward, same layout",
+                real_column.replay_gate.passed
+                and not real_column.replay_gate.mismatches,
+                json.dumps(real_column.replay_gate.strata))
+          check("§2.5's in-job per-token median residual norm is measured, positive",
+                real_column.norms.measured_per_token_median > 0
+                and "MEASURED in-job" in real_column.norms.measured_provenance)
+          check("§2.4 holds inside the job: α=0 with the hook attached is no-hook",
+                real_column.alpha_zero_is_no_hook is True)
+          check("the α=0 baseline's rise is EXACTLY zero on the real model",
+                abs(next(c for c in real_column.cells
+                         if c.kind == "baseline").entropy["entropy_rise"]) == 0.0)
+          check("a dosed cell's steered and unsteered probes genuinely differ",
+                any(c.entropy["entropy_rise"] != 0.0 for c in real_column.cells
+                    if c.alpha_frac != 0.0),
+                str({c.cell_id: c.entropy["entropy_rise"]
+                     for c in real_column.cells if c.alpha_frac == 0.3}))
+          check("the battery scored under injection on the real model (§6)",
+                all(c.capability is not None for c in real_column.cells)
+                and all(set(c.capability["likelihood_rates"])
+                        == {"factual", "arithmetic", "syntactic_agreement"}
+                        for c in real_column.cells))
+          check("every real-run stamp passes the §2.8 checklist",
+                all(_ok(lambda s=c.stamp, k=c.kind:
+                        assert_stamp_complete(s, cell_kind=k))
+                    for c in real_column.cells))
+          check("the real run banked a manifest over every artifact it wrote",
+                len(banked_manifest["artifacts"]) >= 4 * len(real_column.cells)
+                and banked_manifest["replay_gate_passed"] is True,
+                f"{len(banked_manifest['artifacts'])} artifacts")
       except ImportError as exc:                    # transformers availability
         skip("real-forward characterization (transformers unavailable)",
              f"{exc} — the stub-stepper proofs above are the gate")
+
+    # ---- 14. THE COLUMN JOB, end to end, weightless (§2.1) --------------------
+    print("== selftest 14: the §2.1 column job, orchestrated on a stub runtime ==")
+    stub = _StubRuntime(pool, tok, arm, site)
+    doc = _toy_document(pool, node=node, arm=arm, site=site, corpus=corpus,
+                        cells=_toy_cells(site), n_per_cell=4, max_new_tokens=5)
+    os.environ["CUDA_VISIBLE_DEVICES"] = "3"
+    with tempfile.TemporaryDirectory(prefix="behav_column_") as td:
+        work = Path(td)
+        column = run_column(stub, doc=doc, pool=pool, work_root=work,
+                            corpus_sha_of_record=corpus, characterize=True,
+                            scheduler_card_index="3")
+        check("the column runs every staged cell exactly once",
+              len(column.cells) == len(doc.cells) == 25
+              and len({c.cell_id for c in column.cells}) == 25,
+              f"{len(column.cells)} cells × n={doc.n_per_cell} = "
+              f"{column.n_generations} generations")
+        fired = [c.cell_id for c in column.cells]
+        kinds = [c.kind for c in column.cells]
+        check("§2.1's order fires calibration BEFORE anything transported (§4 is a GATE)",
+              max(i for i, k in enumerate(kinds)
+                  if k in ("calibration", "calibration_band"))
+              < min(i for i, k in enumerate(kinds)
+                    if k in ("transported", "transported_band")),
+              f"first: {fired[0]}, last: {fired[-1]}")
+        check("the runtime saw the cells in exactly the filed order",
+              stub.order[:len(fired)] == fired)
+        check("α is resolved from the MEASURED per-token median, per cell (§2.5)",
+              all(abs(c.alpha - c.alpha_frac * 12.2391) < 1e-12 for c in column.cells)
+              and column.norms.measured_per_token_median == 12.2391,
+              f"α(+0.3) = {[c.alpha for c in column.cells if c.alpha_frac == 0.3][0]}")
+        check("the banked mean-STATE norm rides beside and never sets α",
+              column.norms.banked_mean_state_median == 12.1125
+              and "PER-TOKEN" in column.norms.used_for_alpha)
+        check("the canonical layout is FROZEN before any cell fires (§2.2)",
+              column.layout.frozen and column.layout.batch_size in BATCH_LADDER
+              and column.layout.measured, f"B={column.layout.batch_size}")
+        check("the §2.7 replay gate PASSED bitwise in the canonical layout",
+              column.replay_gate.passed and len(column.replay_gate.cells) == 3
+              and not column.replay_gate.mismatches,
+              json.dumps(column.replay_gate.strata))
+        check("the gate's three strata are the frozen ones",
+              sorted(column.replay_gate.strata) == sorted(REPLAY_GATE_STRATA))
+        check("every generation's entropy rise is a difference of two reads of ONE text",
+              all(len(c.probe_rows) == c.n for c in column.cells)
+              and all(r.n_positions > 0 for c in column.cells for r in c.probe_rows))
+        base_cell = next(c for c in column.cells if c.kind == "baseline")
+        dosed = next(c for c in column.cells
+                     if c.kind == "transported" and c.alpha_frac == 0.3)
+        check("the α=0 baseline shows no rise and a dosed cell does (dose response)",
+              abs(base_cell.entropy["entropy_rise"]) < 1e-9
+              and dosed.entropy["entropy_rise"] > 0.0,
+              f"baseline {base_cell.entropy['entropy_rise']} vs +0.3 "
+              f"{dosed.entropy['entropy_rise']}")
+        check("§6's battery rode EVERY cell, bands included (the dose-matched floor)",
+              all(c.capability is not None for c in column.cells)
+              and all(c.coherence is not None for c in column.cells))
+        check("the battery's deltas are formed against the α=0 cell, which has none",
+              base_cell.capability["baseline_available"] is False
+              and dosed.capability["baseline_available"] is True
+              and set(dosed.capability["delta_vs_alpha0"]) >= {"factual", "format"})
+        check("the capability table carries the random band beside every dose (§6)",
+              column.capability_table is not None
+              and set(column.capability_table.get("by_dose", {}))
+              >= {"+0.3", "-0.3"},
+              str(sorted(column.capability_table.get("by_dose", {}))))
+        check("§2.7's B=8/B=1 characterization is DESCRIPTIVE and recorded (M19)",
+              column.batch_invariance is not None
+              and column.batch_invariance.compared_batch_sizes == [1, 8],
+              json.dumps(column.batch_invariance.bitwise_identical))
+        check("the off-ladder characterization sizes never became a layout of record",
+              column.layout.characterization_only is False and column.layout.frozen)
+        check("the fresh-process replay is filed as OWED with its recipe (§2.7, M19)",
+              column.fresh_process_replay["state"] == "OWED"
+              and "CUBLAS_WORKSPACE_CONFIG" in column.fresh_process_replay["recipe"])
+        check("every cell's stamp passes the §2.8 checklist",
+              all(_ok(lambda s=c.stamp, k=c.kind: assert_stamp_complete(s, cell_kind=k))
+                  for c in column.cells))
+        check("every stamp names the entropy-digest ORDER (so the gate is reproducible)",
+              all("gen_id order" in c.stamp["entropy_digest_order"]
+                  for c in column.cells))
+        check("every stamp names the battery's injection span",
+              all("SCORED span" in c.stamp["battery_injection_span"]
+                  for c in column.cells))
+        check("the actuation calibration is named on every cell — OWED, never absent",
+              all(c.stamp["actuation_calibration"]["verdict"] == "OWED"
+                  for c in column.cells))
+        check("raw sits next to every claim: generations + entropy + probe rows banked",
+              all(Path(c.raw_paths["generations"]).exists()
+                  and Path(c.raw_paths["entropy"]).exists()
+                  and Path(c.raw_paths["probe_rows"]).exists()
+                  for c in column.cells))
+        one = column.cells[0]
+        check("a banked generations file has exactly n lines",
+              len(Path(one.raw_paths["generations"]).read_text().splitlines())
+              == one.n)
+        check("the manifest sha's every artifact the job wrote (M4-checkable)",
+              len(column.manifest["artifacts"]) >= 4 * len(column.cells)
+              and all(len(v) == 64 for v in column.manifest["artifacts"].values()),
+              f"{len(column.manifest['artifacts'])} artifacts")
+        check("the column result banks the replay verdict in its manifest",
+              column.manifest["replay_gate_passed"] is True)
+        check("the rehearsal label rides the column and every stamp",
+              column.label == "SELFTEST, NOT A READ"
+              and all(c.stamp["label"] == "SELFTEST, NOT A READ"
+                      for c in column.cells))
+        check("an expected-N shortfall in the column is a HALT (§9 item 10 / M23)",
+              _raises(lambda: assert_column_complete(column.cells, 26, n_per_cell=4),
+                      ExpectedNShortfall)
+              and _raises(lambda: assert_column_complete(column.cells,
+                                                         len(column.cells),
+                                                         n_per_cell=80),
+                          ExpectedNShortfall))
+        check("a pool whose sha disagrees with the document is a HALT (M4)",
+              _raises(lambda: run_column(
+                  _StubRuntime(pool, tok, arm, site), doc=doc.model_copy(
+                      update={"prompt_pool_sha256": "9" * 64}),
+                  pool=pool, work_root=None, corpus_sha_of_record=corpus,
+                  characterize=False, write=False), ArtifactShaMismatch))
+        check("a non-of-record basis in the chain is a HALT (§9 item 2)",
+              _raises(lambda: run_column(
+                  _StubRuntime(pool, tok, arm, site), doc=doc, pool=pool,
+                  work_root=None, corpus_sha_of_record="7" * 64, characterize=False,
+                  write=False), CorpusVintageError),
+              "the basis is a PARAMETER — the engine hardcodes none for a run")
+        # M10: the preflight is a first-class mode and resolves without firing a cell
+        weightless = preflight_report(doc, pool, corpus_sha_of_record=corpus)
+        loaded = preflight_report(doc, pool, runtime=_StubRuntime(pool, tok, arm, site),
+                                  corpus_sha_of_record=corpus)
+        check("the weightless preflight constitutes the replay gate before any spend",
+              weightless["replay_gate"]["constituted"]
+              and len(weightless["replay_gate"]["cells"]) == 3)
+        check("the weightless preflight NAMES what it could not check",
+              weightless["loaded_checks"] == "NOT RUN (no model handed to the "
+                                             "preflight)")
+        check("the loaded preflight reports the layout, the norm and the trunk",
+              loaded["loaded_checks"]["canonical_batch_size"] in BATCH_LADDER
+              and loaded["loaded_checks"]["measured_per_token_median_resid_norm"] > 0)
+        check("the preflight's cell arithmetic matches the document",
+              weightless["n_cells"] == 25 and weightless["n_generations"] == 100)
+    os.environ["CUDA_VISIBLE_DEVICES"] = "3"
+
+    # ---- 15. the characterization layout (the §2.2/§2.7 clause conflict) -------
+    print("== selftest 15: off-ladder characterization layouts are fenced ==")
+    for B in CHARACTERIZATION_BATCH_SIZES:
+        check(f"B={B} is admissible ONLY as a characterization layout",
+              _raises(lambda b=B: CanonicalLayout(batch_size=b, dtype="f32"),
+                      ValueError)
+              and CanonicalLayout(batch_size=B, dtype="f32",
+                                  characterization_only=True).batch_size == B)
+    check("a characterization layout can NEVER be frozen (no second layout of record)",
+          _raises(lambda: CanonicalLayout(batch_size=8, dtype="f32", frozen=True,
+                                          characterization_only=True), ValueError))
+    check("freeze_layout still produces a FROZEN on-ladder layout of record",
+          freeze_layout(80, dtype="bfloat16").frozen
+          and not freeze_layout(80, dtype="bfloat16").characterization_only)
 
     failures = [c for c in checks if not c[1]]
     print(f"\nselftest: {len(failures)} failure(s)")
@@ -2713,39 +4172,120 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--cells-json", type=Path, default=None,
                     help="staged cell specs (build_behavioral_banks.py output)")
     ap.add_argument("--prompt-pool", type=Path, default=None)
-    ap.add_argument("--arm", choices=("native", "raw"), default="native")
-    ap.add_argument("--site", type=int, default=None)
-    ap.add_argument("--n-per-cell", type=int, default=N_PER_CELL)
+    ap.add_argument("--arm", choices=("native", "raw"), default=None,
+                    help="cross-checked against the cells document; the document wins "
+                         "and a disagreement is a refusal, never a silent override")
+    ap.add_argument("--site", type=int, default=None,
+                    help="cross-checked against the cells document (see --arm)")
+    ap.add_argument("--n-per-cell", type=int, default=None,
+                    help=f"override n/cell (frozen at {N_PER_CELL}; a reduced n is a "
+                         "REHEARSAL and the document must carry a label saying so)")
+    ap.add_argument("--corpus-sha-of-record", default=None,
+                    help="the basis the vintage chain is asserted against. Defaults to "
+                         "the document's own corpus sha, so this module hardcodes no "
+                         "basis for a run — the open v2.1/v3 ruling lives here.")
+    ap.add_argument("--dtype", default="bfloat16")
+    ap.add_argument("--job-id", default=None)
+    ap.add_argument("--scheduler-card-index", default=None,
+                    help="M10: a scheduler job carries a card index; a rogue carries "
+                         "the sentinel, and §9 item 9 refuses the stamp without it")
+    ap.add_argument("--no-characterize", action="store_true",
+                    help="skip §2.7's DESCRIPTIVE B=8/B=1 characterization (M19: it "
+                         "can never fail a gate, so skipping it costs no assertion)")
     args = ap.parse_args(argv)
 
     if args.selftest:
         return selftest()
-    if args.preflight or args.run:
-        # The GPU job body is staged for the §3 step-2 certification enactment; this
-        # module's step-1 deliverable is the mechanics + selftests (§3 step 1: "no
-        # science cell fires"). Refusing loudly beats a half-wired run.
-        missing = [f for f in ("node_key", "model_path", "prompt_pool")
-                   if getattr(args, f) is None]
-        if missing:
-            ap.error(f"--{'/--'.join(m.replace('_', '-') for m in missing)} required")
+    if not (args.preflight or args.run):
+        ap.error("nothing to do: pass --selftest, --preflight or --run")
+
+    from metabasis.scripts.build_behavioral_banks import load_cells_document
+
+    missing = [f for f in ("cells_json", "prompt_pool")
+               if getattr(args, f) is None]
+    if args.run and args.model_path is None:
+        missing.append("model_path")
+    if missing:
+        ap.error(f"--{' / --'.join(m.replace('_', '-') for m in missing)} required")
+
+    try:
+        doc = load_cells_document(args.cells_json)
         pool = load_prompt_pool(args.prompt_pool)
-        logger.info("prompt pool of record: %d prompts, sha %s",
-                    len(pool.prompts), pool.sha256)
-        logger.info("dose ladder (FROZEN): %s; n/cell %d; max_new_tokens %d",
-                    list(DOSE_LADDER), args.n_per_cell, MAX_NEW_TOKENS)
-        logger.info("sampling of record: %s", SAMPLING_OF_RECORD.model_dump())
-        B, measured, note = choose_batch_size(None)
-        logger.info("canonical layout preflight: B=%d measured=%s (%s)",
-                    B, measured, note)
-        if args.run:
-            ap.error(
-                "--run is not wired in this build: BRIEF §3 step 1 is 'modules + "
-                "selftests only; NO science cell fires', and the §3 step-2 "
-                "certification run on the 3B is a separate later enactment against "
-                "the FROZEN harness. Use --preflight, or --selftest.")
+    except BehavioralHarnessError as exc:
+        logger.error("HALT: %s", exc)
+        return 2
+
+    for name, given in (("node_key", args.node_key), ("arm", args.arm),
+                        ("site", args.site)):
+        if given is not None and getattr(doc, name) != given:
+            logger.error(
+                "HALT: --%s %r disagrees with the cells document's %r. The document is "
+                "the staged column and a CLI override would run one column under "
+                "another column's stamp.", name.replace('_', '-'), given,
+                getattr(doc, name))
+            return 2
+    basis = args.corpus_sha_of_record or doc.corpus_manifest_sha256
+    logger.info("cells document: %s L%d (%s arm), %d cells, basis %s%s",
+                doc.node_key, doc.site, doc.arm, len(doc.cells), basis[:12],
+                f" — LABEL: {doc.label}" if doc.label else "")
+    logger.info("prompt pool of record: %d prompts, sha %s",
+                len(pool.prompts), pool.sha256)
+    logger.info("dose ladder (FROZEN): %s; n/cell %d; max_new_tokens %d",
+                list(DOSE_LADDER), args.n_per_cell or doc.n_per_cell,
+                doc.max_new_tokens)
+    logger.info("sampling of record: %s", SAMPLING_OF_RECORD.model_dump())
+
+    runtime: Optional[NodeRuntime] = None
+    try:
+        if args.model_path is not None:
+            model, tok, dtype_name = load_model_and_tokenizer(
+                args.model_path, dtype_name=args.dtype)
+            runtime = HFNodeRuntime(
+                model, tok, node_key=doc.node_key, arm=doc.arm, site=doc.site,
+                vectors=load_vectors(Path(doc.vectors_npz) if doc.vectors_npz
+                                     else None),
+                dtype_name=dtype_name)
+        if args.preflight:
+            report = preflight_report(doc, pool, runtime=runtime,
+                                      corpus_sha_of_record=basis)
+            print(json.dumps(report, indent=1, default=str))
+            return 0
+        if runtime is None:                                   # pragma: no cover
+            ap.error("--run needs --model-path")
+        if args.work_root is None:
+            ap.error("--run needs --work-root (all new node-side data lives under "
+                     "/models/metabasis-behavioral/<node>, standing rule 2026-07-29)")
+        result = run_column(
+            runtime, doc=doc, pool=pool, work_root=args.work_root,
+            corpus_sha_of_record=basis, n_per_cell=args.n_per_cell,
+            characterize=not args.no_characterize,
+            scheduler_card_index=args.scheduler_card_index)
+        print(json.dumps({
+            "node_key": result.node_key, "site": result.site, "arm": result.arm,
+            "label": result.label or None,
+            "n_cells": len(result.cells), "n_generations": result.n_generations,
+            "canonical_batch_size": result.layout.batch_size,
+            "measured_per_token_median_resid_norm":
+                result.norms.measured_per_token_median,
+            "replay_gate_passed": result.replay_gate.passed,
+            "replay_gate_cells": result.replay_gate.cells,
+            "work_root": result.work_root, "grade": result.grade}, indent=1))
         return 0
-    ap.error("nothing to do: pass --selftest, --preflight or --run")
-    return 2                                        # pragma: no cover
+    except BehavioralHarnessError as exc:
+        # §3/§9: an enactor never adjudicates a live HALT. The job stops, says which
+        # condition fired, and leaves the adjudication to the desk.
+        logger.error("HALT (%s): %s", type(exc).__name__, exc)
+        return 2
+    except (OSError, ImportError) as exc:
+        logger.error("environment failure (%s): %s", type(exc).__name__, exc)
+        return 3
+    finally:
+        if runtime is not None:
+            try:
+                runtime.close()
+            except Exception as exc:                     # noqa: BLE001 — M19(a)
+                logger.warning("runtime close failed (%s: %s)",
+                               type(exc).__name__, exc)
 
 
 if __name__ == "__main__":
