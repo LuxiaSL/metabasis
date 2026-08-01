@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+{{*header}}
+set -u
+set -o pipefail
+
+ROOT="{{root}}"
+J="$ROOT/{{jobs_dirname}}"
+MODEL="{{model}}"
+MODEL_PATH="{{model_path}}"
+
+{{*constants}}
+
+echo "host $(hostname)  identity preflight for $MODEL at $MODEL_PATH"
+
+{{*checks}}
+
+# --- hand off to the unchanged instrument of record --------------------------
+export MB_MODEL="$MODEL"
+export MB_MODEL_PATH="$MODEL_PATH"
+export MB_SITE="{{site}}"
+export MB_ARM="{{arm}}"
+
+echo "handing off to $J/{{target_script}}  (model=$MB_MODEL site=L$MB_SITE arm=$MB_ARM)"
+exec "$J/{{target_script}}"

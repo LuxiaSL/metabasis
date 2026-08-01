@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+{{*header}}
+set -u
+set -o pipefail
+
+: "${MB_MODEL:?MB_MODEL unset}"
+: "${MB_MODEL_PATH:?MB_MODEL_PATH unset}"
+: "${MB_SITE:?MB_SITE unset}"
+: "${MB_ARM:?MB_ARM unset}"
+MB_MAXSEQ="${MB_MAXSEQ:-}"
+MB_SHARD="${MB_SHARD:-}"
+MB_ASSERT_NTRUNC="${MB_ASSERT_NTRUNC:-}"
+
+ROOT="{{root}}"
+CODE="$ROOT/{{code_dirname}}"
+ARM="$ROOT/{{arm_dirname}}"
+OUT="$ARM/vectors/$MB_MODEL"
+STEM="entropy_gradient_${MB_MODEL}_L${MB_SITE}"
+{{corpus_var}}="{{corpus_sha}}"
+TS="$(date +%Y%m%d-%H%M%S)"
+LOG="$ARM/logs/{{log_stem}}-$MB_MODEL-L$MB_SITE-$TS.log"
+
+cd "$CODE" || { echo "PREFLIGHT-BLOCKED: $CODE absent — wrong node?"; exit 2; }
+mkdir -p "$OUT" "$ARM/logs" || { echo "PREFLIGHT-BLOCKED: cannot make out dirs"; exit 2; }
+
+if [ -z "${CUDA_VISIBLE_DEVICES:-}" ]; then
+  echo "PREFLIGHT-BLOCKED: CUDA_VISIBLE_DEVICES unset — must run under the scheduler"
+  exit 2
+fi
+if [ -e "$OUT/$STEM.npz" ]; then
+  echo "PREFLIGHT-BLOCKED: $OUT/$STEM.npz already exists — refusing to overwrite"; exit 2
+fi
+have=$(sha256sum "$ARM/{{corpus_manifest_relpath}}" | cut -d' ' -f1)
+if [ "$have" != "${{corpus_var}}" ]; then
+  echo "PREFLIGHT-BLOCKED: {{arm_dirname}} corpus sha $have != {{corpus_label}} ${{corpus_var}}"; exit 2
+fi
+
+# shellcheck disable=SC1091
+source "{{venv_activate}}" || { echo "PREFLIGHT-BLOCKED venv"; exit 2; }
+export PYTHONUNBUFFERED=1
+export OMP_NUM_THREADS=1
+export TOKENIZERS_PARALLELISM=false
+export HF_HUB_OFFLINE=1
+
+echo "host $(hostname)  model $MB_MODEL  site L$MB_SITE  arm $MB_ARM  cvd=$CUDA_VISIBLE_DEVICES"
+echo "{{corpus_label}} verified: ${{corpus_var}}   out $OUT/$STEM.npz   log $LOG"
+
+ARGS=(--model "$MB_MODEL" --model-path "$MB_MODEL_PATH" --arm-root "$ARM"
+      --site "$MB_SITE" --arm "$MB_ARM" --out-dir "$OUT" --out-name "$STEM")
+[ -n "$MB_MAXSEQ" ] && ARGS+=(--max-seq-len "$MB_MAXSEQ")
+[ -n "$MB_SHARD" ] && ARGS+=(--shard-across "$MB_SHARD")
+[ -n "$MB_ASSERT_NTRUNC" ] && ARGS+=(--assert-n-truncated "$MB_ASSERT_NTRUNC")
+
+python -m metabasis.scripts.build_entropy_gradient "${ARGS[@]}" 2>&1 | tee -a "$LOG"
+rc=${PIPESTATUS[0]}
+
+if [ "$rc" -eq 0 ]; then
+  echo "{{marker}}-JOB-OK $MB_MODEL L$MB_SITE arm=$MB_ARM stem=$STEM corpus={{corpus_tag}}"
+else
+  echo "{{marker}}-JOB-NONZERO-RC=$rc $MB_MODEL L$MB_SITE"
+fi
+exit "$rc"

@@ -1,0 +1,26 @@
+{
+ "lane": "fits",
+ "name": "fit-pair-v21-8b-gemma3-27b.sh",
+ "header": [
+  "# EXAMPLE ONLY — hub 8b -> gemma3-27b pair fit over the corpus-v2.1",
+  "# banks, both arms, 0 GPU. Rendered from metabasis.jobs_v21.",
+  "#",
+  "# The site grids come from the RATIFIED registry",
+  "# (fit_transport_maps.SITES); this job passes none, so a registry",
+  "# change moves the fit rather than leaving a stale grid frozen into a",
+  "# script."
+ ],
+ "paths": {
+  "root": "<<PROJECT_ROOT>>",
+  "venv_activate": "<<VENV_ACTIVATE>>",
+  "code_dirname": "code-v21",
+  "arm_dirname": "arm-v21",
+  "bankroot": "<<RAID>>/metabasis-gemma-rebank-v21"
+ },
+ "source_model": "8b",
+ "target_model": "gemma3-27b",
+ "arms": "native,raw",
+ "fits_dirname": "fits_v21_pair_8bL16__gemma3-27bL38",
+ "marker": "FIT-PAIR-V21",
+ "log_stem": "fit-pair-v21"
+}

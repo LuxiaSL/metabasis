@@ -1,0 +1,40 @@
+{
+ "lane": "collect",
+ "name": "scan-v21-llama-3.3-70b.sh",
+ "header": [
+  "# EXAMPLE ONLY — corpus-v2.1 collect + fresh-process bitwise spot-replay",
+  "# for llama-3.3-70b-instruct on its REGISTRY scan grid, both arms,",
+  "# sharded 2-way. Rendered from metabasis.jobs_v21; fired via Heimdall",
+  "# only (rake M10 rule b).",
+  "#",
+  "# THE GRID IS NOT TYPED HERE. It is SCAN_GRIDS['llama-3.3-70b-instruct'] as of",
+  "# authoring, and the preflight RE-DERIVES it from the registry and",
+  "# refuses if the two disagree — prereg §4's 'sites from curves, never",
+  "# fiat' as a gate rather than as a habit.",
+  "#",
+  "# ⚠ EXIT 0 IS NOT THE VERDICT. ALL_BITWISE_EXACT in the spot report is."
+ ],
+ "paths": {
+  "root": "<<PROJECT_ROOT>>",
+  "venv_activate": "<<VENV_ACTIVATE>>",
+  "code_dirname": "code-v21",
+  "arm_dirname": "arm-v21",
+  "bankroot": "<<RAID>>/metabasis-3370b-rebank-v21"
+ },
+ "corpus": {
+  "sha256": "5ae355bc5d130f8e9c3ae426f5e71bf2b6e99c74b95369a874bec2abcd59b5d9",
+  "shell_var": "CORPUS_V21_SHA",
+  "label": "corpus-v2.1",
+  "tag": "v21",
+  "n_texts": 775
+ },
+ "model": "llama-3.3-70b-instruct",
+ "model_path": "<<SHARED_WEIGHTS>>/Llama-3.3-70B-Instruct",
+ "arms": "native,raw",
+ "sites": "12,17,22,27,32,37,43,48,53,58,63,68",
+ "spot_replay_k": 3,
+ "shard_across": "0,1",
+ "assert_multi_device": true,
+ "marker": "SCAN-V21",
+ "log_stem": "scan-v21"
+}

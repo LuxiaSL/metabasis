@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+{{*header}}
+set -u
+set -o pipefail
+
+# 0-GPU job. ⚠ For a gpus=0 job `--node` is a PREFERENCE, not a pin: if the
+# preferred node is unreachable at dispatch the job falls through to any
+# reachable one (Heimdall guide §4.7). The `cd` below is the mitigation — a
+# node without this tree fails the job immediately instead of fitting against
+# whatever banks happen to be there.
+
+SRC="{{source_model}}"
+TGT="{{target_model}}"
+ARMS="{{arms}}"
+FITS_DIRNAME="{{fits_dirname}}"
+{{#if has_src_sites}}
+SRC_SITES="{{src_sites}}"
+{{/if}}
+{{#if has_tgt_sites}}
+TGT_SITES="{{tgt_sites}}"
+{{/if}}
+{{#if has_k_grid}}
+K_GRID="{{k_grid}}"
+{{/if}}
+{{#if has_n_null}}
+N_NULL="{{n_null}}"
+{{/if}}
+
+ROOT="{{root}}"
+CODE="$ROOT/{{code_dirname}}"
+ARM="$ROOT/{{arm_dirname}}"
+BANKROOT="{{bankroot}}"
+TS="$(date +%Y%m%d-%H%M%S)"
+LOG="$BANKROOT/logs/{{log_stem}}-$SRC-$TGT-$TS.log"
+
+cd "$CODE" || { echo "PREFLIGHT-BLOCKED: $CODE absent — wrong node?"; exit 2; }
+mkdir -p "$BANKROOT/logs" || { echo "PREFLIGHT-BLOCKED: cannot make out dirs"; exit 2; }
+
+# shellcheck disable=SC1091
+source "{{venv_activate}}" || { echo "PREFLIGHT-BLOCKED venv"; exit 2; }
+export PYTHONUNBUFFERED=1
+export OMP_NUM_THREADS=1
+
+echo "host $(hostname)  src $SRC  tgt $TGT  arms $ARMS  fits-dirname $FITS_DIRNAME"
+echo "code $CODE   arm-root $ARM   log $LOG"
+
+python - "$SRC" "$TGT" "$ARM" "$FITS_DIRNAME" <<'PREFLIGHT'
+import sys
+from pathlib import Path
+
+src, tgt, arm_root, fits_dirname = sys.argv[1:5]
+
+# --- both ends must be BANKED before anything is fitted ----------------------
+# A fit over a bank that is not there produces an empty summary, not an error,
+# and an empty summary reads like a finished job.
+missing = [key for key in (src, tgt)
+           if not any((Path(arm_root) / "states").glob(f"states_{key}*"))]
+if missing:
+    print(f"PREFLIGHT-BLOCKED: no banked states under {arm_root}/states for "
+          f"{missing} — a fit over an absent bank writes an EMPTY summary and "
+          f"an empty summary reads like a finished job"); sys.exit(2)
+
+# --- the fit grid is the RATIFIED one unless the caller overrode it ----------
+from metabasis.scripts.fit_transport_maps import SITES
+for key in (src, tgt):
+    if key in SITES:
+        print(f"preflight: SITES[{key}] = {tuple(SITES[key])} (ratified)")
+    else:
+        print(f"preflight: {key} is NOT in SITES — this fit must pass its grid "
+              f"explicitly, and the run is a SCAN rather than a record fit")
+
+# --- refuse to overwrite an existing summary ---------------------------------
+summary = Path(arm_root) / fits_dirname / "cp2_summary.json"
+if summary.exists():
+    print(f"PREFLIGHT-BLOCKED: {summary} already exists — refusing to overwrite "
+          f"a banked summary"); sys.exit(2)
+print(f"preflight: writing a new {summary}")
+print("preflight ok")
+PREFLIGHT
+rc=$?
+if [ "$rc" -ne 0 ]; then echo "{{marker}}-PREFLIGHT-BLOCKED $SRC->$TGT"; exit 2; fi
+
+if [ "${MB_PREFLIGHT_ONLY:-0}" = "1" ]; then
+  echo "{{marker}}-PREFLIGHT-ONLY-OK $SRC->$TGT (nothing fitted)"; exit 0
+fi
+
+echo "=== FIT $SRC -> $TGT arms=$ARMS into $FITS_DIRNAME ==="
+python -m metabasis.scripts.fit_transport_maps \
+  --source-model "$SRC" --target-model "$TGT" --arm-root "$ARM" \
+  --arms "$ARMS" --fits-dirname "$FITS_DIRNAME" \
+{{#if has_src_sites}}
+  --src-sites "$SRC_SITES" \
+{{/if}}
+{{#if has_tgt_sites}}
+  --tgt-sites "$TGT_SITES" \
+{{/if}}
+{{#if has_k_grid}}
+  --k-grid "$K_GRID" \
+{{/if}}
+{{#if has_n_null}}
+  --n-null "$N_NULL" \
+{{/if}}
+  2>&1 | tee -a "$LOG"
+rc=${PIPESTATUS[0]}
+
+if [ "$rc" -eq 0 ]; then
+  echo "{{marker}}-JOB-OK $SRC->$TGT arms=$ARMS dir=$FITS_DIRNAME"
+  exit 0
+fi
+echo "{{marker}}-JOB-NONZERO-RC=$rc $SRC->$TGT"
+exit "$rc"

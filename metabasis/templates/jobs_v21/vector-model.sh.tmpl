@@ -1,0 +1,232 @@
+#!/usr/bin/env bash
+{{*header}}
+set -u
+set -o pipefail
+
+MODEL="{{model}}"
+MODEL_PATH="{{model_path}}"
+ARM_TEMPLATE="{{arm}}"
+EXPECT_SITE="{{expect_site}}"
+EXPECT_CONFIG_SHA="{{expect_config_sha}}"
+{{*constants}}
+{{corpus_var}}="{{corpus_sha}}"
+
+ROOT="{{root}}"
+CODE="$ROOT/{{code_dirname}}"
+ARM="$ROOT/{{arm_dirname}}"
+BANKROOT="{{bankroot}}"
+OUT="$ARM/vectors/$MODEL"
+TS="$(date +%Y%m%d-%H%M%S)"
+LOG="$BANKROOT/logs/{{log_stem}}-$MODEL-$TS.log"
+SITEFILE="$BANKROOT/logs/{{sitefile_stem}}-$MODEL-$TS.txt"
+
+cd "$CODE" || { echo "PREFLIGHT-BLOCKED: $CODE absent — wrong node?"; exit 2; }
+mkdir -p "$OUT" "$BANKROOT/logs" || { echo "PREFLIGHT-BLOCKED: cannot make out dirs"; exit 2; }
+
+{{#if compact_cvd_gate}}
+if [ -z "${CUDA_VISIBLE_DEVICES:-}" ]; then
+  echo "PREFLIGHT-BLOCKED: CUDA_VISIBLE_DEVICES unset — must run under the scheduler"; exit 2
+fi
+{{#else}}
+if [ -z "${CUDA_VISIBLE_DEVICES:-}" ]; then
+  echo "PREFLIGHT-BLOCKED: CUDA_VISIBLE_DEVICES unset — must run under the scheduler"
+  exit 2
+fi
+{{/if}}
+{{#if blank_before_corpus_gate}}
+
+{{/if}}
+have=$(sha256sum "$ARM/{{corpus_manifest_relpath}}" | cut -d' ' -f1)
+if [ "$have" != "${{corpus_var}}" ]; then
+  echo "PREFLIGHT-BLOCKED: {{arm_dirname}} corpus sha $have != {{corpus_label}} ${{corpus_var}}"; exit 2
+fi
+
+# shellcheck disable=SC1091
+source "{{venv_activate}}" || { echo "PREFLIGHT-BLOCKED venv"; exit 2; }
+export PYTHONUNBUFFERED=1
+export OMP_NUM_THREADS=1
+export TOKENIZERS_PARALLELISM=false
+export HF_HUB_OFFLINE=1
+
+{{*banner}}
+
+{{*preflight_argv}}
+import ast, hashlib, inspect, json, sys
+from pathlib import Path
+
+{{*preflight_unpack}}
+p, out = Path(path), Path(out_dir)
+
+{{*preflight_body}}
+
+{{*memory_section_comment}}
+{{#if mem_inline}}
+import torch
+{{#if mem_sharded}}
+devs = [d for d in shard_across.split(",") if d]
+n = torch.cuda.device_count()
+if n != len(devs):
+    print(f"PREFLIGHT-BLOCKED: torch sees {n} card(s); --shard-across names "
+          f"{len(devs)} ({shard_across})"); sys.exit(2)
+{{#if mem_needs_index}}
+idx = json.loads((p / "model.safetensors.index.json").read_bytes())
+w = idx["metadata"]["total_size"] / 2**30
+{{/if}}
+need_total = w * {{multiplier}}
+need_each = round(need_total / len(devs), 1)
+free_gib = []
+for i in range(n):
+    free, total = torch.cuda.mem_get_info(i)
+    free_gib.append(free / 2**30)
+    print(f"preflight: card {i} free {free/2**30:.1f} of {total/2**30:.1f} GiB")
+print(f"preflight: {w:.1f} GiB bf16 x{{multiplier}} ({{mem_pass_label}}) = {need_total:.1f} GiB "
+      f"over {len(devs)} card(s) -> need >= {need_each} GiB free per card")
+if min(free_gib) < need_each:
+    print(f"PREFLIGHT-BLOCKED: min card free {min(free_gib):.1f} GiB < {need_each} GiB")
+    sys.exit(2)
+{{#else}}
+{{*gate_cards}}
+{{#if mem_needs_index}}
+idx = json.loads((p / "model.safetensors.index.json").read_bytes())
+w = idx["metadata"]["total_size"] / 2**30
+{{/if}}
+free, total = torch.cuda.mem_get_info(0)
+need = round(w * {{multiplier}}, 1){{mem_need_comment}}
+print(f"preflight: card free {free/2**30:.1f} of {total/2**30:.1f} GiB; weights "
+      f"{w:.1f} GiB bf16, need >= {need} GiB (x{{multiplier}} for {{mem_pass_label}})")
+if free / 2**30 < need:
+    print(f"PREFLIGHT-BLOCKED: {free/2**30:.1f} GiB free < {need} GiB"); sys.exit(2)
+{{/if}}
+{{/if}}
+{{#if mem_module}}
+# ONE estimator, not a sixth copy of the arithmetic: metabasis.capacity computes
+# the flat weights-x{{multiplier}} bound AND the M19-derived structural bound
+# (worst CARD's resident weight over the real shard fan-out + load transient +
+# margin), takes the MAX and names which one bound. On every deployed rung the
+# flat bound was the stricter of the two, which is the 2026-07-29 ruling's own
+# case — so a PASS here is the pass the inline heuristic gave, and a BLOCK
+# escalates to the structural reading rather than to a smaller multiplier.
+# ⚠ ONE NAMED DIFFERENCE FROM THE INLINE FORM, AND IT MATTERS ON EXACTLY ONE
+# CLASS OF CHECKPOINT: the inline block sized the model from the safetensors
+# index's `metadata.total_size`, which counts 2 bytes per element and is
+# therefore a bf16-ASSUMED figure; this sizes it from the weight files ON DISK.
+# The two agree for every bf16 checkpoint (all four deployed rungs). They do NOT
+# agree for a natively-FP8 one loaded through dequantize-on-load, where disk is
+# roughly half of bf16-resident and the disk figure would UNDER-reserve. Such a
+# rung must pass the bf16-resident size explicitly, not inherit this default.
+from metabasis.capacity import (CapacityError, TransientEstimate,
+                                capacity_verdict, checkpoint_footprint,
+                                estimate_capacity)
+import torch
+devs = [d for d in "{{shard_across}}".split(",") if d] or ["0"]
+n = torch.cuda.device_count()
+if n != len(devs):
+    print(f"PREFLIGHT-BLOCKED: torch sees {n} card(s); this job plans "
+          f"{len(devs)} ({{mem_plan_label}})")
+    sys.exit(2)
+try:
+    footprint = checkpoint_footprint(p)
+    estimate = estimate_capacity(
+        footprint, len(devs), multiplier={{multiplier}},
+        transient=TransientEstimate.analytic(
+            why="nothing is measured before the weights are read, so the "
+                "conservative analytic reservation is the honest one here"))
+    verdict = capacity_verdict(
+        estimate, [torch.cuda.mem_get_info(i)[0] / 2**30 for i in range(n)])
+except CapacityError as exc:
+    # A MALFORMED question, not a bad fit — they demand opposite responses.
+    print(f"PREFLIGHT-BLOCKED: the capacity question is malformed ({exc})")
+    sys.exit(2)
+print(f"preflight: weights {estimate.weights_gib} GiB over {len(devs)} card(s); "
+      f"flat {estimate.flat_bound_gib} vs structural "
+      f"{estimate.structural_bound_gib} GiB -> NEED {estimate.need_per_card_gib} "
+      f"GiB per card ({estimate.binding_bound} bound binds, layer shape "
+      f"{estimate.layer_shape})")
+for note in estimate.notes:
+    print(f"preflight: NOTE {note}")
+if not verdict.fits:
+    print(f"PREFLIGHT-BLOCKED: {verdict.blocked_reason}")
+    sys.exit(2)
+print(f"preflight: least-free card {verdict.least_free_gib} GiB, slack "
+      f"{verdict.slack_gib} GiB")
+{{/if}}
+print("preflight ok")
+PREFLIGHT
+rc=$?
+if [ "$rc" -ne 0 ]; then echo "{{marker}}-PREFLIGHT-BLOCKED $MODEL"; exit 2; fi
+
+SITE="$(cat "$SITEFILE")"
+[ -n "$SITE" ] || { echo "{{marker}}-PREFLIGHT-BLOCKED $MODEL — empty derived site"; exit 2; }
+STEM="entropy_gradient_${MODEL}_L${SITE}"
+
+if [ "${MB_PREFLIGHT_ONLY:-0}" = "1" ]; then
+  echo "{{marker}}-PREFLIGHT-ONLY-OK $MODEL L$SITE (nothing built)"; exit 0
+fi
+
+{{build_echo}}
+python -m metabasis.scripts.build_entropy_gradient \
+  --model "$MODEL" --model-path "$MODEL_PATH" --arm-root "$ARM" \
+  --site "$SITE" --arm "$ARM_TEMPLATE" \
+{{#if mem_sharded}}
+  --shard-across "$SHARD_ACROSS" \
+{{/if}}
+  --out-dir "$OUT" --out-name "$STEM" 2>&1 | tee -a "$LOG"
+rc=${PIPESTATUS[0]}
+
+{{*verdict_lead}}
+python - "$OUT" "$MODEL" "$SITE" "$ARM_TEMPLATE" <<'VERDICT' 2>&1 | tee -a "$LOG"
+import json, sys
+from pathlib import Path
+out, model, site, template = Path(sys.argv[1]), sys.argv[2], int(sys.argv[3]), sys.argv[4]
+stem = f"entropy_gradient_{model}_L{site}"
+npz, gate_p, st_p = out / f"{stem}.npz", out / f"{stem}_fd_gate.json", \
+    out / f"{stem}_stamps.json"
+print(f"vector_present = {npz.exists()}  ({npz})")
+if not gate_p.exists():
+    print(f"FD gate json absent at {gate_p} — no verdict to read"); sys.exit(0)
+g = json.loads(gate_p.read_bytes())
+print(f"fd_gate_json = {gate_p}")
+print(f"PASSES_FD_GATE = {g.get('PASSES_FD_GATE')}")
+{{#if verdict_explicit}}
+print(f"  rel_tolerance            {g.get('rel_tolerance')}")
+print(f"  best_eps_fraction        {g.get('best_eps_fraction')}")
+print(f"  best_median_rel_error    {g.get('best_median_rel_error')}")
+print(f"  best_max_rel_error       {g.get('best_max_rel_error')}")
+print(f"  all_analytic_slopes_positive {g.get('all_analytic_slopes_positive')}")
+print(f"  all_signs_agree_at_best      {g.get('all_signs_agree_at_best')}")
+print(f"  control_ratio_median     {g.get('control_ratio_median')}")
+print(f"  direction_specific       {g.get('direction_specific')}")
+{{#else}}
+for k in ("rel_tolerance", "best_eps_fraction", "best_median_rel_error",
+          "best_max_rel_error", "all_analytic_slopes_positive",
+          "all_signs_agree_at_best", "control_ratio_median", "direction_specific"):
+    print(f"  {k:<28} {g.get(k)}")
+{{/if}}
+print("  per-rung medians ({{rung_caption}}):")
+for r in g.get("rungs", []):
+    print(f"    eps_fraction {r.get('eps_fraction'):<7} median_rel_error "
+          f"{r.get('median_rel_error')}  all_signs_agree {r.get('all_signs_agree')} "
+          f"n_probes {len(r.get('probes', []))}")
+if st_p.exists():
+    st = json.loads(st_p.read_bytes())
+    d = st.get("diagnostics") or {}
+    print(f"stamps_json = {st_p}")
+    print(f"  corpus_manifest_sha256 {st.get('corpus_manifest_sha256')}")
+    print(f"  site {st.get('site')}  arm {template}  wall {st.get('wall_seconds')}s")
+    print(f"  coherence {d.get('per_text_band_pairwise_coherence')}  "
+          f"sign_consistency {d.get('per_text_band_sign_consistency')}  "
+          f"band_energy_fraction {d.get('band_energy_fraction')}  "
+          f"n_grad_texts {d.get('n_grad_texts')}")
+{{*verdict_note}}
+sys.exit(0)
+VERDICT
+
+if [ "$rc" -eq 0 ] && [ -f "$OUT/$STEM.npz" ]; then
+  sha256sum "$OUT/$STEM"* | tee "$BANKROOT/logs/vector-manifest-$MODEL-L$SITE-$TS.sha256"
+  echo "{{marker}}-JOB-OK $MODEL L$SITE arm=$ARM_TEMPLATE stem=$STEM corpus={{corpus_tag}} {{ok_suffix}}"
+  echo "(read PASSES_FD_GATE above — the artifact is the verdict, not this line)"
+  exit 0
+fi
+echo "{{marker}}-JOB-NO-VECTOR $MODEL L$SITE rc=$rc — the FD gate was not"
+echo "waived, so a non-passing gate writes no vector. The gate json above is the record."
+exit 1
