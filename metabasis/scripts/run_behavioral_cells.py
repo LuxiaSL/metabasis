@@ -2898,9 +2898,25 @@ def load_model_and_tokenizer(model_path: str, *, dtype_name: str = "bfloat16"
     dtype = getattr(torch, dtype_name, torch.bfloat16)
     tok = AutoTokenizer.from_pretrained(model_path)
     tok.padding_side = "left"                                  # §2.2
-    model = AutoModelForCausalLM.from_pretrained(
-        model_path, dtype=dtype, attn_implementation="eager",
-        device_map="auto" if torch.cuda.is_available() else None)
+    common = {"attn_implementation": "eager",
+              "device_map": "auto" if torch.cuda.is_available() else None}
+    # The dtype kwarg was RENAMED across the transformers versions this campaign spans
+    # (`torch_dtype` in 4.5x, `dtype` in 5.x). Trying one and falling back is the only
+    # version-robust form: silently loading at the WRONG dtype would change every
+    # number in the column while the stamp still said bf16 (M9's drift surface).
+    try:
+        model = AutoModelForCausalLM.from_pretrained(model_path, dtype=dtype, **common)
+    except TypeError:
+        logger.info("this transformers build takes `torch_dtype`, not `dtype` — "
+                    "loading at %s through the older kwarg", dtype_name)
+        model = AutoModelForCausalLM.from_pretrained(model_path, torch_dtype=dtype,
+                                                     **common)
+    actual = str(next(model.parameters()).dtype).replace("torch.", "")
+    if actual != dtype_name:
+        raise BehavioralHarnessError(
+            f"requested dtype {dtype_name} but the loaded parameters are {actual} — "
+            "the collection regime is a stamped fact (§2.8) and a silent downgrade "
+            "would make every number in this column incomparable to the bank")
     model.eval()
     model.requires_grad_(False)
     return model, tok, dtype_name
