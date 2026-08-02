@@ -37,3 +37,20 @@ n_train = 598, n_test = 177, recorded per fit in `cp2_summary.json`.
   the Llama 3.1 Community License; DeepSeek-V2-Lite under the
   DeepSeek Model License) — redistributed here as generated text.
   Fictional names occurring in generated prose are fictional.
+
+## Status note (2026-08-01)
+
+This corpus remains the basis of record for every artifact citing its
+sha. A successor fitting corpus (**v3**) is in preparation: all public
+web text (no model-generated strata), drawn from multiple sources,
+sized so higher-rank fits clear the rank guard, with its composition
+census published from birth.
+
+Motivation: the model-generated strata (S1/S3, 617 of 777 texts) make
+this corpus partly on-policy for roster models. Measurements on the
+S2-only subsystem (fits restricted to the 160 WikiText chunks — text
+no model authored) show the transport structure survives off-policy
+while constant *levels* shift; v3 makes the all-web basis primary so
+quoted constants are fit on text empty of model-authored content.
+Artifacts fit on this corpus remain valid as published: constants are
+properties of (pair, corpus) and always name their basis sha.
