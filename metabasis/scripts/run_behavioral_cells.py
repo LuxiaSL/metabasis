@@ -45,6 +45,16 @@ THE FOUR PROPERTIES THAT MAKE THE FAST PATH LEGITIMATE, and where each is proved
      sometimes CPU — reductions are not batch-size invariant, which is exactly why
      §2.7 defines replay IN THE CANONICAL LAYOUT.
 
+     TWO KERNELS, ONE STEP (2026-08-01). The per-generation python step is also the
+     harness's hot path, so a VECTORIZED kernel computes the same step for a whole
+     sub-batch at once (`sample_tokens`). `sample_token` remains in the module as the
+     path of reference and the definition of the step; the vectorized kernel may not
+     draw a token at a (batch, vocab) shape until it has been certified BYTE-identical
+     to the reference at that shape, on that machine, in that process
+     (`assert_batched_sampler_identity`). Every subcase whose batched spelling would
+     be a different computation rather than a faster one — greedy, top-k, top-p, any
+     degenerate row — is REFUSED back to the reference rather than approximated.
+
   2. **M5-safety by construction** (§2.3, ruling 8). Every generation's uniforms
      derive from its OWN sha256 digest over
      `{corpus_sha}|{node_key}|{arm}|L{site}|{cell_id}|{gen_id:03d}`, so a partial
@@ -314,6 +324,16 @@ class SamplingConfigError(BehavioralHarnessError):
 
 class BatchLayoutError(BehavioralHarnessError):
     """A batch layout was requested that is not on the frozen ladder (§2.2)."""
+
+
+class VectorizedSamplerNotIdentical(BehavioralHarnessError):
+    """The batched sampling kernel is not byte-identical to ruling 8's reference step.
+
+    Not a tolerance and not a warning. The vectorized kernel exists ONLY as a faster
+    spelling of `sample_token`; a platform on which it spells something else must not
+    produce one token of record, so this fires BEFORE the first token of a sub-batch
+    shape is drawn (`assert_batched_sampler_identity`) and stops the run for the desk.
+    """
 
 
 # ---------------------------------------------------------------- typed records
@@ -760,6 +780,13 @@ def sample_token(logits_row: Any, u: float, sampling: SamplingConfig = SAMPLING_
 
     Inverse-CDF rather than `torch.multinomial`: multinomial consumes a global
     generator, which is the single-stream design ruling 8 refused (M5).
+
+    THE PATH OF REFERENCE. This function is the DEFINITION of the sampling step and is
+    deliberately unchanged by the 2026-08-01 vectorization: `sample_tokens` computes
+    the same step for a whole sub-batch and is certified byte-identical against THIS
+    code before it may draw a token, and every subcase the batched kernel does not own
+    lands back here. Change this body and the batched kernel becomes wrong by
+    definition — which is the intended coupling.
     """
     logits = np.asarray(logits_row, dtype=np.float64).reshape(-1)
     if logits.size == 0:
@@ -793,6 +820,477 @@ def sample_token(logits_row: Any, u: float, sampling: SamplingConfig = SAMPLING_
     cdf = np.cumsum(p)
     cdf[-1] = 1.0                    # guard the float32→float64 tail of the cumsum
     return int(np.searchsorted(cdf, float(u), side="right"))
+
+
+# ------------------------------------------------- the batched sampling step (2026-08-01)
+class SamplerKernel(BaseModel):
+    """WHICH spelling of ruling 8's fixed sampling step draws the tokens.
+
+    Two kernels, ONE step. `sample_token` above is the reference and stays in the
+    module unchanged; `vectorized` computes the SAME step for a whole sub-batch in one
+    set of numpy calls. The kernel is a stamped fact, never an optimization detail,
+    because a reader who cannot tell which code drew a token cannot reproduce it —
+    even when the two are proven to draw the same one.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: Literal["reference", "vectorized"]
+    provenance: str
+
+
+SAMPLER_KERNEL_REFERENCE = SamplerKernel(
+    name="reference",
+    provenance="ruling 8's per-generation `sample_token`, one python call per row per "
+               "step. The definition of the sampling step; kept as the path of "
+               "reference so the vectorized kernel is measured against code rather "
+               "than against a description of code.")
+SAMPLER_KERNEL_VECTORIZED = SamplerKernel(
+    name="vectorized",
+    provenance="the batched kernel (Luxia 2026-08-01): the SAME float64 "
+               "temperature→max-shift→exp→sum→normalize→cumsum→inverse-CDF, computed "
+               "for a whole sub-batch at once. Byte-identical to `sample_token` by "
+               "construction (no reduction crosses a row; every op is either exactly "
+               "rounded or an exact selection) and certified so at each (batch, vocab) "
+               "shape before that shape draws a token.")
+#: The kernel of record. Both `generate_sub_batch` and the stamp read THIS object, so a
+#: stamp can never name a kernel other than the one that ran.
+SAMPLER_KERNEL_OF_RECORD = SAMPLER_KERNEL_VECTORIZED
+
+#: The working set one tile of the batched kernel aims at, in bytes: a core's private
+#: L2, which is where the reference's one-row-at-a-time chain already lived. MEASURED
+#: on the desk CPU (8-core Zen3 class, 512 KiB L2 per core) across vocab 1000 / 50257
+#: / 128256 — 512 KiB was at or within noise of the best tile at every one, while the
+#: unbounded spelling (one [80, V] array per intermediate) came in at 0.75× at vocab
+#: 128256, i.e. SLOWER than the reference. At vocab 128256 this is one row; at vocab
+#: 1000 it is 64. A PERFORMANCE knob and nothing else: the tile size cannot move a
+#: token (a row's table is a function of that row alone), and the per-shape
+#: certification runs against whatever tiling it produces.
+SAMPLER_TILE_BYTES = 512 << 10
+#: The adversarial logit families the certification runs over — the DEGENERATE
+#: distributions named as much as the realistic ones, because a softmax that agrees on
+#: a plausible logits row and disagrees on a delta is not an identity. `all_nonfinite`
+#: is deliberately outside both tuples: it asserts an EXCEPTION rather than a token,
+#: which is a code property and shape-independent, so the selftest owns it.
+CERTIFICATION_FAMILIES: tuple[str, ...] = (
+    "normal", "wide", "one_hot", "uniform", "tiny_spread", "denormal_adjacent",
+    "extreme_mixed")
+#: What the run-time per-shape gate uses. Four families rather than seven because the
+#: gate runs inside a job: these four span the float regimes that could plausibly
+#: separate a SIMD lane from a scalar tail, and the selftest runs all seven.
+CERTIFICATION_FAMILIES_RUNTIME: tuple[str, ...] = (
+    "normal", "wide", "one_hot", "denormal_adjacent")
+CERTIFICATION_SEED = 20260801
+
+#: Certificates already earned in this process, keyed by (shape, sampling, families).
+#: A certificate is per-PROCESS because what it certifies — this numpy build's loop
+#: selection at this shape — is a property of the loaded binary, not of the job.
+_SAMPLER_CERTIFICATES: dict[tuple, str] = {}
+
+
+def vectorized_sampling_refusal(sampling: SamplingConfig) -> str:
+    """"" if the batched kernel handles this config; else the NAMED reason it will not.
+
+    REFUSAL, never approximation. The kernel implements exactly ruling 4's config of
+    record (pure ancestral: sample, T free, no top-k, no top-p). Greedy and the
+    top-k/top-p filters are `sample_token`'s branches — the battery's and the bridge
+    cell's, both off the 80×512 hot path — and each one contains an operation whose
+    batched spelling would be a DIFFERENT computation, not a faster one (`np.partition`
+    picks a different pivot at another length; the stable argsort's tie order and the
+    renormalized `mask.sum()` are length-dependent). Those subcases therefore go to the
+    reference path and stay bit-exact by identity rather than by argument.
+    """
+    if not sampling.do_sample:
+        return ("do_sample=False (greedy): `sample_token`'s argmax branch — the §6 "
+                "battery's format probe, never a science cell")
+    if sampling.top_k:
+        return (f"top_k={sampling.top_k}: the np.partition/-inf filter is ruling 4's "
+                "bridge-cell exception, not the config of record")
+    if sampling.top_p < 1.0:
+        return (f"top_p={sampling.top_p}: the stable-argsort renormalization is ruling "
+                "4's bridge-cell exception, not the config of record")
+    return ""
+
+
+def sampler_tile_rows(vocab: int) -> int:
+    """How many rows the batched kernel computes at once, at this vocab.
+
+    THE MEASURED REASON THIS EXISTS. The obvious spelling — one [80, 128256] array per
+    intermediate — measured 0.30× against the per-row reference, i.e. 3.3× SLOWER, and
+    0.75× even after the redundant passes were removed. Each float64 intermediate is
+    82 MB there, so the chain streams half a gigabyte per step and every pass starts
+    from DRAM. Batching does not make elementwise float64 work cheaper; it amortizes
+    per-call overhead, and at vocab 128256 that overhead is already noise. So the
+    kernel batches by a TILE sized to stay cache-resident: the amortization is kept
+    and the working set of a per-row chain is kept with it.
+
+    A tile is rows, never columns: a row's table must remain a function of that row
+    alone (§2.2), so a tile boundary can only ever fall between generations.
+    """
+    return max(1, int(SAMPLER_TILE_BYTES // max(1, int(vocab) * 8)))
+
+
+def _tile_cdf(tile: np.ndarray, temperature: float
+              ) -> tuple[np.ndarray, np.ndarray]:
+    """One tile of rows → ([T, V] float64 inverse-CDF table, [T] bool 'refused').
+
+    THE IDENTITY ARGUMENT, op by op, against `sample_token`'s body. Every step below
+    is either exactly rounded, an exact selection, or a provable no-op — the three
+    ways an operation can be moved or dropped without moving a bit:
+
+      * `x / T` when T == 1.0 is SKIPPED. `a / 1.0 == a` exactly for every double
+        including ±0, ±inf, NaN and subnormals, so the reference's divide is the
+        identity function and spelling it costs a full pass for nothing. (T != 1.0 is
+        not the config of record, and there the divide is spelled.)
+      * the row max is taken in the tile's OWN dtype (float32 out of both steppers).
+        Max is an exact SELECTION and widening is order-preserving and injective, so
+        the float32 max widened IS the float64 max — one pass over 4-byte elements
+        instead of 8-byte ones.
+      * `np.subtract(tile, m, dtype=np.float64)` fuses the widening cast into the
+        max-shift: the ufunc casts to float64 and subtracts in float64, which is what
+        `logits.astype(f64) - m` does, in one pass instead of two.
+      * THE ALL-FINITE FAST PATH. If every row's plain max is finite then no row holds
+        +inf or NaN (either would BE the max), so (a) the reference's finite-filtered
+        max equals the plain max, and (b) every shifted value is ≤ 0 and finite, so
+        `np.exp` returns (0, 1] and the reference's `p[~isfinite(p)] = 0.0` assigns to
+        nothing. A no-op is not spelled. Rows holding -inf are still on this path:
+        -inf shifts to -inf and exponentiates to exactly 0.0, in both kernels.
+      * `np.exp` — the one transcendental, and the one op whose bits could in
+        principle depend on an element's POSITION (a SIMD lane vs a scalar tail).
+        Argued nowhere: certified per shape on the running machine before that shape
+        draws a token (`assert_batched_sampler_identity`, gate 1).
+      * `p.sum(axis=1)` — numpy's pairwise summation blocks by the length of the
+        contiguous run being reduced, and both spellings reduce one contiguous run of
+        exactly V float64 with stride 8, so the summation TREE is the same tree.
+        Certified per shape all the same.
+      * `np.cumsum(..., axis=1)` — `add.accumulate` is sequential in index order by
+        definition, so the row's partial sums are the row's partial sums. Written
+        `out=` into its own input, which changes where the bytes land and not what
+        they are.
+      * the draw itself stays in the caller — `np.searchsorted(cdf_row, u,
+        side="right")`, the SAME call the reference makes. A batched comparison-count
+        (`(cdf <= u).sum()`) would agree only while the cdf is nondecreasing, and
+        `cdf[-1] = 1.0` can (legally, rarely) break that.
+
+    No reduction crosses a row, so a row's table is a function of that row alone — the
+    §2.2 layout-invariance property ruling 8 bought is preserved, not traded away.
+    """
+    src = tile if temperature == 1.0 else np.asarray(
+        tile, dtype=np.float64) / temperature
+    m = src.max(axis=1)
+    if np.isfinite(m).all():                              # the fast path
+        x = np.subtract(src, m[:, None], dtype=np.float64)
+        np.exp(x, out=x)
+        total = x.sum(axis=1)
+        refused = ~(np.isfinite(total) & (total > 0.0))
+        np.divide(x, np.where(refused, 1.0, total)[:, None], out=x)
+        np.cumsum(x, axis=1, out=x)
+        x[:, -1] = 1.0               # the same float32→float64 tail guard, per row
+        return x, refused
+    # THE GENERAL PATH: ±inf or NaN is present somewhere in the tile, so every guard
+    # `sample_token` carries is spelled out, in its order.
+    x = np.asarray(src, dtype=np.float64)
+    finite = np.isfinite(x)
+    has_finite = finite.any(axis=1)
+    mm = np.max(x, axis=1, where=finite, initial=-np.inf)
+    p = x - mm[:, None]
+    np.exp(p, out=p)
+    p[~np.isfinite(p)] = 0.0
+    total = p.sum(axis=1)
+    ok = has_finite & np.isfinite(total) & (total > 0.0)
+    # A refused row's divisor is neutralized so its arithmetic cannot raise or warn on
+    # the way past; its TOKEN is recomputed by `sample_token`, never read from here.
+    np.divide(p, np.where(ok, total, 1.0)[:, None], out=p)
+    np.cumsum(p, axis=1, out=p)
+    p[:, -1] = 1.0
+    return p, ~ok
+
+
+def _batched_cdf(block: np.ndarray, sampling: SamplingConfig
+                 ) -> tuple[np.ndarray, np.ndarray]:
+    """The whole block's inverse-CDF table, tile by tile.
+
+    Materializing [b, V] is exactly what the hot path does NOT do (see
+    `_sample_tokens_vectorized`); this exists for the certifier and the selftest,
+    which need every row's table at once in order to compare it.
+    """
+    if block.ndim != 2:
+        raise ValueError(f"_batched_cdf: expected [batch, vocab], got {block.shape}")
+    b, v = int(block.shape[0]), int(block.shape[1])
+    cdf = np.empty((b, v), dtype=np.float64)
+    refused = np.zeros(b, dtype=bool)
+    step = sampler_tile_rows(v)
+    for s in range(0, b, step):
+        e = min(s + step, b)
+        cdf[s:e], refused[s:e] = _tile_cdf(block[s:e], sampling.temperature)
+    return cdf, refused
+
+
+def _sample_tokens_vectorized(block: np.ndarray, *, us: Sequence[float],
+                              rows: Sequence[int], sampling: SamplingConfig
+                              ) -> list[int]:
+    """The batched draw, WITHOUT the certification gate (the certifier's own entry).
+
+    The tile's table is consumed while it is still in cache and never accumulated
+    into a [batch, vocab] result. A tile holding no active row is not computed at
+    all — which costs a frozen row's neighbours nothing and moves no row's slot,
+    because the tiling is a fixed function of the vocab and never of who is done.
+
+    Rows the kernel does not own are not approximated: they are handed to
+    `sample_token`, which either returns its argmax fall-back or raises its own
+    ValueError — so a degenerate row behaves exactly as it always has, including in
+    how it fails.
+    """
+    b, v = int(block.shape[0]), int(block.shape[1])
+    step = sampler_tile_rows(v)
+    at = {int(r): i for i, r in enumerate(rows)}
+    out: list[int] = [0] * len(rows)
+    for s in range(0, b, step):
+        e = min(s + step, b)
+        needed = [r for r in at if s <= r < e]
+        if not needed:
+            continue
+        cdf, refused = _tile_cdf(block[s:e], sampling.temperature)
+        for r in needed:
+            i = at[r]
+            u = float(us[i])
+            out[i] = (sample_token(block[r], u, sampling) if refused[r - s]
+                      else int(np.searchsorted(cdf[r - s], u, side="right")))
+    return out
+
+
+def sample_tokens(logits_block: Any, *, us: Sequence[float],
+                  rows: Optional[Sequence[int]] = None,
+                  sampling: SamplingConfig = SAMPLING_OF_RECORD,
+                  kernel: SamplerKernel = SAMPLER_KERNEL_OF_RECORD) -> list[int]:
+    """One step of a sub-batch: [b, V] logits + one uniform per ACTIVE row → tokens.
+
+    `rows` are indices into the block (the rows not yet frozen by EOS) and `us` are
+    their tape values, in the same order; the returned tokens are in that order too.
+    A frozen row keeps its SLOT in the batch (§2.2) — the tiling is a function of the
+    vocab alone and never of who has finished — but a tile holding no active row is
+    not computed, so freezing costs its neighbours nothing.
+
+    The vectorized kernel cannot draw a token at a (batch, vocab) shape until that
+    shape has been certified against the reference ON THIS MACHINE, in this process.
+    That is the structural guarantee: not "we tested it once", but "this shape is
+    refused until it has been proven here".
+    """
+    block = np.asarray(logits_block)
+    if block.ndim != 2:
+        raise ValueError(f"sample_tokens: expected [batch, vocab] logits, got shape "
+                         f"{block.shape}")
+    idx = list(range(int(block.shape[0]))) if rows is None else [int(r) for r in rows]
+    if len(idx) != len(us):
+        raise ValueError(f"sample_tokens: {len(idx)} rows but {len(us)} uniforms")
+    if not idx:
+        return []
+    if int(block.shape[1]) == 0:
+        raise ValueError("empty logits row")
+    if kernel.name == "reference" or vectorized_sampling_refusal(sampling):
+        return [sample_token(block[r], float(u), sampling) for r, u in zip(idx, us)]
+    assert_batched_sampler_identity(batch=int(block.shape[0]),
+                                    vocab=int(block.shape[1]), sampling=sampling)
+    return _sample_tokens_vectorized(block, us=us, rows=idx, sampling=sampling)
+
+
+def certification_logits(batch: int, vocab: int, family: str,
+                         rng: np.random.Generator) -> np.ndarray:
+    """One adversarial [batch, vocab] float32 logits block, by NAMED float regime.
+
+    float32 because that is what both steppers hand the sampler; the interesting
+    arithmetic is what happens after the exact widening to float64.
+    """
+    if family == "normal":                       # a realistic logits row
+        return (rng.standard_normal((batch, vocab)) * 3.0).astype(np.float32)
+    if family == "wide":                         # peaked: most of the mass in a few ids
+        return (rng.standard_normal((batch, vocab)) * 30.0).astype(np.float32)
+    if family == "one_hot":                      # a delta — p is exactly {0, 1}
+        blk = np.full((batch, vocab), -1e30, dtype=np.float32)
+        blk[np.arange(batch), rng.integers(0, vocab, batch)] = 1e30
+        return blk
+    if family == "uniform":                      # the flat distribution, p == 1/V
+        return np.zeros((batch, vocab), dtype=np.float32)
+    if family == "tiny_spread":                  # flat to within an ulp of flat
+        return (rng.standard_normal((batch, vocab)) * 1e-12).astype(np.float32)
+    if family == "denormal_adjacent":
+        # x - max lands in [-745, -708], so exp() returns SUBNORMALS and zeros — the
+        # regime where a flush-to-zero difference between a SIMD lane and a scalar
+        # tail would show up if there were one.
+        blk = rng.uniform(-745.0, -708.0, size=(batch, vocab)).astype(np.float32)
+        blk[:, 0] = 0.0
+        return blk
+    if family == "extreme_mixed":                # ±inf and NaN beside finite mass
+        blk = (rng.standard_normal((batch, vocab)) * 3.0).astype(np.float32)
+        if vocab >= 4:
+            blk[:, 1] = np.inf
+            blk[:, 2] = -np.inf
+            blk[0, 3] = np.nan
+        return blk
+    if family == "all_nonfinite":                # every row refused; both paths RAISE
+        return np.full((batch, vocab), np.nan, dtype=np.float32)
+    raise ValueError(f"unknown certification family {family!r}")
+
+
+def _certification_uniforms(cdf: np.ndarray, n_u: int,
+                            rng: np.random.Generator) -> list[np.ndarray]:
+    """Uniforms that sit exactly ON the inverse-CDF's breakpoints, plus random ones.
+
+    A one-ulp disagreement between the two paths is invisible to a random u and
+    certain to be visible to a u that equals a breakpoint, because `side="right"` is
+    decided there. So the certification aims at the breakpoints.
+    """
+    b, v = cdf.shape
+    draws: list[np.ndarray] = []
+    for j in range(max(1, n_u)):
+        if j == 0:
+            k = rng.integers(0, v, b)
+            u = cdf[np.arange(b), k]                       # exactly a breakpoint
+        elif j == 1:
+            k = rng.integers(0, v, b)
+            u = np.nextafter(cdf[np.arange(b), k], -np.inf)  # one ulp below one
+        else:
+            u = rng.random(b)
+        draws.append(np.clip(np.asarray(u, dtype=np.float64), 0.0, 1.0 - 2.0 ** -53))
+    return draws
+
+
+def _row_cdf(row: np.ndarray, sampling: SamplingConfig) -> np.ndarray:
+    """`sample_token`'s arithmetic for ONE row, spelled out and stopping at the table.
+
+    A spelling of the reference, not the reference: gate 1 uses it to compare whole
+    tables (which `sample_token` does not return), and gate 2 anchors the same rows to
+    `sample_token` itself. Kept beside `sample_token` in the file for the obvious
+    reason — if that body ever changes, this is the second place to change, and the
+    identity gate fails loudly until it is.
+    """
+    x = np.asarray(row, dtype=np.float64).reshape(-1) / sampling.temperature
+    m = np.max(x[np.isfinite(x)])
+    p = np.exp(x - m)
+    p[~np.isfinite(p)] = 0.0
+    cdf = np.cumsum(p / p.sum())
+    cdf[-1] = 1.0
+    return cdf
+
+
+def _first_divergent_op(row: np.ndarray, tile: np.ndarray, at: int,
+                        sampling: SamplingConfig) -> str:
+    """NAME the operation whose bits moved. Diagnostics only — reached on failure."""
+    xr = np.asarray(row, dtype=np.float64).reshape(-1) / sampling.temperature
+    xt = np.asarray(tile, dtype=np.float64) / sampling.temperature
+    mr = np.max(xr[np.isfinite(xr)])
+    mt = np.max(xt, axis=1, where=np.isfinite(xt), initial=-np.inf)
+    if np.float64(mr).tobytes() != np.float64(mt[at]).tobytes():
+        return "the row max (an exact selection — this should be impossible)"
+    sr = xr - mr
+    st = (xt - mt[:, None])[at]
+    if sr.tobytes() != st.tobytes():
+        return "the max-shift (an exactly rounded subtract)"
+    pr, pt = np.exp(sr), np.exp(st)
+    if pr.tobytes() != pt.tobytes():
+        return "np.exp (a SIMD lane vs a scalar tail — the position-dependent one)"
+    if np.float64(pr.sum()).tobytes() != np.float64(pt.sum()).tobytes():
+        return "np.add.reduce (the pairwise summation tree)"
+    if np.cumsum(pr / pr.sum()).tobytes() != np.cumsum(pt / pt.sum()).tobytes():
+        return "np.add.accumulate (the sequential prefix sum)"
+    return "the inverse-CDF table (no single primitive reproduced it)"
+
+
+def assert_batched_sampler_identity(
+        *, batch: int, vocab: int, sampling: SamplingConfig = SAMPLING_OF_RECORD,
+        families: Sequence[str] = CERTIFICATION_FAMILIES_RUNTIME, n_u: int = 2,
+        seed: int = CERTIFICATION_SEED, force: bool = False) -> str:
+    """Certify the batched kernel against `sample_token` AT THIS SHAPE, or HALT.
+
+    Two gates, because they can fail for different reasons and only one of them is
+    about this module's code:
+
+      GATE 1 — THE WHOLE TABLE. For this exact (batch, vocab), the kernel's
+        inverse-CDF table for a row is byte-identical to the row-wise spelling of
+        `sample_token`'s arithmetic. Comparing the whole TABLE rather than sampled
+        tokens is what makes this gate complete rather than lucky: equal cdf bytes
+        means equal tokens for EVERY uniform in [0, 1), not for the ones that were
+        tried. It is also the only step of the identity argument a machine can take
+        away — `np.exp` is a polynomial in a SIMD lane and a libm call in a scalar
+        tail, and nothing but a comparison on the running binary settles it. On a
+        mismatch the intermediates are recomputed to NAME the operation that moved.
+      GATE 2 — THE ANCHOR. The kernel's token equals the token drawn by the actual
+        `sample_token`, at uniforms sitting exactly on the table's breakpoints. Gate 1
+        compares against a spelling of the reference; gate 2 compares against the
+        reference itself, so neither gate is checking its own homework.
+
+    Returns a one-line certificate (also cached per process and per shape) so a run
+    can say which shapes it proved rather than that it "checked sampling".
+    """
+    key = (int(batch), int(vocab), sampling.do_sample, float(sampling.temperature),
+           float(sampling.top_p), int(sampling.top_k), tuple(families), int(n_u))
+    cached = _SAMPLER_CERTIFICATES.get(key)
+    if cached is not None and not force:
+        return cached
+    refusal = vectorized_sampling_refusal(sampling)
+    if refusal:
+        raise VectorizedSamplerNotIdentical(
+            f"the batched kernel does not own this sampling config — {refusal}. It "
+            "must never be certified for one it refuses; the caller dispatches such "
+            "configs to `sample_token`.")
+    if batch <= 0 or vocab <= 0:
+        raise VectorizedSamplerNotIdentical(
+            f"nothing to certify at shape ({batch}, {vocab})")
+    rng = np.random.default_rng(seed)
+    rows_checked = 0
+    draws_checked = 0
+    for family in families:
+        blk32 = certification_logits(batch, vocab, family, rng)
+        # ---- GATE 1: the kernel's table == the row-wise table, byte for byte -----
+        cdf, refused = _batched_cdf(blk32, sampling)
+        for r in range(batch):
+            if refused[r]:
+                continue
+            row_cdf = _row_cdf(blk32[r], sampling)
+            if row_cdf.tobytes() == cdf[r].tobytes():
+                rows_checked += 1
+                continue
+            step = sampler_tile_rows(vocab)
+            s_ = (r // step) * step
+            moved = _first_divergent_op(blk32[r], blk32[s_:min(s_ + step, batch)],
+                                        r - s_, sampling)
+            raise VectorizedSamplerNotIdentical(
+                f"GATE 1 at shape ({batch}, {vocab}), family {family!r}, row {r}: "
+                f"{moved} is NOT byte-identical between the row-wise and tiled "
+                "spellings on this numpy build. The batched kernel is refused here — "
+                "ruling 8's step is defined by `sample_token`, and a faster spelling "
+                "that rounds differently is a different experiment. Run with "
+                "SAMPLER_KERNEL_REFERENCE and file the platform.")
+        # ---- GATE 2: the kernel's token == `sample_token`'s token ----------------
+        # The first uniform set goes through `_sample_tokens_vectorized` end to end;
+        # the rest reuse the table gate 1 already built, because recomputing an
+        # identical [batch, vocab] cdf per uniform set costs seconds at vocab 128256
+        # and proves nothing the first pass did not.
+        keep = [r for r in range(batch) if not refused[r]]
+        for j, us in enumerate(_certification_uniforms(cdf, n_u, rng)):
+            if j == 0:
+                got = _sample_tokens_vectorized(
+                    blk32, us=[float(us[r]) for r in keep], rows=keep,
+                    sampling=sampling)
+            else:
+                got = [int(np.searchsorted(cdf[r], float(us[r]), side="right"))
+                       for r in keep]
+            want = [sample_token(blk32[r], float(us[r]), sampling) for r in keep]
+            if got != want:
+                bad = next(i for i, (g, w) in enumerate(zip(got, want)) if g != w)
+                raise VectorizedSamplerNotIdentical(
+                    f"GATE 2 at shape ({batch}, {vocab}), family {family!r}: the "
+                    f"batched kernel drew {got[bad]} where `sample_token` drew "
+                    f"{want[bad]} for row {keep[bad]} at u={float(us[keep[bad]])!r}. "
+                    "A mismatch is a FAILURE, never a tolerance.")
+            draws_checked += len(keep)
+    cert = (f"batched sampler certified at (batch={batch}, vocab={vocab}) vs "
+            f"`sample_token`: {rows_checked} row(s) byte-identical through "
+            f"max/shift/exp/sum/normalize/cumsum, {draws_checked} draw(s) "
+            f"token-identical, families {list(families)}, numpy {np.__version__}")
+    _SAMPLER_CERTIFICATES[key] = cert
+    logger.info("%s", cert)
+    return cert
 
 
 # ---------------------------------------------------------------- the generation loop
@@ -867,6 +1365,7 @@ def generate_sub_batch(
     node_key: str,
     arm: str,
     start_pos_sink: Optional[Callable[[int], None]] = None,
+    sampler_kernel: SamplerKernel = SAMPLER_KERNEL_OF_RECORD,
 ) -> list[GenerationRecord]:
     """One sub-batch of a cell's generations, left-padded, uniform-tape-driven.
 
@@ -880,6 +1379,12 @@ def generate_sub_batch(
     is what keeps `sub_batch = gen_id // B; row = gen_id % B` total and deterministic
     (§2.2) — a compacting batch would make a generation's result depend on when its
     neighbours finished.
+
+    `sampler_kernel` chooses which spelling of ruling 8's step draws the tokens. The
+    two are certified byte-identical at the sub-batch's own (batch, vocab) shape
+    before the first token is drawn, so this is a COST switch and never a semantic
+    one — which is exactly why the certification is a gate and not a test: the switch
+    is only ever allowed to be free.
     """
     if not (len(gen_ids) == len(prompts) == len(prompt_ids) == len(tapes)):
         raise ValueError("generate_sub_batch: ragged inputs")
@@ -893,6 +1398,10 @@ def generate_sub_batch(
     done = [False] * b
     for t in range(layout.max_new_tokens):
         next_ids = np.full((b,), pad_token_id, dtype=np.int64)
+        # Tape exhaustion is checked in ROW ORDER before any token is drawn, so the
+        # same (row, step) raises under either kernel — a batched draw must not
+        # change WHICH generation is named by a failure.
+        active: list[int] = []
         for r in range(b):
             if done[r]:
                 continue
@@ -902,7 +1411,11 @@ def generate_sub_batch(
                     f"{cell.cell_id}/gen{gen_ids[r]}: uniform tape exhausted at "
                     f"step {t} (tape length {tape.shape[0]}, max_new_tokens "
                     f"{layout.max_new_tokens})")
-            tok = sample_token(np.asarray(logits)[r], float(tape[t]), cell.sampling)
+            active.append(r)
+        drawn = sample_tokens(logits, us=[float(tapes[r][t]) for r in active],
+                              rows=active, sampling=cell.sampling,
+                              kernel=sampler_kernel)
+        for r, tok in zip(active, drawn):
             consumed[r] += 1
             out[r].append(tok)
             next_ids[r] = tok
@@ -942,6 +1455,7 @@ def generate_cell(
     arm: str,
     start_pos_sink: Optional[Callable[[int], None]] = None,
     n: Optional[int] = None,
+    sampler_kernel: SamplerKernel = SAMPLER_KERNEL_OF_RECORD,
 ) -> list[GenerationRecord]:
     """A whole cell, sub-batched by §2.2's deterministic total map.
 
@@ -969,7 +1483,7 @@ def generate_cell(
                 prompt_ids=prompt_ids, tapes=tapes, layout=layout,
                 pad_token_id=pad_token_id, eos_token_id=eos_token_id,
                 corpus_sha=corpus_sha, node_key=node_key, arm=arm,
-                start_pos_sink=start_pos_sink)
+                start_pos_sink=start_pos_sink, sampler_kernel=sampler_kernel)
         finally:
             stepper.close()
     if len(records) != total:
@@ -1704,6 +2218,7 @@ def build_stamp(*, cell: CellSpec, alpha: float, layout: CanonicalLayout,
                 battery_item_set_sha256: str, actuation_calibration: Any,
                 per_cell_seed_roots: dict[str, str],
                 scheduler_card_index: Optional[str] = None,
+                sampler_kernel: SamplerKernel = SAMPLER_KERNEL_OF_RECORD,
                 extra: Optional[dict] = None) -> dict:
     """§2.8's per-cell custody stamp, built so the checklist cannot be half-met.
 
@@ -1762,6 +2277,11 @@ def build_stamp(*, cell: CellSpec, alpha: float, layout: CanonicalLayout,
         "envelope_ruling": ENVELOPE_RULING_OF_RECORD,
         "probe_grouping_reading": PROBE_GROUPING_READING,
         "sampling_config": cell.sampling.model_dump(),
+        # WHICH code drew the tokens. The two kernels are certified byte-identical
+        # before either draws one, so this can never explain a difference in the
+        # numbers — which is precisely why it has to be on the record rather than
+        # inferred from a commit date.
+        "sampler_kernel": sampler_kernel.model_dump(),
         "lesion_recipe_law": (
             "§5.4: no object in this column is built by projecting out the "
             "direction known to produce the behavior; asserted on the vector's "
@@ -1805,9 +2325,9 @@ class HFStepper:
     """`Stepper` over a real HF causal LM with a KV cache (§2.2's generation path).
 
     `use_cache=True` for generation (§2.2). Logits are returned as the LAST
-    position's row block, float32 on CPU, because `sample_token` does its arithmetic
-    in float64 numpy on one row — which is what makes the sampling step
-    layout-invariant (see `sample_token`).
+    position's row block, float32 on CPU, because the sampling step does its
+    arithmetic in float64 numpy on one row — which is what makes it layout-invariant
+    (see `sample_token`).
     """
 
     def __init__(self, model: Any, device: Optional[str] = None) -> None:
@@ -1820,7 +2340,18 @@ class HFStepper:
         self._len = 0
 
     def _logits(self, out: Any) -> np.ndarray:
-        return out.logits[:, -1, :].detach().float().cpu().numpy()
+        """[batch, vocab] float32 numpy at the LAST position — one D2H per step.
+
+        The widening to float32 happens AFTER the transfer, not before. On a bf16 or
+        fp16 node that halves the per-step device→host traffic (at B=80, V=128256:
+        41 MB → 20 MB, ×512 steps × 25 cells), and it cannot move a bit: widening a
+        bf16/fp16 to float32 is exact in IEEE-754, so the numbers the sampler sees
+        are the same numbers either way. On an fp32 model the two orders are the same
+        call. `.contiguous()` before `.cpu()` keeps the copy one packed block rather
+        than a strided gather across the prefill's [batch, seq, vocab] logits.
+        """
+        return (out.logits[:, -1, :].detach().contiguous().cpu()
+                .to(self.torch.float32).numpy())
 
     def prefill(self, ids: Any, attention_mask: Any) -> np.ndarray:
         t = self.torch
@@ -3317,6 +3848,131 @@ def selftest() -> int:                                   # noqa: C901 — a chec
            SAMPLING_OF_RECORD.top_p, SAMPLING_OF_RECORD.top_k) == (True, 1.0, 1.0, 0),
           SAMPLING_OF_RECORD.name)
 
+    # ---- 2b. THE IDENTITY GATE: the batched kernel IS `sample_token` ----------
+    # The whole warrant for the 2026-08-01 vectorization. Any mismatch below is a
+    # FAILURE and never a tolerance: the two kernels are the same step or the fast
+    # one does not run.
+    print("== selftest 2b: the batched kernel is byte-identical to ruling 8's step ==")
+    # (batch, vocab, families). The full seven families run everywhere except the
+    # 80 × 128256 corner, where a run of the whole set costs ~20 s of a suite that
+    # has to pass in four configurations; the four run there are the ones that could
+    # plausibly separate a SIMD lane from a scalar tail, and the same corner is
+    # re-certified at run time inside every job anyway.
+    gate_shapes: tuple[tuple[int, int, tuple[str, ...]], ...] = (
+        (1, 2, CERTIFICATION_FAMILIES),              # the smallest vocab there is
+        (1, 61, CERTIFICATION_FAMILIES),
+        (3, 61, CERTIFICATION_FAMILIES),
+        (80, 61, CERTIFICATION_FAMILIES),            # toy vocab, layout of record
+        (1, 1000, CERTIFICATION_FAMILIES),
+        (3, 1000, CERTIFICATION_FAMILIES),
+        (80, 1000, CERTIFICATION_FAMILIES),
+        (3, 32000, CERTIFICATION_FAMILIES),          # gpt2-xl / qwen-ish
+        (1, 128256, CERTIFICATION_FAMILIES),         # llama-3-ish, one row
+        (80, 128256, CERTIFICATION_FAMILIES_RUNTIME))    # …and the real corner
+    certified: list[str] = []
+    gate_failure = ""
+    for gB, gV, gFam in gate_shapes:
+        try:
+            certified.append(assert_batched_sampler_identity(
+                batch=gB, vocab=gV, families=gFam, n_u=3, force=True))
+        except VectorizedSamplerNotIdentical as exc:
+            gate_failure = f"shape ({gB}, {gV}): {exc}"
+            break
+    check("both kernels agree BYTE for byte at every gate shape "
+          "(batch ∈ {1, 3, 80} × vocab ∈ {2, 61, 1000, 32000, 128256})",
+          not gate_failure and len(certified) == len(gate_shapes),
+          gate_failure or (
+              f"{len(certified)} shapes certified through max/shift/exp/sum/"
+              f"normalize/cumsum and token draws; families "
+              f"{list(CERTIFICATION_FAMILIES)}; numpy {np.__version__}"))
+    check("the degenerate distributions are IN the gate, not beside it",
+          all(f in CERTIFICATION_FAMILIES
+              for f in ("one_hot", "uniform", "denormal_adjacent", "tiny_spread",
+                        "extreme_mixed")),
+          "one-hot (p is exactly {0,1}), uniform (p == 1/V), denormal-adjacent "
+          "(exp returns subnormals), tiny-spread, ±inf/NaN mixed")
+
+    # EVERY breakpoint of the inverse CDF, not a sample of uniforms: the two step
+    # functions agree at each breakpoint and one ulp below it, so they agree for
+    # every u in [0, 1) — a proof over the whole tape, not over the tape's draws.
+    gate_rng = np.random.default_rng(CERTIFICATION_SEED)
+    bp_blk = certification_logits(3, 61, "normal", gate_rng)
+    bp_cdf, _ = _batched_cdf(np.ascontiguousarray(bp_blk, dtype=np.float64),
+                             SAMPLING_OF_RECORD)
+    bp_bad: list[tuple[int, int, float]] = []
+    bp_probes = 0
+    for r_ in range(bp_blk.shape[0]):
+        for k_ in range(bp_blk.shape[1]):
+            for u_ in (float(bp_cdf[r_, k_]),
+                       float(np.nextafter(bp_cdf[r_, k_], -np.inf))):
+                u_ = min(max(u_, 0.0), 1.0 - 2.0 ** -53)
+                bp_probes += 1
+                if (sample_tokens(bp_blk, us=[u_], rows=[r_])[0]
+                        != sample_token(bp_blk[r_], u_, SAMPLING_OF_RECORD)):
+                    bp_bad.append((r_, k_, u_))
+    check("EVERY inverse-CDF breakpoint (and one ulp below it) draws the same token",
+          not bp_bad, f"{bp_probes} breakpoint probes over 3×61, {len(bp_bad)} "
+                      "disagreement(s)")
+    # …and the probes have TEETH: a kernel that got the boundary rule wrong by one
+    # index is caught by exactly these uniforms. A gate nothing can fail is not one.
+    teeth = sum(1 for r_ in range(bp_blk.shape[0]) for k_ in range(bp_blk.shape[1])
+                if int(np.searchsorted(bp_cdf[r_], float(bp_cdf[r_, k_]),
+                                       side="left"))
+                != sample_token(bp_blk[r_], float(bp_cdf[r_, k_]),
+                                SAMPLING_OF_RECORD))
+    check("the breakpoint probes have TEETH: a side='left' kernel is caught by them",
+          teeth > 0, f"{teeth} of {bp_blk.shape[0] * bp_blk.shape[1]} breakpoints "
+                     "separate side='right' from side='left'")
+
+    # DEGENERATE ROWS ARE REFUSED, NOT APPROXIMATED — including how they fail.
+    nonfinite = certification_logits(2, 8, "all_nonfinite", gate_rng)
+    check("an all-non-finite row raises ValueError under BOTH kernels",
+          _raises(lambda: sample_token(nonfinite[0], 0.5), ValueError)
+          and _raises(lambda: sample_tokens(nonfinite, us=[0.5, 0.5]), ValueError),
+          "the batched kernel hands the row back to `sample_token`, so a degenerate "
+          "row fails in exactly the way it always has")
+    hot = SamplingConfig(name="hot", temperature=1e-300, provenance="selftest")
+    overflow = np.array([[1e30, 2e30, 3e30], [1.0, 2.0, 3.0]], dtype=np.float32)
+    check("a row that overflows to ±inf under the temperature divide is refused "
+          "identically",
+          _raises(lambda: sample_token(overflow[0], 0.5, hot), ValueError)
+          and _raises(lambda: sample_tokens(overflow, us=[0.5, 0.5], sampling=hot),
+                      ValueError),
+          "both paths raise; the batched kernel never invents a token for a row the "
+          "reference refuses")
+
+    # THE CONFIGS THE KERNEL DOES NOT OWN go to the reference, and the certifier
+    # refuses to certify them at all.
+    refused_cfgs = (
+        SamplingConfig(name="greedy", do_sample=False, provenance="selftest"),
+        SamplingConfig(name="k1", top_k=1, provenance="selftest"),
+        SamplingConfig(name="p", top_p=0.5, provenance="selftest"))
+    cfg_blk = certification_logits(4, 61, "normal", gate_rng)
+    cfg_us = [0.01, 0.4, 0.77, 0.999]
+    check("greedy / top-k / top-p dispatch to the reference and are NAMED refusals",
+          all(bool(vectorized_sampling_refusal(c))
+              and sample_tokens(cfg_blk, us=cfg_us, sampling=c)
+              == [sample_token(cfg_blk[r_], cfg_us[r_], c) for r_ in range(4)]
+              and _raises(lambda c=c: assert_batched_sampler_identity(
+                  batch=4, vocab=61, sampling=c), VectorizedSamplerNotIdentical)
+              for c in refused_cfgs),
+          "; ".join(vectorized_sampling_refusal(c).split(":")[0]
+                    for c in refused_cfgs))
+    check("the vectorized kernel OWNS the config of record (no refusal)",
+          vectorized_sampling_refusal(SAMPLING_OF_RECORD) == "",
+          SAMPLING_OF_RECORD.name)
+    check("a shape is certified once per process and the certificate is quotable",
+          assert_batched_sampler_identity(batch=3, vocab=61)
+          == assert_batched_sampler_identity(batch=3, vocab=61)
+          and "byte-identical" in assert_batched_sampler_identity(batch=3, vocab=61),
+          assert_batched_sampler_identity(batch=3, vocab=61))
+    check("the kernel of record is the vectorized one and both are named objects",
+          SAMPLER_KERNEL_OF_RECORD.name == "vectorized"
+          and SAMPLER_KERNEL_REFERENCE.name == "reference"
+          and _raises(lambda: SamplerKernel(name="approximate", provenance="no"),
+                      ValueError),
+          f"kernel of record: {SAMPLER_KERNEL_OF_RECORD.name}")
+
     # ---- 3. LAYOUT INVARIANCE — the §2.2 replay-gate property -----------------
     print("== selftest 3: layout invariance at B ∈ {80, 40, 20, 10, 1} (§2.2) ==")
     tok = _ToyTokenizer()
@@ -3326,7 +3982,9 @@ def selftest() -> int:                                   # noqa: C901 — a chec
         kind="transported", vector_key="gentropy_gradient", site=site,
         alpha_frac=0.3, band_family=None, vector_provenance="toy")
 
-    def run_at(B: int, n: int = N_PER_CELL) -> list[GenerationRecord]:
+    def run_at(B: int, n: int = N_PER_CELL,
+               kernel: SamplerKernel = SAMPLER_KERNEL_OF_RECORD
+               ) -> list[GenerationRecord]:
         layout = CanonicalLayout(batch_size=B, dtype="float32", max_new_tokens=12,
                                  frozen=True)
         return generate_cell(
@@ -3334,7 +3992,8 @@ def selftest() -> int:                                   # noqa: C901 — a chec
             cell=cell, pool=pool,
             tokenize=lambda p: render_prompt(p, tok, arm),
             layout=layout, pad_token_id=0, eos_token_id=None,
-            corpus_sha=corpus, node_key=node, arm=arm, n=n)
+            corpus_sha=corpus, node_key=node, arm=arm, n=n,
+            sampler_kernel=kernel)
 
     ref = run_at(80)
     ref_ids = {r.generation_id: tuple(r.generated_ids) for r in ref}
@@ -3395,6 +4054,30 @@ def selftest() -> int:                                   # noqa: C901 — a chec
           f"{sum(r.finished_with_eos for r in eos_recs)}/20 rows hit EOS")
     check("a frozen row stops consuming its uniform tape",
           all(r.n_uniforms_consumed == len(r.generated_ids) for r in eos_recs))
+    # THE END-TO-END HALF OF THE IDENTITY GATE (numpy-only, so it holds in the
+    # no-torch configuration): the same 80 generations, the same tapes, both kernels.
+    kernel_digests = {B: (token_id_digest(run_at(B, kernel=SAMPLER_KERNEL_REFERENCE)),
+                          token_id_digest(run_at(B, kernel=SAMPLER_KERNEL_VECTORIZED)))
+                      for B in BATCH_LADDER}
+    check("a whole cell is token-identical under both kernels at every B on the ladder",
+          all(a == b for a, b in kernel_digests.values())
+          and len({d for pair in kernel_digests.values() for d in pair}) == 1,
+          f"one digest across B ∈ {list(BATCH_LADDER)} × both kernels: "
+          f"{kernel_digests[BATCH_LADDER[0]][0][:16]}…")
+    eos_ref = generate_cell(
+        lambda: _StubStepper(), cell=cell, pool=pool,
+        tokenize=lambda p: render_prompt(p, tok, arm), layout=layout10,
+        pad_token_id=0, eos_token_id=int(ref[0].generated_ids[0]),
+        corpus_sha=corpus, node_key=node, arm=arm, n=20,
+        sampler_kernel=SAMPLER_KERNEL_REFERENCE)
+    check("EOS-frozen rows draw identically under both kernels (the active subset "
+          "shrinks, the block does not)",
+          [tuple(r.generated_ids) for r in eos_ref]
+          == [tuple(r.generated_ids) for r in eos_recs]
+          and [r.n_uniforms_consumed for r in eos_ref]
+          == [r.n_uniforms_consumed for r in eos_recs],
+          f"{sum(r.finished_with_eos for r in eos_ref)}/20 rows frozen; the batched "
+          "kernel keeps computing the whole block so no row's slot moves")
 
     # ---- 4. the entropy convention fixture -----------------------------------
     print("== selftest 4: entropy convention (§2.6) ==")
@@ -3603,6 +4286,12 @@ def selftest() -> int:                                   # noqa: C901 — a chec
           f"{len(STAMP_REQUIRED_FIELDS)} required fields")
     check("§2.8 checklist covers all 31 named custody items",
           len(STAMP_REQUIRED_FIELDS) == 31, str(len(STAMP_REQUIRED_FIELDS)))
+    check("the stamp NAMES which sampling kernel drew the tokens",
+          stamp["sampler_kernel"]["name"] == SAMPLER_KERNEL_OF_RECORD.name
+          and bool(stamp["sampler_kernel"]["provenance"]),
+          f"{stamp['sampler_kernel']['name']} — the two are certified byte-identical, "
+          "so this can never explain a difference in the numbers, which is exactly "
+          "why it is recorded rather than inferred")
     for field in ("corpus_manifest_sha256", "behavioral_prompt_pool_sha256",
                   "scheduler_card_index", "canonical_batch_layout",
                   "model_config_sha256", "replay_gate_digests",
@@ -3829,6 +4518,27 @@ def selftest() -> int:                                   # noqa: C901 — a chec
           check("the REAL HF path runs through the same loop and stepper protocol",
                 len(r10) == 20 and all(len(r.generated_ids) == 5 for r in r10),
                 f"20 generations × 5 tokens through HFStepper")
+          # THE IDENTITY GATE, END TO END ON A REAL FORWARD (the torch half of
+          # selftest 2b). Same model, same layout, same tapes, both kernels — so the
+          # gate covers real logits (fp32 out of a real lm_head, not synthesized)
+          # arriving through `HFStepper._logits`, whose D2H order changed with the
+          # vectorization. Bitwise or nothing: unlike the B=10-vs-B=20
+          # characterization below, this one CAN fail, because nothing about it is
+          # allowed to depend on a reduction order.
+          r10_ref = generate_cell(lambda: HFStepper(real, "cpu"), cell=cell, pool=pool,
+                                  tokenize=lambda p: render_prompt(p, tok, arm),
+                                  layout=small, pad_token_id=0, eos_token_id=None,
+                                  corpus_sha=corpus, node_key=node, arm=arm, n=20,
+                                  sampler_kernel=SAMPLER_KERNEL_REFERENCE)
+          check("toy-Llama end to end: both kernels draw the SAME 100 tokens "
+                "(a real forward's logits, not synthetic ones)",
+                token_id_digest(r10_ref) == token_id_digest(r10)
+                and [r.generated_ids for r in sorted(
+                    r10_ref, key=lambda x: x.generation_id)]
+                == [r.generated_ids for r in sorted(
+                    r10, key=lambda x: x.generation_id)],
+                f"20 generations × 5 tokens, digest {token_id_digest(r10)[:16]}… "
+                f"under both kernels; vocab {cfg.vocab_size}, B=10")
           same = token_id_digest(r10) == token_id_digest(r20)
           first_div = None
           if not same:
@@ -4166,6 +4876,100 @@ def _toy_stamp(*, cell: CellSpec, alpha: float, layout: CanonicalLayout,
         per_cell_seed_roots=roots)
 
 
+# ---------------------------------------------------------------- the sampler bench
+def bench_sampler(*, batch: int = N_PER_CELL, vocab: int = 128256, steps: int = 8,
+                  seed: int = CERTIFICATION_SEED) -> dict:
+    """CPU cost of the two kernels over SYNTHETIC logits at the layout of record.
+
+    What this is: the sampling step alone, isolated from the forward, because the
+    sampling step is the only thing the 2026-08-01 vectorization touched. What this is
+    NOT: a throughput number. The node-side seq/s certification measures a real
+    forward on a real card and is a separate job — a ratio measured here does not
+    become a column's speed-up, it bounds the part of the column that was slow for
+    this reason.
+
+    Identity is re-asserted inside the bench (the two kernels must draw the same
+    tokens on the very blocks that were timed), so a bench run can never report a
+    speed-up that was bought by drawing something else.
+    """
+    import time
+
+    if steps <= 0 or batch <= 0 or vocab <= 0:
+        raise ValueError(f"bench_sampler: nonsense shape ({batch}, {vocab}) × {steps}")
+    rng = np.random.default_rng(seed)
+    # Two blocks rotating: 80 × 128256 float32 is 41 MB, and what is being timed is
+    # arithmetic, not allocation.
+    blocks = [(rng.standard_normal((batch, vocab)) * 3.0).astype(np.float32)
+              for _ in range(2)]
+    us = [float(u) for u in rng.random(batch)]
+    rows = list(range(batch))
+    cert = assert_batched_sampler_identity(batch=batch, vocab=vocab)  # warm + gate
+
+    def ref_step(blk: np.ndarray) -> list[int]:
+        return [sample_token(blk[r], us[r], SAMPLING_OF_RECORD) for r in rows]
+
+    def vec_step(blk: np.ndarray) -> list[int]:
+        return sample_tokens(blk, us=us, rows=rows, sampling=SAMPLING_OF_RECORD,
+                             kernel=SAMPLER_KERNEL_VECTORIZED)
+
+    # THE PROTOCOL, and why it is not a stopwatch around two loops. Measured the naive
+    # way — all of A, then all of B, once — the SAME code read 1.04× and 2.9× on two
+    # runs: a laptop ramps its clock under sustained load and glibc adapts its mmap
+    # threshold to what has already been freed, so whichever kernel runs LAST tends to
+    # win. CPU time rather than wall clock (the machine is shared), warm-up discarded,
+    # the order alternated every rep, and the median reported with the interquartile
+    # range so a reader sees the spread rather than trusting a mean.
+    want = [ref_step(b) for b in blocks]      # per block: two blocks, two answers
+    for i in range(min(6, steps)):
+        ref_step(blocks[i % 2])
+        vec_step(blocks[i % 2])
+    ref_t: list[float] = []
+    vec_t: list[float] = []
+    identical = True
+    for i in range(steps):
+        blk = blocks[i % 2]
+        order = (ref_step, vec_step) if i % 2 == 0 else (vec_step, ref_step)
+        for fn in order:
+            t0 = time.process_time()
+            got = fn(blk)
+            dt = time.process_time() - t0
+            (ref_t if fn is ref_step else vec_t).append(dt)
+            identical = identical and got == want[i % 2]
+    if not identical:
+        raise VectorizedSamplerNotIdentical(
+            "the benched blocks did not draw identical tokens — a speed-up bought by "
+            "drawing something else is not a speed-up (this is why the bench asserts)")
+
+    def _stat(xs: list[float]) -> tuple[float, float, float]:
+        a = np.sort(np.asarray(xs, dtype=np.float64))
+        return (float(np.median(a)), float(a[len(a) // 4]),
+                float(a[(3 * len(a)) // 4]))
+
+    ref_med, ref_lo, ref_hi = _stat(ref_t)
+    vec_med, vec_lo, vec_hi = _stat(vec_t)
+    return {
+        "shape": {"batch": batch, "vocab": vocab, "steps": steps,
+                  "tile_rows": sampler_tile_rows(vocab),
+                  "tile_bytes": SAMPLER_TILE_BYTES},
+        "certificate": cert,
+        "reference_s_per_step": ref_med,
+        "reference_iqr_s": [ref_lo, ref_hi],
+        "vectorized_s_per_step": vec_med,
+        "vectorized_iqr_s": [vec_lo, vec_hi],
+        "reference_ms_per_draw": ref_med / batch * 1e3,
+        "vectorized_ms_per_draw": vec_med / batch * 1e3,
+        "speedup_x": (ref_med / vec_med) if vec_med > 0 else None,
+        "tokens_identical": True,
+        "n_draws_compared": 2 * steps * batch,
+        "numpy": np.__version__,
+        "reading": (
+            "CPU time for the sampling step alone, synthetic logits, one process, "
+            f"OMP_NUM_THREADS={os.environ.get('OMP_NUM_THREADS')}, median of {steps} "
+            "order-alternated reps after warm-up. The node-side throughput "
+            "certification is a separate job and is NOT this number."),
+    }
+
+
 # ---------------------------------------------------------------- CLI
 def main(argv: Optional[list[str]] = None) -> int:
     ap = argparse.ArgumentParser(
@@ -4173,6 +4977,13 @@ def main(argv: Optional[list[str]] = None) -> int:
                     "the coordinator HTTP API is read-only verification.")
     ap.add_argument("--selftest", action="store_true",
                     help="CPU-only, data-independent verification (no GPU, no weights)")
+    ap.add_argument("--bench-sampler", action="store_true",
+                    help="CPU cost of the reference vs vectorized sampling kernels "
+                         "over synthetic logits (identity re-asserted on the benched "
+                         "blocks). Not a node throughput number.")
+    ap.add_argument("--bench-batch", type=int, default=N_PER_CELL)
+    ap.add_argument("--bench-vocab", type=int, default=128256)
+    ap.add_argument("--bench-steps", type=int, default=8)
     ap.add_argument("--preflight", action="store_true",
                     help="M10: a first-class exit-early preflight mode, NEVER output "
                          "truncation. Resolves the pool, the site, the layout and "
@@ -4212,8 +5023,18 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     if args.selftest:
         return selftest()
+    if args.bench_sampler:
+        try:
+            print(json.dumps(bench_sampler(batch=args.bench_batch,
+                                           vocab=args.bench_vocab,
+                                           steps=args.bench_steps), indent=1))
+        except BehavioralHarnessError as exc:
+            logger.error("HALT (%s): %s", type(exc).__name__, exc)
+            return 2
+        return 0
     if not (args.preflight or args.run):
-        ap.error("nothing to do: pass --selftest, --preflight or --run")
+        ap.error("nothing to do: pass --selftest, --bench-sampler, --preflight "
+                 "or --run")
 
     from metabasis.scripts.build_behavioral_banks import load_cells_document
 
