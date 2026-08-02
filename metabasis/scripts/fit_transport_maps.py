@@ -46,6 +46,7 @@ import numpy as np
 from pydantic import BaseModel
 
 from metabasis.roster import SCAN_GRIDS, fiat_grid_problems
+from metabasis.threads import THREAD_STAMP_KEY, thread_config_stamp
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("fit_transport_maps")
@@ -1056,6 +1057,17 @@ def run_grid(arm_root: Path, src_model: str, tgt_model: str,
         "two_arm_g_agreement": agreement,
         "n_valid": sum(r.valid for r in all_records),
         "n_fits": len(all_records),
+        # ── THE EFFECTIVE THREAD CONFIGURATION (Luxia ruling 2026-08-01) ──────
+        # Every map this run banked passed through `np.linalg.svd` — PCABank.fit,
+        # fit_procrustes and RidgeSVD.prep — and LAPACK's SVD is a blocked GEMM
+        # whose summation order depends on the thread count, exactly as eigh's
+        # does. So the count is part of these fits' identity, and this sidecar is
+        # where a reader of `fit_*.npz` finds it: the map npz's are bare arrays by
+        # design, and cp2_summary.json is the run's stamp.
+        #
+        # UNCONDITIONAL: an absent key means the summary predates 2026-08-01, and
+        # `metabasis.threads.stamp_thread_config` is the reader that says so.
+        THREAD_STAMP_KEY: thread_config_stamp(),
     }
     out = fits_dir / "cp2_summary.json"
     with open(out, "w") as f:

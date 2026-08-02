@@ -38,7 +38,10 @@ fi
 # shellcheck disable=SC1091
 source "{{venv_activate}}" || { echo "PREFLIGHT-BLOCKED venv"; exit 2; }
 export PYTHONUNBUFFERED=1
-export OMP_NUM_THREADS=1
+{{#if thread_ruling_note}}
+{{*thread_ruling_lines}}
+{{/if}}
+export OMP_NUM_THREADS={{omp_num_threads}}
 export TOKENIZERS_PARALLELISM=false
 export HF_HUB_OFFLINE=1
 

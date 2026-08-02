@@ -61,6 +61,24 @@ The two modes differ in exactly one block, and `metabasis.jobs_v21
 than as a claim.
 
 ────────────────────────────────────────────────────────────────────────────────
+THE THREAD COUNT, AND WHY IT IS A SECOND FIDELITY AXIS
+────────────────────────────────────────────────────────────────────────────────
+By Luxia's ruling of 2026-08-01 `OMP_NUM_THREADS=8` is the standing default
+everywhere, because eigh is bitwise-deterministic at a FIXED thread count and
+its bytes differ ACROSS counts — so the number a job exports is part of what
+its vectors ARE, and every builder now stamps the count it actually ran at.
+
+Every DEPLOYED script of record exports `OMP_NUM_THREADS=1`, and the 7/7
+byte-identity proof against those scripts is of record. So the ruled default
+enters as a PARAMETER on the line that already existed (`ThreadPolicy.ruled`
+vs `ThreadPolicy.deployed`), plus a named comment that only a NEW-STYLE render
+emits. `render(..., fidelity=True)` — which is what `compare()` uses — emits
+the ancestor's own number and not one new line, so the proof is untouched.
+`fidelity` is a separate switch from `memory_check` on purpose: they answer
+different questions, and folding one into the other would mean every future
+ruling that touches a shared line had to be smuggled through the memory mode.
+
+────────────────────────────────────────────────────────────────────────────────
 MIRRORED ANCESTRY, AND WHAT IS NOT MIRRORED
 ────────────────────────────────────────────────────────────────────────────────
 A lane is TRUSTED when a deployed script of record exists to diff against.
@@ -93,7 +111,7 @@ Run (repo root, PYTHONPATH=.):
       --mirror-dir <MIRROR_ROOT> --deployment <STAGING>/jobs-v21-deployment.json
   python -m metabasis.jobs_v21 --list [--spec-dir DIR]
   python -m metabasis.jobs_v21 --render <spec> [--out-dir DIR]
-                               [--memory-check capacity-module]
+                               [--memory-check capacity-module] [--fidelity]
   python -m metabasis.jobs_v21 --conversion-diff <spec>
   python -m metabasis.jobs_v21 --compare-mirror <MIRROR_ROOT> \\
       --spec-dir <STAGING>/jobs-v21-specs [--json]
@@ -112,6 +130,8 @@ from pathlib import Path
 from typing import Annotated, Any, Literal, Optional, Sequence, Union
 
 from pydantic import BaseModel, Field, ValidationError, model_validator
+
+from metabasis.threads import RULED_OMP_NUM_THREADS
 
 #: Templates and the spec fixtures for the deployed scripts of record.
 TEMPLATE_ROOT = Path(__file__).resolve().parent / "templates" / "jobs_v21"
@@ -456,9 +476,65 @@ class MemoryPolicy(BaseModel):
         return bool(self.shard_across.strip())
 
 
+class ThreadPolicy(BaseModel):
+    """How many BLAS/OpenMP threads a rendered job exports — and which number.
+
+    THE RULING (Luxia, 2026-08-01): `OMP_NUM_THREADS=8` is the standing default
+    everywhere, and the effective count is recorded in every build stamp as
+    part of instrument identity. eigh is bitwise-deterministic at a FIXED
+    thread count and its bytes differ ACROSS counts, so the exported number is
+    not a performance knob — it is part of what an artifact IS.
+
+    TWO NUMBERS, DELIBERATELY. Every deployed script of record exports
+    `OMP_NUM_THREADS=1`, and the 7/7 byte-identity proof against those scripts
+    is of record. If the ruled default simply replaced the literal, that proof
+    would break for a reason that is not a defect. So `deployed` is what
+    FIDELITY renders (the ancestor's own number, plus nothing) and `ruled` is
+    what a NEW-STYLE render exports — one template, both scripts, the same
+    discipline the corpus basis already travels under.
+    """
+    ruled: int = Field(
+        default=RULED_OMP_NUM_THREADS, ge=1,
+        description="what a NEW-STYLE render exports. The ruled default of "
+                    "record; a spec overrides it only by ruling, and the "
+                    "rebuilt vectors' bytes move when it does")
+    deployed: int = Field(
+        default=1, ge=1,
+        description="what the DEPLOYED ancestor exports, reproduced verbatim "
+                    "by FIDELITY mode. Defaults to 1 because every deployed "
+                    "script of record carries `export OMP_NUM_THREADS=1`, so "
+                    "the fidelity fixtures need no new field to keep passing")
+    ruling_note: bool = Field(
+        default=True,
+        description="emit the named comment above the export in NEW-STYLE "
+                    "renders, so a reader of a job script learns WHY the "
+                    "number is load-bearing without leaving the script. Never "
+                    "emitted in fidelity mode: it is new text, and new text is "
+                    "exactly what a byte-comparison exists to refuse")
+
+
+#: The ruling comment a NEW-STYLE render carries above its export. Held here
+#: rather than in the templates so the four lanes cannot drift apart in the one
+#: block whose whole job is to say the same thing everywhere.
+THREAD_RULING_NOTE: tuple[str, ...] = (
+    "# OMP_NUM_THREADS is the standing default of record (Luxia ruling",
+    "# 2026-08-01), not a performance knob: eigh is bitwise-deterministic at a",
+    "# FIXED thread count and its bytes differ ACROSS counts, so the count is",
+    "# part of the instrument identity every builder now stamps. Changing it",
+    "# changes the vectors' bytes; the deployed pre-ruling scripts exported 1,",
+    "# and any comparison across the boundary quotes both counts.",
+)
+
+
 class _LaneBase(BaseModel):
     """Fields every lane carries. `name` is the rendered filename."""
     name: str = Field(description="the rendered script's filename")
+    threads: ThreadPolicy = Field(
+        default_factory=ThreadPolicy,
+        description="the exported thread count, in both modes. Every lane "
+                    "carries it (vector-wrapper execs the generic instrument "
+                    "and exports nothing itself, so its template reads none of "
+                    "it) — one field, so a new lane cannot forget the ruling")
     header: list[str] = Field(
         default=[],
         description="the header comment block, VERBATIM and including its "
@@ -827,10 +903,27 @@ def _memory_context(memory: MemoryPolicy) -> RenderContext:
     }
 
 
-def _context(spec: JobSpec) -> RenderContext:
+def _thread_context(threads: ThreadPolicy, *, fidelity: bool) -> RenderContext:
+    """The exported thread count, and whether the ruling note travels with it.
+
+    FIDELITY renders the ancestor's own number and NOTHING else: the deployed
+    scripts of record are the claim under test, and any new line — even a
+    comment — is a difference a byte-comparison must refuse. The ruled default
+    therefore enters as a PARAMETER on a line that already existed, plus a note
+    that only a new-style render emits.
+    """
+    return {
+        "omp_num_threads": threads.deployed if fidelity else threads.ruled,
+        "thread_ruling_note": (not fidelity) and threads.ruling_note,
+        "thread_ruling_lines": list(THREAD_RULING_NOTE),
+    }
+
+
+def _context(spec: JobSpec, *, fidelity: bool = False) -> RenderContext:
     """Flatten a spec into the template's context. One place, so a template
     placeholder can never read a field the validators did not see."""
-    ctx: RenderContext = {"header": list(spec.header), "name": spec.name}
+    ctx: RenderContext = {"header": list(spec.header), "name": spec.name,
+                          **_thread_context(spec.threads, fidelity=fidelity)}
     if isinstance(spec, (VectorGenericSpec, VectorModelSpec, CollectSpec)):
         ctx.update({
             "corpus_var": spec.corpus.shell_var,
@@ -929,13 +1022,21 @@ def _apply_deployment(ctx: RenderContext, deployment: Deployment) -> RenderConte
 
 def render(spec: JobSpec, *, deployment: Deployment,
            memory_check: Optional[MemoryCheck] = None,
-           allow_unmirrored: bool = False) -> str:
+           allow_unmirrored: bool = False, fidelity: bool = False) -> str:
     """Render one spec into a job script.
 
     `memory_check` overrides the spec's mode, which is how the SAME spec renders
     both the deployed script (fidelity) and its converted form: the conversion
     is then a diff between two renders of one input, not a comparison of two
     hand-written things.
+
+    `fidelity` is a SEPARATE switch from `memory_check`, deliberately. The two
+    answer different questions — "which memory arithmetic" and "is this render
+    claiming to reproduce a deployed script" — and folding the second into the
+    first would mean every future ruling that touches a shared line had to be
+    smuggled through the memory mode. With `fidelity=True` a render emits the
+    deployed ancestor's thread count and no ruling note; with it False the
+    ruled default of record (2026-08-01) goes out instead.
 
     An unmirrored lane REFUSES rather than warning. A warning in a log is not a
     gate, and the failure it guards against — firing a job whose skeleton nobody
@@ -954,7 +1055,7 @@ def render(spec: JobSpec, *, deployment: Deployment,
         text = path.read_text(encoding="utf-8")
     except OSError as exc:
         raise TemplateError(f"template {path} cannot be read ({exc})") from exc
-    ctx = _context(spec)
+    ctx = _context(spec, fidelity=fidelity)
     if memory_check is not None and isinstance(spec, VectorModelSpec):
         ctx.update(_memory_context(
             spec.memory.model_copy(update={"mode": memory_check})))
@@ -1021,8 +1122,12 @@ def compare(spec: JobSpec, mirror_root: Path, *, deployment: Deployment,
     """
     rel = mirror_relpath or spec.name
     path = Path(mirror_root) / rel
+    #  FIDELITY on BOTH axes: the deployed script carries the inline heuristic
+    #  AND `export OMP_NUM_THREADS=1`, and the claim under test is that this
+    #  template reproduces THAT file. The 2026-08-01 thread ruling therefore
+    #  cannot reach this render — its default is a NEW-STYLE fact.
     rendered = render(spec, deployment=deployment, memory_check="inline-flat",
-                      allow_unmirrored=True)
+                      allow_unmirrored=True, fidelity=True)
     result: dict[str, Any] = {
         "spec_name": spec.name, "lane": spec.lane, "mirror_path": str(path),
         "rendered_sha256": sha256_text(rendered)}
@@ -1056,6 +1161,12 @@ def compare(spec: JobSpec, mirror_root: Path, *, deployment: Deployment,
 #: header and this line; everything outside must be byte-identical in both modes.
 PREFLIGHT_OK_SENTINEL = 'print("preflight ok")'
 
+#: The line the exported ENV BLOCK opens with, in all four exporting templates.
+#: The 2026-08-01 thread ruling may touch what lies between this line and the
+#: `export OMP_NUM_THREADS=` line and nothing else; the selftest splits both
+#: renders here and requires the two ends to compare equal.
+ENV_BLOCK_HEAD_MARKER = "export PYTHONUNBUFFERED=1"
+
 
 def conversion_is_confined(spec: VectorModelSpec,
                            deployment: Deployment) -> tuple[bool, str]:
@@ -1071,6 +1182,10 @@ def conversion_is_confined(spec: VectorModelSpec,
         return False, ("no memory_section_comment to cut at, so 'confined to "
                        "the memory block' has no boundary to be checked against")
     head_marker = spec.memory_section_comment[-1]
+    #  `fidelity` is left at its default on BOTH sides on purpose: the question
+    #  here is what the MEMORY switch moves, so every other axis must be held
+    #  fixed or the split would attribute a thread-ruling line to the estimator
+    #  conversion. One variable at a time, in a check whose whole value is that.
     inline = render(spec, deployment=deployment, memory_check="inline-flat",
                     allow_unmirrored=True)
     module = render(spec, deployment=deployment, memory_check="capacity-module",
@@ -1101,6 +1216,9 @@ def conversion_diff(spec: VectorModelSpec,
     Two renders of ONE spec, so every line of the diff is attributable to the
     mode switch and nothing else — which is the only way a reviewer can be sure
     the conversion changed the memory decision and left the job alone.
+
+    `fidelity` is held at its default on both sides, for the reason
+    `conversion_is_confined` gives: one variable at a time.
     """
     before = render(spec, deployment=deployment, memory_check="inline-flat",
                     allow_unmirrored=True)
@@ -1553,6 +1671,68 @@ def selftest(mirror_root: Optional[Path] = None,
               f"{spec.memory.multiplier:g} explicitly rather than inheriting a "
               f"default that could drift from the ruling")
 
+    print("== selftest 6b: the OMP_NUM_THREADS=8 default, and what FIDELITY "
+          "must not emit (Luxia ruling 2026-08-01) ==")
+    check(RULED_OMP_NUM_THREADS == 8 == ThreadPolicy().ruled
+          and ThreadPolicy().deployed == 1,
+          "the ruled default is 8 and the DEPLOYED ancestor's number is 1, so "
+          "one template renders both without either being hardcoded")
+    #  Every lane whose template exports the count. vector-wrapper execs the
+    #  generic instrument and exports nothing itself, so it is absent BY NAME
+    #  rather than by omission — a lane that quietly stopped exporting would
+    #  otherwise pass this block forever.
+    exporting = [(n, s) for n, s in sorted(specs.items())
+                 if not isinstance(s, VectorWrapperSpec)] \
+        + [("<synthetic demo-7b>", synthetic)]
+    wrappers = [n for n, s in sorted(specs.items())
+                if isinstance(s, VectorWrapperSpec)]
+    for name, spec in exporting:
+        fid = render(spec, deployment=dep, memory_check="inline-flat",
+                     allow_unmirrored=True, fidelity=True)
+        new = render(spec, deployment=dep, allow_unmirrored=True, fidelity=False)
+        check("export OMP_NUM_THREADS=1" in fid
+              and "export OMP_NUM_THREADS=8" not in fid,
+              f"{name}: FIDELITY exports the DEPLOYED count, unchanged")
+        check(not any(line in fid for line in THREAD_RULING_NOTE),
+              f"{name}: FIDELITY emits NO ruling note — new text is exactly "
+              f"what a byte-comparison exists to refuse, comment or not")
+        check("export OMP_NUM_THREADS=8" in new
+              and "export OMP_NUM_THREADS=1" not in new,
+              f"{name}: a NEW-STYLE render exports the ruled default")
+        check(all(line in new for line in THREAD_RULING_NOTE),
+              f"{name}: and carries the ruling note, so a reader of the job "
+              f"script learns why the number is load-bearing in place")
+        #  CONFINEMENT, as a SPLIT rather than a diff-line heuristic (the shape
+        #  `conversion_is_confined` uses). The env block is bounded above by
+        #  `export PYTHONUNBUFFERED=1` — present in all four exporting
+        #  templates, and spec-independent — and below by the export line's own
+        #  newline. Everything outside those bounds must compare EQUAL: that is
+        #  the whole claim, that the ruling touched the env block and nothing
+        #  that decides what the job runs.
+        cut: list[tuple[str, str]] = []
+        for text in (fid, new):
+            if text.count(ENV_BLOCK_HEAD_MARKER) != 1:
+                check(False, f"{name}: {ENV_BLOCK_HEAD_MARKER!r} is not unique "
+                             f"in a render, so the split proves nothing")
+                break
+            head, _, rest = text.partition(ENV_BLOCK_HEAD_MARKER)
+            _, _, after = rest.partition("export OMP_NUM_THREADS=")
+            cut.append((head, after.split("\n", 1)[1] if "\n" in after else ""))
+        else:
+            check(cut[0][0] == cut[1][0],
+                  f"{name}: nothing ABOVE the env block moved "
+                  f"({len(cut[0][0].splitlines())} line(s) identical)")
+            check(cut[0][1] == cut[1][1],
+                  f"{name}: and nothing BELOW it moved either "
+                  f"({len(cut[0][1].splitlines())} line(s)) — the ruled default "
+                  f"enters as a parameterized env line, not as a rewrite")
+    check(all("OMP_NUM_THREADS" not in render(specs[n], deployment=dep,
+                                              allow_unmirrored=True)
+              for n in wrappers) if wrappers else True,
+          f"the wrapper lane exports no thread count at all ({len(wrappers)} "
+          f"spec(s)): it execs the generic instrument, which exports its own — "
+          f"asserted by name so a lane that silently stopped exporting is caught")
+
     print("== selftest 7: the byte-comparison harness, on a mirror it makes ==")
     import tempfile
     with tempfile.TemporaryDirectory(prefix="jobs_v21_") as td:
@@ -1562,8 +1742,12 @@ def selftest(mirror_root: Optional[Path] = None,
         #  check does not degrade with the fidelity set.
         sample = next((s for n, s in sorted(specs.items())
                        if s.lane in MIRRORED_LANES), synthetic)
-        text = render(sample, deployment=dep,
-                      memory_check="inline-flat", allow_unmirrored=True)
+        #  The fake mirror must be written in the mode `compare()` renders in —
+        #  FIDELITY on both axes — or this harness check would fail on the
+        #  thread ruling rather than on the harness, which is the one thing it
+        #  must never do.
+        text = render(sample, deployment=dep, memory_check="inline-flat",
+                      allow_unmirrored=True, fidelity=True)
         (fake / sample.name).write_text(text, encoding="utf-8")
         same = compare(sample, fake, deployment=dep)
         check(same.identical and not same.differences
@@ -1728,6 +1912,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     help="override the spec's memory mode. 'inline-flat' is "
                          "FIDELITY (what the deployed script carries); "
                          "'capacity-module' is the converted form")
+    ap.add_argument("--fidelity", action="store_true",
+                    help="render the DEPLOYED ancestor rather than a new-style "
+                         "job: the ancestor's own OMP_NUM_THREADS and no "
+                         "ruling note. Without it a render carries the ruled "
+                         f"default of record (OMP_NUM_THREADS="
+                         f"{RULED_OMP_NUM_THREADS}, Luxia 2026-08-01). "
+                         "--compare-mirror always renders in fidelity mode; "
+                         "this flag is for reproducing a deployed script by hand")
     ap.add_argument("--allow-unmirrored", action="store_true",
                     help="render a lane with no deployed script of record. FOR "
                          "REVIEW ONLY — the output says so in its own header")
@@ -1938,7 +2130,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             assert deployment is not None
             text = render(spec, deployment=deployment,
                           memory_check=args.memory_check,
-                          allow_unmirrored=args.allow_unmirrored)
+                          allow_unmirrored=args.allow_unmirrored,
+                          fidelity=args.fidelity)
         except (TemplateError, SpecError) as exc:
             print(f"RENDER-REFUSED: {exc}", file=sys.stderr)
             return 2

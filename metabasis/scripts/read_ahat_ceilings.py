@@ -94,6 +94,7 @@ from metabasis.scripts.read_exchange_rates import (
     BANK_ROOT, COLLECTION_ROOT, FAMILIES, FAMILY_OF_RECORD, HUB_MODEL,
     ExchangeRateRow, MissingPiece, PairRequest, cos, exchange_rate,
     fit_path_for, load_entropy_gradient, read_pair, unit)
+from metabasis.threads import thread_config_stamp
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("read_ahat_ceilings")
@@ -234,6 +235,14 @@ class CeilingReadout(BaseModel):
     generated: str
     rows: list[CeilingRow] = []
     missing: list[MissingPiece] = []
+    #: THE EFFECTIVE THREAD CONFIGURATION (Luxia ruling 2026-08-01). Every
+    #: ceiling is a projection norm through `image_basis`, which is an SVD of
+    #: the banked map — a blocked LAPACK routine whose summation order moves
+    #: with the thread count. This readout is not a builder and banks no vector,
+    #: but its `--out` payload IS durable and gets compared across rebuilds, so
+    #: it carries the count for the same reason a build stamp does. Empty dict =
+    #: the payload predates the ruling.
+    thread_config: dict = Field(default_factory=dict)
 
 
 # ---------------------------------------------------------------- geometry
@@ -558,6 +567,9 @@ def run(hubs: Sequence[HubSource], targets: Sequence[TargetSpec], family: str
                 res.ceiling, res.a_over_ceiling, res.source_capture,
                 f"{res.build.coherence:.3f}" if res.build.coherence is not None
                 else "  n/a", res.null_q95, res.bucket_hint)
+    #  Read AFTER the rows, so the block describes the threadpool that ran the
+    #  image-basis SVDs rather than the one requested at start-up.
+    out.thread_config = thread_config_stamp()
     return out
 
 

@@ -68,6 +68,7 @@ import numpy as np
 from pydantic import BaseModel, Field
 
 from metabasis.scripts.read_exchange_rates import BANK_ROOT, FAMILY_OF_RECORD
+from metabasis.threads import thread_config_stamp
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("solve_portability_coefficients")
@@ -151,6 +152,14 @@ class PortabilitySolution(BaseModel):
     rank_forbidden_inputs: list[str] = []
     USABLE_FOR_PREDICTIONS: bool = False
     notes: list[str] = Field(default_factory=list)
+    #: THE EFFECTIVE THREAD CONFIGURATION (Luxia ruling 2026-08-01). The design
+    #: matrix is decomposed by `np.linalg.svd` (rank + nullspace) and solved by
+    #: `np.linalg.lstsq`, both blocked LAPACK routines whose summation order
+    #: moves with the thread count — so the coefficients this document carries
+    #: are thread-conditioned in the last digits and the count belongs beside
+    #: them. Empty dict = this solution predates the ruling; the backward-
+    #: compatible reader is `metabasis.threads.stamp_thread_config`.
+    thread_config: dict = Field(default_factory=dict)
 
 
 # ---------------------------------------------------------------- the solver
@@ -559,6 +568,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     sol = solve_log_least_squares(fit_obs, anchors=anchors, held_out=held_out)
     sol.anchor_provenance = provenance
+    #  Read AFTER the solve, so the block describes the threadpool that actually
+    #  ran the svd/lstsq rather than the one that was requested at start-up.
+    sol.thread_config = thread_config_stamp()
     payload = sol.model_dump_json(indent=1)
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)

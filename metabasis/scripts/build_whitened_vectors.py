@@ -18,6 +18,18 @@ First-read → outer loop; nothing stamped.
 """
 from __future__ import annotations
 
+import os
+
+#  THE RULED DEFAULT (Luxia 2026-08-01), and why this builder is in scope: V3w
+#  is `np.linalg.solve(Sigma, delta)` — a LAPACK LU solve whose blocked GEMM
+#  summation order depends on the thread count exactly as eigh's does. A FLOOR
+#  (setdefault), above the numpy import, because OpenBLAS reads its count when
+#  the shared object is loaded.
+from metabasis.threads import (RULED_OMP_NUM_THREADS, THREAD_STAMP_KEY,
+                               thread_config_stamp)
+
+os.environ.setdefault("OMP_NUM_THREADS", str(RULED_OMP_NUM_THREADS))
+
 import argparse
 import json
 import logging
@@ -131,6 +143,8 @@ def main() -> None:
             mu = float(np.trace(S_emp)) / S_emp.shape[0]
             Sigma = (1.0 - lam) * S_emp + lam * mu * np.eye(S_emp.shape[0])
             shrink_used = lam
+        #  THREAD-SENSITIVE (2026-08-01 ruling): a blocked LAPACK solve, so its
+        #  bytes are fixed at a fixed thread count and differ across counts.
         w = np.linalg.solve(Sigma, delta)                       # Σ⁻¹ Δ  (whitened / LDA direction)
         wn = w / np.linalg.norm(w)
         dn = delta / np.linalg.norm(delta)
@@ -166,6 +180,9 @@ def main() -> None:
     # machine-readable pair (the field whose ABSENCE let a stale string stand): future
     # readers key on this, not the prose, so a mislabel is impossible to propagate.
     stamps["pair"] = [pos_label, neg_label]
+    #  The effective thread configuration (Luxia ruling 2026-08-01), read from
+    #  the threadpool after the solves rather than from the request.
+    stamps[THREAD_STAMP_KEY] = thread_config_stamp()
     stamps["pos_run"] = args.pos_run
     stamps["neg_run"] = args.neg_run
     stamps["provenance"] = (

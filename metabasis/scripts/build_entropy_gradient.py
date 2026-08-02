@@ -70,7 +70,7 @@ severed gradient to prove the gate REJECTS it.
 
 Node-side run (one card, pinned; the trunk stamp records `cuda_visible_devices`):
 
-    CUDA_VISIBLE_DEVICES=3 OMP_NUM_THREADS=1 \
+    CUDA_VISIBLE_DEVICES=3 OMP_NUM_THREADS=8 \
     python -m metabasis.scripts.build_entropy_gradient \
         --model phi-4 --model-path <LOCAL_WEIGHTS_DIR> --arm-root <ARM_ROOT> \
         --site 19 --arm native --out-dir <ARM_ROOT>/staging/phi-4/vectors
@@ -112,7 +112,17 @@ from __future__ import annotations
 
 import os
 
-os.environ.setdefault("OMP_NUM_THREADS", "1")
+#  THE RULED DEFAULT (Luxia 2026-08-01): OMP_NUM_THREADS=8 everywhere. This is a
+#  FLOOR, not an override — every deployed job script exports the count itself and
+#  `setdefault` leaves it alone. It has to run above the numpy import because
+#  OpenBLAS reads its thread count when the shared object is LOADED; setting it
+#  afterwards changes the string and nothing else. The vector's bytes depend on
+#  the count that was actually in effect, so `bank()` records what the THREADPOOL
+#  says rather than what this line asked for (metabasis.threads).
+from metabasis.threads import (RULED_OMP_NUM_THREADS, THREAD_STAMP_KEY,
+                               stamp_thread_config, thread_config_stamp)
+
+os.environ.setdefault("OMP_NUM_THREADS", str(RULED_OMP_NUM_THREADS))
 
 import argparse
 import json
@@ -121,7 +131,7 @@ import sys
 import time
 from pathlib import Path
 from contextlib import ExitStack, contextmanager
-from typing import Any, Iterator, Optional, Sequence
+from typing import Any, Callable, Iterator, Optional, Sequence
 
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -780,6 +790,15 @@ def build_entropy_gradient(model: Any, tok: Any, entries: Sequence[dict],
         del Rc
         n_sigma_positions = int(R.shape[0])
         del R
+        #  THE THREAD-SENSITIVE STEP (Luxia ruling 2026-08-01). Sigma above is
+        #  bitwise stable regardless of thread count; this decomposition is not.
+        #  LAPACK's tridiagonal reduction and back-transformation are blocked
+        #  GEMM calls whose summation order depends on how the work is split, so
+        #  eigh is bitwise-deterministic at a FIXED thread count (measured,
+        #  repeat-identical) and its bytes differ ACROSS counts. Everything
+        #  downstream — the band basis Ub, the projection, the unit vector — is
+        #  built on these evecs, so the effective count is part of this
+        #  vector's identity and `bank()` records it (metabasis.threads).
         evals, evecs = np.linalg.eigh(Sigma)                   # ascending
         ridge = float(request.ridge_rel * float(evals.mean()))
         order = np.argsort(evals)[::-1]                        # descending
@@ -1151,6 +1170,23 @@ def bank(result: BuildResult, trunk: dict, corpus_sha: str, date_string: str,
         "ridge_rel": req.ridge_rel,
         "wall_seconds": result.wall_seconds,
         "trunk": trunk,
+        # ── THE EFFECTIVE THREAD CONFIGURATION (Luxia ruling 2026-08-01) ──────
+        # UNCONDITIONAL, by the same argument that made the M41 hostname
+        # unconditional: the whole point is that EVERY artifact can say what
+        # instrument produced it, and a conditional field would leave exactly
+        # the gap the ruling was made to close. An absent key therefore means
+        # ONE thing — the stamp predates 2026-08-01 — and
+        # `metabasis.threads.stamp_thread_config` is the reader that keeps that
+        # apart from a probe that ran and could not answer.
+        #
+        # WHY IT IS READ HERE AND NOT AT LOAD. This vector's bytes come off
+        # `np.linalg.eigh(Sigma)` (the band basis) and the reductions built on
+        # it. eigh is bitwise-deterministic at a FIXED thread count and its
+        # bytes differ ACROSS counts, so the count that matters is the one in
+        # force when the decomposition ran — which is this side of it. The
+        # trunk stamp beside it describes the deep-learning stack at LOAD time;
+        # the two are separate facts and are recorded separately.
+        THREAD_STAMP_KEY: thread_config_stamp(),
     }
     # ADDENDUM 2026-07-27-B: recorded in EVERY stamp of a truncated node, with the same
     # key names the collector uses so a build stamp and a collection stamp can be
@@ -1226,18 +1262,79 @@ def _toy_corpus(n: int) -> list[dict]:
             for i in range(n)]
 
 
-def selftest() -> int:
-    """End-to-end CPU verification: real algebra, tiny random model, fp32."""
+
+def _stack_available() -> tuple[bool, str]:
+    """Is the deep-learning stack importable here? A PROBE, never a failure.
+
+    RAKE M44(a)/(b): a selftest count must name the configuration it was
+    measured in, and a suite with an availability-branched block runs in BOTH
+    configurations before a merge verdict. This builder's end-to-end block
+    needs torch + transformers to instantiate a tiny Llama; the desk's own repo
+    venv (numpy/scipy/pydantic, no torch) is a legitimate environment, not a
+    test failure, and before this probe existed `--selftest` died there with a
+    ModuleNotFoundError before running a single check.
+    """
+    try:
+        import torch                                          # noqa: F401
+        import transformers                                   # noqa: F401
+    except Exception as exc:                                  # noqa: BLE001 — a probe
+        return False, f"{type(exc).__name__}: {exc}"
+    return True, (f"torch {__import__('torch').__version__} + transformers "
+                  f"{__import__('transformers').__version__}")
+
+
+def _selftest_thread_config(check) -> None:
+    """The thread-config stamp contract — NO deep-learning stack needed.
+
+    Split OUT of the stack guard deliberately (the c6b34a3 pattern): the
+    backward-compatibility contract every banked artifact depends on must stay
+    proven in an environment with no torch at all, because that is the
+    environment a desk reads stamps in.
+    """
+    from metabasis.threads import (PRE_RULING_UNRECORDED,
+                                   THREAD_COUNT_MISMATCH_LABEL, ThreadConfig,
+                                   thread_count_mismatch)
+    block = thread_config_stamp()
+    check("the thread-config block is JSON-round-trippable as banked",
+          json.loads(json.dumps(block)) == block,
+          f"{len(block)} field(s)")
+    check("the block opens with STATUS and states the ruled default",
+          list(block)[0] == "STATUS" and block["ruled_default"] == 8
+          == RULED_OMP_NUM_THREADS,
+          f"ruled_default={block['ruled_default']}")
+    hand_built = {"builder": "build_entropy_gradient.py",
+                  THREAD_STAMP_KEY: block}
+    read_back = stamp_thread_config(hand_built)
+    check("a stamp written by this builder reads back through the "
+          "backward-compatible reader",
+          read_back is not None
+          and read_back.ruled_default == RULED_OMP_NUM_THREADS)
+    check("a PRE-RULING stamp (no thread_config key) reads as None, never as "
+          "a count — the historical banks are UNRECORDED, not single-threaded "
+          "by inference",
+          stamp_thread_config({"builder": "build_entropy_gradient.py"}) is None)
+    banked_pre = None
+    rebuilt = ThreadConfig(effective_num_threads=RULED_OMP_NUM_THREADS,
+                           consensus="agreed", matches_ruled_default=True)
+    note = thread_count_mismatch(banked_pre, rebuilt)
+    check("a v3 rebuild compared against a banked PRE-RULING vector yields a "
+          "LABELED count mismatch quoting both sides, never a bare byte diff",
+          note is not None and THREAD_COUNT_MISMATCH_LABEL in note
+          and PRE_RULING_UNRECORDED in note and "rebuild 8" in note,
+          (note or "")[:88])
+
+
+def _selftest_with_stack(check: Callable[..., None]) -> None:
+    """The end-to-end block: a real tiny Llama, real algebra, fp32. NEEDS torch.
+
+    Moved here VERBATIM from `selftest()` when the M44 availability branch was
+    added — not one assertion of it was rewritten, so the stack-present
+    behaviour is the behaviour that was already certified.
+    """
     import tempfile
 
     import torch
     from transformers import LlamaConfig, LlamaForCausalLM
-
-    checks: list[tuple[str, bool, str]] = []
-
-    def check(name: str, ok: bool, detail: str = "") -> None:
-        checks.append((name, bool(ok), detail))
-        logger.info("%s %s %s", "PASS" if ok else "MISS", name, detail)
 
     torch.manual_seed(20260727)
     cfg = LlamaConfig(vocab_size=128, hidden_size=64, intermediate_size=128,
@@ -1641,6 +1738,21 @@ def selftest() -> int:
         check("stamp carries cuda_visible_devices",
               "cuda_visible_devices" in stamp["trunk"])
         check("stamp records the FD verdict", stamp["fd_gate"]["PASSES"] is True)
+        #  The ruling's field, verified on a REAL banked stamp rather than on a
+        #  hand-built one: the block has to survive the json round-trip that the
+        #  bank actually performs, and it has to be findable by the reader every
+        #  downstream consumer uses.
+        banked_threads = stamp_thread_config(stamp)
+        check("stamp records the EFFECTIVE thread configuration (the ruling's "
+              "instrument identity), readable by the shared reader",
+              THREAD_STAMP_KEY in stamp and banked_threads is not None,
+              f"{THREAD_STAMP_KEY}={stamp.get(THREAD_STAMP_KEY, {}).get('consensus')}"
+              f" -> {banked_threads.quoted if banked_threads else None}")
+        check("and it states the ruled default beside the measured count, so "
+              "the artifact says what the convention WAS when it was built",
+              banked_threads is not None
+              and banked_threads.ruled_default == RULED_OMP_NUM_THREADS,
+              f"ruled {RULED_OMP_NUM_THREADS}")
 
         # The 8bL16 deconfound's shape: a SECOND vector for the same model at a site
         # the legacy bank already holds. The stem must move the files while the npz
@@ -1665,14 +1777,54 @@ def selftest() -> int:
               spec2.key == "entropy_gradient_L2"
               and float(np.max(np.abs(v2 - v))) == 0.0)
 
+
+def selftest() -> int:
+    """End-to-end CPU verification: real algebra, tiny random model, fp32.
+
+    NAMED CONFIGURATIONS (rake M44). One availability axis — the deep-learning
+    stack — and the reported count says which side of it ran. The blocks that
+    need no stack (the thread-config stamp contract) run in BOTH, so the
+    backward-compatibility contract every banked artifact depends on is proved
+    with no torch at all. A skip is a THIRD state, never a non-zero exit code.
+    """
+    checks: list[tuple[str, bool, str]] = []
+
+    def check(name: str, ok: bool, detail: str = "") -> None:
+        checks.append((name, bool(ok), detail))
+        logger.info("%s %s %s", "PASS" if ok else "MISS", name, detail)
+
+    skips: list[str] = []
+
+    def skip(name: str) -> None:
+        skips.append(name)
+        logger.info("SKIP %s", name)
+
+    #  Runs in EVERY configuration — the stamp contract needs no weights.
+    _selftest_thread_config(check)
+
+    stack_ok, stack_why = _stack_available()
+    if stack_ok:
+        _selftest_with_stack(check)
+    else:
+        skip("deep-learning stack: the end-to-end build/FD-gate/checkpoint/"
+             "truncation/banking blocks instantiate a tiny Llama and need "
+             f"torch + transformers ({stack_why}). A venv without them is a "
+             "legitimate environment (the desk's CPU spine is one), not a test "
+             "failure; run this half where the stack is installed")
+
     n_miss = sum(1 for _, ok, _ in checks if not ok)
     print(json.dumps({"checks": len(checks), "misses": n_miss,
+                      "named_skips": len(skips), "skipped": skips,
+                      "configuration": ("stack(" + stack_why + ")" if stack_ok
+                                        else "no stack(" + stack_why + ")"),
                       "failed": [n for n, ok, _ in checks if not ok]}, indent=1))
+    print(f"selftest checks run: {len(checks)} ({len(skips)} named skip(s))")
     if n_miss:
         print(f"SELFTEST-NOT-CLEAN: {n_miss} of {len(checks)} checks did not hold")
         return 1
     print(f"SELFTEST-CLEAN: {len(checks)}/{len(checks)} checks hold")
     return 0
+
 
 
 # ---------------------------------------------------------------- CLI

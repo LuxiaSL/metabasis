@@ -36,7 +36,7 @@ Output (matched to vmb_b7_stage2_vectors so solve_star_systems reads it unchange
   a5_vectors_olmo2-7b_b7/a5_vectors_stamps.json : honest provenance (rake 34)
 
 UNSTAMPED (C section 8). Scores nothing. NEEDS GPU (one card, eager). Node-side run:
-  OMP_NUM_THREADS=1 python -m metabasis.scripts.build_olmo_entropy_gradient \
+  OMP_NUM_THREADS=8 python -m metabasis.scripts.build_olmo_entropy_gradient \
     --model-path <olmo snapshot> --stage0-run <vmb_stage0_olmo2_7b> \
     --out-dir <battery>/a5_vectors_olmo2-7b_b7 --site 16 --n-sigma 60 --n-grad 20
 """
@@ -44,7 +44,16 @@ from __future__ import annotations
 
 import os
 
-os.environ.setdefault("OMP_NUM_THREADS", "1")
+#  THE RULED DEFAULT (Luxia 2026-08-01): OMP_NUM_THREADS=8 everywhere, and the
+#  EFFECTIVE count recorded in the stamp. This builder's V7 comes off
+#  `np.linalg.eigh(Sigma)` exactly as the reference builder's does, so it is
+#  thread-sensitive in exactly the same way and carries the same field. A FLOOR,
+#  not an override — the job script's own export wins — and it must sit above
+#  the numpy import because OpenBLAS reads its count when the library loads.
+from metabasis.threads import (RULED_OMP_NUM_THREADS, THREAD_STAMP_KEY,
+                               thread_config_stamp)
+
+os.environ.setdefault("OMP_NUM_THREADS", str(RULED_OMP_NUM_THREADS))
 
 import argparse
 import json
@@ -145,6 +154,11 @@ def main() -> int:
     mu = R.mean(0)
     Rc = R - mu
     Sigma = (Rc.T @ Rc) / (Rc.shape[0] - 1)
+    #  THE THREAD-SENSITIVE STEP (Luxia ruling 2026-08-01): Sigma above is
+    #  bitwise stable at any thread count, this decomposition is not — eigh is
+    #  bitwise-deterministic at a FIXED count and its bytes differ across
+    #  counts, and the band basis Ub below is built from these evecs. The
+    #  effective count is stamped.
     evals, evecs = np.linalg.eigh(Sigma)                   # ascending
     ridge = args.ridge_rel * float(evals.mean())
     order = np.argsort(evals)[::-1]                        # descending
@@ -236,6 +250,10 @@ def main() -> int:
         "gids": {"sigma": [int(x) for x in sigma_gids],
                  "grad": [int(x) for x in grad_gids]},
         "sites": [site],
+        # The effective thread configuration, read from the THREADPOOL at stamp
+        # time (after the eigh), not from the request. Unconditional: an absent
+        # key means the stamp predates the 2026-08-01 ruling and nothing else.
+        THREAD_STAMP_KEY: thread_config_stamp(),
     }
     (args.out_dir / "a5_vectors_stamps.json").write_text(json.dumps(stamps, indent=1))
 

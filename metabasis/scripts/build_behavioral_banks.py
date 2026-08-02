@@ -81,6 +81,10 @@ from metabasis.scripts.run_behavioral_cells import (
     SEED_MATERIAL_TEMPLATE, SEED_MATERIAL_TEMPLATE_DIGEST, SamplingConfig,
     SiteNotOfRecord, apply_dose_ladder, assert_corpus_vintage, assert_naive_row_banked,
     assert_no_lesion_recipe, baseline_cell, seed_int)
+from metabasis.threads import (PRE_RULING_UNRECORDED, RULED_OMP_NUM_THREADS,
+                               THREAD_COUNT_MISMATCH_LABEL, ThreadConfig,
+                               stamp_thread_config, thread_config_stamp,
+                               thread_count_mismatch)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("build_behavioral_banks")
@@ -180,6 +184,15 @@ class VectorRef(BaseModel):
     fd_gate: Optional[Path] = None
     build_stamp: Optional[Path] = None
     provenance: str = ""
+    #: The BLAS thread count `sha256` above was banked at (Luxia ruling
+    #: 2026-08-01). None = the digest predates the ruling and its count is
+    #: UNRECORDED — a fact to be QUOTED when the file on disk disagrees, never
+    #: inferred, even though every deployed job script of that vintage exported
+    #: OMP_NUM_THREADS=1. This exists so a sha mismatch can name both sides:
+    #: without it the census could only say what the file on disk was built at.
+    expected_thread_count: Optional[int] = Field(
+        default=None, ge=1,
+        description="thread count of record for `sha256`; None = pre-ruling")
 
     @model_validator(mode="after")
     def _sha_is_a_sha(self) -> "VectorRef":
@@ -353,6 +366,13 @@ class ArtifactRow(BaseModel):
     cells_at_risk: int = 0
     ready: bool = False
     blocking_reason: Optional[str] = None
+    #: Populated ONLY when the two sides' thread counts differ (Luxia ruling
+    #: 2026-08-01, scope 3). A byte difference a count mismatch explains is a
+    #: CHARACTERIZED break; the same difference reported bare reads as
+    #: corruption, and the two demand opposite responses. None on agreement,
+    #: which is why it is a separate field rather than prose inside
+    #: `blocking_reason`: a reader scanning rows can test it.
+    thread_count_mismatch: Optional[str] = None
     constructible: bool = False
 
 
@@ -677,6 +697,51 @@ def build_random_band(recipe: RandomBandRecipe, family: Literal["Rband", "gRband
 
 
 # ---------------------------------------------------------------- the census (§4.3)
+def _thread_mismatch_note(ref: VectorRef, *, what: str) -> Optional[str]:
+    """A LABELED thread-count mismatch between a banked digest and the file on disk.
+
+    SCOPE 3 OF THE 2026-08-01 RULING, at the one place in this module where a
+    rebuild meets a banked pre-ruling artifact: `verify_sha` compares the bytes
+    on disk against the digest the spec carries, and before this the ONLY thing
+    it could report was that they differ. It could not say whether they differ
+    because something is wrong or because eigh was run at a different thread
+    count — a difference that is bitwise-expected (eigh is deterministic at a
+    FIXED count and its bytes move across counts) and completely benign.
+
+    BOTH sides are quoted whenever they differ:
+
+      * the BANKED side comes from `VectorRef.expected_thread_count`, which is
+        None for every digest banked before the ruling. That reads as
+        "unrecorded", NOT as 1: the deployed job scripts of that vintage did
+        export OMP_NUM_THREADS=1, but the digest does not say so and an
+        inference is not a record.
+      * the ON-DISK side is read out of the artifact's own build stamp with the
+        shared backward-compatible reader, so a rebuild that carries the field
+        is quoted from its own stamp rather than from this process's threadpool
+        — the file may well have been built somewhere else.
+
+    Returns None only when both counts are known AND equal. A missing build
+    stamp is a mismatch to be quoted, not an agreement (M19: a degraded read is
+    described, never upgraded to a pass).
+    """
+    banked = (None if ref.expected_thread_count is None else
+              ThreadConfig(effective_num_threads=ref.expected_thread_count,
+                           consensus="agreed",
+                           matches_ruled_default=(ref.expected_thread_count
+                                                  == RULED_OMP_NUM_THREADS)))
+    on_disk = stamp_thread_config(_read_json(ref.build_stamp,
+                                             what=f"{what} build stamp"))
+    note = thread_count_mismatch(banked, on_disk, banked_label="banked digest",
+                                 rebuilt_label="artifact on disk")
+    if note is None:
+        return None
+    if on_disk is None:
+        note += (" The artifact on disk carries no thread_config either, so "
+                 f"neither side can vouch for its count ({PRE_RULING_UNRECORDED}"
+                 "); rebuild it with a stamping builder before adjudicating.")
+    return note
+
+
 def _vector_row(name: str, role: CensusRole, ref: Optional[VectorRef], *,
                 cells_at_risk: int, corpus_sha_of_record: str,
                 require_fd_gate: bool = True) -> ArtifactRow:
@@ -695,11 +760,18 @@ def _vector_row(name: str, role: CensusRole, ref: Optional[VectorRef], *,
     try:
         sha, verified = verify_sha(ref.npz, ref.sha256, what=name)
     except ArtifactShaMismatch as exc:
+        #  A SHA MISMATCH IS STILL A HALT (M4) — this does not soften it. What
+        #  it adds is the one distinction the halt could not make on its own:
+        #  whether the two artifacts were built at DIFFERENT thread counts, in
+        #  which case the byte difference is the characterized 2026-08-01 break
+        #  rather than corruption. Both counts are quoted, never one.
+        note = _thread_mismatch_note(ref, what=name)
         return ArtifactRow(
             name=name, role=role, path=str(ref.npz), present=True,
             sha256=sha256_file(ref.npz), expected_sha256=ref.sha256,
             sha_verified=False, cells_at_risk=cells_at_risk, ready=False,
-            blocking_reason=str(exc))
+            thread_count_mismatch=note,
+            blocking_reason=str(exc) + (f" — {note}" if note else ""))
     fd = _read_json(ref.fd_gate, what=f"{name} FD gate")
     fd_passed = None if fd is None else bool(
         fd.get("PASSES_FD_GATE", fd.get("PASSES", False)))
@@ -1606,6 +1678,52 @@ def selftest() -> int:                                   # noqa: C901 — a chec
               not census(bad_sha).ready
               and any("sha" in (r.blocking_reason or "").lower()
                       for r in census(bad_sha).owed))
+        #  ── the 2026-08-01 ruling, scope 3: a sha mismatch between a rebuild
+        #  and a banked PRE-RULING digest must read as a LABELED count
+        #  mismatch, never as a silent byte diff. Three cases, all exercised.
+        thread_stamp = root / "threaded_stamps.json"
+        thread_stamp.write_text(json.dumps({
+            "corpus_manifest_sha256": corpus_sha, "builder": "selftest",
+            "thread_config": thread_config_stamp(
+                ThreadConfig(effective_num_threads=RULED_OMP_NUM_THREADS,
+                             consensus="agreed", matches_ruled_default=True))}))
+        rebuilt_at_8 = native.model_copy(update={
+            "sha256": "0" * 64, "build_stamp": thread_stamp,
+            "expected_thread_count": 1})
+        row8 = [r for r in census(spec.model_copy(
+            update={"native_vector": rebuilt_at_8})).rows
+            if r.role == "native_vector"][0]
+        check("a rebuild-vs-banked sha mismatch QUOTES BOTH thread counts, "
+              "labeled, rather than reporting a bare byte difference",
+              row8.thread_count_mismatch is not None
+              and THREAD_COUNT_MISMATCH_LABEL in row8.thread_count_mismatch
+              and "banked digest 1" in row8.thread_count_mismatch
+              and "artifact on disk 8" in row8.thread_count_mismatch,
+              (row8.thread_count_mismatch or "")[:96])
+        check("and the labeled mismatch travels in the BLOCKING REASON too, so "
+              "a reader of the census table sees it without a second lookup",
+              THREAD_COUNT_MISMATCH_LABEL in (row8.blocking_reason or "")
+              and "sha" in (row8.blocking_reason or "").lower(),
+              "the sha mismatch is still a HALT (M4) — this only says WHY")
+        pre_ruling = native.model_copy(update={"sha256": "0" * 64})
+        row_pre = [r for r in census(spec.model_copy(
+            update={"native_vector": pre_ruling})).rows
+            if r.role == "native_vector"][0]
+        check("when NEITHER side records a count, both are quoted as unrecorded "
+              "— 'both unknown' is never reported as 'both equal'",
+              row_pre.thread_count_mismatch is not None
+              and PRE_RULING_UNRECORDED in row_pre.thread_count_mismatch,
+              (row_pre.thread_count_mismatch or "")[-96:])
+        agreeing = native.model_copy(update={
+            "build_stamp": thread_stamp,
+            "expected_thread_count": RULED_OMP_NUM_THREADS})
+        row_ok = [r for r in census(spec.model_copy(
+            update={"native_vector": agreeing})).rows
+            if r.role == "native_vector"][0]
+        check("two artifacts at the SAME recorded count carry NO mismatch note, "
+              "so the field means what it says when it is populated",
+              row_ok.thread_count_mismatch is None and row_ok.sha_verified is True)
+
         bad_basis = spec.model_copy(update={"corpus_sha_of_record": other_basis})
         check("a basis mismatch blocks EVERY cell (§9 item 2)",
               any(r.role == "corpus" and not r.ready for r in census(bad_basis).rows))

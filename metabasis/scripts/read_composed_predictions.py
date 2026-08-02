@@ -319,6 +319,7 @@ from metabasis.scripts.read_exchange_rates import (
     BANK_ROOT, COLLECTION_ROOT, FAMILIES, FAMILY_OF_RECORD, HUB_MODEL,
     NEAR_ZERO_CARVE_OUT, VectorSpec, cos, fit_path_for, load_entropy_gradient,
     unit)
+from metabasis.threads import stamp_thread_config, thread_count_mismatch
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("read_composed_predictions")
@@ -6204,6 +6205,16 @@ class RecordComparison(BaseModel):
                  "provenance PATHS (absolute vs repo-relative is an invocation "
                  "detail); the sha256 of every provenance artifact IS compared"],
         description="what this comparison deliberately does not read")
+    #: Populated ONLY when the numbers already disagree AND the two records
+    #: name different thread counts (Luxia ruling 2026-08-01, scope 3). It
+    #: EXPLAINS a difference; it never manufactures one, which is why it is
+    #: computed after the deltas rather than beside them: every one of these
+    #: records is compared against a banked pre-ruling one, and a note that
+    #: fired on every clean verify would be noise a reader learns to skip.
+    thread_count_mismatch: Optional[str] = Field(
+        default=None,
+        description="a LABELED thread-count mismatch quoting BOTH records' "
+                    "counts, when the deltas may be explained by it")
 
     @property
     def agree(self) -> bool:
@@ -6306,6 +6317,22 @@ def compare_filing_records(banked: Path, emitted: Path) -> RecordComparison:
                 if field in b_block or field in e_block:
                     compare(f"{key}/{block_key}", field, b_block.get(field),
                             e_block.get(field))
+    #  ── THE 2026-08-01 RULING, SCOPE 3 ───────────────────────────────────────
+    #  Every number in these records was computed from banked fits, and those
+    #  fits came off `np.linalg.svd`; the composed path then multiplies matrices,
+    #  which is a BLAS reduction of its own. All of that is bitwise-deterministic
+    #  at a FIXED thread count and moves in the last digits ACROSS counts. So
+    #  when a re-emitted record disagrees with a banked one, the FIRST question
+    #  is whether the two ran at the same count — and this answers it, quoting
+    #  both, rather than leaving a reader to read a 1e-9 delta as a defect.
+    #
+    #  Computed only when there ARE deltas, deliberately: this comparison exists
+    #  to be run clean, and a note that fired on every pass would be noise a
+    #  reader learns to skip past — which is the same failure as not having it.
+    if result.deltas:
+        result.thread_count_mismatch = thread_count_mismatch(
+            stamp_thread_config(b_doc), stamp_thread_config(e_doc),
+            banked_label="banked record", rebuilt_label="emitted record")
     return result
 
 
@@ -8503,6 +8530,34 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                   f"and a single moved number is CAUGHT: "
                   f"{len(diff26.deltas)} disagreement(s), max |Δ| "
                   f"{diff26.max_abs_delta:.4f}")
+            #  THE 2026-08-01 RULING, SCOPE 3, at the one place this module
+            #  compares a fresh record against a banked one. Both directions of
+            #  the field are exercised: it must fire when the counts differ and
+            #  a difference exists, and it must stay silent on a clean compare.
+            check(same26.thread_count_mismatch is None,
+                  "a record that AGREES carries no thread-count note — the "
+                  "field explains a difference, it never manufactures one")
+            from metabasis.threads import (THREAD_COUNT_MISMATCH_LABEL,
+                                           THREAD_STAMP_KEY, ThreadConfig,
+                                           thread_config_stamp)
+            banked_at_1 = root26 / "record-threads-1.json"
+            emitted_at_8 = root26 / "record-threads-8.json"
+            for path, count in ((banked_at_1, 1), (emitted_at_8, 8)):
+                doc_t = json.loads(out26.read_text())
+                doc_t[THREAD_STAMP_KEY] = thread_config_stamp(ThreadConfig(
+                    effective_num_threads=count, consensus="agreed",
+                    matches_ruled_default=(count == 8)))
+                if count == 8:                # make the numbers actually differ
+                    doc_t["predictions"][0]["star_prediction"]["predicted"] = 0.9999
+                path.write_text(json.dumps(doc_t, indent=1))
+            thr26 = compare_filing_records(banked_at_1, emitted_at_8)
+            check(not thr26.agree and thr26.thread_count_mismatch is not None
+                  and THREAD_COUNT_MISMATCH_LABEL in thr26.thread_count_mismatch
+                  and "banked record 1" in thr26.thread_count_mismatch
+                  and "emitted record 8" in thr26.thread_count_mismatch,
+                  f"a disagreement between records at DIFFERENT thread counts is "
+                  f"labeled and quotes both: "
+                  f"{(thr26.thread_count_mismatch or '')[:80]}")
             #  A record whose band disagrees with the frozen rule cannot be
             #  emitted at all — the consumer's own check runs before the write.
             bad_sym26 = root26 / "sym-bad.json"
@@ -9534,6 +9589,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                       f"{delta.banked!r} vs emitted {delta.emitted!r}"
                       + ("" if delta.abs_delta is None
                          else f" (|Δ| {delta.abs_delta:.3e})"))
+            if cmp_result.thread_count_mismatch:
+                print(f"  {cmp_result.thread_count_mismatch}")
             print(f"  VERDICT: {'AGREE — every number reproduces' if cmp_result.agree else f'{len(cmp_result.deltas)} DISAGREEMENT(S)'}")
             if not cmp_result.agree:
                 status = 1
