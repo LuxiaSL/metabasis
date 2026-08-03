@@ -1,15 +1,20 @@
-# The v2.1 fitting corpus (corpus of record for all transport-map fits)
+# The v2.1 fitting corpus (basis of record for v2.1-era transport-map fits)
 
-`corpus_manifest.json` is published **byte-identical** to the corpus of
-record: its sha256,
+`corpus_manifest.meta.json` is the **metadata manifest**: full per-text
+provenance and a `text_sha256` per entry, with the text bodies removed
+(2026-08-03 — this corpus is superseded as the public basis by its
+all-web-text successor; the raw bodies are no longer republished here
+so the superseded basis is not mistaken for the current one). The full
+manifest travels out-of-band; its sha256,
 
 ```
 5ae355bc5d130f8e9c3ae426f5e71bf2b6e99c74b95369a874bec2abcd59b5d9
 ```
 
-is the exact value every fit artifact and prediction record in this
-campaign cites as `corpus_manifest_sha256`. Verify with
-`sha256sum corpus_manifest.json`.
+is the exact value every v2.1-era fit artifact and prediction record
+cites as `corpus_manifest_sha256`, unchanged. A copy of the full
+manifest verifies against that sha; each of its texts verifies against
+its entry's `text_sha256` here.
 
 ## Composition — 777 texts, three strata
 
