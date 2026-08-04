@@ -22,9 +22,10 @@ ARM="$ROOT/{{arm_dirname}}"
 BANKROOT="{{bankroot}}"
 TS="$(date +%Y%m%d-%H%M%S)"
 LOG="$BANKROOT/logs/{{log_stem}}-$MODEL-$TS.log"
+SPOT_REPORT="$ARM/states/spot_replay_$MODEL.json"
 
 cd "$CODE" || { echo "PREFLIGHT-BLOCKED: $CODE absent — wrong node?"; exit 2; }
-mkdir -p "$BANKROOT/logs" || { echo "PREFLIGHT-BLOCKED: cannot make out dirs"; exit 2; }
+mkdir -p "$BANKROOT/logs" "$ARM/states" || { echo "PREFLIGHT-BLOCKED: cannot make out dirs"; exit 2; }
 
 if [ -z "${CUDA_VISIBLE_DEVICES:-}" ]; then
   echo "PREFLIGHT-BLOCKED: CUDA_VISIBLE_DEVICES unset — must run under the scheduler"
@@ -62,36 +63,60 @@ if model in blocked:
     print(f"PREFLIGHT-BLOCKED: {model} is registry-BLOCKED ({blocked[model]}) — "
           "the block is cleared by a desk ruling, never by a job"); sys.exit(2)
 
-# --- the grid is DERIVED from the registry and ASSERTED against the staged one
+# --- the grid is DERIVED from the registries and ASSERTED against the staged one
 # Sites from curves, never fiat (prereg §4): a grid typed into a job script is a
 # grid nobody can re-derive from a checkpoint's config.json.
+#
+# TWO registries answer two different questions, and this gate consults BOTH.
+# `fit_transport_maps.SITES` is the REGISTERED FIT GRID — each model's site of
+# record plus its ruled robustness sites, which is what a REBANK must reproduce.
+# `roster.SCAN_GRIDS` is the SCAN-ceremony grid a NEW model's curve sweeps.
+# Asserting equality against SCAN_GRIDS alone (as this template did until
+# 2026-08-03) both forces a 12-site sweep nobody asked for and REFUSES the
+# carried-banked keys outright — they carry sites of record and no scan grid.
+# So the rule is containment in both directions:
+#     staged ⊇ SITES[model]          a rebank may not skip a site of record
+#     staged ⊆ SITES ∪ SCAN_GRIDS    and may not invent one
+from metabasis.scripts.fit_transport_maps import SITES
 staged = tuple(int(s) for s in sites.split(",") if s.strip())
-if model in SCAN_GRIDS:
-    registry = tuple(SCAN_GRIDS[model])
-    if staged != registry:
-        print(f"PREFLIGHT-BLOCKED: staged grid {staged} != registry grid "
-              f"{registry}. The registry is the authority; a job that collects "
-              f"a different grid banks a curve nobody can reproduce"); sys.exit(2)
-    print(f"preflight: grid DERIVED — SCAN_GRIDS[{model}] = {registry}")
-else:
-    print(f"PREFLIGHT-BLOCKED: {model} carries no scan grid in the registry, so "
-          f"the staged grid {staged} is fiat"); sys.exit(2)
+registered = tuple(SITES.get(model, ()))
+scan = tuple(SCAN_GRIDS.get(model, ()))
+if not registered and not scan:
+    print(f"PREFLIGHT-BLOCKED: {model} carries neither a registered fit grid nor "
+          f"a scan grid, so the staged grid {staged} is fiat"); sys.exit(2)
+missing_sor = [s for s in registered if s not in staged]
+if missing_sor:
+    print(f"PREFLIGHT-BLOCKED: the staged grid {staged} omits registered site(s) "
+          f"{missing_sor} for {model}. A rebank that skips a site of record "
+          f"cannot answer the question it was fired for"); sys.exit(2)
+unknown_sites = [s for s in staged if s not in set(registered) | set(scan)]
+if unknown_sites:
+    print(f"PREFLIGHT-BLOCKED: staged site(s) {unknown_sites} appear in neither "
+          f"the registered fit grid {registered} nor the scan grid {scan} — "
+          f"fiat"); sys.exit(2)
+print(f"preflight: grid DERIVED — staged {staged} contains registered "
+      f"{registered} and is contained in registered + scan {scan}")
 
 # --- the DEVIATIONS travel with the node, not with this script ---------------
 # max_seq_len lives in the registry so collection, spot-replay, target builds and
 # behavioural reads cannot silently disagree — prereg ADDENDUM 2026-07-27-B wants
-# ONE truncation for all uses of a node.
-node = ROSTER[model]
-wanted = node.collector_args
-print(f"preflight: registry deviations for {model}: "
-      f"{wanted if wanted else 'none'}")
-
-# --- the arms are the ones the roster row asks for ---------------------------
+# ONE truncation for all uses of a node. A CARRIED-BANKED key has no roster row
+# at all; that is a known state, not a lookup to crash on, and its arms and
+# deviations are the ones its banked collection stamp used, passed explicitly.
 staged_arms = tuple(a for a in arms.split(",") if a.strip())
-unknown = [a for a in staged_arms if a not in node.arms]
-if unknown:
-    print(f"PREFLIGHT-BLOCKED: arm(s) {unknown} are not on roster row "
-          f"{node.roster_row} ({node.arms})"); sys.exit(2)
+node = ROSTER.get(model)
+if node is not None:
+    wanted = node.collector_args
+    print(f"preflight: registry deviations for {model}: "
+          f"{wanted if wanted else 'none'}")
+    unknown_arms = [a for a in staged_arms if a not in node.arms]
+    if unknown_arms:
+        print(f"PREFLIGHT-BLOCKED: arm(s) {unknown_arms} are not on roster row "
+              f"{node.roster_row} ({node.arms})"); sys.exit(2)
+else:
+    print(f"preflight: {model} is a CARRIED-BANKED key (no roster row) — arms "
+          f"and deviations are the ones its banked collection stamp used, "
+          f"passed explicitly: arms={list(staged_arms)}")
 
 # --- the corpus, asserted from the manifest bytes AND through the loader -----
 man = Path(arm_root) / "corpus" / "corpus_manifest.json"
@@ -109,6 +134,16 @@ if len(entries) != {{corpus_n_texts}}:
     print(f"PREFLIGHT-BLOCKED: corpus has {len(entries)} entries, not "
           f"{{corpus_n_texts}}"); sys.exit(2)
 {{/if}}
+# --- the BASIS names its own strata, and it does so BEFORE the weights load --
+# The stratum vocabulary is derived from this manifest (desk ruling 2026-08-03),
+# and the CP-1 gate spreads its picks across it. Deriving it here means a
+# manifest that cannot name its strata is refused in the preflight rather than
+# discovered after a full collection pass — which is exactly how the canary of
+# 2026-08-03 burned a bank.
+from metabasis.scripts.fit_transport_maps import derive_strata, stratum_counts
+strata = derive_strata(entries)
+print(f"preflight: basis strata DERIVED — {list(strata)} "
+      f"counts {stratum_counts(entries)}")
 print(f"preflight: corpus = {corpus_sha[:12]}…, {len(entries)} texts at {man}")
 print("preflight ok")
 PREFLIGHT
@@ -119,33 +154,79 @@ if [ "${MB_PREFLIGHT_ONLY:-0}" = "1" ]; then
   echo "{{marker}}-PREFLIGHT-ONLY-OK $MODEL (nothing collected)"; exit 0
 fi
 
-# --- COLLECT + FRESH-PROCESS BITWISE SPOT-REPLAY IN ONE JOB ------------------
-# The standing gate. One job, because a replay in a SEPARATE job certifies a
-# different process's determinism than the one that wrote the bank.
-# ⚠ EXIT 0 IS NOT THE VERDICT: the verdict is ALL_BITWISE_EXACT in the spot
-# report, and a False there is a HALT, never a resubmit.
-echo "=== COLLECT $MODEL arms=$ARMS sites=$SITES + spot-replay K=$SPOT_K ==="
-python -m metabasis.scripts.collect_mean_states \
-  --model "$MODEL" --model-path "$MODEL_PATH" --arm-root "$ARM" \
-  --arms "$ARMS" --sites "$SITES" \
-  --collect --spot-replay "$SPOT_K" \
+# --- THE ONE ARGV BOTH INVOCATIONS GET --------------------------------------
+# Built once and reused, so the collect and the replay provably cannot drift
+# apart. Identical --sites/--arms/--max-seq-len/--shard-across is not a nicety:
+# a replay run with different flags compares DIFFERENT OBJECTS and the bitwise
+# gate then fails for a reason that has nothing to do with determinism.
+ARGS=(--model "$MODEL" --model-path "$MODEL_PATH" --arm-root "$ARM"
+      --arms "$ARMS" --sites "$SITES")
 {{#if has_max_seq_len}}
-  --max-seq-len "$MAX_SEQ_LEN" \
+ARGS+=(--max-seq-len "$MAX_SEQ_LEN")
 {{/if}}
 {{#if mem_sharded}}
-  --shard-across "$SHARD_ACROSS" \
+ARGS+=(--shard-across "$SHARD_ACROSS")
 {{/if}}
 {{#if assert_multi_device}}
-  --assert-multi-device \
+ARGS+=(--assert-multi-device)
 {{/if}}
-  2>&1 | tee -a "$LOG"
+
+# --- COLLECT + FRESH-PROCESS BITWISE SPOT-REPLAY: ONE JOB, TWO PROCESSES -----
+# TWO invocations, deliberately, and this is the mirrored ancestor's shape. A
+# replay INSIDE the collecting process would certify a model object that never
+# left memory; a replay in a SEPARATE JOB would certify a different process from
+# the one that wrote the bank. Two processes inside one job is the only shape
+# that certifies what the gate claims — and `&&` means a collect that fails
+# never reaches the replay.
+#
+# (Passing --collect and --spot-replay to ONE invocation is now a REFUSAL in the
+# CLI itself, desk ruling 2026-08-03: it used to be accepted and then silently
+# ignored, so the gate never ran and the job announced success anyway.)
+echo "=== COLLECT $MODEL arms=$ARMS sites=$SITES, then spot-replay K=$SPOT_K ==="
+{
+  python -m metabasis.scripts.collect_mean_states --collect "${ARGS[@]}" \
+  && python -m metabasis.scripts.collect_mean_states --spot-replay "$SPOT_K" "${ARGS[@]}"
+} 2>&1 | tee -a "$LOG"
 rc=${PIPESTATUS[0]}
 
-if [ "$rc" -eq 0 ]; then
+# --- THE VERDICT IS READ OUT OF THE ARTIFACT, NEVER OFF THE EXIT CODE --------
+# ⚠ Exit 0 is not the verdict. The verdict is `all_bitwise_exact` in the spot
+# report, so this job REFUSES to print its OK line unless it has read that key
+# and found it true. A missing report is the loudest case of all: it is what an
+# invocation that skipped the gate leaves behind.
+verdict=$(python - "$SPOT_REPORT" <<'VERDICT'
+import json, sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+if not path.exists():
+    print("REPORT-ABSENT"); raise SystemExit(0)
+try:
+    report = json.loads(path.read_bytes())
+except (OSError, ValueError):
+    print("REPORT-UNREADABLE"); raise SystemExit(0)
+value = report.get("all_bitwise_exact")
+if value is True:
+    print("ALL_BITWISE_EXACT")
+elif value is False:
+    print("NOT-BITWISE-EXACT")
+else:
+    print("VERDICT-KEY-ABSENT")
+VERDICT
+)
+echo "spot report $SPOT_REPORT -> $verdict"
+
+if [ "$rc" -eq 0 ] && [ "$verdict" = "ALL_BITWISE_EXACT" ]; then
   echo "{{marker}}-JOB-OK $MODEL arms=$ARMS sites=$SITES corpus={{corpus_tag}} spot_k=$SPOT_K"
-  echo "(read ALL_BITWISE_EXACT in the spot report above — the artifact is the"
-  echo " verdict, not this line; a False there is a HALT, not a resubmit)"
+  echo "(the verdict was READ from $SPOT_REPORT — this line is printed only"
+  echo " because all_bitwise_exact is true there, never off the exit code)"
   exit 0
+fi
+if [ "$rc" -eq 0 ]; then
+  echo "{{marker}}-GATE-NOT-CERTIFIED $MODEL spot_report=$verdict"
+  echo "(the chain exited 0 but the spot report does not certify the bank."
+  echo " A HALT for the desk, never a resubmit: re-running cannot change it)"
+  exit 3
 fi
 echo "{{marker}}-JOB-NONZERO-RC=$rc $MODEL"
 exit "$rc"
