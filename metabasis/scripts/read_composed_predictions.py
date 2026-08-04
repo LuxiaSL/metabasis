@@ -309,6 +309,22 @@ pair-fit tree is a CLEAN REFUSAL, which is the ordinary state while the wave
 runs. **DESCRIPTIVE EMISSION ONLY** — the arithmetic of a threshold is
 computation; the verdict it carries is the desk's.
 
+ONE FIT OBJECT, TWO ORDERED SLOTS. A semi-orthogonal Procrustes fit is an
+object of the UNORDERED pair: the 2026-08-04 wave banked 120 fits under the
+canonical direction (the lower-ordinal sealed slot's endpoints) against a
+frozen list of 240 ORDERED slots. `resolve_pair_fit` therefore probes the
+slot's own ordering FIRST and its reversal SECOND, and a reverse hit is read
+through `exchange_rate(tm, v_slot_source, v_slot_target, direction='rev')` —
+the construction of record from the §5.5 asymmetry enactment
+(`enactment-archives/asymmetry-555/asym_rider.py`, on a DIRECT pair fit:
+`exchange_rate(tm, v3, v8, "fwd")` beside `exchange_rate(tm, v8, v3, "rev")`),
+not a direction algebra invented here. Every scored slot records the fit
+object it came out of AND the direction it was read in
+(`observed_fit_pair_id`, `observed_direction`), and the record carries the
+fwd/rev census. `--resolution-only` runs the resolution half ALONE — counting
+files, computing no â — because asserting the surface against real data must
+not perform the desk's scoring act as a side effect.
+
 Run (repo root, PYTHONPATH=.):
   python -m metabasis.scripts.read_composed_predictions --selftest
   python -m metabasis.scripts.read_composed_predictions --gate
@@ -350,6 +366,11 @@ Run (repo root, PYTHONPATH=.):
       --score-v3 staging/webtext-v3-predictions/PREDICTIONS-webtext-v3-<date>.json \
       [--stamp <desk stamp>.json] [--pair-fits-root <pair fits>] \
       [--scored-v3-out /tmp/claude-output/scored-webtext-v3.json]
+  python -m metabasis.scripts.read_composed_predictions \
+      --basis webtext-v3 \
+      --score-v3 staging/webtext-v3-predictions/PREDICTIONS-webtext-v3-<date>.json \
+      --pair-fits-root staging/webtext-v3-fits/pairs/fits-pairs \
+      --resolution-only        # counts resolvable slots; scores NOTHING
 """
 from __future__ import annotations
 
@@ -364,7 +385,7 @@ from contextlib import contextmanager
 from datetime import date, datetime, timezone
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Iterator, Literal, Optional, Sequence
+from typing import Any, Iterator, Literal, NamedTuple, Optional, Sequence
 
 import numpy as np
 from pydantic import BaseModel, Field, model_validator
@@ -1323,6 +1344,55 @@ def pair_fit_dirs_under(pairs_root: Path, source: str, source_site: int,
     pairs = Path(pairs_root)
     return [pairs / f"{source}L{source_site}__{target}L{target_site}__{arm}",
             pairs]
+
+
+class PairFitProbe(NamedTuple):
+    """One candidate fit file, and WHICH DIRECTION reading it would be.
+
+    `direction` is the argument `TransportMap.transport` / `exchange_rate` take,
+    NOT a label: `fwd` means the file's own source side is the slot's source
+    side, `rev` means the file was fit for the OPPOSITE ordering and the slot is
+    read back through it. `fit_pair_id` is the FIT OBJECT's own ordered identity
+    (`<src>L<s>-><tgt>L<t>`), which is what a scored record must name — a
+    reverse-read slot whose record quoted only its own pair id would hide which
+    object the number came out of.
+    """
+    path: Path
+    direction: Literal["fwd", "rev"]
+    fit_pair_id: str
+
+
+def pair_fit_probes_under(pairs_root: Path, source: str, source_site: int,
+                          target: str, target_site: int, arm: str, family: str
+                          ) -> list[PairFitProbe]:
+    """Every candidate fit FILE for a slot, ordered, with its direction.
+
+    THE UNORDERED-BANKING FACT (2026-08-04 pair-fit wave). A semi-orthogonal
+    Procrustes fit is ONE object per UNORDERED pair: the wave banked 120 fits
+    under the canonical direction (the lower-ordinal sealed slot's endpoints)
+    and both ordered slots are read from it — forward through
+    `transport(..., 'fwd')`, reverse through `transport(..., 'rev')`. A resolver
+    that probed only the slot's own ordering therefore found half the wave and
+    reported the other half UNSCORED-NO-FIT, which is a RESOLUTION gap and not
+    a missing measurement (first §8.3 scoring run, 120/240).
+
+    ORDER IS LOAD-BEARING and is: EVERY ordered probe first (the existing
+    `pair_fit_dirs_under` list, untouched), THEN every reversed probe. A slot
+    whose own direction is on disk resolves exactly as it did before this
+    function existed — the reverse probe can only ever ADD a resolution, never
+    move one. Where both orderings happen to be banked, the slot's own wins.
+    """
+    probes: list[PairFitProbe] = []
+    for direction, (a, a_site, b, b_site) in (
+            ("fwd", (source, source_site, target, target_site)),
+            ("rev", (target, target_site, source, source_site))):
+        for directory in pair_fit_dirs_under(pairs_root, a, a_site, b, b_site,
+                                             arm):
+            probes.append(PairFitProbe(
+                path=fit_path_for(directory, a, a_site, b, b_site, arm, family),
+                direction=direction,                # type: ignore[arg-type]
+                fit_pair_id=f"{a}L{a_site}->{b}L{b_site}"))
+    return probes
 
 
 def v3_pair_fit_dirs(source: str, source_site: int, target: str,
@@ -7543,11 +7613,27 @@ def load_v3_prediction_artifact(path: Path, stamp: Optional[Path] = None
 
 # ------------------------------------------------- â_obs from the direct fits
 class V3PairFitRef(BaseModel):
-    """One slot's DIRECT pair fit, resolved or explicitly absent."""
+    """One slot's DIRECT pair fit, resolved or explicitly absent.
+
+    The fit OBJECT's identity (`resolved`, `fit_pair_id`) and the DIRECTION it
+    is read in (`direction`) are both carried, because the pair-fit wave banks
+    one object per UNORDERED pair: two opposing slots legitimately share a file
+    and are told apart only by the direction their â_obs was taken in.
+    """
     pair_id: str
     arm: str
     family: str
     resolved: Optional[str] = None
+    direction: Literal["fwd", "rev"] = Field(
+        default="fwd",
+        description="the `transport`/`exchange_rate` direction this slot is "
+                    "read in through `resolved`. `rev` means the fit object "
+                    "was fit for the OPPOSITE ordering (the wave's canonical "
+                    "direction) and this slot is its reverse reading")
+    fit_pair_id: Optional[str] = Field(
+        default=None,
+        description="the FIT OBJECT's own ordered identity — equal to `pair_id` "
+                    "under `fwd`, its reversal under `rev`")
     probed_paths: list[str] = []
 
     @property
@@ -7584,18 +7670,22 @@ def resolve_pair_fit(slot: V3Slot, pairs_root: Path) -> V3PairFitRef:
     lane's REFUSAL is at tree grain (`require_pair_fits_root`); at slot grain
     an absence is scored as UNSCORED and counted against the frozen
     denominator, which is what §8's "never changes" clause requires.
+
+    BOTH DIRECTIONS are probed (`pair_fit_probes_under`), slot-ordered first:
+    the wave banks ONE fit per unordered pair, so a slot whose own ordering is
+    absent is very often not un-fit at all — its object is on disk under the
+    opposite ordering and is read through `direction='rev'`.
     """
     probed: list[str] = []
-    for directory in pair_fit_dirs_under(
+    for probe in pair_fit_probes_under(
             pairs_root, slot.source_model, slot.source_site,
-            slot.target_model, slot.target_site, slot.arm):
-        path = fit_path_for(directory, slot.source_model, slot.source_site,
-                            slot.target_model, slot.target_site, slot.arm,
-                            slot.family)
-        probed.append(str(path))
-        if path.exists():
+            slot.target_model, slot.target_site, slot.arm, slot.family):
+        probed.append(str(probe.path))
+        if probe.path.exists():
             return V3PairFitRef(pair_id=slot.pair_id, arm=slot.arm,
-                                family=slot.family, resolved=str(path),
+                                family=slot.family, resolved=str(probe.path),
+                                direction=probe.direction,
+                                fit_pair_id=probe.fit_pair_id,
                                 probed_paths=probed)
     return V3PairFitRef(pair_id=slot.pair_id, arm=slot.arm, family=slot.family,
                         probed_paths=probed)
@@ -7621,6 +7711,21 @@ def observed_ahat_for_slot(slot: V3Slot, fit: V3PairFitRef,
     `read_exchange_rates.exchange_rate` is CALLED, not mirrored — the estimand
     is the same object the v2.1 lane reads, so "the observed column is the same
     quantity" is a property of the code rather than of two copies agreeing.
+
+    THE REVERSE READING IS THE v2.1 RECORD'S CONSTRUCTION, UNMODIFIED. The §5.5
+    asymmetry enactment (2026-07-27, `outputs/collection/enactment-archives/
+    asymmetry-555/`) read BOTH directions of a pair out of ONE banked fit object
+    exactly this way — `asym_rider.py`, on the direct pair fit
+    `fit_3bL14__8bL16_native_<family>.npz`:
+
+        a_f = exchange_rate(tm, v3, v8, direction="fwd")   # 3b -> 8b
+        a_r = exchange_rate(tm, v8, v3, direction="rev")   # 8b -> 3b
+
+    and `asym_reads.py` identically over the hub legs (`exchange_rate(tm, v_hub,
+    v_m, "fwd")` / `exchange_rate(tm, v_m, v_hub, "rev")`). The argument ORDER
+    is the SLOT's — source vector first, target vector second — in both
+    directions; only the `direction` keyword changes, and `TransportMap`'s own
+    adjoint owns the arithmetic. Nothing about direction is re-derived here.
 
     The vectors are the ones the ARTIFACT names, resolved under the lane's
     vectors root; a tail mismatch is a HALT, because scoring an observation
@@ -7657,7 +7762,16 @@ def observed_ahat_for_slot(slot: V3Slot, fit: V3PairFitRef,
     (v_src, spec_src), (v_tgt, spec_tgt) = loaded
     assert fit.resolved is not None
     tm = load_transport_map(Path(fit.resolved))
-    a_obs = exchange_rate(tm, v_src, v_tgt)
+    a_obs = exchange_rate(tm, v_src, v_tgt, direction=fit.direction)
+    if fit.direction == "rev":
+        notes.append(
+            f"REVERSE-DIRECTION READING — this slot's â_obs comes out of the "
+            f"fit object banked for {fit.fit_pair_id}, read through "
+            f"`transport(..., direction='rev')`. The pair-fit wave banks ONE "
+            f"semi-orthogonal Procrustes object per UNORDERED pair (canonical "
+            f"direction = the lower-ordinal sealed slot's endpoints) and both "
+            f"ordered slots are read from it — the construction of record from "
+            f"the §5.5 asymmetry enactment. Fit object: {fit.resolved}")
     return float(a_obs), spec_src, spec_tgt, notes
 
 
@@ -7790,6 +7904,19 @@ class V3ScoredSlot(BaseModel):
     observed: Optional[float] = None
     observed_source: Optional[str] = Field(
         default=None, description="the direct pair fit â_obs was read from")
+    observed_direction: Optional[Literal["fwd", "rev"]] = Field(
+        default=None,
+        description="WHICH DIRECTION â_obs was taken in through that object. "
+                    "`fwd` = the fit's own ordering is this slot's; `rev` = the "
+                    "object was fit for the opposite ordering (the wave's "
+                    "canonical direction) and this slot is its reverse reading. "
+                    "Recorded per slot because one fit object legitimately "
+                    "serves two opposing slots and only this field tells them "
+                    "apart")
+    observed_fit_pair_id: Optional[str] = Field(
+        default=None,
+        description="the FIT OBJECT's own ordered identity — equal to `pair_id` "
+                    "under `fwd`, its reversal under `rev`")
     probed_paths: list[str] = []
     extension_line: bool = Field(
         default=False,
@@ -7894,6 +8021,12 @@ class V3ScoredRecord(BaseModel):
     frozen_count_N: int
     n_slots_scored: int = 0
     n_slots_unscored_no_fit: int = 0
+    #: The direction census over the SCORED slots. The pair-fit wave banks one
+    #: object per unordered pair, so a full wave over a both-directions slot
+    #: list reads roughly half and half; a census that is all-`fwd` on such a
+    #: list is the resolution gap the first §8.3 run hit, visible as a number.
+    n_slots_direction_fwd: int = 0
+    n_slots_direction_rev: int = 0
     bands: dict[str, float] = {
         "primary_half_width": V3_BAND_PRIMARY_HALF_WIDTH,
         "co_primary_half_width": V3_BAND_CO_PRIMARY_HALF_WIDTH,
@@ -8013,6 +8146,8 @@ def score_v3_slot(slot: V3Slot, pairs_root: Path,
                 slot, fit, vectors_root)
             scored.observed = observed
             scored.observed_source = fit.resolved
+            scored.observed_direction = fit.direction
+            scored.observed_fit_pair_id = fit.fit_pair_id
             scored.notes.extend(notes)
         except PairFitsAbsentError as exc:
             #  A resolvable fit whose VECTORS are absent is the same shape of
@@ -8022,7 +8157,9 @@ def score_v3_slot(slot: V3Slot, pairs_root: Path,
     else:
         scored.notes.append(
             "UNSCORED-NO-FIT — no direct pair fit for this slot under the "
-            "pair-fits root. Probed: " + ", ".join(fit.probed_paths))
+            "pair-fits root, IN EITHER DIRECTION (the slot's own ordering and "
+            "its reversal were both probed; one fit object serves both). "
+            "Probed: " + ", ".join(fit.probed_paths))
     scored.columns = [score_v3_column(slot, slot.columns[column.hub], observed)
                       for column in _artifact_column_order(slot)]
     return scored
@@ -8223,6 +8360,10 @@ def score_v3_artifact(artifact: V3PredictionArtifact,
     record.n_slots_scored = sum(1 for s in record.slots if s.observed is not None)
     record.n_slots_unscored_no_fit = (record.frozen_count_N
                                       - record.n_slots_scored)
+    record.n_slots_direction_fwd = sum(1 for s in record.slots
+                                       if s.observed_direction == "fwd")
+    record.n_slots_direction_rev = sum(1 for s in record.slots
+                                       if s.observed_direction == "rev")
     record.gates = [
         _column_gate(column.hub, column.of_record, record.slots,
                      artifact.frozen_count_N)
@@ -8249,6 +8390,16 @@ def score_v3_artifact(artifact: V3PredictionArtifact,
         "This is the only mechanically available reading; FLAGGED, not "
         "resolved — the denominator is the desk's to rule.")
     record.flags.append(
+        f"DIRECTION CENSUS over the scored slots: {record.n_slots_direction_fwd} "
+        f"read FORWARD through a fit object banked in the slot's own ordering, "
+        f"{record.n_slots_direction_rev} read REVERSE through the object banked "
+        f"for the opposite ordering (`transport(..., direction='rev')`, the "
+        f"§5.5 asymmetry enactment's construction of record). One "
+        f"semi-orthogonal Procrustes fit is ONE object per UNORDERED pair; "
+        f"every slot names its object AND its direction "
+        f"(`observed_fit_pair_id`, `observed_direction`), so a shared object is "
+        f"visible per slot rather than implied.")
+    record.flags.append(
         "The near-zero carve-out is applied PER COLUMN (each column is its "
         "own prediction with its own band), which is the grain the desk "
         "ACCEPTED 2026-08-04. A per-slot reading keyed to the of-record "
@@ -8271,6 +8422,76 @@ def score_v3_artifact(artifact: V3PredictionArtifact,
             f"difference this explains is a characterized break, and the same "
             f"difference reported bare reads as corruption.")
     return record
+
+
+# ------------------------------------- resolution counting, WITHOUT scoring
+class V3PairFitResolutionRow(BaseModel):
+    """One frozen slot's fit resolution — the object and the direction, no â."""
+    ordinal: int
+    prediction_id: str
+    pair_id: str
+    arm: str
+    family: str
+    resolved: Optional[str] = None
+    direction: Optional[Literal["fwd", "rev"]] = None
+    fit_pair_id: Optional[str] = None
+    probed_paths: list[str] = []
+
+
+class V3PairFitResolution(BaseModel):
+    """Which slots have a fit object at all, and in which direction. NO â_obs."""
+    STATUS: str = (
+        "RESOLUTION COUNTING ONLY — this mode resolves paths and NOTHING else. "
+        "It loads no vector, loads no transport map, computes no â_obs, scores "
+        "no column and writes no record. SCORING IS A DESK ACT performed once "
+        "per record against frozen bands; a lane that scored real data on the "
+        "way to counting files would have performed it by accident.")
+    artifact_path: str
+    artifact_sha256: str
+    pair_fits_root: str
+    frozen_count_N: int
+    n_resolved: int = 0
+    n_resolved_fwd: int = 0
+    n_resolved_rev: int = 0
+    n_unresolved: int = 0
+    all_resolvable: bool = False
+    rows: list[V3PairFitResolutionRow] = []
+
+
+def resolve_v3_pair_fits(artifact: V3PredictionArtifact,
+                         pairs_root: Path) -> V3PairFitResolution:
+    """Resolve every frozen slot's direct pair fit. Counts paths, reads nothing.
+
+    The assertion mode behind the reverse-direction fix: against a landed wave
+    of 120 UNORDERED fit objects and a frozen list of 240 ORDERED slots, this
+    must report 240/240 resolvable — 120 forward and 120 reverse — and it does
+    so without touching a single number the desk has not yet asked for.
+    """
+    pairs_root = require_pair_fits_root(pairs_root)
+    report = V3PairFitResolution(
+        artifact_path=artifact.path, artifact_sha256=artifact.sha256,
+        pair_fits_root=str(pairs_root),
+        frozen_count_N=artifact.frozen_count_N)
+    for slot in artifact.slots:
+        fit = resolve_pair_fit(slot, pairs_root)
+        report.rows.append(V3PairFitResolutionRow(
+            ordinal=slot.ordinal, prediction_id=slot.prediction_id,
+            pair_id=slot.pair_id, arm=slot.arm, family=slot.family,
+            resolved=fit.resolved,
+            direction=fit.direction if fit.available else None,
+            fit_pair_id=fit.fit_pair_id,
+            probed_paths=list(fit.probed_paths)))
+        if not fit.available:
+            report.n_unresolved += 1
+            continue
+        report.n_resolved += 1
+        if fit.direction == "rev":
+            report.n_resolved_rev += 1
+        else:
+            report.n_resolved_fwd += 1
+    report.all_resolvable = (report.n_resolved == artifact.frozen_count_N
+                             and report.n_unresolved == 0)
+    return report
 
 
 def default_v3_scored_path(artifact: Path) -> Path:
@@ -11622,6 +11843,236 @@ def selftest() -> int:                                   # noqa: C901 — a chec
           "and a slot with no direct pair fit is UNSCORED-NO-FIT with its "
           "prediction intact — reported, never dropped")
 
+    print("== selftest 37: ONE unordered fit object, BOTH ordered slots ==")
+    #  RAKE M44(c): synthesized on a temp tree, identical from any cwd.
+    #
+    #  THE FACT THIS FIXTURE IS ABOUT. A semi-orthogonal Procrustes fit is an
+    #  object of the UNORDERED pair. The 2026-08-04 wave banked 120 objects
+    #  under the canonical direction against 240 ORDERED frozen slots, and the
+    #  first §8.3 run scored 120/240 because the resolver probed only the
+    #  slot's own ordering. Both slots must come out of the ONE object, in
+    #  their OWN directions, with DIFFERENT values.
+    #
+    #  THE FIXTURE, AND WHY fwd ≠ rev BY CONSTRUCTION. d = 4, k = 2, and the
+    #  map is deliberately NOT symmetric:
+    #
+    #      va = [e1, e2]     vb = [e3, e4]     Ω = [[0, 1], [-1, 0]]
+    #      src_norm = 2.0    tgt_norm = 5.0    scale = 0.5   (all cancel in cos)
+    #
+    #      v_A = (0.8, 0, 0.6, 0)      a := va·v_A = (0.8, 0.0)   ‖a‖ = 0.8
+    #      v_B = (√.75, 0, 0.3, 0.4)   b := vb·v_B = (0.3, 0.4)   ‖b‖ = 0.5
+    #
+    #  For a proc map both directions share ONE numerator N = aᵀ Ω b and differ
+    #  only in which projection normalizes it (the §5.5 identity, ledger
+    #  2026-07-27: â_rev/â_fwd = ‖va·v_src‖/‖vb·v_tgt‖ = ceil_src/ceil_tgt):
+    #
+    #      a Ω = (0.8, 0) @ [[0,1],[-1,0]] = (0, 0.8)
+    #      N   = (0, 0.8) · (0.3, 0.4) = 0.32
+    #      â_fwd(A→B) = N / (‖a‖ · ‖v_B‖) = 0.32 / 0.8 = +0.40   EXACT
+    #      â_rev(B→A) = N / (‖b‖ · ‖v_A‖) = 0.32 / 0.5 = +0.64   EXACT
+    #      ratio 0.64 / 0.40 = 1.60 == ‖a‖/‖b‖ = 0.8/0.5         EXACT
+    #
+    #  A DIRECTION BUG CANNOT HIDE HERE. Every plausible way to get the reverse
+    #  slot wrong lands on 0.0, not on 0.64 — because va and vb span DISJOINT
+    #  coordinates, so a vector pushed through the wrong side of the map ends
+    #  up orthogonal to the vector it is compared against:
+    #      reverse slot read 'fwd'                 → cos = 0.0
+    #      forward slot read 'rev'                 → cos = 0.0
+    #      reverse slot with the arguments swapped → cos = 0.0
+    #  and 0.0 is OUT of both filed bands, so even the VERDICTS are
+    #  direction-sensitive, not only the numbers.
+    #
+    #  Slot 3 (C→D) has NO fit object in EITHER direction: the reverse probe
+    #  must ADD resolutions, never invent one.
+    with _tmp30.TemporaryDirectory(prefix="composed_v3rev_") as td37:
+        fx37 = Path(td37)
+        pairs37, vectors37 = fx37 / "pairs", fx37 / "vectors"
+        va37 = np.array([[1.0, 0, 0, 0], [0, 1.0, 0, 0]])
+        vb37 = np.array([[0, 0, 1.0, 0], [0, 0, 0, 1.0]])
+        omega37 = np.array([[0.0, 1.0], [-1.0, 0.0]])
+        v_a37 = np.array([0.8, 0.0, 0.6, 0.0])
+        v_b37 = np.array([float(np.sqrt(0.75)), 0.0, 0.3, 0.4])
+        sites37 = {"revA": 21, "revB": 22, "revC": 23, "revD": 24}
+
+        def _plant37(model: str, vec: np.ndarray) -> None:
+            out = vectors37 / model
+            out.mkdir(parents=True, exist_ok=True)
+            site = sites37[model]
+            np.savez(out / f"entropy_gradient_{model}_L{site}.npz",
+                     **{f"entropy_gradient_L{site}": vec})
+
+        for model37, vec37 in (("revA", v_a37), ("revB", v_b37),
+                               ("revC", v_a37), ("revD", v_b37)):
+            _plant37(model37, vec37)
+
+        #  THE ONE OBJECT. Banked under the CANONICAL direction only — revA→revB
+        #  — exactly as the wave banks the lower-ordinal slot's endpoints.
+        fitdir37 = pairs37 / "revAL21__revBL22__native"
+        fitdir37.mkdir(parents=True, exist_ok=True)
+        fit37 = (fitdir37
+                 / f"fit_revAL21__revBL22_native_{FAMILY_OF_RECORD_WEBTEXT_V3}"
+                   f".npz")
+        np.savez_compressed(fit37, kind=np.array("proc"),
+                            src_norm=np.array(2.0), tgt_norm=np.array(5.0),
+                            scale=np.array(0.5), va=va37, vb=vb37,
+                            omega=omega37)
+
+        #  (a) THE HAND-COMPUTED VALUES, straight through the estimand of
+        #      record — before any lane machinery is involved.
+        tm37 = load_transport_map(fit37)
+        u_a37, u_b37 = unit(v_a37), unit(v_b37)
+        direct_fwd37 = exchange_rate(tm37, u_a37, u_b37, direction="fwd")
+        direct_rev37 = exchange_rate(tm37, u_b37, u_a37, direction="rev")
+        check(abs(direct_fwd37 - 0.40) < 1e-12
+              and abs(direct_rev37 - 0.64) < 1e-12,
+              f"the planted object reads +0.40 forward and +0.64 reverse out of "
+              f"ONE file, hand-computed (got {direct_fwd37:+.12f} / "
+              f"{direct_rev37:+.12f}) — the §5.5 asymmetry enactment's "
+              f"construction: exchange_rate(tm, v_src, v_tgt, direction=…), the "
+              f"SLOT's argument order in both directions")
+        check(abs(direct_rev37 / direct_fwd37 - 1.6) < 1e-12,
+              f"and their ratio is exactly ‖va·v_A‖/‖vb·v_B‖ = 0.8/0.5 = 1.60 — "
+              f"the §5.5 identity (ledger 2026-07-27: â_rev/â_fwd = "
+              f"ceil_source/ceil_target for any proc fit), so fwd ≠ rev is a "
+              f"property of the fixture and not of round-off")
+        #  The two distinct ways to get direction wrong. (Passing the reverse
+        #  slot's vectors in the WRONG ORDER under 'rev' is the second call
+        #  literally — v_A first, v_B second — so it is covered by it.)
+        wrong37 = [exchange_rate(tm37, u_b37, u_a37, direction="fwd"),
+                   exchange_rate(tm37, u_a37, u_b37, direction="rev")]
+        check(all(abs(w) < 1e-12 for w in wrong37),
+              f"every wrong-direction reading of this fixture is 0.0 "
+              f"({', '.join(f'{w:+.1e}' for w in wrong37)}) — va and vb span "
+              f"DISJOINT coordinates, so a direction bug lands orthogonal and "
+              f"cannot pass for either +0.40 or +0.64")
+
+        def _column37(filed: float) -> dict[str, Any]:
+            return {
+                "hub": "8b", "hub_site": 16, "of_record": True,
+                "status": "FILED", "a_comp": filed, "filed_a_comp": filed,
+                "band_primary": [round(filed - V3_BAND_PRIMARY_HALF_WIDTH, 4),
+                                 round(filed + V3_BAND_PRIMARY_HALF_WIDTH, 4)],
+                "band_co_primary": [
+                    round(filed - V3_BAND_CO_PRIMARY_HALF_WIDTH, 4),
+                    round(filed + V3_BAND_CO_PRIMARY_HALF_WIDTH, 4)],
+                "magnitude_only": bool(abs(filed) < NEAR_ZERO_CARVE_OUT),
+                "hub_leg_source": None, "hub_leg_target": None,
+                "hub_side_dim": 2, "hub_basis_max_dev": 0.0,
+                "ceiling_target_hub_map": 1.0, "blocker": None, "probed": []}
+
+        #  (ordinal, source, target, filed â_comp). Slot 1 IS the canonical
+        #  direction; slot 2 is its opposing slot and has no directory of its
+        #  own; slot 3 has no object at all.
+        plan37 = [(1, "revA", "revB", 0.4000),
+                  (2, "revB", "revA", 0.6400),
+                  (3, "revC", "revD", 0.4000)]
+        slots37: list[dict[str, Any]] = []
+        for ord37, src37, tgt37, filed37 in plan37:
+            s_site37, t_site37 = sites37[src37], sites37[tgt37]
+            slots37.append({
+                "ordinal": ord37,
+                "prediction_id": f"v3-prediction/{src37}→{tgt37}/native-k256",
+                "pair_id": f"{src37}L{s_site37}->{tgt37}L{t_site37}",
+                "source_model": src37, "source_site": s_site37,
+                "target_model": tgt37, "target_site": t_site37,
+                "arm": "native", "arm_rule": "synthetic fixture",
+                "family": FAMILY_OF_RECORD_WEBTEXT_V3,
+                "pair_class": "instruct↔instruct", "status": "FILED",
+                "blocker": None,
+                "source_vector": (f"staging/webtext-v3-vectors/vectors/{src37}"
+                                  f"/entropy_gradient_{src37}_L{s_site37}.npz"),
+                "target_vector": (f"staging/webtext-v3-vectors/vectors/{tgt37}"
+                                  f"/entropy_gradient_{tgt37}_L{t_site37}.npz"),
+                "columns": {"8b": _column37(filed37)}})
+
+        doc37 = {
+            "artifact": SCHEMA_V3_PREDICTION_ARTIFACT_V1,
+            "frozen_ref": "SYNTHETIC FIXTURE — not the frozen artifact",
+            "adjudication": "NONE",
+            "self_description": {"corpus_manifest_sha256": "f" * 64,
+                                 "splits_sha256": "e" * 64,
+                                 "rank_of_record": FAMILY_OF_RECORD_WEBTEXT_V3,
+                                 "omp_num_threads": 8},
+            "bands": {}, "models": [], "count_arithmetic": {},
+            "frozen_count_N": len(slots37), "slots": slots37,
+            "hub_columns": [{"hub": "8b", "hub_site": 16, "of_record": True,
+                             "role": "x"}],
+            "extension_sub_line": {"gate": "synthetic", "slots": [],
+                                   "never_before_observed_core_members": []},
+            "column_summary": [], "flags": []}
+        art37 = fx37 / "PREDICTIONS-webtext-v3-2026-08-04.json"
+        art37.write_text(json.dumps(doc37, indent=1))
+        (fx37 / V3_STAMP_FILENAME).write_text(json.dumps({
+            "stamp": V3_STAMP_TEXT, "sealed_utc": "2026-08-04T11:07:20Z",
+            "artifact": art37.name, "artifact_sha256": sha256_of(art37),
+            "prereg": "SYNTHETIC", "frozen_count_N": len(slots37),
+            "fully_filed": len(slots37)}, indent=1))
+
+        #  (b) RESOLUTION ONLY — the assertion mode. No â, no record, no score.
+        artifact37, verify37 = load_v3_prediction_artifact(art37)
+        res37 = resolve_v3_pair_fits(artifact37, pairs37)
+        check(res37.n_resolved == 2 and res37.n_resolved_fwd == 1
+              and res37.n_resolved_rev == 1 and res37.n_unresolved == 1
+              and res37.all_resolvable is False,
+              f"resolution-only counts {res37.n_resolved}/"
+              f"{res37.frozen_count_N} resolvable ({res37.n_resolved_fwd} fwd, "
+              f"{res37.n_resolved_rev} rev) with the one genuinely unfit slot "
+              f"still unresolved — the reverse probe ADDS resolutions and "
+              f"invents none")
+        check(res37.rows[0].resolved == res37.rows[1].resolved == str(fit37)
+              and res37.rows[0].direction == "fwd"
+              and res37.rows[1].direction == "rev"
+              and res37.rows[0].fit_pair_id == res37.rows[1].fit_pair_id
+              == "revAL21->revBL22",
+              "and both opposing slots resolve to the SAME file, naming the "
+              "fit object's own canonical ordering — the identity a scored "
+              "record must carry when one object serves two slots")
+
+        #  (c) THE SCORED RECORD: both slots scored, values hand-computed.
+        scored37 = score_v3_artifact(artifact37, verify37, pairs37, vectors37)
+        fwd37, rev37, gap37 = scored37.slots
+        check(scored37.n_slots_scored == 2
+              and scored37.n_slots_unscored_no_fit == 1
+              and scored37.n_slots_direction_fwd == 1
+              and scored37.n_slots_direction_rev == 1,
+              f"the §8.3 lane scores {scored37.n_slots_scored}/"
+              f"{scored37.frozen_count_N} — 1 forward + 1 reverse out of ONE "
+              f"banked object. The pre-fix lane scored the forward slot only "
+              f"(the first real run: 120/240, every miss a reverse direction)")
+        check(abs(float(fwd37.observed) - 0.40) < 1e-12
+              and fwd37.observed_direction == "fwd"
+              and abs(float(rev37.observed) - 0.64) < 1e-12
+              and rev37.observed_direction == "rev",
+              f"â_obs is the HAND-COMPUTED pair: forward {fwd37.observed:+.12f} "
+              f"== +0.40, reverse {rev37.observed:+.12f} == +0.64. They differ, "
+              f"so a lane that read the reverse slot forward would fail here "
+              f"with 0.0")
+        check(fwd37.observed_source == rev37.observed_source == str(fit37)
+              and fwd37.observed_fit_pair_id == rev37.observed_fit_pair_id
+              == "revAL21->revBL22"
+              and any("REVERSE-DIRECTION READING" in n for n in rev37.notes),
+              "both scored slots name the SAME fit object and their own "
+              "direction, and the reverse slot carries the note saying which "
+              "object it came out of — provenance per slot, never implied")
+        col_fwd37 = fwd37.columns[0]
+        col_rev37 = rev37.columns[0]
+        check(col_fwd37.verdict_primary == "in-band"
+              and col_fwd37.verdict_co_primary == "in-band"
+              and col_rev37.verdict_primary == "in-band"
+              and col_rev37.verdict_co_primary == "in-band"
+              and abs(float(col_rev37.error)) < 1e-12,
+              "and BOTH slots' verdicts are in-band at both bands against "
+              "their own filed values (+.40 / +.64) — the wrong direction "
+              "would read 0.0 and land out-of-band-low in both, so the verdict "
+              "is direction-sensitive too, not only the number")
+        check(gap37.observed is None
+              and gap37.observed_direction is None
+              and gap37.columns[0].verdict_primary == "UNSCORED-NO-FIT"
+              and any("IN EITHER DIRECTION" in n for n in gap37.notes),
+              "the slot with no object in either direction stays "
+              "UNSCORED-NO-FIT in the frozen denominator, and says that both "
+              "orderings were probed")
+
     print(f"\nselftest: {len(failures)} failure(s)")
     return 1 if failures else 0
 
@@ -11702,6 +12153,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                          f"the pair-fit wave runs there is nothing to score, "
                          f"and a 0% rate that means 'the disk is empty' reads "
                          f"identically to one that means 'transport failed'.")
+    ap.add_argument("--resolution-only", action="store_true",
+                    help="with --score-v3: RESOLVE each frozen slot's direct "
+                         "pair fit and report the counts (resolved / forward / "
+                         "reverse / unresolved), then STOP. No vector is "
+                         "loaded, no transport map is read, no â_obs is "
+                         "computed, no column is scored and no record is "
+                         "written — scoring is a DESK act, and this mode "
+                         "exists so the resolution surface can be asserted "
+                         "against real data without performing it. Exits "
+                         "nonzero if any frozen slot is unresolvable.")
     ap.add_argument("--v3-vectors-root", type=Path, default=None,
                     help=f"the webtext-v3 entropy-gradient wave (default: "
                          f"<--v3-root>/{V3_VECTORS_STEM}). Each slot's vectors "
@@ -11968,6 +12429,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                         ("--scored-v3-out", args.scored_v3_out)):
         if value is not None and args.score_v3 is None:
             ap.error(f"{flag} only means anything with --score-v3.")
+    if args.resolution_only and args.score_v3 is None:
+        ap.error(
+            "--resolution-only only means anything with --score-v3: it is that "
+            "lane's path-resolution half, run without its scoring half.")
+    if args.resolution_only and args.scored_v3_out is not None:
+        ap.error(
+            "--resolution-only writes NO scored record, so --scored-v3-out has "
+            "nothing to name. Drop one of the two: the whole point of the mode "
+            "is that it stops before scoring.")
     if args.filed_paths_allow_unpinned and args.filed_paths is None:
         ap.error(
             "--filed-paths-allow-unpinned only means anything with "
@@ -12575,6 +13045,35 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(f"  sealed {verification.stamp_sealed_utc} · N="
               f"{verification.frozen_count_N} · {verification.fully_filed} "
               f"fully filed · prereg {verification.prereg}")
+        if args.resolution_only:
+            #  THE RESOLUTION HALF, ALONE. Nothing below this block runs: no
+            #  vector is opened, no map is loaded, no â_obs exists. The mode is
+            #  an assertion about the FILE SURFACE against real data, and
+            #  scoring real data is the desk's act, not a side effect of a check.
+            try:
+                resolution = resolve_v3_pair_fits(artifact, pairs_root)
+            except PairFitsAbsentError as exc:
+                print(f"\nPAIR-FITS HALT — {exc}")
+                return 1
+            print(f"\nPAIR-FIT RESOLUTION ONLY — no â_obs computed, no column "
+                  f"scored, no record written")
+            print(f"  pair-fits root: {resolution.pair_fits_root}")
+            print(f"  {resolution.n_resolved}/{resolution.frozen_count_N} "
+                  f"frozen slots resolvable "
+                  f"({resolution.n_resolved_fwd} forward, "
+                  f"{resolution.n_resolved_rev} reverse through the opposite "
+                  f"ordering's object) · {resolution.n_unresolved} unresolvable")
+            for row in resolution.rows:
+                if row.resolved is None:
+                    print(f"  UNRESOLVED {row.pair_id} [{row.arm}/{row.family}] "
+                          f"— probed: {', '.join(row.probed_paths)}")
+            if not resolution.all_resolvable:
+                print(f"\nRESOLUTION INCOMPLETE — {resolution.n_unresolved} "
+                      f"frozen slot(s) have no fit object in EITHER direction")
+                return 1
+            print(f"\nALL {resolution.frozen_count_N} FROZEN SLOTS RESOLVABLE. "
+                  f"Scoring is the desk's act and was NOT performed.")
+            return 0
         try:
             scored_v3 = score_v3_artifact(artifact, verification, pairs_root,
                                           vectors_root)
@@ -12586,7 +13085,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         except (ScoringError, V3ArtifactError) as exc:
             print(f"\nSCORING HALT — {exc}")
             return 1
-        print(f"\n{'slot':52s} {'arm':6s} {'â_obs':>9s}  "
+        print(f"\n{'slot':52s} {'arm':6s} {'â_obs':>9s} {'dir':>4s}  "
               + " ".join(f"{column.hub[:11]:>11s}"
                          for column in scored_v3.hub_columns))
         for row in scored_v3.slots:
@@ -12601,7 +13100,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     marks.append(f"{mark + tight:>11s}")
             print(f"{row.pair_id[:52]:52s} {row.arm:6s} "
                   + (f"{row.observed:+9.6f}" if row.observed is not None
-                     else f"{'—':>9s}") + "  " + " ".join(marks))
+                     else f"{'—':>9s}")
+                  + f" {(row.observed_direction or '—'):>4s}"
+                  + "  " + " ".join(marks))
         print(f"\n{'hub column':24s} {'of-rec':>6s} {'G-comp-v3':>18s} "
               f"{'G-tight':>18s} {'G-extension':>18s}  both-core")
         for gate in scored_v3.gates:
@@ -12632,6 +13133,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
               f"{scored_v3.frozen_count_N} slots "
               f"({scored_v3.n_slots_unscored_no_fit} with no direct pair fit) "
               f"× {len(scored_v3.gates)} hub column(s)")
+        print(f"  direction census: {scored_v3.n_slots_direction_fwd} forward · "
+              f"{scored_v3.n_slots_direction_rev} reverse (one unordered fit "
+              f"object serves both directions; each slot names its object and "
+              f"its direction)")
         for flag in scored_v3.flags:
             print(f"  FLAG: {flag}")
         for warning in scored_v3.warnings:
