@@ -871,9 +871,149 @@ BEHAVIORAL_TIER: tuple[RosterNode, ...] = (
               "as always and is never hardcoded here."),
 )
 
+# The webtext-v3 BASE SIBLINGS (2026-08-03): the two base checkpoints the frozen
+# webtext-v3 prereg §5 names in the CORE roster ("the 17 collected star nodes +
+# Qwen2.5-72B-Instruct + Llama-3.1-8B base + Qwen2.5-7B base"). They exist to make
+# the §C4 base-vs-instruct sibling read possible: each is the pretrain parent of a
+# checkpoint already on the roster, so the pair differs in post-training and in
+# nothing else.
+#
+# ⚠ THE `roster_row` NUMBERS ARE REGISTRY BOOKKEEPING, NOT A CITATION, AND THE
+# DESK MAY RENUMBER THEM WITH ONE EDIT. The numbered roster TABLE is the campaign
+# prereg's (rows 1–23); the webtext-v3 prereg names these three adds in PROSE and
+# numbers none of them. `roster_row` is a required field, so a number had to be
+# written: 24/25/26 continue the campaign table in the order §5 lists the adds
+# (Qwen2.5-72B-Instruct · Llama-3.1-8B base · Qwen2.5-7B base), which is why 24 is
+# LEFT FREE here for the 72B. Nothing keys off the number.
+#
+# WHAT A ROW BUYS, AND WHAT IT DOES NOT. It buys exactly one thing, the same one
+# it buys anywhere in this module: SCAN_GRIDS gains the key, so `MODEL_KEYS =
+# SITES ∪ SCAN_GRIDS` accepts it and `collect_mean_states.py --model` will run it.
+# It registers NO site. `fit_transport_maps.SITES` and
+# `read_composed_predictions.SITE_OF_RECORD` stay UNSET for both keys until each
+# has had its site-curve ceremony and Luxia has ruled — sites from curves, never
+# fiat, and the frozen §5 requires exactly that ("Core models without a registered
+# site at freeze receive the site-curve ceremony inside their collection window,
+# registered BEFORE any fit of theirs is quoted").
+#
+# ARMS ARE RAW-ONLY, BY DESK RULING (2026-08-03, ledger block of record) — and
+# note that this is a RULING and not an inference from the checkpoints: llama-base
+# has no chat template and could not run a native arm anyway, but qwen-base SHIPS
+# one, and its presence proves nothing (rake M9: a template on a base checkpoint
+# is a packaging fact, not an identity). The rule comes from the frozen webtext-v3
+# prereg §3.2 instead: "any slot with a base-model endpoint is scored in
+# raw::proc_k256 (the parent's arm rule, inherited)". The raw arm is the arm these
+# nodes are read in, so it is the arm they are collected in — the pythia-6.9b and
+# gpt2-xl precedent, reached here for a different reason.
+#
+# Architecture facts below are the M17(a) SEPARATION EVIDENCE staged 2026-08-03
+# (desk logs `/tmp/claude-output/wtv3-wave1-sibling-arch.log` and
+# `…-sibling-discriminators.log`, cited in the wave-1 collection enactor's
+# report): read from each checkpoint's own config.json on the node, at the pinned
+# revision, in the collection venv. The scan grids are the COMPUTED
+# `scan_grid(num_hidden_layers)` values, read from that evidence rather than
+# re-derived here — and `scan_grid` reproduces both exactly, which is the point of
+# never typing a grid.
+V3_BASE_SIBLINGS: tuple[RosterNode, ...] = (
+    RosterNode(
+        key="llama-3.1-8b-base", model_id="meta-llama/Llama-3.1-8B",
+        roster_row=25, arms=("raw",), num_hidden_layers=32, hidden_size=4096,
+        weights_dirname="Llama-3.1-8B", checkpoint_identity="base",
+        config_sha256="54acfad3cffe057640904ca8a1e83525e6551c70c7a04c641f5a9eda0bbf64bd",
+        max_position_embeddings=131072,
+        notes="WEBTEXT-V3 CORE ADD (frozen prereg §5): the pretrain PARENT of the "
+              "campaign's primary hub `8b` (Llama-3.1-8B-Instruct), which is what "
+              "makes the §C4 sibling read a post-training contrast and not a "
+              "family comparison. PINNED REVISION "
+              "d04e592bb4f6aa9cfee91e2e20afa771667e1d4b — the staging pull of "
+              "2026-08-03 fetched that commit and verified every LFS file's "
+              "sha256 against the hub at it (a two-sided comparison covering 100% "
+              "of weight bytes), with `original/consolidated.00.pth` declared "
+              "EXCLUDED (Meta's original-format copy of the same weights; every "
+              "metabasis instrument reads the safetensors shards + index). "
+              "ARCHITECTURE, read from the checkpoint's own config.json at that "
+              "revision: LlamaForCausalLM, 32 decoder layers, hidden_size 4096, "
+              "32 attention heads / 8 kv heads (GQA 4:1), "
+              "max_position_embeddings 131072, torch_dtype bfloat16. Same depth "
+              "and width as the instruct hub, as a pretrain parent must be. "
+              "IDENTITY (rakes M9/M17(a), verified independently of the dirname, "
+              "and SHOWN to separate rather than assumed to): the confusable "
+              "sibling is the INSTRUCT checkpoint already on the store, and all "
+              "THREE metadata discriminators separate them — config.json "
+              "54acfad3… vs 29e4c210…, generation_config.json e645194d… vs "
+              "189fb0c0…, tokenizer_config.json 8004530f… vs 177c7b61… "
+              "(special_tokens_map.json separates too: 462d9193… vs 6f38c737…). "
+              "The DISCRIMINATOR OF RECORD IS THE CONFIG SHA, the others are "
+              "corroborators. CHAT TEMPLATE: ABSENT — this checkpoint has none, "
+              "so the native arm does not exist for it at all. "
+              "ARMS RAW-ONLY (desk ruling 2026-08-03) — see the group header: the "
+              "ruling rests on frozen §3.2's base-endpoint scoring rule, not on "
+              "the absent template, which is why it reads identically on the qwen "
+              "sibling that HAS one. "
+              "SCAN GRID: 32 layers, so the computed 12-site [0.15,0.85] grid is "
+              "(5,7,9,11,13,15,17,19,21,23,25,27) — DERIVED by `scan_grid`, never "
+              "typed, and identical to the value the staged evidence log "
+              "computed. No ruled extension. "
+              "NO SITE IS REGISTERED: `fit_transport_maps.SITES` and "
+              "`read_composed_predictions.SITE_OF_RECORD` stay UNSET until the "
+              "site-curve ceremony runs and Luxia rules on it. "
+              "WEIGHTS: the metabasis-owned v3 roster tree on the RAID (standing "
+              "placement ruling 2026-07-29), a plain directory named by "
+              "`weights_dirname`; the full path is passed via --model-path and is "
+              "never hardcoded here. A pre-existing `llama-3.1-8b-base` tree on "
+              "the same node is byte-identical (same 16 sha256s, already this "
+              "revision); the duplicate was staged deliberately so the v3 tree is "
+              "self-describing, and collapsing it is a desk/Luxia call."),
+    RosterNode(
+        key="qwen2.5-7b-base", model_id="Qwen/Qwen2.5-7B",
+        roster_row=26, arms=("raw",), num_hidden_layers=28, hidden_size=3584,
+        weights_dirname="Qwen2.5-7B", checkpoint_identity="base",
+        config_sha256="267ce68584c5f24c3b267d934db2de68dd21d1ca677fb78ed809eb60067f7642",
+        max_position_embeddings=131072,
+        notes="WEBTEXT-V3 CORE ADD (frozen prereg §5): the pretrain PARENT of the "
+              "carried banked node `qwen-7b` (Qwen2.5-7B-Instruct), the second "
+              "sibling pair of the §C4 base-vs-instruct read. PINNED REVISION "
+              "d149729398750b98c0af14eb82c78cfe92750796, staged and sha-certified "
+              "2026-08-03 the same way as its Llama counterpart (every LFS file's "
+              "sha256 compared two-sidedly against the hub at that commit; "
+              "nothing excluded from this repo). "
+              "ARCHITECTURE, read from the checkpoint's own config.json at that "
+              "revision: Qwen2ForCausalLM, 28 decoder layers, hidden_size 3584, "
+              "28 attention heads / 4 kv heads (GQA 7:1), "
+              "max_position_embeddings 131072, torch_dtype bfloat16. "
+              "IDENTITY (rakes M9/M17(a)) — THE DISCRIMINATOR OF RECORD IS THE "
+              "CONFIG SHA, shown to separate: config.json 267ce685… on this base "
+              "checkpoint against 7463bb0e… on the Qwen2.5-7B-Instruct sibling "
+              "resident on the shared store. Corroborators: generation_config.json "
+              "8c970692… vs 3a8f9087…, tokenizer_config.json c91efca1… vs "
+              "5b5d4f65…. ⚠ ONE DISCRIMINATOR IS DEGENERATE HERE AND IS RECORDED "
+              "AS SUCH: special_tokens_map.json is ABSENT FROM BOTH trees, so it "
+              "separates nothing on this lineage — the mixtral/gemma lesson (M17: "
+              "the discriminator is CHOSEN PER LINEAGE and shown, never reused by "
+              "reflex) reached for a third time. "
+              "⚠ THIS CHECKPOINT SHIPS A CHAT TEMPLATE, AND IT IS NOT EVIDENCE OF "
+              "ANYTHING (rake M9): a base checkpoint carrying a template is a "
+              "packaging fact. Template PRESENCE is therefore not used to tell "
+              "this checkpoint from its instruct sibling, and it does NOT open a "
+              "native arm here — arms are raw-only by the 2026-08-03 desk ruling, "
+              "which rests on frozen §3.2's base-endpoint scoring rule. This row "
+              "is the reason that ruling had to be stated in prereg terms rather "
+              "than read off the checkpoints. "
+              "SCAN GRID: 28 layers, so the computed 12-site [0.15,0.85] grid is "
+              "(4,6,8,10,11,13,15,17,18,20,22,24) — DERIVED by `scan_grid`, never "
+              "typed, and identical to the value the staged evidence log "
+              "computed. Note the DEDUPE-FREE 12 despite the shallow stack. No "
+              "ruled extension. "
+              "NO SITE IS REGISTERED: SITES and SITE_OF_RECORD stay UNSET until "
+              "the site-curve ceremony runs and Luxia rules. "
+              "WEIGHTS: the metabasis-owned v3 roster tree on the RAID, flat "
+              "directory layout, 4 shards, index-complete; the full path is "
+              "passed via --model-path and is never hardcoded here."),
+)
+
 ROSTER: dict[str, RosterNode] = {
     n.key: n for n in WAVE1 + HUB_RUNGS_2 + MOE_CHAT + BIG_CHAIN_SINGLE_CARD
-    + BIG_CHAIN_MULTICARD + CARRIED_BANKED + BEHAVIORAL_TIER}
+    + BIG_CHAIN_MULTICARD + CARRIED_BANKED + BEHAVIORAL_TIER + V3_BASE_SIBLINGS}
 
 #: model key -> the grid it was actually collected and curve-scanned on. This is
 #: what `--sites` should carry for a scan collection, and what `--tgt-sites`
