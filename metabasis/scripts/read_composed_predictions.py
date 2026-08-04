@@ -259,6 +259,56 @@ records compared on NUMBERS AND SLOT IDENTITIES ONLY, timestamps and prose
 excluded by construction, tolerance exactly 0.0. The desk's words are the desk's;
 every number in a filed record must come back out of the tool unchanged.
 
+────────────────────────────────────────────────────────────────────────────────
+THE WEBTEXT-V3 LANE — FIVE HUB COLUMNS, A THIRD VINTAGE, AND §8's SCORING ACT
+────────────────────────────────────────────────────────────────────────────────
+Everything above is the corpus-v2.1 lane and is UNCHANGED BY CONSTRUCTION: with
+no `--basis` (or `--basis corpus-v2.1`) every default in this module is the one
+it always had, and selftest 31 proves the resolution surface path-by-path in
+both rake-M44 configurations.
+
+The frozen webtext-v3 §8 ceremony needs five things this module assumed away,
+and each is now a REGISTRY with the same discipline (a lookup, never a probe;
+an unregistered key REFUSES rather than resolving against a neighbour):
+
+  1. **The hub is a parameter.** §8 step 2 files "the of-record column through
+     the 8b incumbent … all four other race hubs' composed columns filed
+     simultaneously, identically banded", so `HUB_SITES` registers §7's five
+     race hubs and `hub_scope` / the `hub=` arguments select one. Default: the
+     incumbent. An unregistered hub is `UnknownHubError` — a fallback would
+     file the incumbent's number in a candidate's column, which is exactly the
+     post-hoc selection "predictions do not get to pick the winning hub" bars.
+  2. **The family of record is per basis.** `read_exchange_rates.FAMILIES` is
+     the v2.1 enumeration and carries no `proc_k256`; §3.2 makes proc_k256 the
+     v3 family of record. `FAMILIES_ALL` adds it BESIDE that tuple (which is
+     not edited — it is the v2.1 lane's own of-record surface) and `--family`
+     defaults to the BASIS's family rather than to a constant.
+  3. **The v3 root is its own lane.** `--v21-root` is sha-pinned to
+     `CORPUS_SHA_V21` and refuses a v3 root BY CONSTRUCTION, which is correct
+     and stays. `--v3-root` is the same machinery at `CORPUS_SHA_WEBTEXT_V3`:
+     one operator-named root, its vintage PROVED at set time, the wave's stems
+     fixed, `webtext-v3` a first-class `CorpusProvenance` so a mixed resolution
+     is flagged rather than averaged over. The two roots refuse each other at
+     both doors.
+  4. **The prediction id names its rank per basis.** corpus-v2.1 keeps the
+     FROZEN `-k128` literal (every banked record's ids read that way, and a
+     record's ids are its slot identities); webtext-v3 reads the rank off the
+     family, which is §8's own shape `v3-prediction/<src>→<tgt>/<arm>-k<rank>`.
+  5. **The hub-vector registry is per basis AND per hub.** It was already
+     one-path-per-basis (rake M12 at basis grain); `stem_for`/`path_for` extend
+     that to the five hub columns without moving the incumbent's path.
+
+`--basis webtext-v3 --score-v3 <sealed artifact>` is §8 STEP 3. It verifies the
+desk's stamp before parsing a prediction (§8 step 2 binds the lane to refuse
+unstamped), loads the sealed 240-slot list as the denominator — recomputing NO
+â_comp, because the seal exists precisely so a scorer cannot move a prediction
+— computes â_obs per slot from the DIRECT pair fits, scores every hub column at
+BOTH bands with the near-zero carve-out, and emits the gate arithmetic
+(G-comp-v3, G-comp-v3-tight, G-extension, §8's branch structure). An absent
+pair-fit tree is a CLEAN REFUSAL, which is the ordinary state while the wave
+runs. **DESCRIPTIVE EMISSION ONLY** — the arithmetic of a threshold is
+computation; the verdict it carries is the desk's.
+
 Run (repo root, PYTHONPATH=.):
   python -m metabasis.scripts.read_composed_predictions --selftest
   python -m metabasis.scripts.read_composed_predictions --gate
@@ -295,6 +345,11 @@ Run (repo root, PYTHONPATH=.):
       [--alpha-companion /tmp/claude-output/constant-alpha-<batch>.json]
   python -m metabasis.scripts.read_composed_predictions \
       --manifest-audit manifests outputs staging      # rake M42, exits nonzero
+  python -m metabasis.scripts.read_composed_predictions \
+      --basis webtext-v3 [--v3-root staging] \
+      --score-v3 staging/webtext-v3-predictions/PREDICTIONS-webtext-v3-<date>.json \
+      [--stamp <desk stamp>.json] [--pair-fits-root <pair fits>] \
+      [--scored-v3-out /tmp/claude-output/scored-webtext-v3.json]
 """
 from __future__ import annotations
 
@@ -320,8 +375,8 @@ from metabasis.scripts.fit_transport_maps import (
 from metabasis.scripts.read_ahat_ceilings import image_basis, projection_norm
 from metabasis.scripts.read_exchange_rates import (
     BANK_ROOT, COLLECTION_ROOT, FAMILIES, FAMILY_OF_RECORD, HUB_MODEL,
-    NEAR_ZERO_CARVE_OUT, VectorSpec, cos, fit_path_for, load_entropy_gradient,
-    unit)
+    NEAR_ZERO_CARVE_OUT, VectorSpec, cos, exchange_rate, fit_path_for,
+    load_entropy_gradient, unit)
 from metabasis.threads import stamp_thread_config, thread_count_mismatch
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -361,21 +416,59 @@ HubVectorBasis = Literal["corpus-v2.1", "webtext-v3"]
 WEBTEXT_V3_ARM_ROOT = Path("staging/webtext-v3-vectors")
 
 
-class HubVectorEntry(BaseModel):
-    """ONE basis's hub vector: the root it lives under and the stem beneath it.
+#: HOW A WAVE LAYS ITS VECTOR TREE OUT. The two banked conventions, named
+#: rather than spelled twice: v2.1 banks `<model>/vectors/<file>`, the
+#: webtext-v3 wave banks `vectors/<model>/<file>`. Both are real and both are
+#: recorded — the inversion is the wave's identity, not a mistake in either.
+HubVectorLayout = Literal["model-dir-then-vectors", "vectors-then-model-dir"]
 
-    Frozen, and `path` is a derived property rather than a stored field, so a
-    root override can never leave a stale absolute path behind it.
+
+class HubVectorEntry(BaseModel):
+    """ONE basis's hub vector: the root it lives under and the LAYOUT beneath it.
+
+    Frozen, and every path is a derived property rather than a stored field, so
+    a root override can never leave a stale absolute path behind it.
+
+    PER BASIS **AND PER HUB** (webtext-v3 §8 filing lane). The registry was
+    already one-path-per-basis (rake M12 at basis grain); what §8 needs beside
+    that is FIVE hub columns, so the entry now derives its stem from (hub,
+    hub_site) instead of closing over the single hub of record. `stem`/`path`
+    keep their historical meaning — the module's hub of record, 8bL16 — so
+    `HUB_VECTOR_PATH` and every existing caller resolve byte-identically; the
+    other four race hubs are reached through `stem_for`/`path_for`, which are
+    the SAME lookup at a different key and are still never a probe.
     """
     model_config = {"frozen": True, "arbitrary_types_allowed": True}
 
     basis: HubVectorBasis
     root: Path
-    stem: Path = Field(
-        description="the path BENEATH the root — the wave's own layout, which "
-                    "differs per basis (v2.1 banks <model>/vectors/…, the "
-                    "webtext-v3 wave banks vectors/<model>/…)")
+    layout: HubVectorLayout = Field(
+        description="the wave's own tree shape beneath the root — which differs "
+                    "per basis (v2.1 banks <model>/vectors/…, the webtext-v3 "
+                    "wave banks vectors/<model>/…)")
+    filename_suffix: str = Field(
+        default="",
+        description="what the wave appends to `entropy_gradient_<hub>_L<site>` "
+                    "before `.npz`. v2.1's deconfounded L16 column carries "
+                    "`rebuild`; the webtext-v3 wave carries nothing. VERIFIED "
+                    "against the banked artifacts, never inferred from the "
+                    "other basis's convention")
     note: str = ""
+
+    def stem_for(self, hub: str, hub_site: int) -> Path:
+        """THE one path beneath the root for `hub` at `hub_site`. A lookup."""
+        leaf = f"entropy_gradient_{hub}_L{hub_site}{self.filename_suffix}.npz"
+        if self.layout == "model-dir-then-vectors":
+            return Path(hub) / "vectors" / leaf
+        return Path("vectors") / hub / leaf
+
+    def path_for(self, hub: str, hub_site: int) -> Path:
+        return self.root / self.stem_for(hub, hub_site)
+
+    @property
+    def stem(self) -> Path:
+        """The HUB OF RECORD's stem — the historical single-hub surface."""
+        return self.stem_for(HUB_MODEL, HUB_SITE_OF_RECORD)
 
     @property
     def path(self) -> Path:
@@ -387,15 +480,13 @@ class HubVectorEntry(BaseModel):
 HUB_VECTOR_BASES: dict[str, HubVectorEntry] = {
     "corpus-v2.1": HubVectorEntry(
         basis="corpus-v2.1", root=COLLECTION_ROOT,
-        stem=(Path(HUB_MODEL) / "vectors"
-              / f"entropy_gradient_{HUB_MODEL}_L{HUB_SITE_OF_RECORD}rebuild.npz"),
+        layout="model-dir-then-vectors", filename_suffix="rebuild",
         note="Addendum G §G1's go-forward collection basis; the `rebuild` stem "
              "is the deconfounded L16 column banked BESIDE the legacy "
              "entropy_gradient_8b.npz, which is a different column"),
     "webtext-v3": HubVectorEntry(
         basis="webtext-v3", root=WEBTEXT_V3_ARM_ROOT,
-        stem=(Path("vectors") / HUB_MODEL
-              / f"entropy_gradient_{HUB_MODEL}_L{HUB_SITE_OF_RECORD}.npz"),
+        layout="vectors-then-model-dir", filename_suffix="",
         note="the 2026-08-04 vector rebuild wave (20/20 EGVs built + FD-gated "
              "on webtext-v3), at the wave's uniform stem. Filename VERIFIED "
              "against the banked artifact, not inferred from the v2.1 "
@@ -435,6 +526,29 @@ COMPANION_IDENTITY_TOLERANCE = 1e-8
 CORPUS_SHA_V21 = "5ae355bc5d130f8e9c3ae426f5e71bf2b6e99c74b95369a874bec2abcd59b5d9"
 #: Where a v2.1 re-bank root keeps the manifest whose sha pins its vintage.
 V21_CORPUS_MANIFEST_RELPATH = Path("corpus") / "corpus_manifest.json"
+
+#: WEBTEXT-V3 manifest sha — the FROZEN corpus of record for the v3 basis
+#: (`freeze/webtext-v3`: 1,200 texts, 4 strata, pre-LLM-era pins). SAME
+#: DISCIPLINE AS `CORPUS_SHA_V21` AND FOR THE SAME REASON (rake M26): named
+#: with its vintage so a version sweep SEES it, and checked by value at set
+#: time so a root can never be taken on the operator's word.
+CORPUS_SHA_WEBTEXT_V3 = (
+    "b85f4d169ed0cb882a5690e3509308a5807e056b6a491f908014aee8e7b6085f")
+#: Where a webtext-v3 root keeps the manifest whose sha pins its vintage. The
+#: v3 wave's trees are SIBLINGS under one staging root (`webtext-v3-fits/`,
+#: `webtext-v3-vectors/`, `webtext-v3-draft/`), so the root is that parent and
+#: the manifest sits at the draft tree's own stem — VERIFIED against the banked
+#: artifact, not assumed to mirror the v2.1 `corpus/corpus_manifest.json`.
+V3_CORPUS_MANIFEST_RELPATH = Path("webtext-v3-draft") / "corpus_manifest.json"
+#: The v3 wave's stems beneath its root. Each is the WAVE'S IDENTITY and does
+#: not move with the root, exactly as the hub-vector registry's stems do not.
+V3_HUB_LEGS_STEM = Path("webtext-v3-fits") / "hub-legs" / "fits-hub-legs"
+V3_PAIR_FITS_STEM = Path("webtext-v3-fits") / "pairs"
+V3_VECTORS_STEM = Path("webtext-v3-vectors") / "vectors"
+#: The desk-side default root — the staging parent the 2026-08-04 waves landed
+#: under. A DEFAULT, not a constant of record: `--v3-root` relocates it and the
+#: sha gate above decides whether the relocation is the v3 basis.
+WEBTEXT_V3_DEFAULT_ROOT = Path("staging")
 
 #: Prereg §3 / Addendum E §E2: the FROZEN half-width of every scored band, for
 #: both predictors. Never used to move a filed band — only to CHECK that a
@@ -557,6 +671,183 @@ class AlphaCompanionError(ScoringError):
     companion must halt rather than degrade to "absent", because "absent" is
     itself a reportable state — OWED — and the two must never be confused.
     """
+
+
+# ------------------------------------------------------------ the hub registry
+#  ONE HUB WAS AN ASSUMPTION, NOT A LAW. Every composed prediction this module
+#  ever filed went through the primary hub 8bL16, so `HUB_MODEL` /
+#  `HUB_SITE_OF_RECORD` were read straight out of `read_exchange_rates` at the
+#  three places resolution needs them. The frozen webtext-v3 §8 step 2 files
+#  FIVE columns per slot — "the of-record column through the 8b incumbent …
+#  all four other race hubs' composed columns filed simultaneously, identically
+#  banded" — so a single-hub resolver cannot express the ceremony at all.
+#
+#  The generalization is a REGISTRY, on exactly the terms the hub-vector
+#  registry already runs on (rake M12): a lookup, never a probe; an unregistered
+#  hub REFUSES rather than resolving against another hub's legs; and the DEFAULT
+#  is the incumbent, so every existing caller is byte-identical.
+#: §7's race set at its sites of record, plus the incumbent hub. The five keys
+#: are the BANK KEYS of record; §7 spells the set in prose (`llama-3.2-3b` is
+#: the bank key `3b`, `8b` is llama-3.1-8b-instruct) and that mapping is the
+#: registry's — stated here rather than assumed by a substring match.
+HUB_SITES: dict[str, int] = {
+    #  The incumbent. `8b` is deliberately ABSENT from `SITE_OF_RECORD` (it is
+    #  the hub, not a candidate endpoint), so its site lives here and here only.
+    HUB_MODEL: HUB_SITE_OF_RECORD,
+    "qwen2.5-3b-instruct": 26,
+    "qwen2.5-32b-instruct": 46,
+    "3b": 14,
+    "gemma3-27b": 38,
+}
+
+
+class UnknownHubError(ComposedPathError):
+    """A hub nobody registered was asked for.
+
+    RAKE M12 AT HUB GRAIN, and the reason is the §8 ceremony's own: five hub
+    columns are filed simultaneously and identically banded, so a resolver that
+    fell back from an unregistered hub to the incumbent would file the
+    incumbent's number in a candidate's column — the exact post-hoc-selection
+    failure "predictions do not get to pick the winning hub" exists to prevent.
+    """
+
+
+class HubRef(BaseModel):
+    """One hub column's identity: the bank key and its site of record."""
+    model_config = {"frozen": True}
+
+    model: str
+    site: int
+
+    @property
+    def label(self) -> str:
+        return f"{self.model}L{self.site}"
+
+
+def hub_ref(hub: Optional[str] = None, hub_site: Optional[int] = None) -> HubRef:
+    """The `HubRef` for `hub` (default: the ACTIVE hub). Never searches.
+
+    `hub_site` overrides the registered site for a diagnostic read and is
+    echoed by every caller that takes it; the filing path never overrides.
+    """
+    if hub is None and hub_site is None:
+        return ACTIVE_HUB
+    key = ACTIVE_HUB.model if hub is None else str(hub)
+    registered = HUB_SITES.get(key)
+    if registered is None:
+        raise UnknownHubError(
+            f"unknown hub {key!r}. Registered hubs: {sorted(HUB_SITES)}. §8 "
+            f"step 2 files the of-record column and the four other race hubs' "
+            f"columns SIMULTANEOUSLY and identically banded — an unregistered "
+            f"hub is refused rather than resolved against the incumbent's legs, "
+            f"which would file the incumbent's number in a candidate's column")
+    return HubRef(model=key, site=registered if hub_site is None else int(hub_site))
+
+
+#: THE ACTIVE HUB. Module-level for the same reason `V21_ROOT` is: resolution
+#: is reached through call chains with fixed signatures. NEVER set by import —
+#: the default is the incumbent every existing caller already gets, and the v3
+#: filing lane flips it explicitly (`hub_scope`), so there is no silent flip.
+DEFAULT_HUB: HubRef = HubRef(model=HUB_MODEL, site=HUB_SITE_OF_RECORD)
+ACTIVE_HUB: HubRef = DEFAULT_HUB
+
+
+def set_active_hub(hub: Optional[str] = None,
+                   hub_site: Optional[int] = None) -> HubRef:
+    """Make `hub` the active hub column, or restore the incumbent (None)."""
+    global ACTIVE_HUB
+    if hub is None and hub_site is None:
+        ACTIVE_HUB = DEFAULT_HUB
+        return ACTIVE_HUB
+    ACTIVE_HUB = hub_ref(hub, hub_site)
+    logger.info("active hub set: %s", ACTIVE_HUB.label)
+    return ACTIVE_HUB
+
+
+@contextmanager
+def hub_scope(hub: Optional[str] = None,
+              hub_site: Optional[int] = None) -> Iterator[HubRef]:
+    """`set_active_hub` for the duration of a block, restored on any exit."""
+    global ACTIVE_HUB
+    previous = ACTIVE_HUB
+    try:
+        yield set_active_hub(hub, hub_site)
+    finally:
+        ACTIVE_HUB = previous
+
+
+# --------------------------------------------------- the rank/family of record
+#: `read_exchange_rates.FAMILIES` is the v2.1-era enumeration and does not carry
+#: `proc_k256` at all — the webtext-v3 §3.2 family of record. It is NOT edited
+#: there: that tuple is the v2.1 lane's own of-record surface and every module
+#: that reads it must keep resolving exactly what it resolved before. The v3
+#: family is ADDED here, beside it, and the union is what this module's CLI
+#: offers. `FAMILY_OF_RECORD` (proc_k128) stays the default.
+FAMILY_OF_RECORD_WEBTEXT_V3 = "proc_k256"
+#: Every family this module can be asked for, v2.1's first and in its own order
+#: so the CLI's `choices` list is a superset, never a reordering.
+FAMILIES_ALL: tuple[str, ...] = tuple(
+    dict.fromkeys(FAMILIES + (FAMILY_OF_RECORD_WEBTEXT_V3,)))
+
+#: The family of record PER BASIS — §3.2 for webtext-v3, prereg §3 for v2.1.
+FAMILY_OF_RECORD_BY_BASIS: dict[str, str] = {
+    "corpus-v2.1": FAMILY_OF_RECORD,
+    "webtext-v3": FAMILY_OF_RECORD_WEBTEXT_V3,
+}
+
+
+def family_k_label(family: str) -> Optional[str]:
+    """`proc_k256` -> `k256`; a rank-free family (ridge) -> None."""
+    marker = "_k"
+    index = family.rfind(marker)
+    if index < 0:
+        return None
+    suffix = family[index + len(marker):]
+    return f"k{suffix}" if suffix.isdigit() else None
+
+
+#: HOW A PREDICTION ID NAMES ITS RANK, PER BASIS.
+#:
+#:  * `frozen-k128` — the corpus-v2.1 filing convention OF RECORD. Every banked
+#:    v2.1 record's ids read `…/<arm>-k128`, and a record's ids are its slot
+#:    identities: `--verify-against` compares them, `parse_filing_record` keys
+#:    on them and the scorer matches observations to them. Deriving the label
+#:    from the family would leave the family of record byte-identical and MOVE
+#:    the id under a `--family proc_k32` diagnostic — a change to a frozen
+#:    surface, made for a mode nobody files from. It stays pinned.
+#:  * `from-family` — the webtext-v3 convention, which §8 states outright:
+#:    `v3-prediction/<src>→<tgt>/<arm>-k<rank>`. The rank is the family's.
+#:
+#: ⚠ FLAGGED, NOT RESOLVED: whether the v2.1 lane's non-of-record families
+#: SHOULD have carried their own rank in the id is a desk question about three
+#: banked batches, not a code question. This preserves what was filed.
+PredictionIdRankPolicy = Literal["frozen-k128", "from-family"]
+PREDICTION_ID_RANK_POLICY: dict[str, PredictionIdRankPolicy] = {
+    "corpus-v2.1": "frozen-k128",
+    "webtext-v3": "from-family",
+}
+#: The v2.1 filing convention's literal rank label.
+FROZEN_V21_ID_RANK_LABEL = "k128"
+
+
+def prediction_id_rank_label(family: str, basis: str = "corpus-v2.1") -> str:
+    """The `k…` component of a prediction id, per the basis's frozen policy."""
+    policy = PREDICTION_ID_RANK_POLICY.get(basis)
+    if policy is None:
+        raise UnknownHubVectorBasisError(
+            f"no prediction-id rank policy for basis {basis!r}. Registered: "
+            f"{sorted(PREDICTION_ID_RANK_POLICY)}. An id shape is a filing "
+            f"convention of record and is never guessed")
+    if policy == "frozen-k128":
+        return FROZEN_V21_ID_RANK_LABEL
+    label = family_k_label(family)
+    if label is None:
+        raise ComposedPathError(
+            f"family {family!r} carries no rank, so a `<arm>-k<rank>` "
+            f"prediction id cannot be built for basis {basis!r}. §8's id shape "
+            f"is `v3-prediction/<src>→<tgt>/<arm>-k<rank>`; a rank-free family "
+            f"(ridge) has no place in it")
+    return label
 
 
 # ---------------------------------------------------------------- registries
@@ -780,12 +1071,16 @@ CARRIED_CHECKPOINT_IDENTITY: dict[str, Literal["instruct", "base"]] = {
 #: time. `legacy` = the pre-freeze anamnesis corpus; `frozen` = the frozen
 #: campaign corpus (v1); `v21` = the corpus-v2.1 re-bank (Addendum G §G1's
 #: go-forward basis), reachable only when a verified `--v21-root` is set.
-CorpusProvenance = Literal["frozen", "legacy", "v21"]
+#: `webtext-v3` = the frozen v3 basis, reachable only when a verified
+#: `--v3-root` is set. ADDED, never re-spelled: the three v2.1-era values keep
+#: their exact meaning, so nothing that reads this Literal changes for a v2.1
+#: artifact.
+CorpusProvenance = Literal["frozen", "legacy", "v21", "webtext-v3"]
 
 #: Which corpus vintage a whole PREDICTION rides on — a property of all four
 #: resolved artifacts together, never of one side. `MIXED` is a first-class
 #: result and is flagged, not silently averaged over.
-PredictionVintage = Literal["v2.1", "pre-v2.1", "MIXED"]
+PredictionVintage = Literal["v2.1", "pre-v2.1", "MIXED", "webtext-v3"]
 
 
 class HubMapDir(BaseModel):
@@ -831,6 +1126,15 @@ def set_v21_root(root: Optional[Path],
     if root is None:
         V21_ROOT, V21_CORPUS_SHA = None, None
         return None
+    if V3_ROOT is not None:
+        #  The mirror of `set_v3_root`'s guard, and the same reason. Stated at
+        #  BOTH doors because either one being bypassed programmatically is
+        #  exactly how a two-vintage resolution gets built by accident.
+        raise CorpusVintageError(
+            "HALT — a webtext-v3 root is already in force. A v2.1 root and a "
+            "webtext-v3 root are two answers to 'which artifact' per key: "
+            "combined, some sides of a prediction would resolve v2.1 and some "
+            "v3, which is not a prediction on either basis. Clear one first.")
     root = Path(root)
     if not root.is_dir():
         raise CorpusVintageError(
@@ -885,6 +1189,151 @@ def v21_hub_map_dir(model: str, root: Optional[Path] = None) -> Optional[HubMapD
     return HubMapDir(path=base / f"fits_v21_{model}", corpus="v21",
                      note="corpus-v2.1 re-bank mirror (Addendum G §G1 "
                           "go-forward basis; root sha-verified at set time)")
+
+
+# ---------------------------------------------------- the webtext-v3 root
+#  THE THIRD VINTAGE, ON THE SECOND ONE'S EXACT TERMS.
+#
+#  `--v21-root` is sha-pinned to `CORPUS_SHA_V21` by construction, so it can
+#  never point at the webtext-v3 wave: `set_v21_root` hashes the root's own
+#  manifest and REFUSES anything that is not the v2.1 digest. That refusal is
+#  correct and stays — a v3 root reached through the v2.1 flag would stamp v3
+#  numbers with a v2.1 vintage, which is rake M26's failure exactly. What was
+#  missing is a LANE OF ITS OWN, with the same discipline:
+#
+#    * one root, named by the operator, never discovered;
+#    * its vintage PROVED at set time against `CORPUS_SHA_WEBTEXT_V3`;
+#    * the wave's stems fixed (they are the wave's identity, not the root's);
+#    * `webtext-v3` as a first-class `CorpusProvenance`, so a mixed resolution
+#      is FLAGGED rather than averaged over — same rule, third vintage.
+#
+#  MUTUALLY EXCLUSIVE WITH `--v21-root`, and for the reason the v2.1/pin pair
+#  is: two roots are two answers to "which artifact", per key, and a prediction
+#  whose four artifacts came from two bases is not a prediction on either.
+V3_ROOT: Optional[Path] = None
+#: The sha of the manifest that verified `V3_ROOT`, recomputed at set time.
+V3_CORPUS_SHA: Optional[str] = None
+
+
+def set_v3_root(root: Optional[Path],
+                expected_corpus_sha: str = CORPUS_SHA_WEBTEXT_V3,
+                manifest_relpath: Path = V3_CORPUS_MANIFEST_RELPATH,
+                ) -> Optional[str]:
+    """Point the resolvers at a webtext-v3 root, or clear it (None).
+
+    The root must prove its vintage: its own `webtext-v3-draft/
+    corpus_manifest.json` is hashed and must equal `expected_corpus_sha`. The
+    v2.1 lane's rule verbatim (`set_v21_root`), at the v3 digest.
+
+    `expected_corpus_sha` is a parameter ONLY so the selftest can exercise the
+    machinery against a synthetic root; every caller in the lane takes the
+    default.
+    """
+    global V3_ROOT, V3_CORPUS_SHA
+    if root is None:
+        V3_ROOT, V3_CORPUS_SHA = None, None
+        return None
+    if V21_ROOT is not None:
+        raise CorpusVintageError(
+            "HALT — a corpus-v2.1 root is already in force. A v2.1 root and a "
+            "webtext-v3 root are two answers to 'which artifact' per key: "
+            "combined, some sides of a prediction would resolve v2.1 and some "
+            "v3, which is not a prediction on either basis. Clear one first.")
+    root = Path(root)
+    if not root.is_dir():
+        raise CorpusVintageError(
+            f"--v3-root {root} is not a directory. The webtext-v3 root is the "
+            f"tree holding `{V3_HUB_LEGS_STEM}`, `{V3_VECTORS_STEM}` and "
+            f"`{manifest_relpath}`")
+    manifest = root / manifest_relpath
+    if not manifest.is_file():
+        raise CorpusVintageError(
+            f"webtext-v3 root {root} carries no {manifest_relpath} — its "
+            f"vintage cannot be VERIFIED. Every â quoted on this basis carries "
+            f"the corpus manifest sha, and a sha that was asserted rather than "
+            f"checked is the rake M26 failure at basis grain")
+    digest = sha256_of(manifest)
+    if digest != expected_corpus_sha:
+        raise CorpusVintageError(
+            f"HALT — {manifest} hashes to {digest}, not the expected "
+            f"{expected_corpus_sha}. This root is NOT the webtext-v3 basis of "
+            f"record (freeze/webtext-v3 §2); refusing rather than stamping "
+            f"numbers with a vintage they do not have")
+    V3_ROOT, V3_CORPUS_SHA = root, digest
+    logger.info("webtext-v3 root set: %s (manifest sha %s… VERIFIED)",
+                root, digest[:8])
+    return digest
+
+
+@contextmanager
+def v3_root_scope(root: Optional[Path],
+                  expected_corpus_sha: str = CORPUS_SHA_WEBTEXT_V3,
+                  manifest_relpath: Path = V3_CORPUS_MANIFEST_RELPATH,
+                  ) -> Iterator[Optional[str]]:
+    """`set_v3_root` for the duration of a block, restored on any exit path."""
+    global V3_ROOT, V3_CORPUS_SHA
+    previous_root, previous_sha = V3_ROOT, V3_CORPUS_SHA
+    try:
+        yield set_v3_root(root, expected_corpus_sha, manifest_relpath)
+    finally:
+        V3_ROOT, V3_CORPUS_SHA = previous_root, previous_sha
+
+
+def v3_hub_map_dir(model: str, site: int, arm: str,
+                   hub: Optional[str] = None, hub_site: Optional[int] = None,
+                   root: Optional[Path] = None) -> Optional[HubMapDir]:
+    """The webtext-v3 hub-leg dir for one (hub, model, arm), or None.
+
+    Layout of record for the 2026-08-04 hub-leg wave: ONE dir per
+    (hub, target, arm) — `<hub>L<hub_site>__<model>L<site>__<arm>/` — holding
+    the same `fit_<hub>L<hs>__<model>L<site>_<arm>_<family>.npz` names
+    `read_exchange_rates.fit_path_for` builds. Unlike the v2.1 mirror, the
+    directory therefore depends on the SITE, THE ARM **and the hub**, which is
+    why the resolver's probe list had to learn those three.
+    """
+    base = V3_ROOT if root is None else Path(root)
+    if base is None:
+        return None
+    ref = hub_ref(hub, hub_site)
+    return HubMapDir(
+        path=(base / V3_HUB_LEGS_STEM
+              / f"{ref.label}__{model}L{site}__{arm}"),
+        corpus="webtext-v3",
+        note=f"webtext-v3 hub-leg wave (frozen basis; root sha-verified at set "
+             f"time), hub column {ref.label}, arm {arm}")
+
+
+def pair_fit_dirs_under(pairs_root: Path, source: str, source_site: int,
+                        target: str, target_site: int, arm: str) -> list[Path]:
+    """Ordered candidate dirs for a DIRECT pair fit beneath `pairs_root`.
+
+    Two conventions are probed, in this order, and BOTH are echoed by every
+    caller: the per-pair subdirectory the hub-leg wave writes
+    (`<src>L<s>__<tgt>L<t>__<arm>/`) and a flat pairs root. Nothing else — a
+    probe that wandered into a hub-leg tree would silently score a LEG as a
+    pair, and §8 step 1 says outright that a hub leg is not a scoreable pair.
+
+    ⚠ FLAGGED, NOT RESOLVED: the pair-fit wave's own output layout is not
+    banked desk-side yet (`staging/webtext-v3-fits/pairs/` does not exist while
+    the wave runs), so these two are the conventions the campaign's fit tooling
+    writes rather than a convention read off the wave. If the wave lands a
+    third, this list is where it is added; the lane REFUSES on an absent tree
+    rather than guessing (`PairFitsAbsentError`).
+    """
+    pairs = Path(pairs_root)
+    return [pairs / f"{source}L{source_site}__{target}L{target_site}__{arm}",
+            pairs]
+
+
+def v3_pair_fit_dirs(source: str, source_site: int, target: str,
+                     target_site: int, arm: str,
+                     root: Optional[Path] = None) -> list[Path]:
+    """`pair_fit_dirs_under` anchored at the verified webtext-v3 root."""
+    base = (V3_ROOT if root is None else Path(root))
+    if base is None:
+        return []
+    return pair_fit_dirs_under(base / V3_PAIR_FITS_STEM, source, source_site,
+                               target, target_site, arm)
 
 
 # ------------------------------------------------- the hub-vector basis
@@ -951,15 +1400,39 @@ def hub_vector_basis_scope(basis: Optional[str] = None,
         ACTIVE_HUB_VECTOR = previous
 
 
-def _under_v21_root(path: Optional[str | Path]) -> bool:
-    """True iff `path` resolves inside the currently-set v2.1 root."""
-    if path is None or V21_ROOT is None:
+def _under_root(path: Optional[str | Path], root: Optional[Path]) -> bool:
+    """True iff `path` resolves inside `root` (False when either is unset)."""
+    if path is None or root is None:
         return False
     try:
-        Path(path).resolve().relative_to(V21_ROOT.resolve())
+        Path(path).resolve().relative_to(root.resolve())
     except (ValueError, OSError):
         return False
     return True
+
+
+def _under_v21_root(path: Optional[str | Path]) -> bool:
+    """True iff `path` resolves inside the currently-set v2.1 root."""
+    return _under_root(path, V21_ROOT)
+
+
+def _under_v3_root(path: Optional[str | Path]) -> bool:
+    """True iff `path` resolves inside the currently-set webtext-v3 root."""
+    return _under_root(path, V3_ROOT)
+
+
+def _vector_corpus(path: Optional[str | Path]) -> Optional[CorpusProvenance]:
+    """The vintage a resolved VECTOR path is entitled to claim, or None.
+
+    `VectorBankRef.corpus` documents the rule and it is unchanged: a vintage is
+    claimed only when the bank resolved inside a VERIFIED root. The v3 root is
+    the third such root and is answered on identical terms.
+    """
+    if _under_v3_root(path):
+        return "webtext-v3"
+    if _under_v21_root(path):
+        return "v21"
+    return None
 
 
 # ------------------------------------------- resolution provenance (E4 A1)
@@ -1042,6 +1515,12 @@ class ResolutionProvenance(BaseModel):
     v21_root: Optional[str] = Field(
         default=None, description="the verified v2.1 root in force at resolve "
                                   "time, if any")
+    v3_root: Optional[str] = Field(
+        default=None, description="the verified webtext-v3 root in force at "
+                                  "resolve time, if any. A SEPARATE field from "
+                                  "`v21_root` on purpose: the two are mutually "
+                                  "exclusive and a single 'root' field would "
+                                  "make a reader infer which basis answered")
     pin_record: Optional[str] = Field(
         default=None, description="the filing record the pin was built from")
     cross_vintage_fallback: bool = Field(
@@ -1058,6 +1537,7 @@ class ResolutionProvenanceReadout(BaseModel):
         "no â, moves no band, writes nothing under outputs/.")
     generated: str
     v21_root: Optional[str] = None
+    v3_root: Optional[str] = None
     filed_paths_record: Optional[str] = None
     n_resolves: int = 0
     n_by_source: dict[str, int] = {}
@@ -1136,6 +1616,7 @@ def provenance_readout() -> ResolutionProvenanceReadout:
     return ResolutionProvenanceReadout(
         generated=date.today().isoformat(),
         v21_root=None if V21_ROOT is None else str(V21_ROOT),
+        v3_root=None if V3_ROOT is None else str(V3_ROOT),
         filed_paths_record=None if FILED_PATHS is None else FILED_PATHS.record,
         n_resolves=len(records), n_by_source=by_source, n_by_corpus=by_corpus,
         n_cross_vintage_fallback=sum(r.cross_vintage_fallback for r in records),
@@ -1402,8 +1883,18 @@ def _unpinned_notes(kind: ResolutionKind, key: str) -> list[str]:
             f"is whatever the probe order found, NOT what the record filed."]
 
 
-def hub_map_dirs(model: str) -> list[HubMapDir]:
+def hub_map_dirs(model: str, site: Optional[int] = None,
+                 arm: Optional[str] = None, hub: Optional[str] = None,
+                 hub_site: Optional[int] = None) -> list[HubMapDir]:
     """Ordered candidate directories for the banked hub→`model` map.
+
+    `site`/`arm`/`hub`/`hub_site` are OPTIONAL AND DEFAULT-NONE, and with all
+    four unset the returned list is byte-identical to what it was before the
+    webtext-v3 lane existed — for every model, root state and pin state. They
+    exist because the v3 hub-leg wave banks ONE DIR PER (hub, target, arm)
+    rather than one per model, so a v3 candidate cannot be named without them;
+    a v3 root set while they are unset therefore contributes NOTHING to the
+    list rather than guessing a site or an arm.
 
     Order is PREFERENCE, and the preference is frozen-corpus-first: the
     collection-phase convention (`outputs/collection/<model>/fits_scan_<model>/`)
@@ -1420,6 +1911,13 @@ def hub_map_dirs(model: str) -> list[HubMapDir]:
     model, and the E1 gate proves it on the data.
     """
     dirs: list[HubMapDir] = []
+    if V3_ROOT is not None and site is not None and arm is not None:
+        #  The go-forward basis wins when the operator asked for it, exactly as
+        #  the v2.1 prepend does — and falls through to the lists below rather
+        #  than to N/A when the v3 wave has no leg for this key.
+        v3 = v3_hub_map_dir(model, site, arm, hub, hub_site)
+        if v3 is not None:
+            dirs.append(v3)
     v21 = v21_hub_map_dir(model)
     if v21 is not None:
         dirs.append(v21)
@@ -1486,6 +1984,12 @@ def vector_bank_paths(model: str, site: int) -> list[Path]:
     byte-identical to what it was before the option existed.
     """
     paths: list[Path] = []
+    if V3_ROOT is not None:
+        #  The webtext-v3 vector wave: `webtext-v3-vectors/vectors/<model>/…`,
+        #  the wave's own uniform per-site stem (INVERTED nesting vs v2.1 —
+        #  both real, both recorded). Prepended on the same terms as v2.1's.
+        paths.append(V3_ROOT / V3_VECTORS_STEM / model
+                     / f"entropy_gradient_{model}_L{site}.npz")
     if V21_ROOT is not None:
         paths.append(V21_ROOT / "vectors" / model
                      / f"entropy_gradient_{model}_L{site}.npz")
@@ -1675,6 +2179,13 @@ class ComposedPrediction(BaseModel):
     dim_source: int
     dim_target: int
     dim_hub_side: int
+    hub: str = Field(
+        default=HUB_MODEL,
+        description="WHICH HUB COLUMN this â_comp was composed through. Default "
+                    "is the incumbent, so every banked v2.1 record round-trips; "
+                    "§8 step 2 files five columns and each one says so here "
+                    "rather than leaving a reader to infer it from a path")
+    hub_site: int = HUB_SITE_OF_RECORD
     corpus_vintage: PredictionVintage = Field(
         default="pre-v2.1",
         description="the vintage of ALL FOUR resolved artifacts together "
@@ -2094,8 +2605,10 @@ def chart_companions(tm_source: TransportMap, tm_target: TransportMap,
 
 
 # ---------------------------------------------------------------- resolution
-def resolve_hub_map(model: str, site: int, arm: str, family: str) -> HubMapRef:
-    """Find the banked primary-hub→`model` map, or report it absent as data.
+def resolve_hub_map(model: str, site: int, arm: str, family: str,
+                    hub: Optional[str] = None,
+                    hub_site: Optional[int] = None) -> HubMapRef:
+    """Find the banked hub→`model` map, or report it absent as data.
 
     Absent is NOT an error here — draft E1 makes it the N/A-AT-FILING verdict,
     and the returned record carries every path probed so the desk can see what
@@ -2117,8 +2630,10 @@ def resolve_hub_map(model: str, site: int, arm: str, family: str) -> HubMapRef:
                  f"{pinned.filed_in_slot})",
             v21_root=None if V21_ROOT is None else str(V21_ROOT),
             pin_record=FILED_PATHS.record))
+        pin_ref = hub_ref(hub, hub_site)
         return HubMapRef(
             model=model, site=site, arm=arm, family=family,
+            hub=pin_ref.model, hub_site=pin_ref.site,
             resolved=pinned.path, corpus=pinned.corpus,
             dir_note=f"FILED-PATHS PIN — taken from {FILED_PATHS.record} as "
                      f"filed, not probed",
@@ -2126,8 +2641,10 @@ def resolve_hub_map(model: str, site: int, arm: str, family: str) -> HubMapRef:
     probed: list[str] = []
     unpinned_note = _unpinned_notes("hub map",
                                     hub_map_pin_key(model, site, arm, family))
-    for index, candidate in enumerate(hub_map_dirs(model)):
-        path = fit_path_for(candidate.path, HUB_MODEL, HUB_SITE_OF_RECORD,
+    ref = hub_ref(hub, hub_site)
+    for index, candidate in enumerate(
+            hub_map_dirs(model, site, arm, hub, hub_site)):
+        path = fit_path_for(candidate.path, ref.model, ref.site,
                             model, site, arm, family)
         probed.append(str(path))
         if path.exists():
@@ -2137,11 +2654,15 @@ def resolve_hub_map(model: str, site: int, arm: str, family: str) -> HubMapRef:
                 tree=candidate.note or str(candidate.path),
                 probe_index=index, n_probed=len(probed), probed_paths=probed,
                 v21_root=None if V21_ROOT is None else str(V21_ROOT),
+                v3_root=None if V3_ROOT is None else str(V3_ROOT),
                 pin_record=None if FILED_PATHS is None else FILED_PATHS.record,
-                cross_vintage_fallback=(V21_ROOT is not None
-                                        and candidate.corpus != "v21"),
+                cross_vintage_fallback=(
+                    (V21_ROOT is not None and candidate.corpus != "v21")
+                    or (V3_ROOT is not None
+                        and candidate.corpus != "webtext-v3")),
                 notes=unpinned_note))
             return HubMapRef(model=model, site=site, arm=arm, family=family,
+                             hub=ref.model, hub_site=ref.site,
                              resolved=str(path), corpus=candidate.corpus,
                              dir_note=candidate.note, probed_paths=probed)
     _record_provenance(ResolutionProvenance(
@@ -2149,19 +2670,23 @@ def resolve_hub_map(model: str, site: int, arm: str, family: str) -> HubMapRef:
         source="absent", tree="none — every probe missed (N/A-AT-FILING)",
         n_probed=len(probed), probed_paths=probed,
         v21_root=None if V21_ROOT is None else str(V21_ROOT),
+        v3_root=None if V3_ROOT is None else str(V3_ROOT),
         pin_record=None if FILED_PATHS is None else FILED_PATHS.record,
         notes=unpinned_note))
     return HubMapRef(model=model, site=site, arm=arm, family=family,
-                     probed_paths=probed)
+                     hub=ref.model, hub_site=ref.site, probed_paths=probed)
 
 
-def require_hub_map(model: str, site: int, arm: str, family: str) -> HubMapRef:
+def require_hub_map(model: str, site: int, arm: str, family: str,
+                    hub: Optional[str] = None,
+                    hub_site: Optional[int] = None) -> HubMapRef:
     """`resolve_hub_map`, but a miss is a LOUD failure naming every path probed."""
-    ref = resolve_hub_map(model, site, arm, family)
+    ref = resolve_hub_map(model, site, arm, family, hub, hub_site)
+    hub_label = hub_ref(hub, hub_site).label
     if not ref.available:
         raise ComposedPathError(
-            f"no banked primary-hub map for {model!r} L{site} in arm {arm!r} "
-            f"(family {family}, hub {HUB_MODEL}L{HUB_SITE_OF_RECORD}). Probed, "
+            f"no banked hub map for {model!r} L{site} in arm {arm!r} "
+            f"(family {family}, hub {hub_label}). Probed, "
             f"in order:\n  " + "\n  ".join(ref.probed_paths)
             + "\n(draft E1 forbids proxying from another arm — if this pair's "
               "slot is genuinely unbacked it is N/A-AT-FILING, not a fallback)")
@@ -2181,6 +2706,8 @@ def _vector_tree_note(path: Path, site: int) -> str:
     per-site build. They are told apart by where they are and how they are
     named, never by probe position, so the note stays right if the order moves.
     """
+    if _under_v3_root(path):
+        return "webtext-v3 vector wave (verified root, per-site bank)"
     if _under_v21_root(path):
         return "corpus-v2.1 re-bank mirror (verified root, per-site bank)"
     if path.stem.endswith(f"_L{site}"):
@@ -2210,38 +2737,42 @@ def resolve_vector_bank(model: str, site: int) -> VectorBankRef:
         _record_provenance(ResolutionProvenance(
             kind="vector bank", model=model, site=site, source="pin",
             resolved=pinned.path,
-            corpus="v21" if _under_v21_root(pinned.path) else None,
+            corpus=_vector_corpus(pinned.path),
             tree=f"filed-paths pin: {FILED_PATHS.record} (slot "
                  f"{pinned.filed_in_slot})",
             v21_root=None if V21_ROOT is None else str(V21_ROOT),
+            v3_root=None if V3_ROOT is None else str(V3_ROOT),
             pin_record=FILED_PATHS.record))
         return VectorBankRef(
             model=model, site=site, resolved=pinned.path,
-            corpus="v21" if _under_v21_root(pinned.path) else None,
+            corpus=_vector_corpus(pinned.path),
             probed_paths=[pinned.path])
     probed: list[str] = []
     unpinned_note = _unpinned_notes("vector bank", vector_bank_pin_key(model, site))
     for index, path in enumerate(vector_bank_paths(model, site)):
         probed.append(str(path))
         if path.exists():
-            in_v21 = _under_v21_root(path)
+            vintage = _vector_corpus(path)
             _record_provenance(ResolutionProvenance(
                 kind="vector bank", model=model, site=site, source="probe",
-                resolved=str(path), corpus="v21" if in_v21 else None,
+                resolved=str(path), corpus=vintage,
                 tree=_vector_tree_note(path, site), probe_index=index,
                 n_probed=len(probed), probed_paths=probed,
                 v21_root=None if V21_ROOT is None else str(V21_ROOT),
+                v3_root=None if V3_ROOT is None else str(V3_ROOT),
                 pin_record=None if FILED_PATHS is None else FILED_PATHS.record,
-                cross_vintage_fallback=V21_ROOT is not None and not in_v21,
+                cross_vintage_fallback=(
+                    (V21_ROOT is not None and vintage != "v21")
+                    or (V3_ROOT is not None and vintage != "webtext-v3")),
                 notes=unpinned_note))
             return VectorBankRef(model=model, site=site, resolved=str(path),
-                                 corpus="v21" if in_v21 else None,
-                                 probed_paths=probed)
+                                 corpus=vintage, probed_paths=probed)
     _record_provenance(ResolutionProvenance(
         kind="vector bank", model=model, site=site, source="absent",
         tree="none — every probe missed (the target build has not landed)",
         n_probed=len(probed), probed_paths=probed,
         v21_root=None if V21_ROOT is None else str(V21_ROOT),
+        v3_root=None if V3_ROOT is None else str(V3_ROOT),
         pin_record=None if FILED_PATHS is None else FILED_PATHS.record,
         notes=unpinned_note))
     return VectorBankRef(model=model, site=site, probed_paths=probed)
@@ -2253,6 +2784,9 @@ def compose_pair(source_model: str, target_model: str,
                  arm: Optional[str] = None,
                  source_site: Optional[int] = None,
                  target_site: Optional[int] = None,
+                 hub: Optional[str] = None,
+                 hub_site: Optional[int] = None,
+                 basis: str = "corpus-v2.1",
                  ) -> ComposedPrediction | NotFilable:
     """â_comp for one candidate slot, or the N/A-AT-FILING record for it.
 
@@ -2260,6 +2794,13 @@ def compose_pair(source_model: str, target_model: str,
     defaults to the pair's applicable arm (prereg §3). Overriding either is
     allowed for diagnostics and is echoed into the record — draft E1's filing
     path never overrides.
+
+    `hub`/`hub_site` default to the ACTIVE hub, which is the incumbent 8bL16
+    unless a caller set another explicitly (§8 files five hub columns). `basis`
+    selects the PREDICTION-ID convention only — `corpus-v2.1` is the frozen
+    `-k128` filing convention of record, `webtext-v3` is §8's `<arm>-k<rank>`
+    read off the family — and moves nothing else. Every default here reproduces
+    the v2.1 lane exactly.
     """
     s_site = site_of_record(source_model) if source_site is None \
         else require_site(source_model, source_site)
@@ -2274,8 +2815,11 @@ def compose_pair(source_model: str, target_model: str,
         raise ComposedPathError(f"unknown arm {use_arm!r}; known: {ARMS}")
 
     pair_id = f"{source_model}L{s_site}->{target_model}L{t_site}"
-    ref_src = resolve_hub_map(source_model, s_site, use_arm, family)
-    ref_tgt = resolve_hub_map(target_model, t_site, use_arm, family)
+    hub_column = hub_ref(hub, hub_site)
+    ref_src = resolve_hub_map(source_model, s_site, use_arm, family,
+                              hub_column.model, hub_column.site)
+    ref_tgt = resolve_hub_map(target_model, t_site, use_arm, family,
+                              hub_column.model, hub_column.site)
     vec_src = resolve_vector_bank(source_model, s_site)
     vec_tgt = resolve_vector_bank(target_model, t_site)
     missing = [label for label, ref in (("source hub map", ref_src),
@@ -2341,9 +2885,36 @@ def compose_pair(source_model: str, target_model: str,
             f"VERIFIED this run, which a pin does not perform.")
 
     #  Addendum G §G2(a): the corpus sha rides the â — but only when the WHOLE
-    #  computation rode one vintage. All four artifacts, or none.
-    v21_sides = [ref.corpus == "v21"
-                 for ref in (ref_src, ref_tgt, vec_src, vec_tgt)]
+    #  computation rode one vintage. All four artifacts, or none. The webtext-v3
+    #  basis is answered by the SAME rule at its own root and digest, in its own
+    #  branch: with no v3 root in force the arithmetic below is bit-for-bit what
+    #  it was before this lane existed.
+    sides = ("source hub map", "target hub map", "source vector",
+             "target vector")
+    refs = (ref_src, ref_tgt, vec_src, vec_tgt)
+    if V3_ROOT is not None:
+        v3_sides = [ref.corpus == "webtext-v3" for ref in refs]
+        if all(v3_sides):
+            v3_vintage: PredictionVintage = "webtext-v3"
+            v3_sha = V3_CORPUS_SHA
+        else:
+            v3_vintage = "MIXED"
+            v3_sha = None
+            flags.append(
+                "MIXED-VINTAGE — a webtext-v3 root is in force and some of "
+                "{source hub map, target hub map, source vector, target "
+                "vector} fell THROUGH it to another tree: "
+                + ", ".join(f"{label}={'webtext-v3' if is_v3 else 'OTHER'}"
+                            for label, is_v3 in zip(sides, v3_sides))
+                + ". The value is computable but carries NO corpus sha: a sha "
+                  "covering half a computation is worse than none, and a "
+                  "cross-basis composed value is not the estimand §8 scores.")
+        return _finish_composed(
+            source_model, target_model, s_site, t_site, use_arm, arm_rule,
+            family, pair_id, a_comp, companions, flags, v3_vintage, v3_sha,
+            ref_src, ref_tgt, spec_src, spec_tgt, v_src, v_tgt, tm_tgt,
+            hub_column, basis)
+    v21_sides = [ref.corpus == "v21" for ref in refs]
     if all(v21_sides):
         vintage: PredictionVintage = "v2.1"
         corpus_sha = V21_CORPUS_SHA
@@ -2355,9 +2926,7 @@ def compose_pair(source_model: str, target_model: str,
             "vector, target vector} resolved inside the corpus-v2.1 root and "
             "some fell through to the pre-v2.1 trees: "
             + ", ".join(f"{label}={'v2.1' if is_v21 else 'pre-v2.1'}"
-                        for label, is_v21 in zip(
-                            ("source hub map", "target hub map",
-                             "source vector", "target vector"), v21_sides))
+                        for label, is_v21 in zip(sides, v21_sides))
             + ". The value is computable but carries NO corpus sha — Addendum "
               "G §G2(a) wants a vintage tag on every â, and a tag covering "
               "half a computation is worse than none. Cross-vintage reads are "
@@ -2366,9 +2935,29 @@ def compose_pair(source_model: str, target_model: str,
         vintage = "pre-v2.1"
         corpus_sha = None
 
+    return _finish_composed(
+        source_model, target_model, s_site, t_site, use_arm, arm_rule, family,
+        pair_id, a_comp, companions, flags, vintage, corpus_sha, ref_src,
+        ref_tgt, spec_src, spec_tgt, v_src, v_tgt, tm_tgt, hub_column, basis)
+
+
+def _finish_composed(source_model: str, target_model: str, s_site: int,
+                     t_site: int, use_arm: str, arm_rule: str, family: str,
+                     pair_id: str, a_comp: float,
+                     companions: Optional[DescriptiveCompanions],
+                     flags: list[str], vintage: PredictionVintage,
+                     corpus_sha: Optional[str], ref_src: HubMapRef,
+                     ref_tgt: HubMapRef, spec_src: VectorSpec,
+                     spec_tgt: VectorSpec, v_src: np.ndarray,
+                     v_tgt: np.ndarray, tm_tgt: TransportMap,
+                     hub_column: HubRef, basis: str) -> ComposedPrediction:
+    """Assemble the `ComposedPrediction`. ONE construction site behind two
+    vintage branches, so the record's SHAPE can never depend on which basis
+    answered — only its `corpus_vintage` and `corpus_manifest_sha256` do."""
+    rank_label = prediction_id_rank_label(family, basis)
     return ComposedPrediction(
         prediction_id=f"composed-prediction/{source_model}→{target_model}"
-                      f"/{use_arm}-k128",
+                      f"/{use_arm}-{rank_label}",
         pair_id=pair_id, source_model=source_model, source_site=s_site,
         target_model=target_model, target_site=t_site, arm=use_arm,
         arm_rule=arm_rule, family=family, a_comp=a_comp,
@@ -2376,6 +2965,7 @@ def compose_pair(source_model: str, target_model: str,
         ceiling_target_hub_map=projection_norm(image_basis(tm_tgt), v_tgt),
         dim_source=int(v_src.shape[0]), dim_target=int(v_tgt.shape[0]),
         dim_hub_side=_source_dim(tm_tgt),
+        hub=hub_column.model, hub_site=hub_column.site,
         corpus_vintage=vintage, corpus_manifest_sha256=corpus_sha,
         hub_map_source=ref_src, hub_map_target=ref_tgt,
         source_vector=spec_src, target_vector=spec_tgt,
@@ -6566,6 +7156,1145 @@ def compare_filing_records(banked: Path, emitted: Path) -> RecordComparison:
     return result
 
 
+# ══════════════════════════════════════════ THE WEBTEXT-V3 SCORING LANE (§8)
+#  WHAT THIS IS, AND WHAT IT IS NOT.
+#
+#  The frozen webtext-v3 §8 ceremony has four mechanical steps, and step 2 is
+#  already DONE: the prediction artifact is built, sha'd and desk-attested, and
+#  its 240-slot list "is the denominator of every gate, forever". This lane is
+#  step 3 — "Fit scoreable pairs → â_obs. Score." — and nothing else:
+#
+#    (a) it VERIFIES the desk's stamp against the artifact before reading a
+#        single prediction (§8 step 2 makes that binding: "the fit lane refuses
+#        to run without the stamp");
+#    (b) it LOADS the sealed artifact as the denominator. Not one â_comp is
+#        recomputed here. The composed column was filed before any pair was fit
+#        and re-deriving it at scoring time would let a scorer move a
+#        prediction, which is the whole thing the seal exists to prevent;
+#    (c) it computes â_obs per slot from the DIRECT pair fits — and refuses
+#        cleanly when they are absent, which is the state while the pair-fit
+#        wave runs;
+#    (d) it scores every one of the five columns at BOTH bands with the
+#        near-zero carve-out per the frozen text;
+#    (e) it emits the scored record carrying the gate arithmetic — G-comp-v3,
+#        G-comp-v3-tight, G-extension and §8's branch structure.
+#
+#  DESCRIPTIVE EMISSION ONLY. The arithmetic of a threshold is computation; the
+#  VERDICT it carries is not. Nothing here stamps, adjudicates, rules a branch
+#  or writes under `outputs/` — every block says so, in the builder's own idiom
+#  ("adjudication: NONE"), because a tool that ruled on its own output would be
+#  inventing the authority for it.
+#: The sealed artifact's schema, by NAME and VERSION (rake M26): a schema bump
+#: is visible to a mechanical sweep instead of hiding inside a string literal.
+SCHEMA_V3_PREDICTION_ARTIFACT_V1 = "webtext-v3-prediction-artifact/v1"
+#: What this lane emits.
+SCHEMA_V3_SCORED_RECORD_V1 = "webtext-v3-scored-record/v1"
+#: The desk stamp's own opening line, checked by value.
+V3_STAMP_TEXT = "THE §8.2 PREDICTION ARTIFACT IS SEALED — desk attestation"
+#: Where the stamp sits when the operator does not name it: BESIDE the artifact,
+#: under the sealing act's own filename. A default, never a search.
+V3_STAMP_FILENAME = "ARTIFACT-STAMP-PREDICTIONS-webtext-v3.json"
+
+#: §8 "Bands and carve-out": ±.05 primary, ±.025 beside-with-teeth. Named with
+#: their gates so a reader never has to remember which half-width feeds which.
+V3_BAND_PRIMARY_HALF_WIDTH = 0.05
+V3_BAND_CO_PRIMARY_HALF_WIDTH = 0.025
+#: §8's three thresholds, verbatim.
+V3_GATE_COMP_THRESHOLD = 0.80
+V3_GATE_COMP_TIGHT_THRESHOLD = 0.80
+V3_GATE_EXTENSION_THRESHOLD = 0.70
+#: §8: "The floor-clearing count (|â_obs| ≥ .08)". The SAME numeral as the
+#: near-zero carve-out and a DIFFERENT rule — the carve-out reads |â_comp|
+#: (a property of the prediction, marked at filing), the floor reads |â_obs|
+#: (a property of the observation, evaluated only now). They are separate
+#: constants because they answer separate questions and a future ruling could
+#: move one without the other.
+V3_FLOOR_CLEARING_ABS = NEAR_ZERO_CARVE_OUT
+
+
+class V3ArtifactError(ComposedPathError):
+    """A webtext-v3 prediction artifact is not what it claims to be.
+
+    ALWAYS LOUD, and always by naming the contract. The artifact is the frozen
+    denominator of every §8 gate; a scorer that half-parsed it, or that scored
+    a file which is not the sealed one, would produce a rate over a population
+    nobody froze — and the rate would look exactly like a real one.
+    """
+
+
+class PredictionStampError(V3ArtifactError):
+    """The desk's seal does not verify against the artifact.
+
+    §8 step 2 made this binding: "The prediction artifact is sha'd and
+    timestamp-attested BEFORE the first direct-pair fit job is submitted; the
+    fit lane refuses to run without the stamp (the census no-peeking mechanism,
+    made binding)." A scoring lane that read the artifact without checking the
+    seal would be exactly the peeking hole the clause closes, so this refusal
+    happens BEFORE a single prediction is parsed.
+    """
+
+
+class PairFitsAbsentError(ComposedPathError):
+    """The direct pair fits are not on disk, so nothing can be scored.
+
+    A CLEAN REFUSAL, not a crash and not an empty record: while the pair-fit
+    wave runs this is the ordinary state of the world, and a lane that emitted
+    a scored record full of UNSCORED slots would publish a 0% gate rate that is
+    a fact about the disk rather than about transport.
+    """
+
+
+class PredictionArtifactStamp(BaseModel):
+    """The desk's seal over the §8.2 prediction artifact. READ-ONLY over it."""
+    model_config = {"extra": "allow"}
+
+    stamp: str
+    sealed_utc: str
+    artifact: str
+    artifact_sha256: str
+    sidecar_sha256: Optional[str] = None
+    prereg: str
+    frozen_count_N: int
+    fully_filed: int
+    desk_verification: str = ""
+    binding: str = ""
+
+
+class StampVerification(BaseModel):
+    """The stamp check, as a record. Emitted whether it passed or halted."""
+    STATUS: str = (
+        "BINDING — §8 step 2: no scoring of this artifact happens unless the "
+        "sha the desk sealed is the sha the file has, recomputed here")
+    stamp_path: str
+    artifact_path: str
+    stamp_sealed_utc: str
+    sha256_sealed: str
+    sha256_recomputed: str
+    sha_matches: bool
+    filename_matches: bool
+    frozen_count_N: int
+    fully_filed: int
+    prereg: str
+
+
+def verify_prediction_stamp(artifact: Path,
+                            stamp: Optional[Path] = None
+                            ) -> tuple[PredictionArtifactStamp, StampVerification]:
+    """Verify the desk's seal over `artifact`. HALTS on any disagreement.
+
+    `stamp` defaults to the sealing act's own filename BESIDE the artifact —
+    one named path, never a search (rake M12's discipline at stamp grain).
+    """
+    artifact = Path(artifact)
+    stamp_path = (Path(artifact).parent / V3_STAMP_FILENAME if stamp is None
+                  else Path(stamp))
+    if not stamp_path.is_file():
+        raise PredictionStampError(
+            f"no desk stamp at {stamp_path}. §8 step 2 binds the fit/scoring "
+            f"lane to REFUSE without it — the census no-peeking mechanism. "
+            f"Name it with --stamp, or seal the artifact first; this lane does "
+            f"not search for one and never proceeds unstamped")
+    if not artifact.is_file():
+        raise PredictionStampError(
+            f"no prediction artifact at {artifact} — nothing to verify the "
+            f"stamp {stamp_path} against")
+    try:
+        doc = json.loads(stamp_path.read_text())
+    except (OSError, ValueError) as exc:
+        raise PredictionStampError(
+            f"unreadable stamp {stamp_path}: {exc}") from exc
+    if not isinstance(doc, dict):
+        raise PredictionStampError(
+            f"stamp {stamp_path} is not a JSON object")
+    try:
+        parsed = PredictionArtifactStamp(**doc)
+    except Exception as exc:                                  # noqa: BLE001
+        raise PredictionStampError(
+            f"stamp {stamp_path} is not a desk attestation of the §8.2 "
+            f"prediction artifact: {exc}. Expected keys `stamp`, `sealed_utc`, "
+            f"`artifact`, `artifact_sha256`, `prereg`, `frozen_count_N`, "
+            f"`fully_filed`") from exc
+    if V3_STAMP_TEXT not in parsed.stamp:
+        raise PredictionStampError(
+            f"stamp {stamp_path} carries {parsed.stamp!r}, which is not the "
+            f"sealing act's own text {V3_STAMP_TEXT!r}. A stamp is checked by "
+            f"VALUE, never trusted by filename (rake M26)")
+    digest = sha256_of(artifact)
+    filename_matches = Path(parsed.artifact).name == artifact.name
+    verification = StampVerification(
+        stamp_path=str(stamp_path), artifact_path=str(artifact),
+        stamp_sealed_utc=parsed.sealed_utc,
+        sha256_sealed=parsed.artifact_sha256, sha256_recomputed=digest,
+        sha_matches=digest == parsed.artifact_sha256,
+        filename_matches=filename_matches,
+        frozen_count_N=parsed.frozen_count_N, fully_filed=parsed.fully_filed,
+        prereg=parsed.prereg)
+    if not filename_matches:
+        raise PredictionStampError(
+            f"HALT — the stamp {stamp_path} seals {parsed.artifact!r} but this "
+            f"lane was pointed at {artifact.name!r}. Two artifacts and one "
+            f"seal is not a verification; refusing rather than scoring a file "
+            f"the desk did not attest")
+    if not verification.sha_matches:
+        raise PredictionStampError(
+            f"HALT — {artifact} hashes to {digest}, not the sealed "
+            f"{parsed.artifact_sha256}. The desk's seal is over a DIFFERENT "
+            f"byte sequence, so this file is not the frozen denominator of "
+            f"§8's gates. Nothing is scored: a rate computed over an unsealed "
+            f"population would look exactly like a real one")
+    logger.info("stamp VERIFIED: %s seals %s (sha %s…, N=%d, %d fully filed)",
+                stamp_path.name, artifact.name, digest[:12],
+                parsed.frozen_count_N, parsed.fully_filed)
+    return parsed, verification
+
+
+class V3ColumnPrediction(BaseModel):
+    """ONE hub column's filed prediction for ONE slot, as sealed.
+
+    `extra="forbid"`: this is the scoring-critical shape, and a field this lane
+    does not know is a schema drift that must be SEEN rather than ignored.
+    """
+    model_config = {"extra": "forbid"}
+
+    hub: str
+    hub_site: int
+    of_record: bool
+    status: str
+    a_comp: Optional[float] = None
+    filed_a_comp: Optional[float] = None
+    band_primary: Optional[list[float]] = None
+    band_co_primary: Optional[list[float]] = None
+    magnitude_only: Optional[bool] = None
+    hub_leg_source: Optional[str] = None
+    hub_leg_target: Optional[str] = None
+    hub_side_dim: Optional[int] = None
+    hub_basis_max_dev: Optional[float] = None
+    ceiling_target_hub_map: Optional[float] = None
+    blocker: Optional[str] = None
+    probed: list[str] = []
+
+    @property
+    def filed(self) -> bool:
+        return self.status == "FILED" and self.filed_a_comp is not None
+
+
+class V3Slot(BaseModel):
+    """ONE of the frozen 240 scoreable slots, with its five columns."""
+    model_config = {"extra": "forbid"}
+
+    ordinal: int
+    prediction_id: str
+    pair_id: str
+    source_model: str
+    source_site: int
+    target_model: str
+    target_site: int
+    arm: str
+    arm_rule: str
+    family: str
+    pair_class: str
+    status: str
+    blocker: Optional[str] = None
+    source_vector: Optional[str] = None
+    target_vector: Optional[str] = None
+    columns: dict[str, V3ColumnPrediction]
+
+
+class V3HubColumn(BaseModel):
+    """One of §8 step 2's five simultaneously-filed hub columns."""
+    model_config = {"extra": "allow"}
+
+    hub: str
+    hub_site: int
+    of_record: bool
+    role: str = ""
+    control_note: str = ""
+
+
+class V3ExtensionSlot(BaseModel):
+    model_config = {"extra": "allow"}
+
+    key: str
+    status: str
+    blocker: str = ""
+
+
+class V3ExtensionSubLine(BaseModel):
+    model_config = {"extra": "allow"}
+
+    gate: str = ""
+    never_pooled: str = ""
+    slots: list[V3ExtensionSlot] = []
+    never_before_observed_core_members: list[str] = []
+    note: str = ""
+
+
+class V3PredictionArtifact(BaseModel):
+    """The sealed §8.2 artifact. THE DENOMINATOR — never recomputed, only read."""
+    model_config = {"extra": "allow"}
+
+    artifact: str
+    frozen_ref: str = ""
+    adjudication: str = ""
+    self_description: dict[str, Any] = {}
+    bands: dict[str, Any] = {}
+    hub_columns: list[V3HubColumn]
+    models: list[dict[str, Any]] = []
+    count_arithmetic: dict[str, Any] = {}
+    frozen_count_N: int
+    slots: list[V3Slot]
+    extension_sub_line: V3ExtensionSubLine = V3ExtensionSubLine()
+    column_summary: list[dict[str, Any]] = []
+    flags: list[str] = []
+    #: Filled in by the loader, never by the file.
+    path: str = ""
+    sha256: str = ""
+
+    @property
+    def hub_keys(self) -> list[str]:
+        return [column.hub for column in self.hub_columns]
+
+    @property
+    def of_record_hub(self) -> str:
+        for column in self.hub_columns:
+            if column.of_record:
+                return column.hub
+        raise V3ArtifactError(
+            "the sealed artifact declares NO of-record hub column. §8 step 2 "
+            "names one — 'the of-record column through the 8b incumbent' — and "
+            "the branch structure is stated in terms of it, so an artifact "
+            "without one cannot be scored against §8 at all")
+
+
+def load_v3_prediction_artifact(path: Path, stamp: Optional[Path] = None
+                                ) -> tuple[V3PredictionArtifact,
+                                           StampVerification]:
+    """The sealed artifact, AFTER its stamp verifies. Both, or neither.
+
+    The stamp check runs FIRST and unconditionally: §8 step 2 binds the lane to
+    refuse unstamped, and a lane that parsed first would have already read the
+    predictions by the time it noticed the seal was wrong.
+    """
+    path = Path(path)
+    parsed_stamp, verification = verify_prediction_stamp(path, stamp)
+    try:
+        doc = json.loads(path.read_text())
+    except (OSError, ValueError) as exc:
+        raise V3ArtifactError(f"unreadable artifact {path}: {exc}") from exc
+    if not isinstance(doc, dict):
+        raise V3ArtifactError(f"artifact {path} is not a JSON object")
+    schema = doc.get("artifact")
+    if schema != SCHEMA_V3_PREDICTION_ARTIFACT_V1:
+        raise V3ArtifactError(
+            f"artifact {path} declares {schema!r}, not "
+            f"{SCHEMA_V3_PREDICTION_ARTIFACT_V1!r}. The schema is a CONTRACT "
+            f"with the sealing lane, not a shape to be inferred: a differently "
+            f"versioned artifact may band, carve out or enumerate differently, "
+            f"and scoring it under this lane's assumptions would be silent")
+    try:
+        artifact = V3PredictionArtifact(**doc)
+    except Exception as exc:                                  # noqa: BLE001
+        raise V3ArtifactError(
+            f"artifact {path} does not parse as "
+            f"{SCHEMA_V3_PREDICTION_ARTIFACT_V1}: {exc}") from exc
+    artifact.path = str(path)
+    artifact.sha256 = verification.sha256_recomputed
+
+    problems: list[str] = []
+    if len(artifact.slots) != artifact.frozen_count_N:
+        problems.append(
+            f"the artifact declares frozen_count_N={artifact.frozen_count_N} "
+            f"but carries {len(artifact.slots)} slots")
+    if artifact.frozen_count_N != parsed_stamp.frozen_count_N:
+        problems.append(
+            f"the artifact declares frozen_count_N={artifact.frozen_count_N} "
+            f"but the stamp seals {parsed_stamp.frozen_count_N}")
+    ordinals = [slot.ordinal for slot in artifact.slots]
+    if len(set(ordinals)) != len(ordinals):
+        problems.append("slot ordinals are not unique")
+    ids = [slot.prediction_id for slot in artifact.slots]
+    if len(set(ids)) != len(ids):
+        problems.append("prediction ids are not unique — a gate keyed on them "
+                        "would double-count")
+    hubs = artifact.hub_keys
+    if len(set(hubs)) != len(hubs):
+        problems.append(f"duplicate hub columns declared: {hubs}")
+    for slot in artifact.slots:
+        missing = sorted(set(hubs) - set(slot.columns))
+        extra = sorted(set(slot.columns) - set(hubs))
+        if missing or extra:
+            problems.append(
+                f"slot {slot.ordinal} ({slot.prediction_id}) carries columns "
+                f"{sorted(slot.columns)}, not the declared {sorted(hubs)} "
+                f"(missing {missing}, unexpected {extra})")
+            break
+    if problems:
+        raise V3ArtifactError(
+            f"the sealed artifact {path} is internally inconsistent and is NOT "
+            f"the denominator it claims to be:\n  " + "\n  ".join(problems)
+            + "\n(§8: 'the denominator of every gate is that artifact's list "
+              "and never changes after it is sha'd' — a list that disagrees "
+              "with itself cannot be that)")
+    logger.info("artifact loaded: %s — N=%d slots × %d hub columns "
+                "(of-record %s)", path.name, artifact.frozen_count_N,
+                len(hubs), artifact.of_record_hub)
+    return artifact, verification
+
+
+# ------------------------------------------------- â_obs from the direct fits
+class V3PairFitRef(BaseModel):
+    """One slot's DIRECT pair fit, resolved or explicitly absent."""
+    pair_id: str
+    arm: str
+    family: str
+    resolved: Optional[str] = None
+    probed_paths: list[str] = []
+
+    @property
+    def available(self) -> bool:
+        return self.resolved is not None
+
+
+def require_pair_fits_root(root: Path) -> Path:
+    """The pair-fit tree, or a CLEAN refusal naming what is owed.
+
+    §8's order is mechanical: predictions are sealed BEFORE the first
+    direct-pair fit job is submitted, so an absent tree is the ordinary state
+    of the world while the wave runs — not a bug, and not something to paper
+    over with an empty record.
+    """
+    root = Path(root)
+    if not root.is_dir():
+        raise PairFitsAbsentError(
+            f"no direct pair fits at {root} — the §8 step-3 wave has not "
+            f"landed desk-side. This lane REFUSES rather than emitting a "
+            f"scored record whose every slot is UNSCORED: that record would "
+            f"quote a 0% gate rate, and a 0% that means 'the disk is empty' is "
+            f"indistinguishable in a readout from a 0% that means 'transport "
+            f"failed'. Re-run when the pair-fit wave is pulled back, or point "
+            f"--pair-fits-root at the tree that holds it")
+    return root
+
+
+def resolve_pair_fit(slot: V3Slot, pairs_root: Path) -> V3PairFitRef:
+    """Find the slot's direct pair fit, or report it absent as data.
+
+    Absent is DATA here for the same reason a missing hub map is: a wave that
+    landed 236 of 240 fits must produce four NAMED gaps, not a traceback. The
+    lane's REFUSAL is at tree grain (`require_pair_fits_root`); at slot grain
+    an absence is scored as UNSCORED and counted against the frozen
+    denominator, which is what §8's "never changes" clause requires.
+    """
+    probed: list[str] = []
+    for directory in pair_fit_dirs_under(
+            pairs_root, slot.source_model, slot.source_site,
+            slot.target_model, slot.target_site, slot.arm):
+        path = fit_path_for(directory, slot.source_model, slot.source_site,
+                            slot.target_model, slot.target_site, slot.arm,
+                            slot.family)
+        probed.append(str(path))
+        if path.exists():
+            return V3PairFitRef(pair_id=slot.pair_id, arm=slot.arm,
+                                family=slot.family, resolved=str(path),
+                                probed_paths=probed)
+    return V3PairFitRef(pair_id=slot.pair_id, arm=slot.arm, family=slot.family,
+                        probed_paths=probed)
+
+
+def _vector_tail(path: str | Path, n: int = 3) -> tuple[str, ...]:
+    """The last `n` path components — a RELOCATION-TOLERANT identity.
+
+    The artifact records repo-relative vector paths and the lane may be pointed
+    at a relocated root, so comparing absolute paths would report a difference
+    that is only a root. The tail (`vectors/<model>/<file>`) is the wave's own
+    identity and is what parity is asserted on.
+    """
+    parts = Path(path).parts
+    return tuple(parts[-n:])
+
+
+def observed_ahat_for_slot(slot: V3Slot, fit: V3PairFitRef,
+                           vectors_root: Optional[Path] = None
+                           ) -> tuple[float, VectorSpec, VectorSpec, list[str]]:
+    """â_obs for one slot, through the SAME operationalization â always used.
+
+    `read_exchange_rates.exchange_rate` is CALLED, not mirrored — the estimand
+    is the same object the v2.1 lane reads, so "the observed column is the same
+    quantity" is a property of the code rather than of two copies agreeing.
+
+    The vectors are the ones the ARTIFACT names, resolved under the lane's
+    vectors root; a tail mismatch is a HALT, because scoring an observation
+    against a prediction computed from a different vector is a number whose
+    label lies.
+    """
+    if not fit.available:
+        raise PairFitsAbsentError(
+            f"{slot.pair_id}: no direct pair fit resolved; probed "
+            + ", ".join(fit.probed_paths))
+    notes: list[str] = []
+    root = (Path(vectors_root) if vectors_root is not None
+            else (V3_ROOT / V3_VECTORS_STEM if V3_ROOT is not None
+                  else Path(V3_VECTORS_STEM)))
+    loaded: list[tuple[np.ndarray, VectorSpec]] = []
+    for role, model, site, filed in (
+            ("source", slot.source_model, slot.source_site, slot.source_vector),
+            ("target", slot.target_model, slot.target_site, slot.target_vector)):
+        path = root / model / f"entropy_gradient_{model}_L{site}.npz"
+        if filed is not None and _vector_tail(filed) != _vector_tail(path):
+            raise V3ArtifactError(
+                f"{slot.pair_id}: the sealed artifact names the {role} vector "
+                f"{filed!r}, but this lane resolves {str(path)!r} — the two "
+                f"disagree beyond their root ({_vector_tail(filed)} vs "
+                f"{_vector_tail(path)}). Scoring an observation against a "
+                f"prediction computed from a DIFFERENT vector is a number "
+                f"whose label lies; refusing")
+        if not path.exists():
+            raise PairFitsAbsentError(
+                f"{slot.pair_id}: the {role} entropy-gradient vector is not at "
+                f"{path}. The prediction was filed from it, so the observation "
+                f"must be read from the same bank — never from another")
+        loaded.append(load_entropy_gradient(path, model, site))
+    (v_src, spec_src), (v_tgt, spec_tgt) = loaded
+    assert fit.resolved is not None
+    tm = load_transport_map(Path(fit.resolved))
+    a_obs = exchange_rate(tm, v_src, v_tgt)
+    return float(a_obs), spec_src, spec_tgt, notes
+
+
+# ------------------------------------------------------------ scoring the slot
+#: What one column × one band came to. `UNSCORED-NO-FIT` is a FIRST-CLASS
+#: result and is counted against the frozen denominator, never dropped from it.
+V3Verdict = Literal["in-band", "out-of-band-high", "out-of-band-low",
+                    "magnitude-only-in-band", "magnitude-only-out-of-band-high",
+                    "magnitude-only-out-of-band-low", "UNSCORED-NO-FIT",
+                    "UNSCORED-NOT-FILED"]
+
+
+def _v3_check_band(prediction_id: str, hub: str, predicted: float,
+                   band: Optional[Sequence[float]], half_width: float,
+                   label: str) -> list[float]:
+    """The SEALED band must BE the frozen band. A HALT, never a repair.
+
+    `_check_filed_band`'s rule at the v3 half-widths, and for the same reason:
+    a band that is not the frozen one is a band nobody froze, and scoring it
+    would score a contract the ceremony never made. The sealed artifact bands
+    the FILED (4-dp) value — `filed = round(â_comp, 4)`, `band = [round(filed −
+    h, 4), round(filed + h, 4)]` — which is the v2.1 filing convention of
+    record, so the comparison is against that arithmetic exactly.
+    """
+    if band is None or len(band) != 2:
+        raise ScoringError(
+            f"{prediction_id} [{hub}]: sealed {label} band {band!r} is not a "
+            f"[lo, hi] pair")
+    lo, hi = float(band[0]), float(band[1])
+    if lo > hi:
+        raise ScoringError(
+            f"{prediction_id} [{hub}]: sealed {label} band [{lo}, {hi}] is "
+            f"inverted")
+    want_lo = round(predicted - half_width, FILED_DECIMALS)
+    want_hi = round(predicted + half_width, FILED_DECIMALS)
+    if (abs(lo - want_lo) > BAND_ARITHMETIC_TOLERANCE
+            or abs(hi - want_hi) > BAND_ARITHMETIC_TOLERANCE):
+        raise ScoringError(
+            f"{prediction_id} [{hub}]: sealed {label} band [{lo}, {hi}] is not "
+            f"the FROZEN filed ± {half_width} = [{want_lo}, {want_hi}] "
+            f"(|Δ| lo {abs(lo - want_lo):.3e}, hi {abs(hi - want_hi):.3e}, tol "
+            f"{BAND_ARITHMETIC_TOLERANCE:.0e}). Bands never move after the "
+            f"seal, so this artifact disagrees with §8's frozen contract and "
+            f"is NOT scored — the desk rules on which side is wrong")
+    return [lo, hi]
+
+
+def _v3_scored_band(predicted: float, band: Sequence[float],
+                    magnitude_only: bool, half_width: float) -> list[float]:
+    """The band the comparison actually runs against.
+
+    §8's carve-out is "inherited verbatim from the parent", so this is
+    `_scored_band_for`'s rule at a parameterized half-width: magnitude-only
+    moves the comparison onto |·| and the band travels with it, at 4 dp so the
+    magnitude band is the same KIND of object the sealed signed band is.
+    """
+    if magnitude_only:
+        return [round(abs(predicted) - half_width, FILED_DECIMALS),
+                round(abs(predicted) + half_width, FILED_DECIMALS)]
+    return [float(band[0]), float(band[1])]
+
+
+def _v3_verdict(value: float, scored_band: Sequence[float],
+                magnitude_only: bool) -> tuple[V3Verdict, bool, float]:
+    """(verdict, in_band, band_excess) for one value against one scored band."""
+    in_band, where, excess = _band_position(value, float(scored_band[0]),
+                                            float(scored_band[1]))
+    if magnitude_only:
+        verdict: V3Verdict = ("magnitude-only-in-band" if in_band
+                              else f"magnitude-only-out-of-band-{where}")  # type: ignore[assignment]
+    else:
+        verdict = "in-band" if in_band else f"out-of-band-{where}"  # type: ignore[assignment]
+    return verdict, in_band, excess
+
+
+class V3ScoredColumn(BaseModel):
+    """One hub column of one slot, scored at BOTH bands. Pure arithmetic."""
+    hub: str
+    hub_site: int
+    of_record: bool
+    filed_status: str
+    predicted: Optional[float] = Field(
+        default=None, description="the SEALED filed â_comp (4 dp). Read, never "
+                                  "recomputed — the seal is the denominator")
+    a_comp_full_precision: Optional[float] = None
+    magnitude_only: Optional[bool] = Field(
+        default=None,
+        description="§8's near-zero carve-out as SEALED (|â_comp| < .08), "
+                    "re-checked here against the frozen rule. PER COLUMN — the "
+                    "desk accepted that grain 2026-08-04; each column is its "
+                    "own prediction with its own band")
+    band_primary: Optional[list[float]] = None
+    band_co_primary: Optional[list[float]] = None
+    scored_band_primary: Optional[list[float]] = None
+    scored_band_co_primary: Optional[list[float]] = None
+    observed: Optional[float] = None
+    scored_value: Optional[float] = Field(
+        default=None, description="|â_obs| under the carve-out, â_obs otherwise")
+    error: Optional[float] = Field(
+        default=None, description="scored_value − predicted (or |predicted|)")
+    verdict_primary: V3Verdict = "UNSCORED-NO-FIT"
+    verdict_co_primary: V3Verdict = "UNSCORED-NO-FIT"
+    in_band_primary: Optional[bool] = None
+    in_band_co_primary: Optional[bool] = None
+    band_excess_primary: Optional[float] = None
+    band_excess_co_primary: Optional[float] = None
+    floor_clearing: Optional[bool] = Field(
+        default=None,
+        description="|â_obs| ≥ .08 — §8's selector for the CO-PRIMARY gate's "
+                    "denominator. A property of the OBSERVATION, evaluated "
+                    "only now; distinct from the carve-out, which reads the "
+                    "prediction and was marked at filing")
+    sign_scored: Optional[bool] = None
+    notes: list[str] = []
+
+
+class V3ScoredSlot(BaseModel):
+    """One frozen slot: its identity, its â_obs, and its five scored columns."""
+    ordinal: int
+    prediction_id: str
+    pair_id: str
+    source_model: str
+    source_site: int
+    target_model: str
+    target_site: int
+    arm: str
+    family: str
+    pair_class: str
+    filed_status: str
+    observed: Optional[float] = None
+    observed_source: Optional[str] = Field(
+        default=None, description="the direct pair fit â_obs was read from")
+    probed_paths: list[str] = []
+    extension_line: bool = Field(
+        default=False,
+        description="an endpoint is one of §8's never-before-observed models, "
+                    "so this slot ALSO enters the G-extension sub-line. §8's "
+                    "own double membership, recorded rather than resolved")
+    columns: list[V3ScoredColumn] = []
+    notes: list[str] = []
+
+
+class V3ColumnGate(BaseModel):
+    """§8's gate arithmetic for ONE hub column. MECHANICAL — never a verdict."""
+    STATUS: str = (
+        "MECHANICAL — a threshold's arithmetic, computed. The RULING on what "
+        "it means is the desk's; nothing here stamps or adjudicates anything.")
+    hub: str
+    of_record: bool
+
+    #: G-comp-v3, over the FROZEN list — §8: "the denominator of every gate is
+    #: that artifact's list and never changes after it is sha'd".
+    n_frozen: int
+    n_scored: int
+    n_unscored_no_fit: int
+    n_in_band_primary: int
+    fraction_primary: Optional[float] = None
+    g_comp_v3_threshold: float = V3_GATE_COMP_THRESHOLD
+    g_comp_v3_meets_threshold: Optional[bool] = None
+    #: The same numerator over the OBSERVED subset — descriptive, and quoted
+    #: beside so an unscored slot's cost to the rate is visible rather than
+    #: buried in a denominator.
+    fraction_primary_over_observed: Optional[float] = None
+
+    #: G-comp-v3-tight, over the FLOOR-CLEARING slots (|â_obs| ≥ .08).
+    n_floor_clearing: int = 0
+    n_near_zero_predicted: int = 0
+    n_in_band_co_primary: int = 0
+    fraction_co_primary: Optional[float] = None
+    g_comp_v3_tight_threshold: float = V3_GATE_COMP_TIGHT_THRESHOLD
+    g_comp_v3_tight_meets_threshold: Optional[bool] = None
+
+    #: Both core gates — §8: "Both gates must pass for the structure claim at
+    #: full strength; tight-fail/floor-pass = the named partial 'structure
+    #: holds at the coarse band only.'"
+    both_core_gates_meet_thresholds: Optional[bool] = None
+    named_partial: Optional[str] = None
+
+    #: G-extension, its own line and NEVER pooled with the core.
+    n_extension: int = 0
+    n_extension_scored: int = 0
+    n_extension_in_band_primary: int = 0
+    fraction_extension: Optional[float] = None
+    g_extension_threshold: float = V3_GATE_EXTENSION_THRESHOLD
+    g_extension_meets_threshold: Optional[bool] = None
+
+    n_out_of_band_high: int = 0
+    n_out_of_band_low: int = 0
+    n_magnitude_only_scored: int = 0
+    notes: list[str] = []
+
+
+class V3BranchStructure(BaseModel):
+    """§8's pre-named branch structure (review A-F6). NAMED, never ruled."""
+    STATUS: str = (
+        "MECHANICAL — which of §8's pre-named branches the column arithmetic "
+        "lands in. §8 named these BEFORE any fit; this block reports which one "
+        "the numbers select and rules nothing. The desk adjudicates.")
+    of_record_hub: str
+    of_record_passes_both: Optional[bool] = None
+    race_hubs_passing_both: list[str] = []
+    race_hubs_failing: list[str] = []
+    branch: Optional[Literal["a", "b", "c", "UNNAMED-BY-§8", "INDETERMINATE"]] = None
+    branch_text: str = ""
+    notes: list[str] = []
+
+
+class V3ScoredRecord(BaseModel):
+    """The §8 step-3 scored record. DESCRIPTIVE EMISSION ONLY."""
+    record: str = SCHEMA_V3_SCORED_RECORD_V1
+    STATUS: str = (
+        "DESCRIPTIVE — computation only. This lane recomputes NO prediction, "
+        "moves NO band, fits nothing, stamps nothing and writes nothing under "
+        "outputs/. The 240-slot denominator is the sealed artifact's and is "
+        "read, never re-derived.")
+    adjudication: str = (
+        "NONE — this record SCORES and COUNTS. Every verdict, ruling, stamp "
+        "and branch adjudication is the desk's; this lane declares nothing of "
+        "record.")
+    frozen_ref: str = ""
+    generated_utc: str
+    artifact_path: str
+    artifact_sha256: str
+    stamp_verification: StampVerification
+    prereg: str = ""
+    corpus_manifest_sha256: Optional[str] = None
+    splits_sha256: Optional[str] = None
+    v3_root: Optional[str] = None
+    pair_fits_root: str
+    family_of_record: str
+    rank_of_record: str = ""
+    omp_num_threads_artifact: Optional[Any] = None
+    omp_num_threads_process: Optional[str] = None
+    frozen_count_N: int
+    n_slots_scored: int = 0
+    n_slots_unscored_no_fit: int = 0
+    bands: dict[str, float] = {
+        "primary_half_width": V3_BAND_PRIMARY_HALF_WIDTH,
+        "co_primary_half_width": V3_BAND_CO_PRIMARY_HALF_WIDTH,
+        "near_zero_carve_out_abs_a_comp": NEAR_ZERO_CARVE_OUT,
+        "floor_clearing_abs_a_obs": V3_FLOOR_CLEARING_ABS,
+    }
+    hub_columns: list[V3HubColumn] = []
+    gates: list[V3ColumnGate] = []
+    branch_structure: Optional[V3BranchStructure] = None
+    extension_sub_line: V3ExtensionSubLine = V3ExtensionSubLine()
+    slots: list[V3ScoredSlot] = []
+    flags: list[str] = []
+    warnings: list[str] = []
+
+
+def score_v3_column(slot: V3Slot, column: V3ColumnPrediction,
+                    observed: Optional[float]) -> V3ScoredColumn:
+    """Score ONE column of ONE slot at BOTH bands. Pure arithmetic.
+
+    Every branch is decided by §8's frozen rules and nothing else: no band is
+    recomputed, no threshold is read from the environment, and no column's
+    verdict depends on another column's.
+    """
+    scored = V3ScoredColumn(
+        hub=column.hub, hub_site=column.hub_site, of_record=column.of_record,
+        filed_status=column.status, a_comp_full_precision=column.a_comp)
+    if not column.filed:
+        scored.verdict_primary = "UNSCORED-NOT-FILED"
+        scored.verdict_co_primary = "UNSCORED-NOT-FILED"
+        scored.notes.append(
+            f"the sealed artifact files no prediction in this column "
+            f"(status {column.status!r}"
+            + (f"; blocker: {column.blocker}" if column.blocker else "")
+            + "). Counted against the frozen denominator, never dropped from "
+              "it — §5: 'a denominator never silently shrinks'.")
+        return scored
+
+    predicted = float(column.filed_a_comp)                # type: ignore[arg-type]
+    magnitude_only = bool(column.magnitude_only)
+    _check_carve_out(f"{slot.prediction_id} [{column.hub}]", predicted,
+                     magnitude_only)
+    band_primary = _v3_check_band(slot.prediction_id, column.hub, predicted,
+                                  column.band_primary,
+                                  V3_BAND_PRIMARY_HALF_WIDTH, "primary")
+    band_co_primary = _v3_check_band(slot.prediction_id, column.hub, predicted,
+                                     column.band_co_primary,
+                                     V3_BAND_CO_PRIMARY_HALF_WIDTH,
+                                     "co-primary")
+    scored.predicted = predicted
+    scored.magnitude_only = magnitude_only
+    scored.sign_scored = not magnitude_only
+    scored.band_primary = band_primary
+    scored.band_co_primary = band_co_primary
+    scored.scored_band_primary = _v3_scored_band(
+        predicted, band_primary, magnitude_only, V3_BAND_PRIMARY_HALF_WIDTH)
+    scored.scored_band_co_primary = _v3_scored_band(
+        predicted, band_co_primary, magnitude_only,
+        V3_BAND_CO_PRIMARY_HALF_WIDTH)
+    if magnitude_only:
+        scored.notes.append(
+            "NEAR-ZERO CARVE-OUT (§8, inherited verbatim from the parent): "
+            "|â_comp| < .08, so this column is scored MAGNITUDE-ONLY — "
+            "|observed| within band of |predicted|, sign UNSCORED.")
+
+    if observed is None:
+        scored.verdict_primary = "UNSCORED-NO-FIT"
+        scored.verdict_co_primary = "UNSCORED-NO-FIT"
+        scored.notes.append(
+            "no direct pair fit resolved for this slot, so no â_obs exists. "
+            "The slot stays in the frozen denominator (§8: it 'never changes "
+            "after it is sha'd'); it is reported, never dropped.")
+        return scored
+
+    value = abs(observed) if magnitude_only else observed
+    scored.observed = observed
+    scored.scored_value = value
+    scored.error = value - (abs(predicted) if magnitude_only else predicted)
+    scored.floor_clearing = bool(abs(observed) >= V3_FLOOR_CLEARING_ABS)
+
+    verdict_p, in_p, excess_p = _v3_verdict(
+        value, scored.scored_band_primary, magnitude_only)
+    verdict_c, in_c, excess_c = _v3_verdict(
+        value, scored.scored_band_co_primary, magnitude_only)
+    scored.verdict_primary, scored.in_band_primary = verdict_p, in_p
+    scored.band_excess_primary = excess_p
+    scored.verdict_co_primary, scored.in_band_co_primary = verdict_c, in_c
+    scored.band_excess_co_primary = excess_c
+    if magnitude_only and scored.floor_clearing:
+        scored.notes.append(
+            "⚠ CARVE-OUT × FLOOR interaction: this column's PREDICTION is "
+            "near-zero (magnitude-only) while its OBSERVATION clears the .08 "
+            "floor, so the slot enters G-comp-v3-tight's denominator AND is "
+            "scored sign-unscored inside it. §8 defines the two rules "
+            "independently and does not address their intersection. The "
+            "literal reading is applied; FLAGGED, not resolved.")
+    return scored
+
+
+def score_v3_slot(slot: V3Slot, pairs_root: Path,
+                  never_before_observed: Sequence[str],
+                  vectors_root: Optional[Path] = None) -> V3ScoredSlot:
+    """â_obs for one slot, then every column scored against it."""
+    scored = V3ScoredSlot(
+        ordinal=slot.ordinal, prediction_id=slot.prediction_id,
+        pair_id=slot.pair_id, source_model=slot.source_model,
+        source_site=slot.source_site, target_model=slot.target_model,
+        target_site=slot.target_site, arm=slot.arm, family=slot.family,
+        pair_class=slot.pair_class, filed_status=slot.status,
+        extension_line=bool({slot.source_model, slot.target_model}
+                            & set(never_before_observed)))
+    fit = resolve_pair_fit(slot, pairs_root)
+    scored.probed_paths = list(fit.probed_paths)
+    observed: Optional[float] = None
+    if fit.available:
+        try:
+            observed, _spec_src, _spec_tgt, notes = observed_ahat_for_slot(
+                slot, fit, vectors_root)
+            scored.observed = observed
+            scored.observed_source = fit.resolved
+            scored.notes.extend(notes)
+        except PairFitsAbsentError as exc:
+            #  A resolvable fit whose VECTORS are absent is the same shape of
+            #  gap and is reported as one, not raised: a wave that landed 240
+            #  fits and 19 of 20 vector banks must name the gap.
+            scored.notes.append(f"UNSCORED — {exc}")
+    else:
+        scored.notes.append(
+            "UNSCORED-NO-FIT — no direct pair fit for this slot under the "
+            "pair-fits root. Probed: " + ", ".join(fit.probed_paths))
+    scored.columns = [score_v3_column(slot, slot.columns[column.hub], observed)
+                      for column in _artifact_column_order(slot)]
+    return scored
+
+
+def _artifact_column_order(slot: V3Slot) -> list[V3ColumnPrediction]:
+    """The slot's columns in the artifact's own key order — never re-sorted.
+
+    Column ORDER is the sealing lane's, and the of-record column's position in
+    it is a fact about the seal. Re-sorting here would make a diff of two
+    scored records depend on this module's taste.
+    """
+    return list(slot.columns.values())
+
+
+def _column_gate(hub: str, of_record: bool, scored_slots: Sequence[V3ScoredSlot],
+                 frozen_n: int) -> V3ColumnGate:
+    """§8's three gates' arithmetic for one hub column."""
+    rows = [(s, c) for s in scored_slots for c in s.columns if c.hub == hub]
+    gate = V3ColumnGate(hub=hub, of_record=of_record, n_frozen=frozen_n,
+                        n_scored=0, n_unscored_no_fit=0,
+                        n_in_band_primary=0)
+    ext_rows = [(s, c) for s, c in rows if s.extension_line]
+    for _slot, column in rows:
+        if column.in_band_primary is None:
+            gate.n_unscored_no_fit += 1
+            continue
+        gate.n_scored += 1
+        if column.in_band_primary:
+            gate.n_in_band_primary += 1
+        if column.verdict_primary.endswith("high"):
+            gate.n_out_of_band_high += 1
+        elif column.verdict_primary.endswith("low"):
+            gate.n_out_of_band_low += 1
+        if column.magnitude_only:
+            gate.n_magnitude_only_scored += 1
+        if column.floor_clearing:
+            gate.n_floor_clearing += 1
+            if column.in_band_co_primary:
+                gate.n_in_band_co_primary += 1
+    gate.n_near_zero_predicted = sum(
+        1 for _s, c in rows if c.magnitude_only)
+
+    #  G-comp-v3 — over the FROZEN list, which never changes after the seal.
+    if frozen_n > 0:
+        gate.fraction_primary = gate.n_in_band_primary / frozen_n
+        gate.g_comp_v3_meets_threshold = bool(
+            gate.fraction_primary >= V3_GATE_COMP_THRESHOLD)
+    if gate.n_scored > 0:
+        gate.fraction_primary_over_observed = (
+            gate.n_in_band_primary / gate.n_scored)
+    #  G-comp-v3-tight — over the floor-clearing slots.
+    if gate.n_floor_clearing > 0:
+        gate.fraction_co_primary = (
+            gate.n_in_band_co_primary / gate.n_floor_clearing)
+        gate.g_comp_v3_tight_meets_threshold = bool(
+            gate.fraction_co_primary >= V3_GATE_COMP_TIGHT_THRESHOLD)
+    else:
+        gate.notes.append(
+            "G-comp-v3-tight has an EMPTY denominator: no slot's observation "
+            "cleared |â_obs| ≥ .08. The gate is INDETERMINATE, not passed and "
+            "not failed — a rate over zero slots is not a rate.")
+    #  G-extension — its own line, never pooled with the core.
+    gate.n_extension = len(ext_rows)
+    gate.n_extension_scored = sum(1 for _s, c in ext_rows
+                                  if c.in_band_primary is not None)
+    gate.n_extension_in_band_primary = sum(1 for _s, c in ext_rows
+                                           if c.in_band_primary)
+    if gate.n_extension > 0:
+        gate.fraction_extension = (
+            gate.n_extension_in_band_primary / gate.n_extension)
+        gate.g_extension_meets_threshold = bool(
+            gate.fraction_extension >= V3_GATE_EXTENSION_THRESHOLD)
+
+    core = (gate.g_comp_v3_meets_threshold,
+            gate.g_comp_v3_tight_meets_threshold)
+    if None in core:
+        gate.both_core_gates_meet_thresholds = None
+        gate.named_partial = (
+            "INDETERMINATE — one of the two core gates has no denominator to "
+            "be a rate over. §8 names no partial for that state; it is "
+            "reported, never rounded into a pass or a fail.")
+    else:
+        gate.both_core_gates_meet_thresholds = bool(core[0] and core[1])
+        if core[0] and not core[1]:
+            gate.named_partial = (
+                "§8's PRE-NAMED PARTIAL: tight-fail / floor-pass = 'structure "
+                "holds at the coarse band only'.")
+        elif not core[0] and core[1]:
+            gate.named_partial = (
+                "⚠ UNNAMED BY §8: the tight band's rate meets its threshold "
+                "while the coarse band's does not. §8 names the reverse "
+                "partial only. Arithmetically possible because the two gates "
+                "have DIFFERENT denominators (frozen list vs floor-clearing "
+                "slots). FLAGGED, not resolved.")
+    return gate
+
+
+def _branch_structure(artifact: V3PredictionArtifact,
+                      gates: Sequence[V3ColumnGate]) -> V3BranchStructure:
+    """§8's pre-named branch structure (review A-F6), selected by arithmetic."""
+    of_record_hub = artifact.of_record_hub
+    by_hub = {gate.hub: gate for gate in gates}
+    incumbent = by_hub.get(of_record_hub)
+    structure = V3BranchStructure(of_record_hub=of_record_hub)
+    if incumbent is None:                                    # pragma: no cover
+        structure.branch = "INDETERMINATE"
+        structure.branch_text = (
+            f"no gate arithmetic for the of-record hub {of_record_hub!r}")
+        return structure
+    structure.of_record_passes_both = incumbent.both_core_gates_meet_thresholds
+    race = [gate for gate in gates if gate.hub != of_record_hub]
+    structure.race_hubs_passing_both = [
+        gate.hub for gate in race if gate.both_core_gates_meet_thresholds]
+    structure.race_hubs_failing = [
+        gate.hub for gate in race
+        if gate.both_core_gates_meet_thresholds is False]
+    if (structure.of_record_passes_both is None
+            or any(gate.both_core_gates_meet_thresholds is None
+                   for gate in race)):
+        structure.branch = "INDETERMINATE"
+        structure.branch_text = (
+            "at least one column's core gates are INDETERMINATE (an empty "
+            "denominator), so §8's branch structure — which is stated in terms "
+            "of columns passing or failing BOTH core gates — does not select a "
+            "branch. Reported as indeterminate rather than collapsed into one.")
+        return structure
+    passing_race = structure.race_hubs_passing_both
+    if not structure.of_record_passes_both and not passing_race:
+        structure.branch = "a"
+        structure.branch_text = (
+            "§8 branch (a): the of-record column AND all race-hub columns "
+            "fail → the structure claim takes the hit at full weight.")
+    elif not structure.of_record_passes_both and passing_race:
+        structure.branch = "b"
+        structure.branch_text = (
+            "§8 branch (b): the of-record column fails while "
+            f"{len(passing_race)} simultaneously-filed race column(s) "
+            f"({', '.join(passing_race)}) pass both core gates → 'composed "
+            "transport generalizes; the incumbent hub does not'. The structure "
+            "claim survives on the passing column — identity fixed AT FILING "
+            "TIME by the seal, so no post-hoc selection is possible — and the "
+            "incumbent's demotion is the headline.")
+    elif structure.of_record_passes_both and not passing_race:
+        structure.branch = "c"
+        structure.branch_text = (
+            "§8 branch (c): the of-record column passes and the candidates "
+            "fail → incumbent-specific robustness, a mechanism datum.")
+    else:
+        structure.branch = "UNNAMED-BY-§8"
+        structure.branch_text = (
+            "⚠ §8's branch structure names three cases and this is not one of "
+            "them: the of-record column passes both core gates AND "
+            f"{len(passing_race)} race column(s) ({', '.join(passing_race)}) "
+            "do too. That is the unambiguous-success case §8 did not need a "
+            "name for. Reported as UNNAMED rather than forced into (c), which "
+            "requires the candidates to FAIL. FLAGGED, not resolved.")
+    return structure
+
+
+def score_v3_artifact(artifact: V3PredictionArtifact,
+                      verification: StampVerification,
+                      pairs_root: Path,
+                      vectors_root: Optional[Path] = None) -> V3ScoredRecord:
+    """§8 step 3, end to end: â_obs per slot, every column at both bands, gates.
+
+    The pair-fits tree is required to EXIST (`require_pair_fits_root`) before a
+    slot is touched; per-slot absences inside a present tree are named gaps and
+    are counted against the frozen denominator.
+    """
+    pairs_root = require_pair_fits_root(pairs_root)
+    self_description = artifact.self_description
+    never_before = list(
+        artifact.extension_sub_line.never_before_observed_core_members)
+    record = V3ScoredRecord(
+        frozen_ref=artifact.frozen_ref,
+        generated_utc=utc_now(),
+        artifact_path=artifact.path, artifact_sha256=artifact.sha256,
+        stamp_verification=verification,
+        prereg=str((self_description.get("prereg") or {}).get("sha256", ""))
+        if isinstance(self_description.get("prereg"), dict) else "",
+        corpus_manifest_sha256=self_description.get("corpus_manifest_sha256"),
+        splits_sha256=self_description.get("splits_sha256"),
+        v3_root=None if V3_ROOT is None else str(V3_ROOT),
+        pair_fits_root=str(pairs_root),
+        family_of_record=(artifact.slots[0].family if artifact.slots
+                          else FAMILY_OF_RECORD_WEBTEXT_V3),
+        rank_of_record=str(self_description.get("rank_of_record", "")),
+        omp_num_threads_artifact=self_description.get("omp_num_threads"),
+        omp_num_threads_process=os.environ.get("OMP_NUM_THREADS"),
+        frozen_count_N=artifact.frozen_count_N,
+        hub_columns=list(artifact.hub_columns),
+        extension_sub_line=artifact.extension_sub_line)
+
+    for slot in artifact.slots:
+        record.slots.append(score_v3_slot(slot, pairs_root, never_before,
+                                          vectors_root))
+    record.n_slots_scored = sum(1 for s in record.slots if s.observed is not None)
+    record.n_slots_unscored_no_fit = (record.frozen_count_N
+                                      - record.n_slots_scored)
+    record.gates = [
+        _column_gate(column.hub, column.of_record, record.slots,
+                     artifact.frozen_count_N)
+        for column in artifact.hub_columns]
+    record.branch_structure = _branch_structure(artifact, record.gates)
+
+    #  EVERY AMBIGUITY THIS LANE MET, NAMED. Flagged, never resolved silently.
+    record.flags.append(
+        "G-comp-v3's denominator is the FROZEN 240-slot list, per §8's "
+        "'the denominator of every gate is that artifact's list and never "
+        "changes after it is sha'd'. An unscored slot therefore COUNTS "
+        "AGAINST the rate. The same numerator over the observed subset is "
+        "quoted beside as `fraction_primary_over_observed` — descriptive, "
+        "never the gate.")
+    record.flags.append(
+        "⚠ G-extension's denominator is read as: every frozen slot with an "
+        "endpoint in the artifact's own `never_before_observed_core_members` "
+        f"({', '.join(never_before) or 'none'}). §8 names the sub-line as "
+        "'extension + never-before-observed slots (72B, base siblings, dsv3, "
+        "gpt2-xl, olmo2-base)' and the artifact records the double membership "
+        "'rather than resolving it'. The three EXTENSION models are ABSENT "
+        "WITH THEIR NAMED BLOCKER and contribute no slots — they are reported "
+        "in `extension_sub_line`, never pooled into any quoted rate (§5). "
+        "This is the only mechanically available reading; FLAGGED, not "
+        "resolved — the denominator is the desk's to rule.")
+    record.flags.append(
+        "The near-zero carve-out is applied PER COLUMN (each column is its "
+        "own prediction with its own band), which is the grain the desk "
+        "ACCEPTED 2026-08-04. A per-slot reading keyed to the of-record "
+        "column alone remains available from this record's data.")
+    if record.n_slots_unscored_no_fit:
+        record.warnings.append(
+            f"{record.n_slots_unscored_no_fit}/{record.frozen_count_N} slots "
+            f"have NO direct pair fit and are UNSCORED. They stay in the "
+            f"frozen denominator, so every G-comp-v3 rate below is a rate "
+            f"over a partially-fit wave and is NOT a gate reading yet.")
+    if (record.omp_num_threads_artifact is not None
+            and record.omp_num_threads_process is not None
+            and str(record.omp_num_threads_artifact)
+            != str(record.omp_num_threads_process)):
+        record.warnings.append(
+            f"THREAD COUNT MISMATCH — the artifact was built at "
+            f"OMP_NUM_THREADS={record.omp_num_threads_artifact} and this "
+            f"process is running at {record.omp_num_threads_process}. The "
+            f"thread count is instrument identity (ledger 2026-08-01); a byte "
+            f"difference this explains is a characterized break, and the same "
+            f"difference reported bare reads as corruption.")
+    return record
+
+
+def default_v3_scored_path(artifact: Path) -> Path:
+    """Where the scored record lands when the operator does not name it."""
+    artifact = Path(artifact)
+    return artifact.parent / f"scored-{artifact.name}"
+
+
+def write_v3_scored_record(record: V3ScoredRecord, out: Path,
+                           overwrite: bool = False) -> Path:
+    """Write the scored record. Refuses to clobber, exactly as v2.1 scoring does."""
+    out = Path(out)
+    if out.exists() and not overwrite:
+        raise ScoringError(
+            f"a scored record already exists at {out}. Scoring is a DESK ACT "
+            f"performed once per record against frozen bands; pass "
+            f"--overwrite-scored to replace it deliberately")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(record.model_dump_json(indent=1))
+    logger.info("wrote %s (%d slot(s) × %d column(s))", out, len(record.slots),
+                len(record.gates))
+    return out
+
+
 # ---------------------------------------------------------------- selftest
 def _proc_map(rng: np.random.Generator, d_hub: int, d_model: int, k: int,
               src_norm: float, tgt_norm: float, scale: float) -> TransportMap:
@@ -9263,6 +10992,636 @@ def selftest() -> int:                                   # noqa: C901 — a chec
     check(ACTIVE_HUB_VECTOR.basis == DEFAULT_HUB_VECTOR_BASIS,
           "and no refused CLI invocation left a non-default basis in force")
 
+    # ══════════════════════════ 31: THE v2.1 LANE IS UNCHANGED (the byte proof)
+    print("== selftest 31: the v2.1 lane's resolution is BYTE-UNCHANGED ==")
+    #  RAKE M44's rule (a) in code: this configuration is "no root set, no pin
+    #  set, default hub, default basis" — the one every existing caller runs in
+    #  — and the claim is that the generalization moved NOTHING in it. Proved
+    #  path-by-path rather than asserted, because a probe list that quietly
+    #  gained an entry is exactly the change that reads as "still works".
+    check(V21_ROOT is None and V3_ROOT is None and FILED_PATHS is None,
+          "the module starts with no v2.1 root, no webtext-v3 root and no pin "
+          "— the state every existing caller resolves in")
+    historical_hub_dirs = {
+        "phi-4": ["outputs/collection/phi-4/fits_scan_phi-4"],
+        "3b": ["outputs/collection/3b/fits_scan_3b",
+               "outputs/pairs/8b__3b/fits_8bL16__3bL14"],
+        "dsv2-lite": ["outputs/collection/dsv2-lite/fits_scan_dsv2-lite",
+                      "outputs/battery/arms/A8_conjugation/leg2/fits"],
+        "qwen-7b": ["outputs/collection/qwen-7b/fits_scan_qwen-7b",
+                    "outputs/battery/arms/A8_conjugation/leg1/fits"],
+        "gemma3-27b": ["outputs/collection/gemma3-27b/fits_scan_gemma3-27b",
+                       "outputs/battery/arms/A8_conjugation/smalls/fits_gemma"],
+    }
+    for model31, expected31 in sorted(historical_hub_dirs.items()):
+        got31 = [str(d.path) for d in hub_map_dirs(model31)]
+        check(got31 == expected31,
+              f"hub_map_dirs({model31!r}) is the historical list, verbatim: "
+              f"{got31}")
+        #  ... and the four NEW arguments, passed at their v2.1 values, change
+        #  nothing: the v3 dir is contributed only under a VERIFIED v3 root.
+        check([str(d.path) for d in hub_map_dirs(
+            model31, SITE_OF_RECORD[model31], "native", HUB_MODEL,
+            HUB_SITE_OF_RECORD)] == expected31,
+              f"and hub_map_dirs({model31!r}, site, arm, hub, hub_site) with no "
+              f"v3 root returns the SAME list — the new parameters cannot add a "
+              f"candidate on their own")
+    for model31, site31 in (("phi-4", 19), ("gemma3-27b", 38)):
+        check([str(p) for p in vector_bank_paths(model31, site31)]
+              == [f"outputs/collection/{model31}/vectors/"
+                  f"entropy_gradient_{model31}.npz",
+                  f"outputs/collection/{model31}/vectors/"
+                  f"entropy_gradient_{model31}_L{site31}.npz"],
+              f"vector_bank_paths({model31!r}, {site31}) is the historical "
+              f"two-probe list, verbatim")
+    check(str(HUB_VECTOR_PATH)
+          == "outputs/collection/8b/vectors/entropy_gradient_8b_L16rebuild.npz"
+          and HUB_VECTOR_BASES["corpus-v2.1"].path == HUB_VECTOR_PATH,
+          f"the corpus-v2.1 hub vector still resolves to its historical single "
+          f"path after the registry became per-hub: {HUB_VECTOR_PATH}")
+    check(ACTIVE_HUB == DEFAULT_HUB
+          and ACTIVE_HUB.model == HUB_MODEL
+          and ACTIVE_HUB.site == HUB_SITE_OF_RECORD,
+          f"and the ACTIVE hub is the incumbent {ACTIVE_HUB.label} by default, "
+          f"never set by import")
+    #  THE FROZEN PREDICTION-ID SURFACE. Every banked v2.1 record's ids read
+    #  `<arm>-k128`; a record's ids ARE its slot identities, so this is checked
+    #  for every family the v2.1 lane can be asked for, not only its default.
+    for family31 in FAMILIES:
+        check(prediction_id_rank_label(family31, "corpus-v2.1") == "k128",
+              f"the corpus-v2.1 prediction-id rank label is the FROZEN k128 at "
+              f"family {family31!r} — the filing convention of record does not "
+              f"move because a diagnostic family was asked for")
+    check(prediction_id_rank_label(FAMILY_OF_RECORD_WEBTEXT_V3, "webtext-v3")
+          == "k256"
+          and prediction_id_rank_label("proc_k128", "webtext-v3") == "k128",
+          "while the webtext-v3 policy reads the rank OFF THE FAMILY, which is "
+          "§8's own id shape (`v3-prediction/<src>→<tgt>/<arm>-k<rank>`)")
+    try:
+        prediction_id_rank_label("ridge", "webtext-v3")
+        check(False, "a rank-free family must refuse to build a k<rank> id")
+    except ComposedPathError as exc31:
+        check("carries no rank" in str(exc31),
+              f"a rank-free family REFUSES rather than inventing a rank: "
+              f"{exc31!s:.56}")
+    check(FAMILIES_ALL[:len(FAMILIES)] == FAMILIES
+          and FAMILY_OF_RECORD_WEBTEXT_V3 in FAMILIES_ALL
+          and FAMILY_OF_RECORD_WEBTEXT_V3 not in FAMILIES,
+          f"FAMILIES_ALL is a SUPERSET of read_exchange_rates.FAMILIES in its "
+          f"own order ({FAMILIES_ALL}) — proc_k256 is added beside the v2.1 "
+          f"enumeration, never spliced into it")
+
+    print("== selftest 32: the hub registry — a lookup, never a fallback ==")
+    check(sorted(HUB_SITES) == sorted(
+        ["8b", "qwen2.5-3b-instruct", "qwen2.5-32b-instruct", "3b",
+         "gemma3-27b"]),
+          f"§7's five race hubs are registered at their sites of record: "
+          f"{sorted(HUB_SITES.items())}")
+    #  The four non-incumbent hubs must agree with the candidate registry, or
+    #  one of them would resolve legs at a site the campaign never ruled.
+    for hub32, site32 in sorted(HUB_SITES.items()):
+        if hub32 == HUB_MODEL:
+            continue
+        check(SITE_OF_RECORD.get(hub32) == site32,
+              f"hub {hub32} L{site32} agrees with SITE_OF_RECORD — the two "
+              f"registries cannot describe different objects")
+    check(HUB_MODEL not in SITE_OF_RECORD,
+          "and the incumbent is deliberately ABSENT from SITE_OF_RECORD (it is "
+          "the hub, not a candidate endpoint), which is why its site lives in "
+          "HUB_SITES and nowhere else")
+    for bad32 in ("llama-3.2-3b", "qwen2.5-3b", "8B", "", "gemma3"):
+        try:
+            hub_ref(bad32)
+            check(False, f"an unregistered hub {bad32!r} must be REFUSED")
+        except UnknownHubError as exc32:
+            check("unknown hub" in str(exc32) and "8b" in str(exc32),
+                  f"hub {bad32!r} REFUSES and names the registered hubs: "
+                  f"{exc32!s:.52}")
+    check(ACTIVE_HUB == DEFAULT_HUB,
+          "and a refused hub leaves the ACTIVE hub untouched")
+    with hub_scope("gemma3-27b") as scoped32:
+        check(scoped32.label == "gemma3-27bL38" and ACTIVE_HUB == scoped32,
+              f"hub_scope sets the active hub ({scoped32.label})")
+        check([str(d.path) for d in hub_map_dirs("phi-4")]
+              == ["outputs/collection/phi-4/fits_scan_phi-4"],
+              "and a hub flip alone changes NO probe directory — the v2.1 "
+              "trees are one dir per model; the hub only names the fit FILE")
+    check(ACTIVE_HUB == DEFAULT_HUB,
+          "hub_scope restores the incumbent on exit — a half-applied hub flip "
+          "would file one column's number in another column")
+    #  The per-hub hub-vector lookup: five hubs, five DISTINCT paths, per basis.
+    for basis32 in sorted(HUB_VECTOR_BASES):
+        entry32 = HUB_VECTOR_BASES[basis32]
+        paths32 = {hub32: entry32.path_for(hub32, site32)
+                   for hub32, site32 in HUB_SITES.items()}
+        check(len(set(map(str, paths32.values()))) == len(HUB_SITES),
+              f"basis {basis32!r} resolves the five hub columns to "
+              f"{len(set(map(str, paths32.values())))} DISTINCT vector paths")
+        check(paths32[HUB_MODEL] == entry32.path,
+              f"and the incumbent's per-hub path IS the historical `path` "
+              f"property for basis {basis32!r}: {entry32.path}")
+
+    print("== selftest 33: the webtext-v3 root — vintage-gated like v2.1's ==")
+    with _tmp30.TemporaryDirectory(prefix="composed_v3root_") as td33:
+        fixture33 = Path(td33)
+        good33 = fixture33 / "good"
+        (good33 / V3_CORPUS_MANIFEST_RELPATH).parent.mkdir(parents=True)
+        (good33 / V3_CORPUS_MANIFEST_RELPATH).write_text('{"corpus": "synthetic"}')
+        synthetic_sha33 = sha256_of(good33 / V3_CORPUS_MANIFEST_RELPATH)
+        try:
+            set_v3_root(good33)
+            check(False, "a root whose manifest is not the FROZEN v3 digest "
+                         "must be refused")
+        except CorpusVintageError as exc33:
+            check(CORPUS_SHA_WEBTEXT_V3 in str(exc33)
+                  and synthetic_sha33 in str(exc33),
+                  f"a wrong-vintage root REFUSES, quoting both digests: "
+                  f"{exc33!s:.56}")
+        check(V3_ROOT is None,
+              "and a refused root leaves NO root in force — a half-set root "
+              "would resolve some sides against a basis nobody verified")
+        missing33 = fixture33 / "no-manifest"
+        missing33.mkdir()
+        try:
+            set_v3_root(missing33)
+            check(False, "a root with no vintage manifest must be refused")
+        except CorpusVintageError as exc33b:
+            check("cannot be VERIFIED" in str(exc33b),
+                  f"a root that cannot PROVE its vintage refuses: {exc33b!s:.52}")
+        try:
+            set_v3_root(fixture33 / "does-not-exist")
+            check(False, "a non-directory root must be refused")
+        except CorpusVintageError:
+            check(True, "a non-directory --v3-root refuses")
+        #  The machinery itself, against the SYNTHETIC digest (rake M44(c): the
+        #  fixture is data-independent — it never touches a banked tree).
+        with v3_root_scope(good33, expected_corpus_sha=synthetic_sha33) as sha33:
+            check(sha33 == synthetic_sha33 and V3_ROOT == good33
+                  and V3_CORPUS_SHA == synthetic_sha33,
+                  "a root that PROVES its vintage is accepted and its digest "
+                  "recorded — checked by value, never trusted by name (M26)")
+            check([str(d.path) for d in hub_map_dirs("phi-4", 19, "native")][0]
+                  == str(good33 / V3_HUB_LEGS_STEM / "8bL16__phi-4L19__native"),
+                  "and the v3 hub-leg dir is PREPENDED, one dir per "
+                  "(hub, target, arm) — the wave's own layout")
+            check([str(d.path) for d in hub_map_dirs("phi-4")]
+                  == ["outputs/collection/phi-4/fits_scan_phi-4"],
+                  "while a call that names NO site and NO arm contributes no v3 "
+                  "candidate at all: the v3 dir cannot be built without them, "
+                  "and guessing one would probe a tree nobody asked for")
+            check(str(vector_bank_paths("phi-4", 19)[0])
+                  == str(good33 / V3_VECTORS_STEM / "phi-4"
+                         / "entropy_gradient_phi-4_L19.npz"),
+                  "and the v3 vector wave is prepended at its own inverted stem")
+            with hub_scope("gemma3-27b"):
+                check(str(hub_map_dirs("phi-4", 19, "native")[0].path).endswith(
+                    "gemma3-27bL38__phi-4L19__native"),
+                      "a hub flip DOES move the v3 dir — five hub columns, five "
+                      "leg trees, which is exactly what §8 step 2 files")
+            try:
+                set_v21_root(good33)
+                check(False, "a v2.1 root must refuse while a v3 root is set")
+            except CorpusVintageError as exc33c:
+                check("MUTUALLY" in str(exc33c).upper()
+                      or "Clear one first" in str(exc33c),
+                      f"the two roots refuse each other at BOTH doors: "
+                      f"{exc33c!s:.52}")
+        check(V3_ROOT is None and V3_CORPUS_SHA is None,
+              "v3_root_scope restores the previous (unset) root on exit")
+
+    print("== selftest 34: the §8 stamp is BINDING (no seal, no scoring) ==")
+    with _tmp30.TemporaryDirectory(prefix="composed_v3stamp_") as td34:
+        fixture34 = Path(td34)
+        artifact34 = fixture34 / "PREDICTIONS-webtext-v3-2026-08-04.json"
+        artifact34.write_text(json.dumps({"artifact": "x"}, indent=1))
+        real_sha34 = sha256_of(artifact34)
+
+        def _stamp34(**overrides: Any) -> Path:
+            payload = {"stamp": V3_STAMP_TEXT, "sealed_utc": "2026-08-04T11:07:20Z",
+                       "artifact": artifact34.name, "artifact_sha256": real_sha34,
+                       "prereg": "freeze/webtext-v3 sha " + "1" * 64,
+                       "frozen_count_N": 4, "fully_filed": 4}
+            payload.update(overrides)
+            path = fixture34 / f"stamp-{len(list(fixture34.iterdir()))}.json"
+            path.write_text(json.dumps(payload, indent=1))
+            return path
+
+        try:
+            verify_prediction_stamp(artifact34, fixture34 / "nothing.json")
+            check(False, "an absent stamp must refuse")
+        except PredictionStampError as exc34:
+            check("REFUSE" in str(exc34) or "refuse" in str(exc34),
+                  f"NO STAMP, NO SCORING — §8 step 2 made it binding: "
+                  f"{exc34!s:.52}")
+        wrong_sha34 = _stamp34(artifact_sha256="0" * 64)
+        try:
+            verify_prediction_stamp(artifact34, wrong_sha34)
+            check(False, "a stamp whose sha does not match must refuse")
+        except PredictionStampError as exc34b:
+            check(real_sha34 in str(exc34b) and "0" * 64 in str(exc34b),
+                  f"STAMP MISMATCH REFUSED, quoting both digests: {exc34b!s:.52}")
+        wrong_name34 = _stamp34(artifact="SOME-OTHER-ARTIFACT.json")
+        try:
+            verify_prediction_stamp(artifact34, wrong_name34)
+            check(False, "a stamp sealing a different filename must refuse")
+        except PredictionStampError as exc34c:
+            check("SOME-OTHER-ARTIFACT.json" in str(exc34c),
+                  f"two artifacts and one seal is not a verification: "
+                  f"{exc34c!s:.52}")
+        wrong_text34 = _stamp34(stamp="looks like a stamp")
+        try:
+            verify_prediction_stamp(artifact34, wrong_text34)
+            check(False, "a file that is not the sealing act must refuse")
+        except PredictionStampError as exc34d:
+            check("by VALUE" in str(exc34d),
+                  f"a stamp is checked by VALUE, never trusted by filename: "
+                  f"{exc34d!s:.52}")
+        good34 = _stamp34()
+        parsed34, verification34 = verify_prediction_stamp(artifact34, good34)
+        check(verification34.sha_matches
+              and verification34.sha256_recomputed == real_sha34
+              and parsed34.frozen_count_N == 4,
+              "a matching seal VERIFIES and records the recomputed digest")
+        #  ... and the artifact behind a VALID seal must still be the schema.
+        try:
+            load_v3_prediction_artifact(artifact34, good34)
+            check(False, "a verified-but-wrong-schema artifact must refuse")
+        except V3ArtifactError as exc34e:
+            check(SCHEMA_V3_PREDICTION_ARTIFACT_V1 in str(exc34e),
+                  f"the schema is a CONTRACT, checked after the seal: "
+                  f"{exc34e!s:.56}")
+
+    print("== selftest 35: the §8 lane end-to-end on a HAND-COMPUTED fixture ==")
+    #  RAKE M44(c): everything below is synthesized on a temp tree. No banked
+    #  artifact is touched, so this configuration is identical from any cwd.
+    #
+    #  THE FIXTURE, AND WHY EVERY NUMBER IN IT IS EXACT.
+    #  The direct pair map is the IDENTITY proc map (va = vb = Ω = I_4,
+    #  src_norm = tgt_norm = scale = 1), so `transport(v, 'fwd') == v` and
+    #  therefore â_obs == cos(v_src, v_tgt) exactly. Planting
+    #  v_src = (1,0,0,0) and v_tgt = (c, √(1−c²), 0, 0) makes â_obs == c, to
+    #  fp64 round-off. Every band edge below is ≥ .005 away from every observed
+    #  value, so no verdict can turn on that round-off.
+    #
+    #  FOUR SLOTS × TWO COLUMNS (of-record `8b`, race `gemma3-27b`), N = 4:
+    #
+    #   slot  â_obs    floor?   8b filed  8b ±.05  8b ±.025 | gm filed  gm ±.05 gm ±.025
+    #    1   +0.3100    yes      +0.3000    in       in     |  +0.3100    in       in
+    #    2   +0.3400    yes      +0.3000    in      OUT hi  |  +0.3400    in       in
+    #    3   +0.3000    yes      +0.2000   OUT hi   OUT hi  |  +0.3000    in       in
+    #    4   −0.0700    NO       +0.0500  in(mag)  in(mag)  |  −0.0700  in(mag) in(mag)
+    #
+    #  Slot 4 is the carve-out: both columns file |â_comp| < .08, so BOTH are
+    #  MAGNITUDE-ONLY — |−.07| = .07 is compared against the band of |filed|,
+    #  and the sign disagreement (8b files +.05, the observation is −.07) is
+    #  UNSCORED. |â_obs| = .07 < .08, so slot 4 is NOT floor-clearing and never
+    #  enters the tight gate's denominator.
+    #
+    #  HAND-COMPUTED GATE ARITHMETIC:
+    #    8b     G-comp-v3      3/4 = 0.750 < 0.80  FAIL   (slots 1, 2, 4 in band)
+    #           G-tight        1/3 = 0.333 < 0.80  FAIL   (floor = {1,2,3})
+    #           G-extension    0/1 = 0.000 < 0.70  FAIL   (slot 3 is the ext slot)
+    #    gemma  G-comp-v3      4/4 = 1.000 >= 0.80 PASS
+    #           G-tight        3/3 = 1.000 >= 0.80 PASS
+    #           G-extension    1/1 = 1.000 >= 0.70 PASS
+    #    branch: of-record fails both, a race column passes both => §8 BRANCH (b)
+    with _tmp30.TemporaryDirectory(prefix="composed_v3score_") as td35:
+        fx35 = Path(td35)
+        pairs35 = fx35 / "pairs"
+        vectors35 = fx35 / "vectors"
+        d35 = 4
+        eye35 = np.eye(d35)
+
+        def _plant_vector35(model: str, site: int, first: float) -> None:
+            vec = np.zeros(d35)
+            vec[0] = first
+            vec[1] = float(np.sqrt(max(0.0, 1.0 - first ** 2)))
+            out = vectors35 / model
+            out.mkdir(parents=True, exist_ok=True)
+            np.savez(out / f"entropy_gradient_{model}_L{site}.npz",
+                     **{f"entropy_gradient_L{site}": vec})
+
+        def _plant_identity_fit35(src: str, s_site: int, tgt: str, t_site: int,
+                                  arm: str, family: str) -> None:
+            out = pairs35 / f"{src}L{s_site}__{tgt}L{t_site}__{arm}"
+            out.mkdir(parents=True, exist_ok=True)
+            np.savez_compressed(
+                out / f"fit_{src}L{s_site}__{tgt}L{t_site}_{arm}_{family}.npz",
+                kind=np.array("proc"), src_norm=np.array(1.0),
+                tgt_norm=np.array(1.0), scale=np.array(1.0),
+                va=eye35.astype(np.float32), vb=eye35.astype(np.float32),
+                omega=eye35.astype(np.float32))
+
+        #  (source, target, â_obs, 8b filed, gemma filed).
+        #  EVERY SLOT GETS ITS OWN PAIR OF MODEL KEYS. A key reused across
+        #  slots would be planted twice at one site with two different target
+        #  cosines, and the second plant would silently redefine the first
+        #  slot's â_obs — a fixture that lies about its own hand-computation.
+        plan35 = [("s1src", "s1tgt", 0.3100, 0.3000, 0.3100),
+                  ("s2src", "s2tgt", 0.3400, 0.3000, 0.3400),
+                  ("s3src", "s3tgt", 0.3000, 0.2000, 0.3000),
+                  ("s4src", "s4tgt", -0.0700, 0.0500, -0.0700)]
+        sites35 = {"s1src": 11, "s1tgt": 12, "s2src": 13, "s2tgt": 14,
+                   "s3src": 15, "s3tgt": 16, "s4src": 17, "s4tgt": 18}
+        #  Slot 3 is the G-extension slot: its target is the fixture's one
+        #  never-before-observed model.
+        never_before35 = ["s3tgt"]
+
+        def _column35(hub: str, hub_site: int, of_record: bool,
+                      filed: float) -> dict[str, Any]:
+            return {
+                "hub": hub, "hub_site": hub_site, "of_record": of_record,
+                "status": "FILED", "a_comp": filed, "filed_a_comp": filed,
+                "band_primary": [round(filed - V3_BAND_PRIMARY_HALF_WIDTH, 4),
+                                 round(filed + V3_BAND_PRIMARY_HALF_WIDTH, 4)],
+                "band_co_primary": [
+                    round(filed - V3_BAND_CO_PRIMARY_HALF_WIDTH, 4),
+                    round(filed + V3_BAND_CO_PRIMARY_HALF_WIDTH, 4)],
+                "magnitude_only": bool(abs(filed) < NEAR_ZERO_CARVE_OUT),
+                "hub_leg_source": None, "hub_leg_target": None,
+                "hub_side_dim": d35, "hub_basis_max_dev": 0.0,
+                "ceiling_target_hub_map": 1.0, "blocker": None, "probed": []}
+
+        slots35: list[dict[str, Any]] = []
+        for index35, (src35, tgt35, obs35, filed_hub35,
+                      filed_race35) in enumerate(plan35, start=1):
+            s_site35, t_site35 = sites35[src35], sites35[tgt35]
+            _plant_vector35(src35, s_site35, 1.0)
+            _plant_vector35(tgt35, t_site35, obs35)
+            _plant_identity_fit35(src35, s_site35, tgt35, t_site35, "native",
+                                  FAMILY_OF_RECORD_WEBTEXT_V3)
+            slots35.append({
+                "ordinal": index35,
+                "prediction_id": f"v3-prediction/{src35}→{tgt35}/native-k256",
+                "pair_id": f"{src35}L{s_site35}->{tgt35}L{t_site35}",
+                "source_model": src35, "source_site": s_site35,
+                "target_model": tgt35, "target_site": t_site35,
+                "arm": "native", "arm_rule": "synthetic fixture",
+                "family": FAMILY_OF_RECORD_WEBTEXT_V3,
+                "pair_class": "instruct↔instruct", "status": "FILED",
+                "blocker": None,
+                "source_vector": (f"staging/webtext-v3-vectors/vectors/{src35}"
+                                  f"/entropy_gradient_{src35}_L{s_site35}.npz"),
+                "target_vector": (f"staging/webtext-v3-vectors/vectors/{tgt35}"
+                                  f"/entropy_gradient_{tgt35}_L{t_site35}.npz"),
+                "columns": {
+                    "8b": _column35("8b", 16, True, filed_hub35),
+                    "gemma3-27b": _column35("gemma3-27b", 38, False,
+                                            filed_race35)}})
+
+        doc35 = {
+            "artifact": SCHEMA_V3_PREDICTION_ARTIFACT_V1,
+            "frozen_ref": "SYNTHETIC FIXTURE — not the frozen artifact",
+            "adjudication": "NONE",
+            "self_description": {"corpus_manifest_sha256": "f" * 64,
+                                 "splits_sha256": "e" * 64,
+                                 "rank_of_record": FAMILY_OF_RECORD_WEBTEXT_V3,
+                                 "omp_num_threads": 8},
+            "bands": {}, "models": [], "count_arithmetic": {},
+            "frozen_count_N": len(slots35), "slots": slots35,
+            "hub_columns": [
+                {"hub": "8b", "hub_site": 16, "of_record": True, "role": "x"},
+                {"hub": "gemma3-27b", "hub_site": 38, "of_record": False,
+                 "role": "y"}],
+            "extension_sub_line": {
+                "gate": "synthetic", "slots": [],
+                "never_before_observed_core_members": never_before35},
+            "column_summary": [], "flags": []}
+        art35 = fx35 / "PREDICTIONS-webtext-v3-2026-08-04.json"
+        art35.write_text(json.dumps(doc35, indent=1))
+        stamp35 = fx35 / V3_STAMP_FILENAME
+        stamp35.write_text(json.dumps({
+            "stamp": V3_STAMP_TEXT, "sealed_utc": "2026-08-04T11:07:20Z",
+            "artifact": art35.name, "artifact_sha256": sha256_of(art35),
+            "prereg": "SYNTHETIC", "frozen_count_N": len(slots35),
+            "fully_filed": len(slots35)}, indent=1))
+
+        #  (a) THE ABSENT-FITS REFUSAL. The ordinary state while the wave runs.
+        artifact35, verify35 = load_v3_prediction_artifact(art35)
+        try:
+            score_v3_artifact(artifact35, verify35, fx35 / "no-such-pairs",
+                              vectors35)
+            check(False, "an absent pair-fits tree must refuse cleanly")
+        except PairFitsAbsentError as exc35:
+            check("REFUSES" in str(exc35) and "0%" in str(exc35),
+                  f"ABSENT FITS REFUSED, and the message says why an empty "
+                  f"record would be worse: {exc35!s:.56}")
+
+        #  (b) THE END-TO-END SCORE, against the hand-computed table above.
+        scored35 = score_v3_artifact(artifact35, verify35, pairs35, vectors35)
+        check(scored35.frozen_count_N == 4 and len(scored35.slots) == 4
+              and scored35.n_slots_scored == 4
+              and scored35.n_slots_unscored_no_fit == 0,
+              f"all {scored35.n_slots_scored}/{scored35.frozen_count_N} slots "
+              f"scored — the frozen denominator is the artifact's, read")
+        observed35 = [s.observed for s in scored35.slots]
+        expected_obs35 = [row[2] for row in plan35]
+        worst_obs35 = max(abs(float(a) - b)
+                          for a, b in zip(observed35, expected_obs35))
+        check(worst_obs35 < 1e-12,
+              f"â_obs reproduces the planted cosines exactly (worst |Δ| "
+              f"{worst_obs35:.3e}) — the identity map makes â_obs = "
+              f"cos(v_src, v_tgt) by construction")
+
+        by_hub35 = {g.hub: g for g in scored35.gates}
+        hub35, race35 = by_hub35["8b"], by_hub35["gemma3-27b"]
+        check(hub35.n_in_band_primary == 3 and hub35.n_frozen == 4
+              and abs((hub35.fraction_primary or 0) - 0.75) < 1e-12
+              and hub35.g_comp_v3_meets_threshold is False,
+              f"8b G-comp-v3 = 3/4 = {hub35.fraction_primary:.3f} < 0.80 — the "
+              f"hand-computed FAIL (slots 1, 2 and the carve-out slot 4 in "
+              f"band; slot 3 out high)")
+        check(hub35.n_floor_clearing == 3 and hub35.n_in_band_co_primary == 1
+              and abs((hub35.fraction_co_primary or 0) - 1 / 3) < 1e-12
+              and hub35.g_comp_v3_tight_meets_threshold is False,
+              f"8b G-comp-v3-tight = 1/3 = {hub35.fraction_co_primary:.3f} < "
+              f"0.80 over the FLOOR-CLEARING slots {{1,2,3}} — slot 4's "
+              f"|â_obs| = .07 < .08 keeps it out of this denominator")
+        check(hub35.n_extension == 1 and hub35.n_extension_in_band_primary == 0
+              and hub35.g_extension_meets_threshold is False,
+              "8b G-extension = 0/1 < 0.70 over the one never-before-observed "
+              "slot — its own line, never pooled with the core")
+        check(hub35.both_core_gates_meet_thresholds is False
+              and hub35.n_near_zero_predicted == 1
+              and hub35.n_magnitude_only_scored == 1
+              and hub35.n_out_of_band_high == 1
+              and hub35.n_out_of_band_low == 0,
+              f"and 8b's census is the hand-computed one: 1 near-zero "
+              f"carve-out, 1 out-of-band-high, 0 low")
+        check(race35.n_in_band_primary == 4
+              and abs((race35.fraction_primary or 0) - 1.0) < 1e-12
+              and race35.g_comp_v3_meets_threshold is True
+              and race35.n_floor_clearing == 3
+              and race35.n_in_band_co_primary == 3
+              and race35.g_comp_v3_tight_meets_threshold is True
+              and race35.both_core_gates_meet_thresholds is True,
+              "gemma3-27b passes BOTH core gates — 4/4 at ±.05 and 3/3 at "
+              "±.025 over the floor-clearing slots")
+        check(race35.n_extension == 1
+              and race35.n_extension_in_band_primary == 1
+              and race35.g_extension_meets_threshold is True,
+              "and its G-extension line reads 1/1 >= 0.70")
+        branch35 = scored35.branch_structure
+        assert branch35 is not None
+        check(branch35.branch == "b"
+              and branch35.of_record_passes_both is False
+              and branch35.race_hubs_passing_both == ["gemma3-27b"],
+              f"§8 BRANCH (b) is selected by the arithmetic: the of-record "
+              f"column fails and a simultaneously-filed race column passes "
+              f"both core gates — 'composed transport generalizes; the "
+              f"incumbent hub does not'")
+        check("MECHANICAL" in branch35.STATUS
+              and "desk" in branch35.STATUS.lower()
+              and "adjudication" in scored35.adjudication.lower()
+              and "NONE" in scored35.adjudication,
+              "and the record ADJUDICATES NOTHING — every block says the "
+              "ruling is the desk's")
+
+        #  (c) BOTH BANDS AND THE CARVE-OUT, at slot grain.
+        slot4_35 = scored35.slots[3]
+        col_hub4_35 = next(c for c in slot4_35.columns if c.hub == "8b")
+        col_race4_35 = next(c for c in slot4_35.columns if c.hub == "gemma3-27b")
+        check(col_hub4_35.magnitude_only is True
+              and col_hub4_35.sign_scored is False
+              and col_hub4_35.scored_band_primary == [0.0, 0.1]
+              and col_hub4_35.scored_band_co_primary == [0.025, 0.075]
+              and col_hub4_35.verdict_primary == "magnitude-only-in-band"
+              and col_hub4_35.verdict_co_primary == "magnitude-only-in-band",
+              f"the carve-out slot files +0.05 and observes −0.07: |observed| "
+              f"is scored against the band of |predicted| at BOTH half-widths "
+              f"({col_hub4_35.scored_band_primary} / "
+              f"{col_hub4_35.scored_band_co_primary}) and the SIGN is unscored")
+        check(abs(float(col_hub4_35.scored_value) - 0.07) < 1e-12
+              and col_hub4_35.floor_clearing is False
+              and col_race4_35.floor_clearing is False,
+              "and |â_obs| = .07 < .08, so the slot is NOT floor-clearing in "
+              "either column — the floor reads the OBSERVATION, the carve-out "
+              "reads the PREDICTION, and they are different rules")
+        slot2_35 = scored35.slots[1]
+        col_hub2_35 = next(c for c in slot2_35.columns if c.hub == "8b")
+        check(col_hub2_35.verdict_primary == "in-band"
+              and col_hub2_35.verdict_co_primary == "out-of-band-high"
+              and abs(float(col_hub2_35.error) - 0.04) < 1e-12
+              and abs(float(col_hub2_35.band_excess_co_primary) - 0.015) < 1e-12,
+              "slot 2 separates the two bands exactly as designed: err +.04 is "
+              "INSIDE ±.05 and OUTSIDE ±.025, by .015")
+
+        #  (d) THE SEALED BAND IS THE FROZEN BAND, or nothing is scored.
+        tampered35 = json.loads(art35.read_text())
+        tampered35["slots"][0]["columns"]["8b"]["band_primary"] = [0.2, 0.4]
+        art_bad35 = fx35 / "TAMPERED.json"
+        art_bad35.write_text(json.dumps(tampered35, indent=1))
+        stamp_bad35 = fx35 / "stamp-tampered.json"
+        stamp_bad35.write_text(json.dumps({
+            "stamp": V3_STAMP_TEXT, "sealed_utc": "x",
+            "artifact": art_bad35.name,
+            "artifact_sha256": sha256_of(art_bad35), "prereg": "SYNTHETIC",
+            "frozen_count_N": 4, "fully_filed": 4}, indent=1))
+        art_t35, ver_t35 = load_v3_prediction_artifact(art_bad35, stamp_bad35)
+        try:
+            score_v3_artifact(art_t35, ver_t35, pairs35, vectors35)
+            check(False, "a band that is not the frozen band must HALT")
+        except ScoringError as exc35b:
+            check("never move after the seal" in str(exc35b),
+                  f"a WIDENED band halts even under a valid seal — the seal "
+                  f"proves the bytes, not the arithmetic: {exc35b!s:.52}")
+
+    print("== selftest 36: carve-out × floor-clearing, at column grain ==")
+    #  Hand-computed unit checks on `score_v3_column` — no disk, no fits, so
+    #  these run identically in every configuration (rake M44(c)).
+    def _fixture_slot36(prediction_id: str = "v3-prediction/a→b/native-k256"
+                        ) -> V3Slot:
+        return V3Slot(
+            ordinal=1, prediction_id=prediction_id, pair_id="aL1->bL2",
+            source_model="a", source_site=1, target_model="b", target_site=2,
+            arm="native", arm_rule="fixture",
+            family=FAMILY_OF_RECORD_WEBTEXT_V3, pair_class="instruct↔instruct",
+            status="FILED", columns={})
+
+    def _fixture_column36(filed: float, magnitude_only: Optional[bool] = None,
+                          **overrides: Any) -> V3ColumnPrediction:
+        payload: dict[str, Any] = dict(
+            hub="8b", hub_site=16, of_record=True, status="FILED",
+            a_comp=filed, filed_a_comp=filed,
+            band_primary=[round(filed - V3_BAND_PRIMARY_HALF_WIDTH, 4),
+                          round(filed + V3_BAND_PRIMARY_HALF_WIDTH, 4)],
+            band_co_primary=[round(filed - V3_BAND_CO_PRIMARY_HALF_WIDTH, 4),
+                             round(filed + V3_BAND_CO_PRIMARY_HALF_WIDTH, 4)],
+            magnitude_only=(bool(abs(filed) < NEAR_ZERO_CARVE_OUT)
+                            if magnitude_only is None else magnitude_only))
+        payload.update(overrides)
+        return V3ColumnPrediction(**payload)
+
+    slot36 = _fixture_slot36()
+    #  (1) THE INTERSECTION §8 DOES NOT ADDRESS: a near-zero PREDICTION whose
+    #      OBSERVATION clears the floor. Literal reading applied, and flagged.
+    inter36 = score_v3_column(slot36, _fixture_column36(0.0700), 0.5000)
+    check(inter36.magnitude_only is True and inter36.floor_clearing is True
+          and inter36.scored_band_primary == [0.02, 0.12]
+          and inter36.verdict_primary == "magnitude-only-out-of-band-high"
+          and any("CARVE-OUT × FLOOR" in n for n in inter36.notes),
+          "a near-zero prediction (+.07) with a floor-clearing observation "
+          "(+.50) enters the tight denominator AND is scored magnitude-only — "
+          "§8 defines the two rules independently; the literal reading is "
+          "applied and FLAGGED, never resolved silently")
+    #  (2) THE SIGN IS GENUINELY UNSCORED under the carve-out.
+    signflip36 = score_v3_column(slot36, _fixture_column36(0.0500), -0.0400)
+    check(signflip36.verdict_primary == "magnitude-only-in-band"
+          and signflip36.scored_value == 0.04
+          and signflip36.floor_clearing is False,
+          "predicted +.05 vs observed −.04 is IN BAND magnitude-only (|−.04| "
+          "against [0.0, 0.1]) — a signed comparison would have called it out "
+          "of band low, which is exactly the carve-out's point")
+    #  (3) BAND EDGES ARE INCLUSIVE ("± .05 absolute").
+    edge36 = score_v3_column(slot36, _fixture_column36(0.3000), 0.3500)
+    check(edge36.verdict_primary == "in-band"
+          and edge36.in_band_primary is True
+          and edge36.verdict_co_primary == "out-of-band-high",
+          "an exact edge hit (+.35 against [.25, .35]) is IN BAND — the band "
+          "is '± .05 absolute', edges included")
+    #  (4) OUT-OF-BAND LOW, and the floor at its own boundary.
+    low36 = score_v3_column(slot36, _fixture_column36(0.3000), 0.2000)
+    check(low36.verdict_primary == "out-of-band-low"
+          and abs(float(low36.band_excess_primary) - 0.05) < 1e-12
+          and low36.floor_clearing is True,
+          "predicted +.30 vs observed +.20 is out-of-band LOW by exactly .05, "
+          "and |+.20| >= .08 keeps it in the tight denominator")
+    floor36 = score_v3_column(slot36, _fixture_column36(0.1000), 0.0800)
+    check(floor36.floor_clearing is True,
+          "the floor is |â_obs| >= .08 INCLUSIVE — an observation exactly at "
+          "the floor clears it")
+    justunder36 = score_v3_column(slot36, _fixture_column36(0.1000), 0.0799)
+    check(justunder36.floor_clearing is False,
+          "and .0799 does not — the tight gate's denominator is decided by "
+          "that comparison and nothing else")
+    #  (5) A CARVE-OUT FLAG THAT DISAGREES WITH THE FROZEN RULE IS A HALT.
+    try:
+        score_v3_column(slot36, _fixture_column36(0.0500, magnitude_only=False),
+                        0.0500)
+        check(False, "a carve-out flag contradicting the frozen rule must HALT")
+    except ScoringError as exc36:
+        check("frozen near-zero carve-out" in str(exc36),
+              f"a sealed magnitude_only that disagrees with |â_comp| < .08 "
+              f"halts: {exc36!s:.52}")
+    #  (6) NOT-FILED AND UNOBSERVED ARE FIRST-CLASS, AND STAY IN THE DENOMINATOR.
+    notfiled36 = score_v3_column(
+        slot36, _fixture_column36(0.3000, status="N/A-AT-FILING",
+                                  filed_a_comp=None, a_comp=None,
+                                  band_primary=None, band_co_primary=None,
+                                  blocker="synthetic blocker"), 0.3000)
+    check(notfiled36.verdict_primary == "UNSCORED-NOT-FILED"
+          and notfiled36.in_band_primary is None
+          and any("never dropped from it" in n for n in notfiled36.notes),
+          "a column the seal did not file is UNSCORED-NOT-FILED and is counted "
+          "against the frozen denominator — §5: 'a denominator never silently "
+          "shrinks'")
+    nofit36 = score_v3_column(slot36, _fixture_column36(0.3000), None)
+    check(nofit36.verdict_primary == "UNSCORED-NO-FIT"
+          and nofit36.predicted == 0.3
+          and nofit36.observed is None,
+          "and a slot with no direct pair fit is UNSCORED-NO-FIT with its "
+          "prediction intact — reported, never dropped")
+
     print(f"\nselftest: {len(failures)} failure(s)")
     return 1 if failures else 0
 
@@ -9297,6 +11656,62 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     default=V21_CORPUS_MANIFEST_RELPATH,
                     help=f"path of the vintage manifest RELATIVE to --v21-root "
                          f"(default {V21_CORPUS_MANIFEST_RELPATH})")
+    ap.add_argument("--basis", default="corpus-v2.1",
+                    choices=sorted(FAMILY_OF_RECORD_BY_BASIS),
+                    help="WHICH BASIS THIS RUN IS ON. Default corpus-v2.1 — "
+                         "every existing mode is byte-identical under it. "
+                         "`webtext-v3` selects the §8 lane: it sets the "
+                         "webtext-v3 family of record "
+                         f"({FAMILY_OF_RECORD_WEBTEXT_V3}), verifies and sets "
+                         "the --v3-root, and is REQUIRED by --score-v3.")
+    ap.add_argument("--v3-root", type=Path, default=None,
+                    help=f"root of the webtext-v3 wave — the tree holding "
+                         f"{V3_HUB_LEGS_STEM}/, {V3_VECTORS_STEM}/ and "
+                         f"{V3_CORPUS_MANIFEST_RELPATH}. Its hub legs and "
+                         f"vectors are PREPENDED to the existing probes; the "
+                         f"root must prove its vintage against the frozen "
+                         f"corpus manifest sha (the --v21-root discipline, at "
+                         f"the v3 digest). Default under --basis webtext-v3: "
+                         f"{WEBTEXT_V3_DEFAULT_ROOT}. MUTUALLY EXCLUSIVE WITH "
+                         f"--v21-root and with --gate.")
+    ap.add_argument("--v3-corpus-manifest", type=Path,
+                    default=V3_CORPUS_MANIFEST_RELPATH,
+                    help=f"path of the vintage manifest RELATIVE to --v3-root "
+                         f"(default {V3_CORPUS_MANIFEST_RELPATH})")
+    ap.add_argument("--score-v3", type=Path, default=None,
+                    help="THE §8 STEP-3 SCORING LANE. Names the SEALED §8.2 "
+                         "prediction artifact. The lane verifies the desk "
+                         "stamp against it (§8 step 2 binds the lane to refuse "
+                         "unstamped), loads its slot list as the denominator "
+                         "— never recomputing one â_comp — computes â_obs per "
+                         "slot from the direct pair fits, scores every hub "
+                         "column at BOTH bands with the carve-out, and emits "
+                         "the gate arithmetic (G-comp-v3, G-comp-v3-tight, "
+                         "G-extension, the §8 branch structure). DESCRIPTIVE "
+                         "EMISSION ONLY — stamps and adjudications are the "
+                         "desk's. Requires --basis webtext-v3.")
+    ap.add_argument("--stamp", type=Path, default=None,
+                    help=f"the desk's seal over the artifact (default: "
+                         f"{V3_STAMP_FILENAME} BESIDE it — one named path, "
+                         f"never a search). Its artifact_sha256 is recomputed "
+                         f"and compared before a single prediction is parsed.")
+    ap.add_argument("--pair-fits-root", type=Path, default=None,
+                    help=f"the tree holding the DIRECT pair fits (default: "
+                         f"<--v3-root>/{V3_PAIR_FITS_STEM}). An absent tree is "
+                         f"a CLEAN REFUSAL, not an empty scored record: while "
+                         f"the pair-fit wave runs there is nothing to score, "
+                         f"and a 0% rate that means 'the disk is empty' reads "
+                         f"identically to one that means 'transport failed'.")
+    ap.add_argument("--v3-vectors-root", type=Path, default=None,
+                    help=f"the webtext-v3 entropy-gradient wave (default: "
+                         f"<--v3-root>/{V3_VECTORS_STEM}). Each slot's vectors "
+                         f"are checked against the ones the SEALED artifact "
+                         f"names; a disagreement beyond the root HALTS.")
+    ap.add_argument("--scored-v3-out", type=Path, default=None,
+                    help="where the §8 scored record is written (default: "
+                         "beside the artifact as scored-<artifact name>). A "
+                         "SEPARATE flag from --scored-out, which belongs to "
+                         "the v2.1 scoring act — one path, one artifact.")
     ap.add_argument("--hub-vector-basis", default=DEFAULT_HUB_VECTOR_BASIS,
                     choices=sorted(HUB_VECTOR_BASES),
                     help=f"which collection basis the hub's OWN vector (xi, the "
@@ -9448,7 +11863,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     help=f"candidate-pair enumeration (default {CANDIDATE_PAIRS_JSON})")
     ap.add_argument("--archive-dir", type=Path, default=ARCHIVE_ROOT,
                     help="the archived operationalization of record")
-    ap.add_argument("--family", default=FAMILY_OF_RECORD, choices=FAMILIES)
+    #  The choices are the UNION (`FAMILIES_ALL`): `read_exchange_rates.FAMILIES`
+    #  is the v2.1-era enumeration and carries no `proc_k256`, which is the
+    #  webtext-v3 §3.2 family of record. v2.1's own order is preserved and its
+    #  default is untouched, so this is a superset and never a reordering.
+    ap.add_argument("--family", default=None, choices=FAMILIES_ALL,
+                    help=f"fit family (default: the BASIS's family of record — "
+                         f"{FAMILY_OF_RECORD} on corpus-v2.1, "
+                         f"{FAMILY_OF_RECORD_WEBTEXT_V3} on webtext-v3)")
     ap.add_argument("--source-model", default=None, help="single-slot mode")
     ap.add_argument("--target-model", default=None, help="single-slot mode")
     ap.add_argument("--arm", default=None, choices=ARMS,
@@ -9465,6 +11887,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     if args.selftest:
         return selftest()
+
+    #  THE BASIS, resolved at the door. `--family` defaults to the BASIS's own
+    #  family of record rather than to a constant, so a v3 run cannot silently
+    #  read proc_k128 fits and a v2.1 run cannot silently move off proc_k128.
+    if args.family is None:
+        args.family = FAMILY_OF_RECORD_BY_BASIS[args.basis]
 
     #  THE RESOLUTION-PARITY TRAP, closed at the door. The E1 gate re-resolves
     #  the five ARCHIVED v1 pairs through this module's own hub_map_dirs and
@@ -9504,6 +11932,42 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "the record and unpinned ones from the root — a mixed regime whose "
             "vintage is a per-key fact, which is exactly what E4 anomaly A1 was "
             "about. Pin to the record, or point at the root; not both.")
+    #  THE THIRD VINTAGE, AT THE SAME DOOR. `--v21-root` and `--v3-root` are two
+    #  answers to "which artifact" per key; combined, some sides of a prediction
+    #  resolve v2.1 and some v3, which is a prediction on neither basis.
+    #  `set_v3_root`/`set_v21_root` guard this too — one guard can be bypassed
+    #  programmatically, and this one cannot be bypassed at all.
+    if args.v3_root is not None and args.v21_root is not None:
+        ap.error(
+            "--v3-root and --v21-root are MUTUALLY EXCLUSIVE. Both re-order "
+            "the probes: combined, a prediction's four artifacts could come "
+            "from two different corpora, and a value composed across bases is "
+            "not the estimand either basis defines. Point at one root.")
+    #  THE RESOLUTION-PARITY TRAP AGAIN, third mechanism. The E1 gate is a
+    #  FIXED-VINTAGE proof about the archived v1 objects and asserts resolution
+    #  parity against the archive's own npz files; a v3 root moves that leg.
+    if args.gate and (args.v3_root is not None or args.basis != "corpus-v2.1"):
+        ap.error(
+            "--gate is a FIXED-VINTAGE proof about the archived v1 "
+            "operationalization: it re-resolves the five archived pairs "
+            "through this module's own hub_map_dirs() and asserts RESOLUTION "
+            "PARITY against the archive's own npz files. A webtext-v3 root or "
+            "basis silently moves that leg onto v3 objects — the gate would "
+            "fail for a reason that has nothing to do with fidelity, or pass "
+            "on the wrong objects. Run the gate on its own.")
+    if args.score_v3 is not None and args.basis != "webtext-v3":
+        ap.error(
+            "--score-v3 requires --basis webtext-v3. The §8 lane's family of "
+            f"record is {FAMILY_OF_RECORD_WEBTEXT_V3}, its vintage gate is the "
+            "frozen v3 corpus sha and its bands are §8's — naming the basis is "
+            "how a run says which contract it is under, and defaulting it "
+            "would let a v2.1 invocation score a v3 artifact.")
+    for flag, value in (("--stamp", args.stamp),
+                        ("--pair-fits-root", args.pair_fits_root),
+                        ("--v3-vectors-root", args.v3_vectors_root),
+                        ("--scored-v3-out", args.scored_v3_out)):
+        if value is not None and args.score_v3 is None:
+            ap.error(f"{flag} only means anything with --score-v3.")
     if args.filed_paths_allow_unpinned and args.filed_paths is None:
         ap.error(
             "--filed-paths-allow-unpinned only means anything with "
@@ -9636,11 +12100,33 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 0 if n_unclean == 0 else 1
 
     if not (args.gate or args.candidates or args.resolution_sweep
-            or args.source_model or args.score_record or args.emit_record):
+            or args.source_model or args.score_record or args.emit_record
+            or args.score_v3):
         raise SystemExit("pass --selftest, --gate, --candidates, "
                          "--resolution-sweep, --source-model/--target-model, "
-                         "--emit-record, --manifest-audit, or "
-                         "--score-record/--observed")
+                         "--emit-record, --manifest-audit, "
+                         "--score-record/--observed, or "
+                         "--basis webtext-v3 --score-v3 <sealed artifact>")
+
+    #  THE WEBTEXT-V3 ROOT, verified before anything resolves through it. Set
+    #  under `--basis webtext-v3` even when the operator named no root, because
+    #  the lane's default root is a DEFAULT and the sha gate is what decides
+    #  whether it is the v3 basis — a default that skipped verification would
+    #  be the one path into this lane with no vintage proof on it.
+    if args.basis == "webtext-v3":
+        try:
+            set_v3_root(args.v3_root or WEBTEXT_V3_DEFAULT_ROOT,
+                        manifest_relpath=args.v3_corpus_manifest)
+        except CorpusVintageError as exc:
+            #  An EXPECTED halt: the operator pointed at something that is not
+            #  the webtext-v3 basis of record.
+            print(f"\nVINTAGE HALT — {exc}")
+            return 1
+    elif args.v3_root is not None:
+        ap.error("--v3-root needs --basis webtext-v3: a root that re-orders "
+                 "the probes onto the v3 wave while the run declares itself "
+                 "corpus-v2.1 is exactly the vintage confusion the basis flag "
+                 "exists to make impossible.")
 
     directional_constants: Optional[DirectionalConstants] = None
     if args.directional_constants is not None:
@@ -10063,6 +12549,103 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         except ScoringError as exc:
             print(f"\nSCORING HALT — {exc}")
             return 1
+
+    #  ───────────────────────── THE WEBTEXT-V3 §8 STEP-3 SCORING LANE
+    if args.score_v3 is not None:
+        artifact_path = Path(args.score_v3)
+        pairs_root = (args.pair_fits_root if args.pair_fits_root is not None
+                      else (V3_ROOT or WEBTEXT_V3_DEFAULT_ROOT)
+                      / V3_PAIR_FITS_STEM)
+        vectors_root = (args.v3_vectors_root if args.v3_vectors_root is not None
+                        else (V3_ROOT or WEBTEXT_V3_DEFAULT_ROOT)
+                        / V3_VECTORS_STEM)
+        try:
+            artifact, verification = load_v3_prediction_artifact(
+                artifact_path, args.stamp)
+        except V3ArtifactError as exc:
+            #  An EXPECTED halt with a meaningful message: the seal does not
+            #  verify, or the file is not the sealed contract. Reported cleanly
+            #  and NONZERO — §8 step 2 binds the lane to refuse.
+            print(f"\nARTIFACT HALT — {exc}")
+            return 1
+        print(f"\nSTAMP VERIFIED — {Path(verification.stamp_path).name} seals "
+              f"{Path(verification.artifact_path).name}")
+        print(f"  sha256 {verification.sha256_recomputed} (recomputed) == "
+              f"{verification.sha256_sealed} (sealed)")
+        print(f"  sealed {verification.stamp_sealed_utc} · N="
+              f"{verification.frozen_count_N} · {verification.fully_filed} "
+              f"fully filed · prereg {verification.prereg}")
+        try:
+            scored_v3 = score_v3_artifact(artifact, verification, pairs_root,
+                                          vectors_root)
+        except PairFitsAbsentError as exc:
+            #  THE ORDINARY STATE WHILE THE WAVE RUNS. A clean refusal, named
+            #  and nonzero — never an empty scored record.
+            print(f"\nPAIR-FITS HALT — {exc}")
+            return 1
+        except (ScoringError, V3ArtifactError) as exc:
+            print(f"\nSCORING HALT — {exc}")
+            return 1
+        print(f"\n{'slot':52s} {'arm':6s} {'â_obs':>9s}  "
+              + " ".join(f"{column.hub[:11]:>11s}"
+                         for column in scored_v3.hub_columns))
+        for row in scored_v3.slots:
+            marks = []
+            for column in row.columns:
+                if column.in_band_primary is None:
+                    marks.append(f"{'—':>11s}")
+                else:
+                    mark = "in" if column.in_band_primary else "OUT"
+                    tight = ("t" if column.in_band_co_primary else "·") \
+                        if column.floor_clearing else " "
+                    marks.append(f"{mark + tight:>11s}")
+            print(f"{row.pair_id[:52]:52s} {row.arm:6s} "
+                  + (f"{row.observed:+9.6f}" if row.observed is not None
+                     else f"{'—':>9s}") + "  " + " ".join(marks))
+        print(f"\n{'hub column':24s} {'of-rec':>6s} {'G-comp-v3':>18s} "
+              f"{'G-tight':>18s} {'G-extension':>18s}  both-core")
+        for gate in scored_v3.gates:
+            def _rate(fraction: Optional[float], n: int, d: int,
+                      meets: Optional[bool]) -> str:
+                if fraction is None:
+                    return f"{'INDET':>18s}"
+                return f"{n:>4d}/{d:<4d} {fraction:6.3f}{'P' if meets else 'f'}"
+            print(f"{gate.hub:24s} {str(gate.of_record):>6s} "
+                  + _rate(gate.fraction_primary, gate.n_in_band_primary,
+                          gate.n_frozen, gate.g_comp_v3_meets_threshold) + " "
+                  + _rate(gate.fraction_co_primary, gate.n_in_band_co_primary,
+                          gate.n_floor_clearing,
+                          gate.g_comp_v3_tight_meets_threshold) + " "
+                  + _rate(gate.fraction_extension,
+                          gate.n_extension_in_band_primary, gate.n_extension,
+                          gate.g_extension_meets_threshold)
+                  + f"  {gate.both_core_gates_meet_thresholds}")
+            for note in gate.notes:
+                print(f"    NOTE [{gate.hub}]: {note}")
+            if gate.named_partial:
+                print(f"    PARTIAL [{gate.hub}]: {gate.named_partial}")
+        branch = scored_v3.branch_structure
+        assert branch is not None
+        print(f"\nBRANCH STRUCTURE (§8, review A-F6) — branch "
+              f"{branch.branch!r}\n  {branch.branch_text}")
+        print(f"\nscored {scored_v3.n_slots_scored}/"
+              f"{scored_v3.frozen_count_N} slots "
+              f"({scored_v3.n_slots_unscored_no_fit} with no direct pair fit) "
+              f"× {len(scored_v3.gates)} hub column(s)")
+        for flag in scored_v3.flags:
+            print(f"  FLAG: {flag}")
+        for warning in scored_v3.warnings:
+            print(f"  WARNING: {warning}")
+        out_v3 = args.scored_v3_out or default_v3_scored_path(artifact_path)
+        try:
+            written_v3 = write_v3_scored_record(scored_v3, out_v3,
+                                                args.overwrite_scored)
+        except ScoringError as exc:
+            print(f"\nSCORED-RECORD HALT — {exc}")
+            return 1
+        print(f"\nscored record: {written_v3}. DESCRIPTIVE — every gate above "
+              f"is arithmetic; the stamp, the ruling and the branch "
+              f"adjudication are the desk's.")
 
     #  THE RESOLUTION-PROVENANCE LEDGER (E4 anomaly A1). Printed only when the
     #  operator asked for a pin or for the artifact: the no-root stdout of every
