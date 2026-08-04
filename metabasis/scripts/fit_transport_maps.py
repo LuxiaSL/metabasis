@@ -554,7 +554,59 @@ SITES = {"3b": (13, 14, 18), "8b": (14, 16, 18), "qwen-7b": (19, 21, 23),
          # The tuple is in the ORDER LUXIA RULED IT — bracket first, pair-read
          # site appended — and is deliberately NOT re-sorted, so a reader sees
          # the ruling's shape. Every consumer treats it as a set or iterates it.
-         "qwen2.5-7b-base": (18, 20, 22, 21)}          # ⋆ L20 (L21 C4 pair-read)
+         "qwen2.5-7b-base": (18, 20, 22, 21),         # ⋆ L20 (L21 C4 pair-read)
+         # --- webtext-v3 scale add (roster row 24) ------------------------------
+         # qwen2.5-72b-instruct: RULED BY LUXIA 2026-08-04 (ledger "SITE RULING")
+         # from the webtext-v3 12-site SCAN FITS on this node — cp2_summary of
+         # record `5f787171…`, 72/72 cells valid in BOTH arms, fitted on the
+         # FROZEN `--splits-artifact` membership. This is the third and last of
+         # the frozen §5 CORE adds to receive its ceremony (rows 25/26 were ruled
+         # 2026-08-03); §5 requires the ceremony inside the collection window and
+         # BEFORE any fit of this node is quoted, and this is it. L58 is the site
+         # of record ⋆ and L63 is the robustness site.
+         # THE EVIDENCE, so nobody re-derives this from one curve:
+         #  · L58 IS THE PEAK ON FIVE OF THE SIX INSTRUMENTS the scan carries —
+         #    all THREE native fit families, plus BOTH raw procrustes families
+         #    and raw cka. A 5/6 majority ACROSS TWO ARMS is what the ruling
+         #    rests on, and the count is stated rather than one family's number,
+         #    because a single family is exactly what the r²/â rakes warn against.
+         #  · THE SIXTH INSTRUMENT IS NATIVE CKA, AND IT PEAKS AT L63 — which is
+         #    why L63 is kept rather than dropped. It is both the dissenting
+         #    instrument's pick AND the bracket on a BROAD L48–L63 PLATEAU: the
+         #    ⋆ sits at one end of a flat region, so the pair is the read, the
+         #    same two-site shape as llama-3.1-70b's L37 ⋆ / L43,
+         #    llama-3.3-70b's L58 ⋆ / L63 and gemma3-27b's L38 ⋆ / L41. The grid
+         #    records the disagreement instead of hiding it behind the majority.
+         #  · SHALLOW-HALF CAVEAT, NAMED: RAW RIDGE INFLATES THE SHALLOW HALF
+         #    here. That is the rows-25/26 sibling divergence pattern with the
+         #    ROLES SWAPPED (there it was the proc family collapsing shallow),
+         #    and it is the same lesson either way — the families agree from L27
+         #    on, and the ruling is drawn only from where they agree. Nothing
+         #    shallow is registered.
+         # THE COINCIDENCE WITH ROW 12 IS WORTH NAMING, AND IT IS A COINCIDENCE:
+         # (58, 63) ⋆ L58 is EXACTLY llama-3.3-70b-instruct's registered grid,
+         # arrived at independently, off this node's own scan. All three 80-layer
+         # rows (11, 12, 24) share ONE computed grid, so the frozen §7 C2
+         # recipe-vs-range read is site-for-site readable in any case; the
+         # coincidence makes the footing against row 12 site-IDENTICAL as well as
+         # grid-identical. C2's own paired sign test is scored against ROW 11,
+         # whose independent ruling is (37, 43) ⋆ L37 — mid-depth, unreconciled
+         # with either deep pair on purpose (the vintage disagreement recorded on
+         # row 12 above). Nothing here is inherited from row 11 or row 12.
+         # ⚠ AND THE DESK FLAGGED A C2 RIDER ON EXACTLY THIS: the 72B's r² TROUGH
+         # sits on row 11's sites (37, 43) while its r² PEAK sits on row 12's
+         # (58, 63). A C2 comparison quoted at the OTHER row's site is therefore
+         # reading this node at a curve extremum of its own, in one direction or
+         # the other. Site-for-site is a footing, not an immunity, and the read
+         # must say which site it is quoting at.
+         # Both 58 and 63 are ON the model's own computed 12-site scan grid
+         # (12, 17, 22, 27, 32, 37, 43, 48, 53, 58, 63, 68), so NO
+         # `scan_grid_extension` is needed and the ratification invariant is
+         # satisfied by construction — unlike rows 25/26, this is a
+         # curve-visited pair with nothing ruled off-grid. See
+         # `read_composed_predictions.SITE_OF_RECORD`; the two registries must
+         # agree.
+         "qwen2.5-72b-instruct": (58, 63)}             # ⋆ L58 primary, L63 robustness
 
 # Every model key the CLIs will accept. SITES = models whose FIT grid is fixed;
 # metabasis.roster.SCAN_GRIDS = the 12-site alignment-curve scan grids (prereg §4,

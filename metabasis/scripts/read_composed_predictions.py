@@ -646,6 +646,36 @@ SITE_OF_RECORD: dict[str, int] = {
     # quote a C4 sibling delta before that re-collect is certified.
     "llama-3.1-8b-base": 15,
     "qwen2.5-7b-base": 20,
+    # qwen2.5-72b-instruct (roster row 24, the webtext-v3 SCALE ADD): L58, RULED
+    # BY LUXIA 2026-08-04 from this node's own webtext-v3 12-site scan fits on
+    # the FROZEN --splits-artifact membership — cp2_summary of record
+    # `5f787171…`, 72/72 valid in both arms. L58 ⋆ primary, L63 robustness: L58
+    # is the peak on FIVE OF SIX instruments (all three native fit families +
+    # both raw procrustes families + raw cka), and the sixth — NATIVE CKA —
+    # peaks at L63 on a broad L48–L63 plateau, which is why L63 is kept as the
+    # dissenting pick and the plateau bracket rather than dropped. Raw ridge
+    # inflates the shallow half (the rows-25/26 divergence pattern, roles
+    # swapped); the families agree from L27 on, and nothing shallow is
+    # registered. `fit_transport_maps.SITES` carries the full rationale and the
+    # two registries must agree (cross-checked in selftest 7).
+    # (58, 63) IS ALSO llama-3.3-70b-instruct's registered grid, reached
+    # independently off this node's own scan. The three 80-layer rows share one
+    # computed grid, so the frozen §7 C2 recipe-vs-range read is site-for-site
+    # readable regardless; the coincidence makes the footing against row 12
+    # site-identical too. C2's paired sign test is scored against ROW 11, which
+    # rules to (37, 43) ⋆ L37 — nothing here is inherited from either. ⚠ AND THE
+    # DESK'S C2 RIDER APPLIES AT THIS KEY: the 72B's r² TROUGH is at row 11's
+    # (37, 43) and its r² PEAK at row 12's (58, 63), so a C2 comparison quoted
+    # at the other row's site is quoting this node at an extremum of its own
+    # curve. Site-for-site is a footing, not an immunity.
+    # ⚠ BOTH REGISTERED SITES ARE BANKED — unlike rows 25/26, nothing here was
+    # ruled off the computed grid, so no re-collect is implied by this ruling.
+    # WHAT IS OPEN IS DOWNSTREAM: the states-pull, the five hub legs and the
+    # §3.3 k256 health check fire ON this ruling, and no corpus-v2.1 FD-gated
+    # entropy-gradient vector exists for this node at any site. No v3 slot filed
+    # off this registry may quote a 72b column before those land — the RULING is
+    # what this row states; the rest of the pipeline catches up to it.
+    "qwen2.5-72b-instruct": 58,
 }
 
 #: Checkpoint identity for models NOT in `metabasis.roster.ROSTER` (which holds

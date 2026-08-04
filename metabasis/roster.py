@@ -961,18 +961,42 @@ V3_SCALE_ADD: tuple[RosterNode, ...] = (
               "layers), which is what makes the C2 comparison readable "
               "SITE-FOR-SITE and not only by fractional depth. No ruled "
               "extension. "
-              "NO SITE IS REGISTERED: `fit_transport_maps.SITES` and "
-              "`read_composed_predictions.SITE_OF_RECORD` stay UNSET until the "
-              "site-curve ceremony runs and Luxia rules on it — frozen §5 "
-              "requires exactly that for a core model without a registered site "
-              "at freeze. "
-              "NOT YET COLLECTED, WITH A NAMED BLOCKER THAT IS NOT A `blocked_"
-              "reason`: at 136 GiB on disk this node exceeds the 100 GiB "
-              "cohabitation ceiling on two cards, and the desk ruled "
-              "SHARD-ACROSS-3 for it and the 70B pair (72.2 GiB/card, a sharded "
-              "job runs as the SOLE job). That is a scheduling deviation the JOB "
-              "carries, not a registry block — the node is collectable, so "
-              "`blocked_reason` stays None and the scan joins wave 3. "
+              "SITES REGISTERED (58, 63) ⋆ L58 — RULED BY LUXIA 2026-08-04 "
+              "(ledger \"SITE RULING\") on this node's own webtext-v3 12-site "
+              "scan fits (cp2_summary `5f787171…`, 72/72 cells valid in BOTH "
+              "arms, on the FROZEN --splits-artifact membership). The frozen §5 "
+              "ceremony this row previously recorded as OWED has now run: L58 is "
+              "the peak on FIVE OF THE SIX instruments (all three native fit "
+              "families + both raw procrustes families + raw cka) and L63 is "
+              "kept because the SIXTH — native cka — peaks there, on a broad "
+              "L48–L63 plateau; the pair is the read. Raw ridge inflates the "
+              "shallow half (the rows-25/26 divergence pattern with the roles "
+              "swapped); the families agree from L27 on and nothing shallow is "
+              "registered. `fit_transport_maps.SITES` and "
+              "`read_composed_predictions.SITE_OF_RECORD` carry the same ruling "
+              "and the full rationale; the two registries must agree. "
+              "NO `scan_grid_extension` IS NEEDED, AND THAT IS THE DIFFERENCE "
+              "FROM ROWS 25/26: both 58 and 63 are ON the computed 12-site grid "
+              "above, so the ratification invariant is satisfied by construction "
+              "— a curve-visited pair, nothing ruled off-grid, and no re-collect "
+              "implied by the ruling. "
+              "⚠ (58, 63) ⋆ L58 IS EXACTLY ROW 12's REGISTERED GRID "
+              "(llama-3.3-70b-instruct), reached INDEPENDENTLY off this node's "
+              "own scan — a coincidence worth naming because it makes the C2 "
+              "footing against row 12 site-IDENTICAL as well as grid-identical. "
+              "C2's own paired sign test is scored against ROW 11, which rules "
+              "to (37, 43) ⋆ L37. The desk flagged a rider on precisely this: "
+              "the 72B's r² TROUGH sits on row 11's sites and its r² PEAK on row "
+              "12's, so a C2 comparison quoted at the other row's site reads this "
+              "node at an extremum of its own curve. Site-for-site is a footing, "
+              "not an immunity. "
+              "COLLECTED (2026-08-03→04, the wave-3 tail), UNDER A SCHEDULING "
+              "DEVIATION THAT WAS NEVER A `blocked_reason`: at 136 GiB on disk "
+              "this node exceeds the 100 GiB cohabitation ceiling on two cards, "
+              "so the desk ruled SHARD-ACROSS-3 for it and the 70B pair (72.2 "
+              "GiB/card, a sharded job runs as the SOLE job) and it ran that way. "
+              "That was a deviation the JOB carried, not a registry block, which "
+              "is why `blocked_reason` stayed None throughout. "
               "WEIGHTS: the metabasis-owned v3 roster tree on the RAID (standing "
               "placement ruling 2026-07-29), a plain directory named by "
               "`weights_dirname`, 37 shards, index-complete; the full path is "
@@ -1010,8 +1034,11 @@ V3_SCALE_ADD: tuple[RosterNode, ...] = (
 # computed 12 never visited. The per-row notes below carry the evidence; the
 # extension field is what keeps the ratification invariant honest about it (a
 # site registered off the effective scan grid is a fiat grid by construction, and
-# `fiat_grid_problems` would fail the import). Row 24 above is still UNSET: its
-# collection has not happened, so its ceremony has not either.
+# `fiat_grid_problems` would fail the import). Row 24 above has SINCE had its own
+# ceremony too (Luxia, 2026-08-04, sites (58, 63) ⋆ L58) — so all three frozen §5
+# CORE adds are now registered — but it needs NO extension, because both of its
+# ruled sites are on its computed grid. The extension mechanism is what these two
+# rows need and row 24 does not.
 #
 # ARMS ARE RAW-ONLY, BY DESK RULING (2026-08-03, ledger block of record) — and
 # note that this is a RULING and not an inference from the checkpoints: llama-base
