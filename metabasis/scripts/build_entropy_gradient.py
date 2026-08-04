@@ -1089,6 +1089,285 @@ def _hidden_dim(model: Any) -> int:
     return int(dim)
 
 
+# ------------------------------------------------- the peak-memory stamp
+#  SELF-EVIDENCING CAPACITY. Every capacity ruling this campaign makes — the
+#  x1.6 flat multiplier, the structural bound, a sole-job reservation, a
+#  shard-across decision — is a claim about how much device memory a build
+#  actually needs. Until now those claims were adjudicated against numbers that
+#  lived in a job log beside the artifact; the artifact itself said nothing. So
+#  the bank records what the allocator SAW, per device, at bank time.
+#
+#  WHY max_memory_allocated AND max_memory_reserved. `allocated` is what the
+#  build asked for and is the number a reservation should be compared against;
+#  `reserved` is what the caching allocator held from the driver and is the
+#  number the CARD saw (and therefore what a co-tenant collided with). They
+#  differ by the allocator's fragmentation, which is exactly the quantity a
+#  margin exists to cover — so recording one without the other would leave the
+#  next ruling arguing about which number the stamp meant.
+#
+#  MONOTONIC FROM PROCESS START, and NOT reset here. `max_memory_allocated` is a
+#  high-water mark since the process began, so this covers the model load, the
+#  forward/backward passes and the FD ladder together — the whole build, which
+#  is the unit a capacity ruling is made in. Resetting it at any point inside
+#  the build would silently narrow the window and make the stamp read LOWER
+#  than the job's real peak, which is the one direction a capacity number must
+#  never be wrong in.
+#: The stamp key. ONE name, so a reader that wants a build's peak memory never
+#: has to know which builder wrote the artifact (the THREAD_STAMP_KEY pattern).
+CAPACITY_STAMP_KEY: str = "peak_device_memory"
+
+#: The probe ran and could not measure a peak — degraded instrumentation, which
+#: is NOT the same as "this stamp predates the field" (that is
+#: `stamp_peak_device_memory(...) is None`). Greppable, so a log/stamp sweep
+#: never has to recognise prose (the THREADS_UNRESOLVED discipline).
+CAPACITY_UNMEASURED: str = "CAPACITY_UNMEASURED"
+
+#: What a PRE-CHANGE artifact's peak memory reads as in a comparison. Every
+#: vector banked before 2026-08-04 has no such field, and its peak is
+#: UNRECORDED — never inferred from a job log that happens to be beside it.
+CAPACITY_PRE_CHANGE_UNRECORDED: str = (
+    "unrecorded (stamp predates the 2026-08-04 capacity stamp)")
+
+GIB: float = float(1024 ** 3)
+
+
+class DevicePeakMemory(BaseModel):
+    """One CUDA device's high-water marks, as the allocator reports them."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    index: int = Field(
+        description="the device ordinal AS THIS PROCESS SAW IT — i.e. after "
+                    "CUDA_VISIBLE_DEVICES remapping, which is why that value "
+                    "is recorded in the same block")
+    name: Optional[str] = None
+    max_memory_allocated_bytes: Optional[int] = Field(
+        default=None,
+        description="torch.cuda.max_memory_allocated(i) — what the build "
+                    "ASKED FOR, high-water since process start. None = the "
+                    "probe could not answer, a NAMED degradation, never a "
+                    "silent 0")
+    max_memory_reserved_bytes: Optional[int] = Field(
+        default=None,
+        description="torch.cuda.max_memory_reserved(i) — what the caching "
+                    "allocator HELD from the driver, i.e. what a co-tenant "
+                    "collided with")
+    max_memory_allocated_gib: Optional[float] = None
+    max_memory_reserved_gib: Optional[float] = None
+    total_capacity_gib: Optional[float] = Field(
+        default=None,
+        description="the card's own total, so a peak can be read as a "
+                    "FRACTION without a second artifact")
+    note: str = ""
+
+
+class PeakDeviceMemory(BaseModel):
+    """The peak device memory of THIS build process, as one document.
+
+    UNCONDITIONAL SHAPE. The same keys are present whether or not anything was
+    measurable, so a no-CUDA build is a NAMED absence (`measured=False` plus a
+    `note` saying why) rather than a missing field — and a missing field
+    therefore means exactly one thing: the stamp predates this change.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    measured: bool = Field(
+        default=False,
+        description="did any device answer? False with a note is the M19 "
+                    "degradation; False with no devices and a named reason is "
+                    "the honest no-CUDA case")
+    n_devices: int = 0
+    devices: list[DevicePeakMemory] = Field(
+        default=[], description="one row per visible CUDA device")
+    peak_allocated_gib: Optional[float] = Field(
+        default=None,
+        description="the WORST device's allocated high-water mark — the single "
+                    "number a per-card reservation is compared against")
+    peak_reserved_gib: Optional[float] = None
+    cuda_visible_devices: str = Field(
+        default="(unset)",
+        description="recorded here as well as in the trunk, because the device "
+                    "ORDINALS above are meaningless without it")
+    torch_version: Optional[str] = None
+    probe: str = Field(
+        default="", description="HOW the peaks were read, so a reader can "
+                                "judge them")
+    note: str = Field(
+        default="",
+        description="why the probe degraded, when it did. Empty on a clean "
+                    "read; never empty when `measured` is False")
+
+    @property
+    def quoted(self) -> str:
+        """The peak as a comparison should print it — never a bare number."""
+        if self.peak_allocated_gib is None:
+            return f"{CAPACITY_UNMEASURED} (0 device(s))"
+        return (f"{self.peak_allocated_gib:.3f} GiB allocated / "
+                f"{self.peak_reserved_gib:.3f} GiB reserved over "
+                f"{self.n_devices} device(s)"
+                if self.peak_reserved_gib is not None
+                else f"{self.peak_allocated_gib:.3f} GiB allocated")
+
+
+#: The one-line STATUS the block opens with, so a reader who has never seen the
+#: field knows in one line what it is, what window it covers, and what it does
+#: NOT mean.
+CAPACITY_STAMP_STATUS: str = (
+    "SELF-EVIDENCING CAPACITY: the per-device high-water memory marks this "
+    "build actually reached, read from the allocator at bank time. "
+    "max_memory_allocated/reserved are MONOTONIC FROM PROCESS START and are "
+    "deliberately NOT reset anywhere in the build, so these cover the whole "
+    "job (load + forwards + backwards + FD ladder) — the unit a capacity "
+    "ruling is made in. DESCRIPTIVE ONLY: no gate reads it, and a build with "
+    "no CUDA records a NAMED absence rather than a zero.")
+
+
+def peak_device_memory() -> PeakDeviceMemory:
+    """Read the per-device peaks. NEVER raises (rake M19).
+
+    Availability-branched, with NAMED skip semantics (rake M44): no torch, no
+    CUDA, and a device that would not answer are three different facts and are
+    reported as three different notes — none of them as a zero, which would
+    read as "this build needed no memory".
+    """
+    visible = os.environ.get("CUDA_VISIBLE_DEVICES", "(unset)")
+    base = dict(cuda_visible_devices=visible)
+    try:
+        import torch
+    except Exception as exc:                                  # noqa: BLE001 — a probe
+        return PeakDeviceMemory(
+            **base, probe="torch.cuda.max_memory_allocated/reserved per device",
+            note=f"{CAPACITY_UNMEASURED}: torch is not importable here "
+                 f"({type(exc).__name__}: {exc}) — a legitimate environment "
+                 f"(the desk's CPU spine is one), not a failure")
+    version = str(getattr(torch, "__version__", "unknown"))
+    try:
+        available = bool(torch.cuda.is_available())
+        count = int(torch.cuda.device_count()) if available else 0
+    except Exception as exc:                                  # noqa: BLE001 — M19
+        return PeakDeviceMemory(
+            **base, torch_version=version,
+            probe="torch.cuda.max_memory_allocated/reserved per device",
+            note=f"{CAPACITY_UNMEASURED}: the CUDA availability probe raised "
+                 f"{type(exc).__name__}: {exc}")
+    if not available or count == 0:
+        return PeakDeviceMemory(
+            **base, torch_version=version,
+            probe="torch.cuda.max_memory_allocated/reserved per device",
+            note=f"{CAPACITY_UNMEASURED}: no CUDA device is visible to this "
+                 f"process (torch.cuda.is_available()={available}, "
+                 f"device_count={count}) — this build ran on CPU, so there is "
+                 f"no device peak to record. A NAMED absence, never a 0")
+
+    rows: list[DevicePeakMemory] = []
+    for index in range(count):
+        try:
+            allocated = int(torch.cuda.max_memory_allocated(index))
+            reserved = int(torch.cuda.max_memory_reserved(index))
+        except Exception as exc:                              # noqa: BLE001 — M19
+            rows.append(DevicePeakMemory(
+                index=index,
+                note=f"{CAPACITY_UNMEASURED}: the allocator declined "
+                     f"({type(exc).__name__}: {exc})"))
+            continue
+        name: Optional[str] = None
+        total: Optional[float] = None
+        try:
+            props = torch.cuda.get_device_properties(index)
+            name = str(props.name)
+            total = round(float(props.total_memory) / GIB, 3)
+        except Exception as exc:                              # noqa: BLE001 — M19
+            name = None
+            total = None
+            logger.debug("device %d properties unavailable: %s", index, exc)
+        rows.append(DevicePeakMemory(
+            index=index, name=name,
+            max_memory_allocated_bytes=allocated,
+            max_memory_reserved_bytes=reserved,
+            max_memory_allocated_gib=round(allocated / GIB, 3),
+            max_memory_reserved_gib=round(reserved / GIB, 3),
+            total_capacity_gib=total))
+
+    answered = [r for r in rows if r.max_memory_allocated_bytes is not None]
+    probe = ("torch.cuda.max_memory_allocated/max_memory_reserved per visible "
+             "device, read at bank time; monotonic from process start and "
+             "never reset, so the window is the whole build")
+    if not answered:
+        return PeakDeviceMemory(
+            **base, torch_version=version, n_devices=count, devices=rows,
+            probe=probe,
+            note=f"{CAPACITY_UNMEASURED}: {count} device(s) are visible and "
+                 f"none answered the allocator — "
+                 + "; ".join(f"device {r.index}: {r.note}" for r in rows))
+    peak_alloc = max(float(r.max_memory_allocated_gib or 0.0) for r in answered)
+    peak_res = max(float(r.max_memory_reserved_gib or 0.0) for r in answered)
+    partial = ""
+    if len(answered) != count:
+        partial = (f"{CAPACITY_UNMEASURED}: {count - len(answered)} of {count} "
+                   f"device(s) did not answer; the peaks below are over the "
+                   f"{len(answered)} that did")
+    return PeakDeviceMemory(
+        **base, measured=True, torch_version=version, n_devices=count,
+        devices=rows, peak_allocated_gib=round(peak_alloc, 3),
+        peak_reserved_gib=round(peak_res, 3), probe=probe, note=partial)
+
+
+def capacity_stamp(memory: Optional[PeakDeviceMemory] = None) -> dict:
+    """The `peak_device_memory` block a builder writes into its stamp.
+
+    Plain JSON-able types only, `STATUS` first, so the block reads correctly in
+    a stamp opened by a human with no access to this module.
+    """
+    mem = memory if memory is not None else peak_device_memory()
+    return {"STATUS": CAPACITY_STAMP_STATUS, **mem.model_dump(mode="json")}
+
+
+def stamp_peak_device_memory(stamp: Optional[dict]) -> Optional[PeakDeviceMemory]:
+    """The peak memory a stamp records — `None` for a PRE-CHANGE stamp.
+
+    THE BACKWARD-COMPATIBLE READER, and the only one any consumer should use.
+    Three states a reader must keep apart (the thread_config / M41 discipline):
+
+        None                    the stamp PREDATES the field. The build's peak
+                                is UNRECORDED and must not be inferred
+        measured=False          the builder RAN and measured nothing — either
+                                honestly (no CUDA) or degraded; the `note`
+                                says which
+        measured=True           the peaks the build actually reached
+
+    Accepts a whole build stamp, a nested `trunk`, or the block itself, because
+    all three get handed around.
+    """
+    if not isinstance(stamp, dict):
+        return None
+    block: object = stamp.get(CAPACITY_STAMP_KEY)
+    if block is None and isinstance(stamp.get("trunk"), dict):
+        block = stamp["trunk"].get(CAPACITY_STAMP_KEY)
+    if block is None and "measured" in stamp and "cuda_visible_devices" in stamp:
+        block = stamp                       # the block itself was handed in
+    if not isinstance(block, dict):
+        return None
+    payload = {k: v for k, v in block.items() if k != "STATUS"}
+    try:
+        return PeakDeviceMemory(**payload)
+    except Exception:                                         # noqa: BLE001 — M19
+        #  A block this reader cannot parse is still EVIDENCE that the field is
+        #  present, so it must not read as "pre-change". It reads as a probe
+        #  that produced something unusable, which is what it is.
+        return PeakDeviceMemory(
+            note=f"{CAPACITY_UNMEASURED}: the stamp carries a "
+                 f"{CAPACITY_STAMP_KEY} block this reader cannot parse (keys "
+                 f"{sorted(str(k) for k in block)}) — recorded as an "
+                 f"unmeasured probe, NOT as a pre-change absence")
+
+
+def quote_peak_memory(memory: Optional[PeakDeviceMemory]) -> str:
+    """How a peak is printed in a comparison. Never a bare number."""
+    return (CAPACITY_PRE_CHANGE_UNRECORDED if memory is None
+            else memory.quoted)
+
+
 # ---------------------------------------------------------------- banking
 def bank(result: BuildResult, trunk: dict, corpus_sha: str, date_string: str,
          saboteur_used: bool = False) -> dict[str, Path]:
@@ -1187,6 +1466,21 @@ def bank(result: BuildResult, trunk: dict, corpus_sha: str, date_string: str,
         # trunk stamp beside it describes the deep-learning stack at LOAD time;
         # the two are separate facts and are recorded separately.
         THREAD_STAMP_KEY: thread_config_stamp(),
+        # ── THE PEAK DEVICE MEMORY THIS BUILD REACHED (2026-08-04) ───────────
+        # UNCONDITIONAL, by the thread_config argument one field over: the
+        # point is that every artifact can evidence the capacity ruling it was
+        # built under, and a conditional field would leave exactly the gap.
+        # An absent key therefore means ONE thing — the stamp predates
+        # 2026-08-04 — and `stamp_peak_device_memory` is the reader that keeps
+        # that apart from a probe that ran and measured nothing (no CUDA).
+        #
+        # WHY IT IS READ HERE. The high-water marks are monotonic from process
+        # start, so bank time — after the forwards, the backwards and the FD
+        # ladder, and before the process exits — is the only point that sees
+        # the whole build. It is a READ of counters the allocator already
+        # maintains: it allocates nothing, resets nothing, and cannot change
+        # one banked number.
+        CAPACITY_STAMP_KEY: capacity_stamp(),
     }
     # ADDENDUM 2026-07-27-B: recorded in EVERY stamp of a truncated node, with the same
     # key names the collector uses so a build stamp and a collection stamp can be
@@ -1322,6 +1616,126 @@ def _selftest_thread_config(check) -> None:
           note is not None and THREAD_COUNT_MISMATCH_LABEL in note
           and PRE_RULING_UNRECORDED in note and "rebuild 8" in note,
           (note or "")[:88])
+
+
+def _selftest_capacity_stamp(check: Callable[..., None],
+                             skip: Callable[[str], None]) -> None:
+    """The peak-memory stamp contract — NO deep-learning stack needed.
+
+    Split out for the same reason as the thread-config block: the
+    backward-compatibility contract is what every future capacity ruling will
+    be read through, and it must stay proven in the environment a desk reads
+    stamps in, which has no torch at all.
+
+    RAKE M44: the MEASURED half is availability-branched on CUDA and registers
+    a NAMED SKIP where no device exists — a skip is a third state, never a
+    failure and never a silently-passed check.
+    """
+    block = capacity_stamp()
+    check("the peak-memory block is JSON-round-trippable as banked",
+          json.loads(json.dumps(block)) == block, f"{len(block)} field(s)")
+    check("the block opens with STATUS, so a reader who has never seen the "
+          "field knows in one line what window it covers",
+          list(block)[0] == "STATUS" and block["STATUS"] == CAPACITY_STAMP_STATUS)
+
+    #  THE UNCONDITIONAL SHAPE, checked as a SHAPE: the measured and unmeasured
+    #  documents must carry exactly the same keys, or "absent = pre-change
+    #  vintage" stops being true the first time a build runs without a card.
+    measured_fixture = PeakDeviceMemory(
+        measured=True, n_devices=2, cuda_visible_devices="0,1",
+        torch_version="fixture", probe="fixture",
+        devices=[DevicePeakMemory(index=0, name="fixture-card",
+                                  max_memory_allocated_bytes=3 * 1024 ** 3,
+                                  max_memory_reserved_bytes=4 * 1024 ** 3,
+                                  max_memory_allocated_gib=3.0,
+                                  max_memory_reserved_gib=4.0,
+                                  total_capacity_gib=80.0),
+                 DevicePeakMemory(index=1, name="fixture-card",
+                                  max_memory_allocated_bytes=1024 ** 3,
+                                  max_memory_reserved_bytes=2 * 1024 ** 3,
+                                  max_memory_allocated_gib=1.0,
+                                  max_memory_reserved_gib=2.0,
+                                  total_capacity_gib=80.0)],
+        peak_allocated_gib=3.0, peak_reserved_gib=4.0)
+    unmeasured_fixture = PeakDeviceMemory(
+        probe="fixture", note=f"{CAPACITY_UNMEASURED}: fixture")
+    check("the MEASURED and UNMEASURED blocks carry exactly the same key set — "
+          "the unconditional shape 'absent = pre-change vintage' depends on",
+          (list(capacity_stamp(measured_fixture))
+           == list(capacity_stamp(unmeasured_fixture))),
+          f"{len(capacity_stamp(unmeasured_fixture))} key(s)")
+    check("an UNMEASURED block always says why (M19: a degraded or absent read "
+          "is described, never silent) and never reports a 0 peak",
+          unmeasured_fixture.note.startswith(CAPACITY_UNMEASURED)
+          and unmeasured_fixture.peak_allocated_gib is None
+          and unmeasured_fixture.devices == [],
+          unmeasured_fixture.note[:60])
+    check("the WORST device is the reported peak, per side — a reservation is "
+          "compared against the card that got closest to it",
+          measured_fixture.peak_allocated_gib == 3.0
+          and measured_fixture.peak_reserved_gib == 4.0
+          and "3.000 GiB allocated" in measured_fixture.quoted,
+          measured_fixture.quoted)
+    check("allocated and reserved are BOTH carried, per device — the gap "
+          "between them is the fragmentation a margin exists to cover",
+          all(d.max_memory_allocated_bytes is not None
+              and d.max_memory_reserved_bytes is not None
+              and d.max_memory_reserved_bytes >= d.max_memory_allocated_bytes
+              for d in measured_fixture.devices))
+
+    #  THE READER, on the three states it must keep apart.
+    check("a PRE-CHANGE stamp (no peak_device_memory key) reads as None — the "
+          "historical banks are UNRECORDED, never 'used no memory'",
+          stamp_peak_device_memory({"builder": "build_entropy_gradient.py"})
+          is None
+          and stamp_peak_device_memory(None) is None
+          and stamp_peak_device_memory([]) is None)          # type: ignore[arg-type]
+    round_tripped = stamp_peak_device_memory(
+        {"builder": "x", CAPACITY_STAMP_KEY: capacity_stamp(measured_fixture)})
+    check("a stamped block round-trips through the backward-compatible reader "
+          "with its peaks intact",
+          round_tripped is not None and round_tripped.measured
+          and round_tripped.peak_allocated_gib == 3.0
+          and round_tripped.n_devices == 2,
+          quote_peak_memory(round_tripped))
+    nested = stamp_peak_device_memory(
+        {"trunk": {CAPACITY_STAMP_KEY: capacity_stamp(measured_fixture)}})
+    bare = stamp_peak_device_memory(capacity_stamp(measured_fixture))
+    check("a block nested under `trunk`, and the block handed in on its own, "
+          "are both found — all three shapes get handed around",
+          nested is not None and nested.peak_allocated_gib == 3.0
+          and bare is not None and bare.peak_allocated_gib == 3.0)
+    broken = stamp_peak_device_memory({CAPACITY_STAMP_KEY: {"nonsense": 1}})
+    check("an UNPARSEABLE block is an unmeasured probe, NEVER a pre-change "
+          "absence — the field's presence is itself evidence",
+          broken is not None and not broken.measured
+          and CAPACITY_UNMEASURED in broken.note,
+          (broken.note if broken else "")[:60])
+    check("a PRE-CHANGE side is QUOTED as unrecorded rather than compared as a "
+          "number, so a capacity ruling never rests on an inferred peak",
+          quote_peak_memory(None) == CAPACITY_PRE_CHANGE_UNRECORDED)
+
+    #  THE LIVE PROBE. It must never raise, in any configuration.
+    live = peak_device_memory()
+    check("the live probe returns a PeakDeviceMemory in every environment and "
+          "never raises (rake M19: instrumentation cannot fail a build)",
+          isinstance(live, PeakDeviceMemory)
+          and (live.measured or bool(live.note)),
+          f"measured={live.measured} {live.note[:48]}")
+    if live.measured:
+        check("with CUDA present the peaks are read per device, and the "
+              "reported peak is the worst of them",
+              live.n_devices >= 1 and live.devices
+              and live.peak_allocated_gib is not None
+              and live.peak_allocated_gib
+              == max(d.max_memory_allocated_gib or 0.0 for d in live.devices),
+              live.quoted)
+    else:
+        skip(f"NAMED SKIP — the MEASURED half of the capacity stamp: no CUDA "
+             f"device answered in this configuration ({live.note[:70]}), so "
+             f"only the unmeasured branch and the reader contract run here. "
+             f"The measured branch runs on a node with a card, in the same "
+             f"--selftest.")
 
 
 def _selftest_with_stack(check: Callable[..., None]) -> None:
@@ -1753,6 +2167,21 @@ def _selftest_with_stack(check: Callable[..., None]) -> None:
               banked_threads is not None
               and banked_threads.ruled_default == RULED_OMP_NUM_THREADS,
               f"ruled {RULED_OMP_NUM_THREADS}")
+        #  The capacity field on a REAL banked stamp, for the same reason: it
+        #  has to survive the json round-trip the bank actually performs and be
+        #  findable by the reader a desk will use.
+        banked_memory = stamp_peak_device_memory(stamp)
+        check("stamp records the PEAK DEVICE MEMORY this build reached, "
+              "readable by the backward-compatible reader",
+              CAPACITY_STAMP_KEY in stamp and banked_memory is not None,
+              quote_peak_memory(banked_memory))
+        check("and the capacity block is present UNCONDITIONALLY — a CPU build "
+              "records a NAMED absence, so an absent key can only ever mean "
+              "'this stamp predates the field'",
+              banked_memory is not None
+              and (banked_memory.measured or CAPACITY_UNMEASURED
+                   in banked_memory.note),
+              (banked_memory.note if banked_memory else "")[:60])
 
         # The 8bL16 deconfound's shape: a SECOND vector for the same model at a site
         # the legacy bank already holds. The stem must move the files while the npz
@@ -1799,8 +2228,9 @@ def selftest() -> int:
         skips.append(name)
         logger.info("SKIP %s", name)
 
-    #  Runs in EVERY configuration — the stamp contract needs no weights.
+    #  Runs in EVERY configuration — the stamp contracts need no weights.
     _selftest_thread_config(check)
+    _selftest_capacity_stamp(check, skip)
 
     stack_ok, stack_why = _stack_available()
     if stack_ok:

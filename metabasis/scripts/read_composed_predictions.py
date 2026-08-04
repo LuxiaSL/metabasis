@@ -267,6 +267,9 @@ Run (repo root, PYTHONPATH=.):
   python -m metabasis.scripts.read_composed_predictions --candidates \
       --v21-root <v2.1 re-bank root> --out /tmp/claude-output/composed_v21.json
   python -m metabasis.scripts.read_composed_predictions --candidates \
+      --hub-vector-basis webtext-v3 [--hub-vector-root <v3 arm root>] \
+      --out /tmp/claude-output/composed_wtv3.json
+  python -m metabasis.scripts.read_composed_predictions --candidates \
       --directional-constants <directional constants readout>.json \
       --directional-out /tmp/claude-output/directional_slots.json
   python -m metabasis.scripts.read_composed_predictions --candidates \
@@ -336,13 +339,82 @@ BANKED_JSON_TOLERANCE = 5e-7
 #: The draft quotes 4-dp display figures; they must round-trip exactly.
 DISPLAY_DECIMALS = 4
 
-#: The primary hub's OWN entropy-gradient bank at the rebuilt-L16 column — the
-#: `xi` of the hub-frame decomposition (see `hub_frame_coordinates`). ONE path,
-#: no fallback: the neighbouring `entropy_gradient_8b.npz` is a different
-#: column, and a near-miss here would silently rotate every alpha (rake M12).
-#: Its absence degrades the descriptive companions, never the prediction.
-HUB_VECTOR_PATH = (COLLECTION_ROOT / HUB_MODEL / "vectors"
-                   / f"entropy_gradient_{HUB_MODEL}_L{HUB_SITE_OF_RECORD}rebuild.npz")
+#: THE HUB VECTOR, PER COLLECTION BASIS. The primary hub's OWN entropy-gradient
+#: bank at the rebuilt-L16 column — the `xi` of the hub-frame decomposition (see
+#: `hub_frame_coordinates`).
+#:
+#: RAKE M12'S DISCIPLINE, PRESERVED EXACTLY: ONE PATH PER BASIS, NO FALLBACK.
+#: The neighbouring `entropy_gradient_8b.npz` is a different column, and a
+#: near-miss here would silently rotate every alpha — so the resolver never
+#: searches, never probes a candidate list and never falls through from one
+#: basis to another. What changed (webtext-v3 filing lane) is only that the ONE
+#: path is now selected by NAME: an unknown basis is a REFUSAL
+#: (`UnknownHubVectorBasisError`), never a search. A basis whose file is absent
+#: degrades the descriptive companions and nothing else, exactly as before.
+HubVectorBasis = Literal["corpus-v2.1", "webtext-v3"]
+
+#: The desk-side arm root of the webtext-v3 vector wave (the 2026-08-04 pull:
+#: `vectors/<model>/…` beneath it, one uniform stem per model). Named as a
+#: constant so the filing lane relocates the wave with `--hub-vector-root`
+#: rather than by editing a path literal; the STEM below is the wave's identity
+#: and does not move with the root.
+WEBTEXT_V3_ARM_ROOT = Path("staging/webtext-v3-vectors")
+
+
+class HubVectorEntry(BaseModel):
+    """ONE basis's hub vector: the root it lives under and the stem beneath it.
+
+    Frozen, and `path` is a derived property rather than a stored field, so a
+    root override can never leave a stale absolute path behind it.
+    """
+    model_config = {"frozen": True, "arbitrary_types_allowed": True}
+
+    basis: HubVectorBasis
+    root: Path
+    stem: Path = Field(
+        description="the path BENEATH the root — the wave's own layout, which "
+                    "differs per basis (v2.1 banks <model>/vectors/…, the "
+                    "webtext-v3 wave banks vectors/<model>/…)")
+    note: str = ""
+
+    @property
+    def path(self) -> Path:
+        return self.root / self.stem
+
+
+#: The registry. ONE entry per basis of record; a key that is not here is not a
+#: basis this module knows, and asking for it halts.
+HUB_VECTOR_BASES: dict[str, HubVectorEntry] = {
+    "corpus-v2.1": HubVectorEntry(
+        basis="corpus-v2.1", root=COLLECTION_ROOT,
+        stem=(Path(HUB_MODEL) / "vectors"
+              / f"entropy_gradient_{HUB_MODEL}_L{HUB_SITE_OF_RECORD}rebuild.npz"),
+        note="Addendum G §G1's go-forward collection basis; the `rebuild` stem "
+             "is the deconfounded L16 column banked BESIDE the legacy "
+             "entropy_gradient_8b.npz, which is a different column"),
+    "webtext-v3": HubVectorEntry(
+        basis="webtext-v3", root=WEBTEXT_V3_ARM_ROOT,
+        stem=(Path("vectors") / HUB_MODEL
+              / f"entropy_gradient_{HUB_MODEL}_L{HUB_SITE_OF_RECORD}.npz"),
+        note="the 2026-08-04 vector rebuild wave (20/20 EGVs built + FD-gated "
+             "on webtext-v3), at the wave's uniform stem. Filename VERIFIED "
+             "against the banked artifact, not inferred from the v2.1 "
+             "convention: this wave carries NO `rebuild` suffix"),
+}
+
+#: THE ACTIVE BASIS. Module-level for the same reason `V21_ROOT` is: the
+#: companions are computed from deep inside the predictor, through call chains
+#: with fixed signatures. It is NEVER set by import — the default is the v2.1
+#: basis every existing caller already gets, and the filing lane flips it
+#: explicitly (`--hub-vector-basis` / `set_hub_vector_basis`), so there is no
+#: silent default flip.
+DEFAULT_HUB_VECTOR_BASIS: HubVectorBasis = "corpus-v2.1"
+ACTIVE_HUB_VECTOR: HubVectorEntry = HUB_VECTOR_BASES[DEFAULT_HUB_VECTOR_BASIS]
+
+#: The corpus-v2.1 hub vector, under its historical name. Derived FROM the
+#: registry so the constant and the registry cannot drift apart, and kept
+#: because it is the default every existing caller resolves to.
+HUB_VECTOR_PATH = HUB_VECTOR_BASES[DEFAULT_HUB_VECTOR_BASIS].path
 #: The hub-frame decomposition needs BOTH hub maps to share one hub-side PCA
 #: basis (`va`). Banked maps fit against the same hub bank agree to ~2e-12
 #: (chart-overlap preview: hub_basis_max_dev 1.82e-12 across 12 models); a
@@ -443,6 +515,17 @@ class CorpusVintageError(ComposedPathError):
     """A corpus-vintage root is not what it claims to be, or is set where it
     must not be (the E1 gate). Always LOUD: a vintage confusion produces
     numbers that are individually valid and collectively meaningless."""
+
+
+class UnknownHubVectorBasisError(ComposedPathError):
+    """A hub-vector basis nobody registered was asked for.
+
+    RAKE M12 AT BASIS GRAIN. The whole point of the one-path-per-basis registry
+    is that resolution is a LOOKUP, not a search: an unregistered key therefore
+    halts, naming the keys that exist, rather than falling back to the default
+    basis and computing every alpha against the wrong column — which is exactly
+    the silent rotation the single-path rule was filed to prevent.
+    """
 
 
 class DirectionalConstantsError(ComposedPathError):
@@ -802,6 +885,70 @@ def v21_hub_map_dir(model: str, root: Optional[Path] = None) -> Optional[HubMapD
     return HubMapDir(path=base / f"fits_v21_{model}", corpus="v21",
                      note="corpus-v2.1 re-bank mirror (Addendum G §G1 "
                           "go-forward basis; root sha-verified at set time)")
+
+
+# ------------------------------------------------- the hub-vector basis
+def hub_vector_entry(basis: Optional[str] = None,
+                     root: Optional[Path] = None) -> HubVectorEntry:
+    """The registry entry for `basis` (default: the ACTIVE one). Never searches.
+
+    `root` relocates the SAME entry — the wave's stem is its identity and does
+    not move with it — so a filing lane can point at the node arm root or a
+    future banked location without editing a constant. It is an explicit
+    operator act naming ONE root, not a probe order.
+    """
+    if basis is None and root is None:
+        return ACTIVE_HUB_VECTOR
+    key = ACTIVE_HUB_VECTOR.basis if basis is None else str(basis)
+    try:
+        entry = HUB_VECTOR_BASES[key]
+    except KeyError as exc:
+        raise UnknownHubVectorBasisError(
+            f"unknown hub-vector basis {key!r}. Registered bases: "
+            f"{sorted(HUB_VECTOR_BASES)}. There is ONE hub-vector path per "
+            f"basis and no fallback (rake M12): an unregistered basis is "
+            f"refused rather than resolved against another basis's column, "
+            f"which would silently rotate every alpha") from exc
+    if root is None:
+        return entry
+    return entry.model_copy(update={"root": Path(root)})
+
+
+def resolve_hub_vector_path(basis: Optional[str] = None,
+                            root: Optional[Path] = None) -> Path:
+    """THE one path for `basis`. A lookup — never a probe, never a fallback."""
+    return hub_vector_entry(basis, root).path
+
+
+def set_hub_vector_basis(basis: Optional[str] = None,
+                         root: Optional[Path] = None) -> HubVectorEntry:
+    """Make `basis` the active hub-vector basis, or restore the default (None).
+
+    Set ONLY here and only explicitly. Passing `None` for both arguments is the
+    reset to `DEFAULT_HUB_VECTOR_BASIS`, so a caller that meant "put it back"
+    cannot leave the v3 basis in force for whatever runs next.
+    """
+    global ACTIVE_HUB_VECTOR
+    if basis is None and root is None:
+        ACTIVE_HUB_VECTOR = HUB_VECTOR_BASES[DEFAULT_HUB_VECTOR_BASIS]
+        return ACTIVE_HUB_VECTOR
+    entry = hub_vector_entry(basis, root)
+    ACTIVE_HUB_VECTOR = entry
+    logger.info("hub-vector basis set: %s -> %s", entry.basis, entry.path)
+    return entry
+
+
+@contextmanager
+def hub_vector_basis_scope(basis: Optional[str] = None,
+                           root: Optional[Path] = None
+                           ) -> Iterator[HubVectorEntry]:
+    """`set_hub_vector_basis` for the duration of a block, restored on any exit."""
+    global ACTIVE_HUB_VECTOR
+    previous = ACTIVE_HUB_VECTOR
+    try:
+        yield set_hub_vector_basis(basis, root)
+    finally:
+        ACTIVE_HUB_VECTOR = previous
 
 
 def _under_v21_root(path: Optional[str | Path]) -> bool:
@@ -1626,6 +1773,18 @@ class ComposedReadout(BaseModel):
     corpus_manifest_sha256_v21: Optional[str] = Field(
         default=None, description="that root's own manifest sha, recomputed and "
                                   "verified against CORPUS_SHA_V21 at set time")
+    hub_vector_basis: str = Field(
+        default_factory=lambda: ACTIVE_HUB_VECTOR.basis,
+        description="which collection basis the hub vector (xi) was read from "
+                    "for the DESCRIPTIVE companions. Default-off in the sense "
+                    "that matters: it is the v2.1 basis unless a run named "
+                    "another, and it is recorded whether or not the file was "
+                    "present, so an absent xi cannot be mistaken for a basis "
+                    "nobody chose")
+    hub_vector: str = Field(
+        default_factory=lambda: str(ACTIVE_HUB_VECTOR.path),
+        description="the ONE path that basis resolves to (rake M12: no "
+                    "fallback, no probe order)")
     gate: Optional["GateResult"] = None
     predictions: list[ComposedPrediction] = []
     na_at_filing: list[NotFilable] = []
@@ -1808,19 +1967,27 @@ def hub_frame_coordinates(tm: TransportMap, vector: np.ndarray) -> np.ndarray:
     return omega @ (vb @ np.asarray(vector, np.float64))
 
 
-def load_hub_vector(path: Path = HUB_VECTOR_PATH
+def load_hub_vector(path: Optional[Path] = None
                     ) -> tuple[Optional[np.ndarray], Optional[str]]:
-    """The hub's own vector for `xi`, or (None, None) if it is not banked."""
-    if not path.exists():
+    """The hub's own vector for `xi`, or (None, None) if it is not banked.
+
+    `path` defaults to the ACTIVE basis's one path, resolved at CALL time —
+    a module-level default would bind at import and quietly ignore a basis
+    flip made afterwards, which is the silent-wrong-column failure this whole
+    registry exists to prevent. An absent file is still (None, None): the one
+    path is the one path, and nothing probes for a second one.
+    """
+    resolved = resolve_hub_vector_path() if path is None else Path(path)
+    if not resolved.exists():
         return None, None
-    vector, spec = load_entropy_gradient(path, HUB_MODEL, HUB_SITE_OF_RECORD)
+    vector, spec = load_entropy_gradient(resolved, HUB_MODEL, HUB_SITE_OF_RECORD)
     return np.asarray(vector, np.float64), spec.path
 
 
 def chart_companions(tm_source: TransportMap, tm_target: TransportMap,
                      v_source: np.ndarray, v_target: np.ndarray,
                      a_comp: float,
-                     hub_vector_path: Path = HUB_VECTOR_PATH,
+                     hub_vector_path: Optional[Path] = None,
                      ) -> DescriptiveCompanions:
     """The descriptive companion block for one composed prediction.
 
@@ -1828,6 +1995,9 @@ def chart_companions(tm_source: TransportMap, tm_target: TransportMap,
     from — nothing is re-resolved, nothing is re-loaded except the hub's own
     vector, and `a_comp` is passed IN rather than recomputed so this can only
     ever describe the filed number, never replace it.
+
+    `hub_vector_path` defaults to the ACTIVE basis's one path (resolved here, at
+    call time). A caller may name a path outright; nothing is ever probed.
     """
     block = DescriptiveCompanions()
     notes: list[str] = []
@@ -1872,11 +2042,24 @@ def chart_companions(tm_source: TransportMap, tm_target: TransportMap,
             f"the predictor's own arithmetic); the DECOMPOSITION is what is "
             f"suspect and must not be read.")
 
-    v_hub, hub_path = load_hub_vector(hub_vector_path)
+    #  M19: an unregistered basis must not be able to fail a prediction that was
+    #  already computed, so the refusal is caught here and reported as a note.
+    try:
+        if hub_vector_path is None:
+            resolved_hub_vector = resolve_hub_vector_path()
+            source_label = f"basis {ACTIVE_HUB_VECTOR.basis!r}"
+        else:
+            resolved_hub_vector = Path(hub_vector_path)
+            source_label = "caller-supplied path"
+    except UnknownHubVectorBasisError as exc:
+        block.notes = [f"companions NOT computed: {exc}"]
+        return block
+    v_hub, hub_path = load_hub_vector(resolved_hub_vector)
     if v_hub is None:
         notes.append(
             f"the hub's own entropy-gradient bank is not present at "
-            f"{hub_vector_path}, so xi — and with it alpha_source, "
+            f"{resolved_hub_vector} ({source_label} — ONE path, no fallback), "
+            f"so xi — and with it alpha_source,"
             f"alpha_target, delta_excess and rho_offaxis — is not computable. "
             f"alpha_pair and the identity above are unaffected (they need only "
             f"the two charts).")
@@ -8940,6 +9123,146 @@ def selftest() -> int:                                   # noqa: C901 — a chec
               "and a named manifest that is not there is a FINDING, not a crash — "
               "the sweep reports it and carries on over the rest")
 
+    print("== selftest 30: the hub-vector basis — one path per basis, no fallback ==")
+    #  RAKE M12 AT BASIS GRAIN. Three properties, and the third is the one that
+    #  actually protects a filing: (a) both registered bases resolve BY
+    #  CONSTRUCTION against a fixture, (b) an unregistered basis REFUSES, and
+    #  (c) a registered basis whose file is absent stays absent — it never
+    #  falls through to the other basis's column, which is the silent alpha
+    #  rotation the single-path rule exists to prevent.
+    import tempfile as _tmp30
+
+    check(ACTIVE_HUB_VECTOR.basis == DEFAULT_HUB_VECTOR_BASIS == "corpus-v2.1",
+          f"the ACTIVE basis defaults to the v2.1 basis — no import flips it "
+          f"({ACTIVE_HUB_VECTOR.basis})")
+    check(ACTIVE_HUB_VECTOR.path == HUB_VECTOR_PATH
+          == (COLLECTION_ROOT / HUB_MODEL / "vectors"
+              / f"entropy_gradient_{HUB_MODEL}_L{HUB_SITE_OF_RECORD}rebuild.npz"),
+          f"and it is the historical v2.1 path, unmoved: {HUB_VECTOR_PATH}")
+    check(HUB_VECTOR_BASES["webtext-v3"].stem
+          == Path("vectors") / HUB_MODEL / f"entropy_gradient_{HUB_MODEL}_L16.npz",
+          f"the webtext-v3 stem is the wave's VERIFIED banked filename — no "
+          f"`rebuild` suffix, model dir UNDER vectors/: "
+          f"{HUB_VECTOR_BASES['webtext-v3'].stem}")
+    check(HUB_VECTOR_BASES["webtext-v3"].stem
+          != HUB_VECTOR_BASES["corpus-v2.1"].stem,
+          "and it is a genuinely different stem from the v2.1 one — the two "
+          "waves do not share a layout, which is precisely why a single "
+          "hardcoded path could not serve both")
+    check(all(k == e.basis for k, e in HUB_VECTOR_BASES.items()),
+          f"every registry key equals the entry's own basis name, so a lookup "
+          f"cannot return a mislabelled entry ({sorted(HUB_VECTOR_BASES)})")
+
+    for bad30 in ("corpus-v2.2", "webtext-v2", "", "CORPUS-V2.1"):
+        try:
+            resolve_hub_vector_path(bad30)
+            check(False, f"an unregistered basis {bad30!r} must be REFUSED")
+        except UnknownHubVectorBasisError as exc:
+            check("no fallback" in str(exc) and "corpus-v2.1" in str(exc),
+                  f"basis {bad30!r} REFUSES and names the registered bases: "
+                  f"{exc!s:.58}")
+    check(ACTIVE_HUB_VECTOR.basis == DEFAULT_HUB_VECTOR_BASIS,
+          "and a refused basis leaves the ACTIVE basis untouched")
+    try:
+        set_hub_vector_basis("webtext-v4")
+        check(False, "set_hub_vector_basis must refuse an unregistered basis")
+    except UnknownHubVectorBasisError:
+        check(ACTIVE_HUB_VECTOR.basis == DEFAULT_HUB_VECTOR_BASIS,
+              "a refused SET leaves the previous basis in force — a half-applied "
+              "basis switch would file alphas against an unannounced column")
+
+    with _tmp30.TemporaryDirectory(prefix="composed_basis_") as td30:
+        fixture30 = Path(td30)
+        hub_dim30 = d_hub
+        planted30: dict[str, np.ndarray] = {}
+        for name30, entry30 in sorted(HUB_VECTOR_BASES.items()):
+            #  Each basis gets its own root so the two fixtures cannot alias:
+            #  a resolver that ignored the stem would still find A file, and the
+            #  check would pass for the wrong reason.
+            target30 = fixture30 / name30 / entry30.stem
+            target30.parent.mkdir(parents=True, exist_ok=True)
+            vec30 = unit(rng.standard_normal(hub_dim30))
+            planted30[name30] = vec30
+            np.savez(target30,
+                     **{f"entropy_gradient_L{HUB_SITE_OF_RECORD}": vec30})
+        resolved30: dict[str, Optional[str]] = {}
+        loaded30: dict[str, Optional[np.ndarray]] = {}
+        for name30 in sorted(HUB_VECTOR_BASES):
+            with hub_vector_basis_scope(name30, fixture30 / name30) as entry30:
+                resolved30[name30] = str(entry30.path)
+                v30, p30 = load_hub_vector()
+                loaded30[name30] = v30
+                check(p30 is not None and Path(str(p30)) == entry30.path,
+                      f"basis {name30!r} resolves BY CONSTRUCTION to its own "
+                      f"stem under the fixture root and loads from exactly "
+                      f"that file: {entry30.stem}")
+        check(len(set(resolved30.values())) == len(HUB_VECTOR_BASES),
+              f"the {len(HUB_VECTOR_BASES)} registered bases resolve to "
+              f"{len(set(resolved30.values()))} DISTINCT paths")
+        #  Each basis must load ITS OWN planted vector. `load_entropy_gradient`
+        #  re-normalizes on read, so "identical" is at fp64 round-off; the
+        #  discriminating leg is the SECOND one — an independent random unit
+        #  vector in 96-D is nowhere near, so a cross-basis mix-up could not
+        #  hide inside any tolerance this check would tolerate.
+        worst_own30 = max(float(np.abs(loaded30[n] - planted30[n]).max())
+                          for n in planted30 if loaded30[n] is not None)
+        cross30 = min(float(np.abs(loaded30[a30] - planted30[b30]).max())
+                      for a30 in planted30 for b30 in planted30 if a30 != b30)
+        check(len(loaded30) == len(planted30)
+              and all(loaded30[n] is not None for n in planted30)
+              and worst_own30 < 1e-15 < 1e-3 < cross30,
+              f"and each basis loads ITS OWN planted vector (worst |Δ| "
+              f"{worst_own30:.3e}) while the nearest CROSS-basis vector is "
+              f"{cross30:.3e} away — orders apart, so a mix-up cannot hide "
+              f"inside a tolerance")
+        check(ACTIVE_HUB_VECTOR.basis == DEFAULT_HUB_VECTOR_BASIS
+              and ACTIVE_HUB_VECTOR.path == HUB_VECTOR_PATH,
+              "hub_vector_basis_scope restores the previous basis on exit")
+
+        #  (c) THE NO-FALLBACK PROPERTY, demonstrated rather than asserted: the
+        #  v2.1 fixture is populated and the v3 root is EMPTY, so a fallback
+        #  would return the v2.1 vector under the v3 basis.
+        empty30 = fixture30 / "empty-v3-root"
+        empty30.mkdir()
+        with hub_vector_basis_scope("webtext-v3", empty30):
+            v_absent30, p_absent30 = load_hub_vector()
+            check(v_absent30 is None and p_absent30 is None,
+                  "a basis whose ONE path is absent reads as ABSENT — it does "
+                  "NOT fall through to the other basis's banked column")
+            #  The shared-hub-frame maps from selftest 16, so the code path
+            #  actually REACHES the hub-vector load instead of stopping at the
+            #  common-frame guard.
+            block30 = chart_companions(m_a, m_b, v_a, v_b, 0.0)
+            check(any("no fallback" in n for n in block30.notes)
+                  and any(str(empty30) in n for n in block30.notes),
+                  "and the companions say so by NAMING the one path they "
+                  "looked for, never a probe list")
+            check(block30.alpha_pair is not None
+                  and block30.identity_a_comp is not None,
+                  "while alpha_pair and the identity — which need only the two "
+                  "charts — are unaffected (rake M19: the description degrades, "
+                  "the prediction does not)")
+            check(ComposedReadout(generated="1970-01-01", hub=HUB_MODEL,
+                                  hub_site=HUB_SITE_OF_RECORD,
+                                  family=FAMILY_OF_RECORD).hub_vector_basis
+                  == "webtext-v3",
+                  "and a readout built under this basis RECORDS it, so an "
+                  "absent xi can never read as a basis nobody chose")
+
+    for argv30, why30 in ((["--candidates", "--hub-vector-basis", "corpus-v9"],
+                           "an unregistered basis at the CLI"),
+                          (["--candidates", "--hub-vector-basis", "v3"],
+                           "a basis ABBREVIATION at the CLI")):
+        try:
+            main(argv30)
+            check(False, f"{why30} must be refused")
+        except SystemExit as exc:
+            check(exc.code == 2,
+                  f"{why30} is refused by argparse choices (exit {exc.code}) — "
+                  f"the flag cannot name a basis the registry does not have")
+    check(ACTIVE_HUB_VECTOR.basis == DEFAULT_HUB_VECTOR_BASIS,
+          "and no refused CLI invocation left a non-default basis in force")
+
     print(f"\nselftest: {len(failures)} failure(s)")
     return 1 if failures else 0
 
@@ -8974,6 +9297,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     default=V21_CORPUS_MANIFEST_RELPATH,
                     help=f"path of the vintage manifest RELATIVE to --v21-root "
                          f"(default {V21_CORPUS_MANIFEST_RELPATH})")
+    ap.add_argument("--hub-vector-basis", default=DEFAULT_HUB_VECTOR_BASIS,
+                    choices=sorted(HUB_VECTOR_BASES),
+                    help=f"which collection basis the hub's OWN vector (xi, the "
+                         f"descriptive companions' hub axis) is read from. ONE "
+                         f"path per basis, no fallback (rake M12); an "
+                         f"unregistered basis is refused. Default "
+                         f"{DEFAULT_HUB_VECTOR_BASIS} — the filing lane flips "
+                         f"this EXPLICITLY, never by default.")
+    ap.add_argument("--hub-vector-root", type=Path, default=None,
+                    help="relocate the chosen basis's root (its stem, which is "
+                         "the wave's identity, is unchanged). For pointing at a "
+                         "node arm root or a re-banked tree without editing a "
+                         "constant — still ONE named path, never a probe order.")
     ap.add_argument("--filed-paths", type=Path, default=None,
                     help="a FILED prediction record whose own `resolved` paths "
                          "PIN resolution (E4 anomaly A1). Every hub map and "
@@ -9347,6 +9683,23 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             #  An EXPECTED halt: the record cannot be read as a pin.
             print(f"\nFILED-PATHS HALT — {exc}")
             return 1
+
+    #  THE HUB-VECTOR BASIS, set BEFORE the readout is built (the readout
+    #  records which basis was in force, and a basis set afterwards would be
+    #  recorded as the default it was not). A default run sets the default
+    #  entry, so this normalizes the module global on every invocation instead
+    #  of inheriting whatever a previous in-process call left behind.
+    try:
+        active_hub_vector = set_hub_vector_basis(args.hub_vector_basis,
+                                                 args.hub_vector_root)
+    except UnknownHubVectorBasisError as exc:
+        #  Unreachable through argparse (choices), reachable programmatically.
+        print(f"\nHUB-VECTOR BASIS HALT — {exc}")
+        return 1
+    if active_hub_vector.basis != DEFAULT_HUB_VECTOR_BASIS:
+        logger.warning("hub vector read from the %s basis (%s) — NOT the "
+                       "default %s basis", active_hub_vector.basis,
+                       active_hub_vector.path, DEFAULT_HUB_VECTOR_BASIS)
 
     readout = ComposedReadout(generated=date.today().isoformat(), hub=HUB_MODEL,
                               hub_site=HUB_SITE_OF_RECORD, family=args.family,
