@@ -72,10 +72,18 @@ Modes (one model per invocation; run once per model on the assigned card):
   --cp1-summary          the compact CP-1 table from banked stamps + spot results
                          (run locally after rsyncing states/ back; needs no GPU)
 
-Launch template (node-side, after venv activation, from the deploy root):
-  OMP_NUM_THREADS=1 python -m metabasis.scripts.collect_mean_states --collect \
-    --model 3b --model-path <LOCAL_WEIGHTS_DIR> --arm-root <ARM_ROOT>
-  python -m metabasis.scripts.collect_mean_states --spot-replay 3 --model 3b ...
+⚠ --collect AND --spot-replay IN ONE INVOCATION IS A REFUSAL (desk ruling
+2026-08-03). It used to be accepted and then IGNORED — the dispatch returned
+after collecting, so the gate silently never ran and the job's JOB-OK line
+pointed at a spot report that was never written. The gate is TWO PROCESSES IN
+ONE JOB, because a replay inside the collecting process would certify a model
+object that never left memory.
+
+Launch template (node-side, after venv activation, from the deploy root) — build
+the flags ONCE so the two invocations provably cannot drift apart:
+  ARGS=(--model 3b --model-path <LOCAL_WEIGHTS_DIR> --arm-root <ARM_ROOT>)
+  python -m metabasis.scripts.collect_mean_states --collect "${ARGS[@]}" \
+  && python -m metabasis.scripts.collect_mean_states --spot-replay 3 "${ARGS[@]}"
   # big rung, whole node (CUDA_VISIBLE_DEVICES left unpinned):
   OMP_NUM_THREADS=1 python -m metabasis.scripts.collect_mean_states --collect \
     --model 70b --model-path <LOCAL_WEIGHTS_DIR> --arm-root <ARM_ROOT> \
@@ -92,18 +100,41 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any, Optional, Sequence, Union
 
 import numpy as np
 
 from metabasis.scripts.fit_transport_maps import (
-    ARMS, DEFAULT_ARM_ROOT, MODEL_KEYS, StateBank, load_state_bank,
-    save_state_bank, sites_for)
+    ARMS, DEFAULT_ARM_ROOT, MODEL_KEYS, StateBank, StrataDerivationError,
+    derive_strata, load_state_bank, save_state_bank, sites_for, stratum_counts)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("collect_mean_states")
 
-STRATA = ("S1", "S2", "S3", "S5")  # S5 = Leg-4 uncapped/natural-termination stratum
+# THE STRATUM VOCABULARY IS BASIS-DERIVED (desk ruling 2026-08-03; brief
+# BRIEF-strata-basis-fix-2026-08-03). This module used to carry
+#
+#     STRATA = ("S1", "S2", "S3", "S5")
+#
+# and `pick_spot_ids` keyed a dict off it, so the CP-1 spot-replay gate died with
+# `KeyError: 'wikitext'` the first time it met the webtext-v3 basis (canary,
+# 2026-08-03) — AFTER a full collection pass, with the bank already written.
+# `derive_strata` (defined once, in `fit_transport_maps`, so the collector and
+# the fitter can never disagree about the vocabulary) reads the names off the
+# pinned manifest's per-entry `stratum` field in FIRST-OCCURRENCE order, which
+# makes them a pure function of the manifest bytes — deterministic under the
+# `corpus_manifest_sha256` every stamp already carries.
+#
+# THE GATE'S IDENTITY ON A v2.1 CORPUS DOES NOT MOVE, and that is proven rather
+# than argued (selftest 8): the round-robin skips an empty stratum WITHOUT
+# consuming a pick, so cycling the legacy 4-tuple over a manifest that holds only
+# S1/S2/S3 emits exactly the sequence cycling the derived 3-tuple does. The
+# recorded pre-change selection is asserted byte-exact against the derived path.
+
+#: What this module hardcoded before 2026-08-03 — DOCUMENTATION ONLY, and the
+#: provenance of selftest 8's recorded expectations. Nothing reads it to make a
+#: decision, and nothing may start to.
+LEGACY_V21_STRATA: tuple[str, ...] = ("S1", "S2", "S3", "S5")
 
 # The Llama strftime_now chat-template date pin. Historically imported from the
 # anamnesis stage-0 generator (`vmb_stage0_generate.VMB_CANONICAL_DATE`) — that
@@ -917,6 +948,14 @@ def collect(arm_root: Path, model: str, model_path: str, arms: list[str],
             max_length: int | None = None,
             dequantize_fp8: bool = False) -> None:
     entries, manifest_sha = load_corpus(arm_root)
+    #  THE BASIS NAMES ITS OWN STRATA, and it does so BEFORE the weights load: a
+    #  manifest whose entries cannot be read for a vocabulary is a staging defect,
+    #  and finding that out after a 26-minute collection pass is how the canary
+    #  of 2026-08-03 burned a bank.
+    strata = derive_strata(entries)
+    counts = stratum_counts(entries)
+    logger.info("basis: %d strata %s (manifest %s…), counts %s",
+                len(strata), list(strata), manifest_sha[:12], counts)
     sites = sites_override or sites_for(model)
     states_dir = arm_root / "states"
     logs_dir = arm_root / "logs"
@@ -942,9 +981,6 @@ def collect(arm_root: Path, model: str, model_path: str, arms: list[str],
         bank = StateBank(model=model, arm=arm, text_ids=text_ids,
                          states=means, median_norms=median_norms)
         npz_path, norms_path = save_state_bank(states_dir, bank)
-        counts: dict[str, int] = {}
-        for e in entries:
-            counts[e["stratum"]] = counts.get(e["stratum"], 0) + 1
         stamp = {
             "arm_dir": "A8_conjugation", "leg": arm_root.name, "builder": "collect_mean_states.py",
             "prereg_tag": "prereg-arm8-v1", "model": model, "template_arm": arm,
@@ -962,6 +998,21 @@ def collect(arm_root: Path, model: str, model_path: str, arms: list[str],
             "capture_convention": "forward_pre_hook on decoder_layers[L] "
                                   "(residual ENTERING layer L), completion "
                                   "positions >= P, fp32 mean; batch-1, no cache",
+            # ── THE STRATUM BASIS (desk ruling 2026-08-03) ────────────────────
+            # APPENDED, so every historical key keeps its historical position in
+            # a stamp read as an ordered document (the M41 hostname discipline).
+            # UNCONDITIONAL, for the same reason the hostname is: the vocabulary
+            # a bank was collected under is part of its IDENTITY, not a
+            # deviation, and `counts_per_stratum` above is unreadable without it
+            # on any basis whose names a reader does not already know.
+            "strata_basis": {
+                "rule": "corpus_manifest.json per-entry `stratum`, "
+                        "first-occurrence order (deterministic under the "
+                        "manifest sha recorded above)",
+                "strata": list(strata),
+                "n_strata": len(strata),
+                "counts": counts,
+            },
         }
         # ADDENDUM 2026-07-27-B: the deviation is recorded in EVERY stamp of a
         # truncated node. Absent on every other node, so historical stamps keep
@@ -979,16 +1030,55 @@ def collect(arm_root: Path, model: str, model_path: str, arms: list[str],
 
 
 # ---------------------------------------------------------------- spot replay (T5)
-def pick_spot_ids(entries: list[dict], k: int) -> list[str]:
-    """Deterministic stratified pick: k texts spread across strata by id-hash order."""
-    by_stratum: dict[str, list[str]] = {s: [] for s in STRATA}
+def pick_spot_ids(entries: list[dict], k: int,
+                  strata: Optional[Sequence[str]] = None) -> list[str]:
+    """Deterministic stratified pick: k texts spread across strata by id-hash order.
+
+    THE CP-1 GATE'S SELECTION RULE, unchanged in every respect except where the
+    stratum vocabulary comes from. `strata` defaults to `derive_strata(entries)`
+    — the pinned manifest's own names, in first-occurrence order — so a basis
+    with one stratum, four, or a vocabulary nobody has seen works by
+    construction, and no manifest can make this function raise `KeyError`.
+
+    BYTE-IDENTICAL ON A v2.1 CORPUS, by construction rather than by luck: the
+    round-robin below advances `i` on every turn but pops only from a NON-EMPTY
+    stratum, so a stratum absent from the manifest contributes nothing and costs
+    nothing. Cycling the legacy ("S1","S2","S3","S5") tuple over a manifest that
+    holds S1/S2/S3 therefore emits exactly what cycling the derived ("S1","S2",
+    "S3") tuple emits — the same ids, in the same order, for every k. Selftest 8
+    asserts that against selections RECORDED FROM THE PRE-CHANGE CODE.
+    """
+    order = tuple(strata) if strata is not None else derive_strata(entries)
+    if not order:
+        raise StrataDerivationError(
+            "pick_spot_ids: no strata to spread the CP-1 gate's picks across")
+    if k < 1:
+        raise ValueError(f"pick_spot_ids: k={k} — the gate picks at least one text")
+    if k > len(entries):
+        #  Historically this looped FOREVER (the while-loop has no other exit),
+        #  which on a node is a job that burns its slot and reports nothing.
+        raise ValueError(
+            f"pick_spot_ids: k={k} exceeds the {len(entries)} texts the corpus "
+            f"holds — the gate cannot replay more texts than were banked")
+    by_stratum: dict[str, list[str]] = {s: [] for s in order}
+    unknown: dict[str, int] = {}
     for e in entries:
-        by_stratum[e["stratum"]].append(e["text_id"])
-    for s in STRATA:
+        bucket = by_stratum.get(str(e["stratum"]))
+        if bucket is None:                      # only reachable via an explicit `strata`
+            unknown[str(e["stratum"])] = unknown.get(str(e["stratum"]), 0) + 1
+            continue
+        bucket.append(e["text_id"])
+    if unknown:
+        raise StrataDerivationError(
+            f"pick_spot_ids: {sum(unknown.values())} manifest entries carry "
+            f"stratum(s) {sorted(unknown)} that the requested vocabulary "
+            f"{list(order)} does not name. Those texts could never be picked, so "
+            f"the gate would silently under-cover the corpus")
+    for s in order:
         by_stratum[s].sort(key=lambda t: hashlib.sha256(t.encode()).hexdigest())
     picked, i = [], 0
     while len(picked) < k:
-        s = STRATA[i % len(STRATA)]
+        s = order[i % len(order)]
         if by_stratum[s]:
             picked.append(by_stratum[s].pop(0))
         i += 1
@@ -1000,7 +1090,11 @@ def spot_replay(arm_root: Path, model: str, model_path: str, arms: list[str],
                 shard: Optional[ShardSpec] = None,
                 max_length: int | None = None,
                 dequantize_fp8: bool = False) -> int:
-    entries, _ = load_corpus(arm_root)
+    entries, manifest_sha = load_corpus(arm_root)
+    strata = derive_strata(entries)
+    counts = stratum_counts(entries)
+    logger.info("basis: %d strata %s (manifest %s…), counts %s",
+                len(strata), list(strata), manifest_sha[:12], counts)
     by_id = {e["text_id"]: e for e in entries}
     sites = sites_override or sites_for(model)
     states_dir = arm_root / "states"
@@ -1011,9 +1105,23 @@ def spot_replay(arm_root: Path, model: str, model_path: str, arms: list[str],
         model_obj, tok, device, sharding = load_model_and_tok_sharded(
             model_path, shard, sites, dequantize_fp8)
     fp8 = assert_dequantized(model_obj, model_path) if dequantize_fp8 else None
-    spot_ids = pick_spot_ids(entries, k)
+    spot_ids = pick_spot_ids(entries, k, strata)
     ok_all = True
     report: dict = {"model": model, "k": k, "spot_ids": spot_ids,
+                    # The vocabulary the picks were spread across, recorded WITH
+                    # the picks: which texts this gate replayed is the gate's
+                    # identity, and that identity is a function of the basis.
+                    "strata_basis": {
+                        "rule": "corpus_manifest.json per-entry `stratum`, "
+                                "first-occurrence order",
+                        "corpus_manifest_sha256": manifest_sha,
+                        "strata": list(strata),
+                        "n_strata": len(strata),
+                        "counts": counts,
+                        "picked_per_stratum": {
+                            s: sum(1 for t in spot_ids
+                                   if by_id[t]["stratum"] == s) for s in strata},
+                    },
                     "trunk": trunk_stamp(model_path, tok, device, sharding, fp8),
                     "results": {}}
     if max_length is not None:                 # ADDENDUM 2026-07-27-B, per-use record
@@ -1091,6 +1199,82 @@ def cp1_summary(arm_root: Path, models: list[str]) -> int:
 
 
 # ---------------------------------------------------------------- selftest (CPU)
+#  THE GATE-IDENTITY FIXTURES. Shapes, not data: `pick_spot_ids` reads exactly
+#  two fields, so these carry exactly two fields. They are built the same way the
+#  real manifests are — one stratum block after another, in the order the corpus
+#  builders emit them (`build_uncapped_corpus` appends S5 to a byte-identical
+#  v2.1 body) — because FIRST-OCCURRENCE ORDER is what the derivation reads.
+def _v21_fixture_entries() -> list[dict]:
+    """A v2.1-shaped manifest: S1 (model-authored) · S2 (carrier) · S3 (scaffolded)."""
+    e: list[dict] = []
+    for voice in ("3b", "8b"):
+        for t in range(20):
+            for r in (0, 1):
+                e.append({"text_id": f"S1-{voice}-t{t:02d}-s0-r{r}", "stratum": "S1"})
+    for r in range(40):
+        e.append({"text_id": f"S2-wikitext-{r:03d}", "stratum": "S2"})
+    for voice in ("3b", "8b"):
+        for mode in ("linear", "socratic", "contrastive"):
+            for t in range(5):
+                e.append({"text_id": f"S3-{voice}-{mode}-t{t:02d}", "stratum": "S3"})
+    return e
+
+
+def _v21_s5_fixture_entries() -> list[dict]:
+    """The Leg-4 augmentation: the v2.1 rows byte-identical, S5 appended."""
+    e = _v21_fixture_entries()
+    for voice in ("3b", "8b"):
+        for g in range(20):
+            e.append({"text_id": f"S5-{voice}-g{g:03d}", "stratum": "S5"})
+    return e
+
+
+def _webtext_v3_fixture_entries() -> list[dict]:
+    """A webtext-v3-shaped manifest: the four strata frozen prereg §3.4 names."""
+    return [{"text_id": f"{s}-{i:04d}", "stratum": s}
+            for s in ("wikitext", "c4", "pg19", "stackexchange")
+            for i in range(30)]
+
+
+#  RECORDED FROM THE PRE-CHANGE CODE (2026-08-03, before a line of this file
+#  moved), by running the then-current `pick_spot_ids` — module constant
+#  ("S1","S2","S3","S5") — on the fixtures above. Raw log:
+#  /tmp/claude-output/strata-fix-BEFORE-pick-spot-ids.log.
+#
+#  These are the CP-1 gate's IDENTITY on a v2.1-shaped corpus: which texts it
+#  replays. The gate is a certified instrument, so that identity must provably
+#  not move. `pick_spot_ids` is incremental (each turn appends one id and never
+#  reorders), so pick(k) is a PREFIX of pick(k') for k < k' — one recorded
+#  20-long selection therefore pins every K the gate is ever run at.
+LEGACY_PICK_V21_K20: tuple[str, ...] = (
+    "S1-3b-t19-s0-r0", "S2-wikitext-023", "S3-8b-contrastive-t00",
+    "S1-8b-t16-s0-r1", "S2-wikitext-001", "S3-3b-socratic-t00",
+    "S1-3b-t18-s0-r1", "S2-wikitext-027", "S3-8b-linear-t02",
+    "S1-3b-t12-s0-r0", "S2-wikitext-036", "S3-8b-socratic-t02",
+    "S1-3b-t12-s0-r1", "S2-wikitext-014", "S3-3b-contrastive-t03",
+    "S1-3b-t14-s0-r1", "S2-wikitext-004", "S3-3b-contrastive-t00",
+    "S1-8b-t18-s0-r1", "S2-wikitext-013")
+LEGACY_PICK_V21_S5_K20: tuple[str, ...] = (
+    "S1-3b-t19-s0-r0", "S2-wikitext-023", "S3-8b-contrastive-t00", "S5-8b-g018",
+    "S1-8b-t16-s0-r1", "S2-wikitext-001", "S3-3b-socratic-t00", "S5-3b-g009",
+    "S1-3b-t18-s0-r1", "S2-wikitext-027", "S3-8b-linear-t02", "S5-8b-g001",
+    "S1-3b-t12-s0-r0", "S2-wikitext-036", "S3-8b-socratic-t02", "S5-3b-g017",
+    "S1-3b-t12-s0-r1", "S2-wikitext-014", "S3-3b-contrastive-t03", "S5-3b-g018")
+#: The same record against the REAL v2.1 fitting manifest of record (775 texts) —
+#: the corpus every certified v2.1 bank was collected on, not a fixture. Guarded
+#: by a NAMED SKIP (rake M44) because it is a repo data artifact and a deployed
+#: code tree has none.
+LEGACY_PICK_REAL_V21_K20: tuple[str, ...] = (
+    "S1-dsv2-lite-t02-s3-r1", "S2-wt-094", "S3-dsv2-lite-analogical-t03-r1",
+    "S1-dsv2-lite-t05-s1-r1", "S2-wt-093", "S3-8b-dialectical-t08-r1",
+    "S1-dsv2-lite-t06-s0-r1", "S2-wt-101", "S3-dsv2-lite-analogical-t05-r1",
+    "S1-8b-t16-s0-r1", "S2-wt-055", "S3-8b-socratic-t05-r0",
+    "S1-dsv2-lite-t03-s0-r0", "S2-wt-097", "S3-dsv2-lite-socratic-t17-r0",
+    "S1-dsv2-lite-t16-s0-r1", "S2-wt-089", "S3-8b-dialectical-t17-r0",
+    "S1-dsv2-lite-t06-s1-r0", "S2-wt-005")
+REAL_V21_MANIFEST = Path("corpus/fitting-v21/corpus_manifest.meta.json")
+
+
 def selftest() -> int:
     """CPU-only gates on the OPT-IN dtype regime and its wiring.
 
@@ -1177,6 +1361,15 @@ def selftest() -> int:
         fp8_why = (f"{_fp8_environment()}; FineGrainedFP8Config raised "
                    f"{type(exc).__name__}: {exc}")
         print(f"[config] fp8 dequantize: ABSENT — {fp8_why}")
+
+    #  AXIS 3 — the DATA TREE (rake M44(a): the count names its configuration,
+    #  and M44(c): a fixture that resolves a real artifact relative to cwd is
+    #  itself a defect). The gate-identity blocks below are proved on SYNTHETIC
+    #  fixtures that need no tree at all; the REAL v2.1 fitting manifest is an
+    #  additional, cwd-dependent pass that degrades to a named skip.
+    print(f"[config] cwd={Path.cwd()}  v2.1 fitting manifest "
+          f"{'PRESENT' if REAL_V21_MANIFEST.exists() else 'ABSENT'} at "
+          f"{REAL_V21_MANIFEST}")
 
     print("== selftest 1: the historical loader call is untouched when opted out ==")
     check("_fp8_kwargs(False) contributes NO kwargs", _fp8_kwargs(False) == {},
@@ -1381,14 +1574,159 @@ def selftest() -> int:
         globals()["collect"], globals()["spot_replay"] = real_collect, real_spot
         sys.argv = real_argv
 
+    print("== selftest 8: THE CP-1 GATE'S IDENTITY ON A v2.1 CORPUS DOES NOT MOVE ==")
+    #  The whole admissibility of this change rests here. `pick_spot_ids` decides
+    #  WHICH texts the certified gate replays; the v3 rebank window is the only
+    #  reason a certified-gate config may be touched at all, and it is only
+    #  admissible if the v2.1 behaviour is provably unchanged. So: recorded from
+    #  the pre-change code, asserted byte-exact against the derived path.
+    v21 = _v21_fixture_entries()
+    v21_s5 = _v21_s5_fixture_entries()
+    check("this file names no stratum outside the legacy documentation constant",
+          LEGACY_V21_STRATA == ("S1", "S2", "S3", "S5"),
+          "the constant is kept as PROVENANCE for the recordings below and is "
+          "read by nothing that makes a decision")
+    check("a v2.1 manifest derives S1,S2,S3 — the legacy tuple minus its "
+          "never-present S5", derive_strata(v21) == ("S1", "S2", "S3"),
+          str(derive_strata(v21)))
+    check("the S5-augmented manifest derives the legacy tuple EXACTLY",
+          derive_strata(v21_s5) == LEGACY_V21_STRATA, str(derive_strata(v21_s5)))
+    for name, entries, recorded in (
+            ("v2.1-shaped fixture", v21, LEGACY_PICK_V21_K20),
+            ("S5-augmented fixture", v21_s5, LEGACY_PICK_V21_S5_K20)):
+        derived = pick_spot_ids(entries, len(recorded))
+        check(f"{name}: the derived path reproduces the RECORDED pre-change "
+              f"selection byte-exact at K={len(recorded)}",
+              tuple(derived) == recorded,
+              f"first three {derived[:3]}" if tuple(derived) == recorded
+              else f"got {derived!r} vs recorded {list(recorded)!r}")
+        prefix_ok = all(tuple(pick_spot_ids(entries, k)) == recorded[:k]
+                        for k in range(3, len(recorded) + 1))
+        check(f"{name}: and at EVERY K from 3 to {len(recorded)} — the pick is "
+              f"incremental, so one recorded selection pins every K the gate "
+              f"runs at", prefix_ok)
+    if REAL_V21_MANIFEST.exists():
+        real_entries = json.loads(REAL_V21_MANIFEST.read_text())["entries"]
+        check("the REAL v2.1 fitting manifest of record derives S1,S2,S3",
+              derive_strata(real_entries) == ("S1", "S2", "S3"),
+              f"{len(real_entries)} entries, counts {stratum_counts(real_entries)}")
+        got = pick_spot_ids(real_entries, len(LEGACY_PICK_REAL_V21_K20))
+        check("and its gate selection is byte-exact against the recording — the "
+              "corpus every certified v2.1 bank was collected on",
+              tuple(got) == LEGACY_PICK_REAL_V21_K20,
+              f"K=3 picks {got[:3]}" if tuple(got) == LEGACY_PICK_REAL_V21_K20
+              else f"got {got!r}")
+    else:
+        skip("the gate-identity proof against the REAL v2.1 fitting manifest",
+             f"{REAL_V21_MANIFEST} is absent from this tree (a repo data "
+             f"artifact; a deployed code tree carries none). The two "
+             f"v2.1-shaped fixtures above prove the same claim on synthetic "
+             f"manifests of the same shape")
+
+    print("== selftest 8b: the vocabulary is the BASIS's — v3, single, unknown ==")
+    v3 = _webtext_v3_fixture_entries()
+    check("a webtext-v3 manifest derives its four strata in manifest order",
+          derive_strata(v3) == ("wikitext", "c4", "pg19", "stackexchange"),
+          str(derive_strata(v3)))
+    picks3 = pick_spot_ids(v3, 8)
+    check("and pick_spot_ids RUNS on it — this is the canary's KeyError, closed",
+          [e["stratum"] for e in v3 if e["text_id"] in picks3] and len(picks3) == 8,
+          f"{picks3[:4]}… (the old code raised KeyError: 'wikitext' here, after "
+          f"a full collection pass, with the bank already written)")
+    check("the picks round-robin the four strata, two apiece at K=8",
+          sorted({s: sum(1 for t in picks3
+                         if t.startswith(s + "-")) for s in derive_strata(v3)
+                  }.values()) == [2, 2, 2, 2],
+          str({s: sum(1 for t in picks3 if t.startswith(s + "-"))
+               for s in derive_strata(v3)}))
+    check("it is DETERMINISTIC (same manifest, same picks, no seed anywhere)",
+          pick_spot_ids(v3, 8) == picks3)
+    single = [{"text_id": f"only-{i:03d}", "stratum": "only"} for i in range(10)]
+    check("a SINGLE-stratum manifest works by construction",
+          len(pick_spot_ids(single, 3)) == 3
+          and derive_strata(single) == ("only",),
+          str(pick_spot_ids(single, 3)))
+    exotic = [{"text_id": f"{s}-{i}", "stratum": s}
+              for s in ("zeta", "alpha") for i in range(4)]
+    check("so does a vocabulary NOTHING in this campaign has seen, in "
+          "first-occurrence (never sorted) order",
+          derive_strata(exotic) == ("zeta", "alpha")
+          and len(pick_spot_ids(exotic, 5)) == 5,
+          f"{derive_strata(exotic)} -> {pick_spot_ids(exotic, 5)}")
+    for entries_, k_, why in (
+            (v21, len(v21) + 1,
+             "K larger than the corpus is refused (it used to loop FOREVER, "
+             "burning a scheduler slot and reporting nothing)"),
+            (v21, 0, "K < 1 is refused")):
+        try:
+            pick_spot_ids(entries_, k_)
+            check(why, False, "no raise")
+        except (ValueError, StrataDerivationError) as exc:
+            check(why, True, str(exc)[:70])
+    try:
+        pick_spot_ids(v21, 3, strata=("S1", "S2"))
+        check("an explicit vocabulary that MISSES a stratum is refused", False,
+              "no raise")
+    except StrataDerivationError as exc:
+        check("an explicit vocabulary that MISSES a stratum is refused — its "
+              "texts could never be picked and the gate would silently "
+              "under-cover the corpus", True, str(exc)[:70])
+
+    print("== selftest 9: --collect --spot-replay in ONE invocation is REFUSED ==")
+    #  RAKE M45: SystemExit is not Exception. It is caught HERE, recorded as this
+    #  block's result, and the suite continues to its TOTAL line.
+    real_argv2 = sys.argv
+    try:
+        sys.argv = ["collect_mean_states", "--model", "8b", "--model-path", ".",
+                    "--arm-root", "/nonexistent-selftest", "--sites", "1",
+                    "--collect", "--spot-replay", "3"]
+        try:
+            rc = main()
+            check("both flags together raise SystemExit", False,
+                  f"main() returned {rc!r} — the silent-skip class is back")
+        except SystemExit as exc:
+            message = str(exc.code if isinstance(exc.code, str) else exc)
+            check("both flags together are REFUSED at the CLI", True,
+                  message.splitlines()[0])
+            check("and the refusal NAMES the two-invocation chain",
+                  "--collect" in message and "--spot-replay" in message
+                  and "&&" in message,
+                  "a refusal that does not say what to run instead is a "
+                  "riddle; this one prints the chain")
+            check("and says WHY one process cannot certify the gate",
+                  "never left memory" in message or "TWO PROCESSES" in message,
+                  "the claim is that a SEPARATE process reproduces the bank")
+        #  The refusal must not have cost either mode its own path.
+        sys.argv = ["collect_mean_states", "--model", "8b", "--model-path", ".",
+                    "--arm-root", "/nonexistent-selftest", "--sites", "1",
+                    "--collect"]
+        seen.clear()
+        globals()["collect"] = lambda *a, **kw: seen.update(ran="collect")
+        globals()["spot_replay"] = lambda *a, **kw: (seen.update(ran="spot"), 0)[1]
+        main()
+        check("--collect ALONE still dispatches to collect", seen.get("ran") == "collect")
+        sys.argv = ["collect_mean_states", "--model", "8b", "--model-path", ".",
+                    "--arm-root", "/nonexistent-selftest", "--sites", "1",
+                    "--spot-replay", "3"]
+        main()
+        check("--spot-replay ALONE still dispatches to the gate",
+              seen.get("ran") == "spot")
+    finally:
+        globals()["collect"], globals()["spot_replay"] = real_collect, real_spot
+        sys.argv = real_argv2
+
     print(f"\nselftest: {len(fails)} failures")
     for f in fails:
-        print(f"  FAILED: {f}")
+        print(f"  FAILING CHECK: {f}")
     # RAKE M44: coverage is part of the verdict, per configuration. A bare pass count
     # cannot be read without knowing which cell of the matrix produced it.
     print(f"selftest checks run: {len(checks)} ({len(skips)} named skip(s))")
     for name in skips:
         print(f"  SKIPPED {name}")
+    # RAKE M45 rule (b): a sweep log without its terminal TOTAL line is a FAILING
+    # sweep, never a quiet pass. This line is that terminus for this module.
+    print(f"TOTAL collect_mean_states: {len(checks)} check(s), {len(fails)} "
+          f"failure(s), {len(skips)} skip(s)")
     return 1 if fails else 0
 
 
@@ -1461,6 +1799,34 @@ def main() -> int:
     args = ap.parse_args()
     if args.selftest:
         return selftest()
+    #  THE SILENT-SKIP CLASS DIES AT THE CLI (desk ruling 2026-08-03).
+    #  `--collect --spot-replay K` in ONE invocation used to be accepted and then
+    #  IGNORED: the dispatch below returns after `--collect`, so the replay never
+    #  ran, no spot report was written, and the job's own JOB-OK line pointed at
+    #  an artifact that did not exist. Runtime-proven on the node, 2026-08-03.
+    #
+    #  A REFUSAL, not a silent re-order into the right thing: the gate's whole
+    #  claim is that a SEPARATE PROCESS reproduces the bank bit for bit, and one
+    #  process that collects and then replays in-memory would certify a model
+    #  object that never left memory. Two processes in one job is the only shape
+    #  that certifies what the gate says it certifies, and only the caller can
+    #  arrange that — so the caller is told, in the words of the chain.
+    if args.collect and args.spot_replay is not None:
+        raise SystemExit(
+            "--collect and --spot-replay in ONE invocation is REFUSED. This "
+            "process would collect and then EXIT, silently skipping the gate "
+            "(no spot report is written, and a job that prints JOB-OK on the "
+            "exit code alone points at an artifact that does not exist).\n"
+            "The CP-1 gate is TWO PROCESSES IN ONE JOB — a genuinely fresh "
+            "replay of the bank the first process wrote. Run the chain:\n"
+            "  python -m metabasis.scripts.collect_mean_states --collect "
+            "<ARGS> \\\n"
+            "  && python -m metabasis.scripts.collect_mean_states "
+            f"--spot-replay {args.spot_replay} <ARGS>\n"
+            "with <ARGS> built ONCE (a shell array) so the two invocations "
+            "cannot drift apart — identical --sites/--arms/--max-seq-len/"
+            "--shard-across, or the replay compares different objects and the "
+            "bitwise gate fails for the wrong reason.")
     arms = [a.strip() for a in args.arms.split(",") if a.strip()]
     bad = [a for a in arms if a not in ARMS]
     if bad:

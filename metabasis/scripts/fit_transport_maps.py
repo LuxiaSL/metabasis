@@ -10,7 +10,16 @@ Gates per fit (frozen rule, prereg §1 FIT VALIDITY):
   held-out state-prediction R^2 separates from BOTH the shuffled-pair null AND the
   stratum-preserving shuffle null (re-pair with a different text from the same
   (stratum, voice, mode) group — the sharp null); per-stratum R^2 carries in >=2 of
-  {S1,S2,S3}. Plus: CKA before/after, and the two-arm g-agreement robustness read.
+  THE STRATA THE PINNED CORPUS MANIFEST NAMES. Plus: CKA before/after, and the
+  two-arm g-agreement robustness read.
+
+THE STRATUM VOCABULARY IS BASIS-DERIVED (desk ruling 2026-08-03). No stratum name
+appears in this module: `derive_strata` reads them off the manifest's per-entry
+`stratum` field in first-occurrence order, so the set is a pure function of the
+manifest bytes (deterministic under the `corpus_manifest_sha256` in every stamp).
+On webtext-v3 that is the four strata frozen prereg §3.4 names; on v2.1 manifests
+it is S1/S2/S3 (+S5 on the Leg-4 augmented corpus) — identical to the tuple this
+module used to hardcode, which is why no banked v2.1 readout moves.
 
 STATE-BANK CONTRACT (T4 `collect_mean_states.py` imports save_state_bank from here —
 single source of truth):
@@ -37,10 +46,10 @@ import hashlib
 import json
 import logging
 import sys
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 import numpy as np
 from pydantic import BaseModel
@@ -571,8 +580,119 @@ def require_site(model: str, site: int,
 
 
 ARMS = ("native", "raw")
-STRATA = ("S1", "S2", "S3")
 DEFAULT_ARM_ROOT = Path("outputs/battery/arms/A8_conjugation")
+
+
+# ------------------------------------------------------- the basis's own strata
+# THE STRATUM VOCABULARY IS DERIVED FROM THE PINNED CORPUS MANIFEST, NEVER TYPED
+# (desk ruling 2026-08-03, ledger block of record; brief
+# BRIEF-strata-basis-fix-2026-08-03).
+#
+# WHAT WENT WRONG. Both this module and the collector carried a module-level
+# `STRATA` tuple in v2.1 vocabulary — ("S1","S2","S3") here, ("S1","S2","S3","S5")
+# in the collector. The collector's tuple made the CP-1 spot-replay gate die with
+# `KeyError: 'wikitext'` on the webtext-v3 basis (canary, 2026-08-03); this
+# module's tuple was the same landmine one step further downstream and WOULD NOT
+# HAVE CRASHED — it would have silently produced an EMPTY per-stratum readout on
+# a v3 corpus, so `strata_carried` could never reach the frozen prereg §3.4 bar
+# ("per-stratum R² carries in ≥2 of the four strata {wikitext, c4, pg19,
+# stackexchange}") and EVERY v3 fit would have been marked invalid for a reason
+# that is not about the data. A wrong answer that looks like a verdict.
+#
+# THE RULE. The basis is a PARAMETER of the campaign; its stratum names are a
+# property OF THE MANIFEST and are read from it. Order is FIRST OCCURRENCE in the
+# manifest's entry list, which makes the derived tuple a pure function of the
+# manifest BYTES — i.e. deterministic under the `corpus_manifest_sha256` every
+# stamp already carries. No name appears in this module, so a manifest with one
+# stratum, four, or a vocabulary nobody has seen works by construction.
+#
+# BACKWARD COMPATIBILITY IS PROVEN, NOT ASSUMED. On the v2.1 fitting manifest the
+# derived order is exactly ("S1","S2","S3"); on the Leg-4 S5-augmented manifest
+# (v2.1 rows byte-identical, S5 appended) it is exactly ("S1","S2","S3","S5").
+# See the collector's `pick_spot_ids` selftest for the byte-exact gate-identity
+# proof — that gate is a certified instrument and its selection on a v2.1-shaped
+# corpus provably does not move.
+
+#: The frozen §3.4 carry bar, as a number rather than as prose in four places.
+#: "per-stratum R² carries in ≥2 of the four strata" — the ≥2 is the rule; "the
+#: four" is a property of the webtext-v3 basis, which is why the denominator is
+#: derived and only the threshold lives here.
+MIN_STRATA_CARRIED = 2
+
+#: What this module hardcoded before 2026-08-03. DOCUMENTATION ONLY — nothing
+#: reads it to make a decision, and nothing may start to. It is kept so a reader
+#: of a pre-fix artifact can see which vocabulary produced it, and so the
+#: backward-compatibility claim names the thing it is compatible WITH.
+LEGACY_V21_STRATA: tuple[str, ...] = ("S1", "S2", "S3")
+
+
+class StrataDerivationError(RuntimeError):
+    """A corpus manifest cannot name its own strata — never a silent fallback.
+
+    Raised when the manifest is empty, or an entry carries no usable `stratum`.
+    Both are staging defects, and both would otherwise degrade into a per-stratum
+    readout that is quietly missing rows — the failure mode the derivation
+    exists to end.
+    """
+
+
+def derive_strata(entries: Sequence[Mapping[str, Any]]) -> tuple[str, ...]:
+    """The basis's stratum vocabulary, in FIRST-OCCURRENCE order.
+
+    Deterministic under the manifest sha: the manifest bytes fix the entry order,
+    the entry order fixes this tuple, and every stamp already records the sha.
+    """
+    if not entries:
+        raise StrataDerivationError(
+            "cannot derive strata from an EMPTY corpus manifest — the stratum "
+            "vocabulary is a property of the basis, so a basis with no entries "
+            "has none to read")
+    seen: dict[str, None] = {}
+    for i, entry in enumerate(entries):
+        value = entry.get("stratum")
+        if not isinstance(value, str) or not value.strip():
+            text_id = entry.get("text_id", f"<entry {i}>")
+            raise StrataDerivationError(
+                f"{text_id}: manifest entry carries stratum={value!r}. Every "
+                f"entry must name its stratum as a non-empty string — the "
+                f"per-stratum readout, the stratum-preserving null and the "
+                f"spot-replay pick are all keyed off it, and an entry that "
+                f"names none would silently leave all three")
+        seen.setdefault(value, None)
+    return tuple(seen)
+
+
+def stratum_counts(entries: Sequence[Mapping[str, Any]]) -> dict[str, int]:
+    """Census per stratum, keyed in the SAME first-occurrence order as
+    `derive_strata` (dicts preserve insertion order), so a stamp's counts and its
+    derived vocabulary can never disagree about either membership or order."""
+    counts = {s: 0 for s in derive_strata(entries)}
+    for entry in entries:
+        counts[str(entry["stratum"])] += 1
+    return counts
+
+
+def manifest_entries(manifest_path: Path) -> list[dict]:
+    """The manifest's entry list, IN ORDER — the one reader of the file's shape.
+
+    Order is load-bearing here (it is what makes `derive_strata` deterministic),
+    so this returns the list and never a dict keyed by text_id.
+    """
+    try:
+        with open(manifest_path) as f:
+            payload = json.load(f)
+    except OSError as exc:
+        raise StrataDerivationError(
+            f"corpus manifest {manifest_path} cannot be read ({exc})") from exc
+    except json.JSONDecodeError as exc:
+        raise StrataDerivationError(
+            f"corpus manifest {manifest_path} is not valid JSON ({exc})") from exc
+    entries = payload.get("entries") if isinstance(payload, dict) else None
+    if not isinstance(entries, list):
+        raise StrataDerivationError(
+            f"corpus manifest {manifest_path} has no `entries` list — this is "
+            f"not a corpus manifest, or its shape has changed")
+    return entries
 
 
 # ---------------------------------------------------------------- data model
@@ -625,16 +745,29 @@ def load_state_bank(states_dir: Path, model: str, arm: str) -> StateBank:
 
 @dataclass
 class Labels:
-    """Corpus-manifest labels aligned to a bank's text_id order."""
-    stratum: np.ndarray                  # ["S1"|"S2"|"S3"]
+    """Corpus-manifest labels aligned to a bank's text_id order.
+
+    `strata` is THE BASIS'S OWN VOCABULARY (`derive_strata` over the whole
+    manifest, first-occurrence order) and travels with the labels so that every
+    per-stratum readout downstream — `per_stratum_r2`, the per-stratum null
+    envelope, `strata_carried` — indexes the same derived set, and none of them
+    has to reach for a module constant that could disagree with the corpus.
+    """
+    stratum: np.ndarray                  # the per-row stratum, as the manifest names it
     group: np.ndarray                    # "(stratum|voice|mode)" null-permutation group
-    topic: np.ndarray                    # int topic_idx, -1 for S2
+    topic: np.ndarray                    # int topic_idx, -1 where the basis has none
     s2_rank: np.ndarray                  # int rank for S2 ids, -1 otherwise
+    strata: tuple[str, ...]              # the DERIVED basis vocabulary, in manifest order
 
 
 def load_labels(manifest_path: Path, text_ids: list[str]) -> Labels:
-    with open(manifest_path) as f:
-        entries = {e["text_id"]: e for e in json.load(f)["entries"]}
+    rows = manifest_entries(manifest_path)
+    #  Derived over the WHOLE manifest, not over `text_ids`: the vocabulary is a
+    #  property of the BASIS, so it must not shift when a bank happens to hold a
+    #  subset of it (and it is what makes the derivation reproducible from the
+    #  manifest sha alone).
+    strata = derive_strata(rows)
+    entries = {e["text_id"]: e for e in rows}
     missing = [t for t in text_ids if t not in entries]
     if missing:
         raise ValueError(f"{len(missing)} text_ids absent from manifest: {missing[:3]}…")
@@ -644,9 +777,19 @@ def load_labels(manifest_path: Path, text_ids: list[str]) -> Labels:
         strat.append(e["stratum"])
         grp.append(f"{e['stratum']}|{e['voice']}|{e['mode']}")
         top.append(e["topic_idx"] if e["topic_idx"] is not None else -1)
+        #  ⚠ NAMED GAP, DELIBERATELY NOT CLOSED HERE (2026-08-03): `s2_rank` and
+        #  `make_split` below still carry v2.1 SPLIT vocabulary — the literal
+        #  "S2" and the topic-grouped holdout rule. That is a different question
+        #  from the stratum VOCABULARY this change derives, and it has its own
+        #  authority: the webtext-v3 splits are derived by
+        #  `derive_webtext_splits.py` into splits.json (frozen prereg §2), which
+        #  `run_grid` does not yet consume. On a v3 manifest topic_idx is None
+        #  and no id is "S2", so `make_split` would hold NOTHING out — a fit run
+        #  would surface as n_test=0 rather than as a wrong number, and wiring
+        #  splits.json in is a separate brief. Recorded so it is not rediscovered.
         s2r.append(int(t.rsplit("-", 1)[1]) if e["stratum"] == "S2" else -1)
     return Labels(stratum=np.array(strat), group=np.array(grp),
-                  topic=np.array(top), s2_rank=np.array(s2r))
+                  topic=np.array(top), s2_rank=np.array(s2r), strata=strata)
 
 
 def make_split(labels: Labels, seed: int = A8_SEED) -> tuple[np.ndarray, np.ndarray, dict]:
@@ -781,9 +924,18 @@ def r2_score(y_true: np.ndarray, y_pred: np.ndarray, y_train_mean: np.ndarray) -
     return 1.0 - sse / sst if sst > 0 else float("nan")
 
 
-def per_stratum_r2(y_true, y_pred, y_train_mean, strata: np.ndarray) -> dict[str, float]:
+def per_stratum_r2(y_true, y_pred, y_train_mean, strata: np.ndarray,
+                   strata_order: Sequence[str]) -> dict[str, float]:
+    """Held-out R² per stratum, keyed over the BASIS-DERIVED vocabulary.
+
+    `strata_order` is `Labels.strata` — the manifest's own first-occurrence
+    order — so the keys of this dict, of the null envelope beside it and of
+    `strata_carried` are the same set in the same order on every basis. A
+    stratum with no row in this test slice is OMITTED (it has no R² to report),
+    exactly as before; what changed is only where the vocabulary comes from.
+    """
     return {s: r2_score(y_true[strata == s], y_pred[strata == s], y_train_mean)
-            for s in STRATA if (strata == s).any()}
+            for s in strata_order if (strata == s).any()}
 
 
 def linear_cka(x: np.ndarray, y: np.ndarray) -> float:
@@ -834,24 +986,34 @@ def evaluate_fit(name: str, predict_fn, refit_predict_fn, x, y, train, test,
     y_pred = predict_fn(x[test])
     r2 = r2_score(y[test], y_pred, y_train_mean)
     strata_test = labels.stratum[test]
-    ps_r2 = per_stratum_r2(y[test], y_pred, y_train_mean, strata_test)
+    #  THE DERIVED SET, everywhere: per-stratum R², the per-stratum null
+    #  envelope and the carry list all range over `labels.strata` (the pinned
+    #  manifest's own vocabulary), so on webtext-v3 the frozen §3.4 denominator
+    #  is the four named strata and on a v2.1 manifest it is S1/S2/S3(+S5).
+    basis = tuple(labels.strata)
+    ps_r2 = per_stratum_r2(y[test], y_pred, y_train_mean, strata_test, basis)
 
     null_overall: dict[str, list[float]] = {"shuffled": [], "stratum": []}
     null_ps: dict[str, dict[str, list[float]]] = {
-        "shuffled": {s: [] for s in STRATA}, "stratum": {s: [] for s in STRATA}}
+        "shuffled": {s: [] for s in basis}, "stratum": {s: [] for s in basis}}
     for kind in ("shuffled", "stratum"):
         for perm in perms[kind]:
             yp = refit_predict_fn(perm, x[test])
             null_overall[kind].append(r2_score(y[test], yp, y_train_mean))
-            for s, v in per_stratum_r2(y[test], yp, y_train_mean, strata_test).items():
+            for s, v in per_stratum_r2(y[test], yp, y_train_mean, strata_test,
+                                       basis).items():
                 null_ps[kind][s].append(v)
     q = lambda vals: float(np.quantile(vals, 0.95)) if vals else float("nan")
     ps_null_q95 = {s: max(q(null_ps["shuffled"][s]), q(null_ps["stratum"][s]))
-                   for s in STRATA}
-    carried = [s for s in STRATA
+                   for s in basis}
+    carried = [s for s in basis
                if s in ps_r2 and np.isfinite(ps_null_q95[s]) and ps_r2[s] > ps_null_q95[s]]
     shuf_q95, strat_q95 = q(null_overall["shuffled"]), q(null_overall["stratum"])
-    valid = (r2 > shuf_q95) and (r2 > strat_q95) and (len(carried) >= 2)
+    #  Frozen prereg §3.4: "per-stratum R² carries in >= 2 of the four strata".
+    #  The BAR is 2 and is frozen; "the four" is the derived basis's size, which
+    #  is 4 on webtext-v3 exactly as frozen and 3-or-4 on v2.1 manifests.
+    valid = ((r2 > shuf_q95) and (r2 > strat_q95)
+             and (len(carried) >= MIN_STRATA_CARRIED))
     pair, arm, family = name.split("::")
     return FitRecord(
         site_pair=pair, arm=arm, family=family,
@@ -992,8 +1154,18 @@ def subset_bank(bank: StateBank, keep: np.ndarray) -> StateBank:
 
 
 def subset_labels(labels: Labels, keep: np.ndarray) -> Labels:
+    """Row-subset the labels. `strata` is CARRIED THROUGH UNCHANGED.
+
+    The derived vocabulary is the BASIS's, not the slice's: with `--fit-strata
+    S1,S2` the readout still ranges over the whole basis, so a stratum the fit
+    excluded reports as absent rather than silently redefining the denominator
+    the §3.4 carry rule is read against. (This is also what keeps the v2.1
+    `--fit-strata` behaviour byte-identical to the pre-derivation code, which
+    ranged over the module constant.)
+    """
     return Labels(stratum=labels.stratum[keep], group=labels.group[keep],
-                  topic=labels.topic[keep], s2_rank=labels.s2_rank[keep])
+                  topic=labels.topic[keep], s2_rank=labels.s2_rank[keep],
+                  strata=labels.strata)
 
 
 def run_grid(arm_root: Path, src_model: str, tgt_model: str,
@@ -1005,6 +1177,26 @@ def run_grid(arm_root: Path, src_model: str, tgt_model: str,
     fits_dir = arm_root / fits_dirname
     fits_dir.mkdir(parents=True, exist_ok=True)
     manifest = arm_root / "corpus" / "corpus_manifest.json"
+
+    #  THE BASIS, READ ONCE AND UP FRONT (desk ruling 2026-08-03). Derived here
+    #  as well as inside `load_labels` so the run's stamp can name the
+    #  vocabulary even if the grid loop never executes, and so a basis that
+    #  cannot satisfy the frozen carry rule is announced BEFORE the fits rather
+    #  than inferred from a summary full of `valid: false`.
+    basis_entries = manifest_entries(manifest)
+    basis_strata = derive_strata(basis_entries)
+    basis_counts = stratum_counts(basis_entries)
+    manifest_sha = hashlib.sha256(manifest.read_bytes()).hexdigest()
+    logger.info("basis: %d strata %s from %s (sha %s…), counts %s",
+                len(basis_strata), list(basis_strata), manifest.name,
+                manifest_sha[:12], basis_counts)
+    if len(basis_strata) < MIN_STRATA_CARRIED:
+        logger.warning(
+            "basis carries %d stratum/strata %s — the frozen prereg §3.4 carry "
+            "rule needs >= %d, so NO fit from this basis can be marked valid. "
+            "The fits are still computed and banked; read them beside this "
+            "line, and do not read `valid: false` as a statement about the maps",
+            len(basis_strata), list(basis_strata), MIN_STRATA_CARRIED)
 
     all_records: list[FitRecord] = []
     agreement: dict[str, dict] = {}
@@ -1052,6 +1244,24 @@ def run_grid(arm_root: Path, src_model: str, tgt_model: str,
         "split": split_info, "n_null_reps": n_null, "k_grid": list(k_grid),
         "fit_strata": fit_strata, "arms": list(arms),
         "null_group_key": "(stratum|voice|mode)",
+        # ── THE STRATUM BASIS (desk ruling 2026-08-03) ───────────────────────
+        # Derived from the pinned manifest, never typed. Recorded here because
+        # `per_stratum_r2` / `per_stratum_null_q95` / `strata_carried` in every
+        # record below are keyed by it, and a reader of those keys must be able
+        # to see WHICH basis named them without opening the corpus.
+        "strata_basis": {
+            "rule": "corpus_manifest.json per-entry `stratum`, first-occurrence "
+                    "order (deterministic under the manifest sha)",
+            "manifest": str(manifest),
+            "manifest_sha256": manifest_sha,
+            "strata": list(basis_strata),
+            "n_strata": len(basis_strata),
+            "counts": basis_counts,
+            "carry_rule": f"per-stratum R2 carries in >= {MIN_STRATA_CARRIED} "
+                          f"of the {len(basis_strata)} derived strata "
+                          f"(frozen prereg webtext-v3 §3.4)",
+            "carry_rule_satisfiable": len(basis_strata) >= MIN_STRATA_CARRIED,
+        },
         "normalization": "per-site median norm at fit time (norms in state banks)",
         "records": [r.model_dump() for r in all_records],
         "two_arm_g_agreement": agreement,
@@ -1117,8 +1327,13 @@ def _synthetic_world(rng, n_latent=12, d_a=64, d_b=96, noise=0.15, paired=True):
          for g, t in zip(grp, top)])
     y = z2 @ b_map + noise * rng.standard_normal((n, d_b))
     v_lat = np.zeros(n_latent); v_lat[3] = 1.0
+    #  The synthetic world's labels are DERIVED from its own rows, exactly as a
+    #  real run derives them from a manifest — so the selftest exercises the
+    #  derivation rather than restating a vocabulary beside it.
     labels = Labels(stratum=np.array(strat), group=np.array(grp),
-                    topic=np.array(top), s2_rank=np.array(s2r))
+                    topic=np.array(top), s2_rank=np.array(s2r),
+                    strata=derive_strata([{"stratum": s, "text_id": f"t{i}"}
+                                          for i, s in enumerate(strat)]))
     banks = (
         StateBank("srcM", "native", [f"t{i}" for i in range(n)], {1: x.astype(np.float32)},
                   {1: float(np.median(np.linalg.norm(x, axis=1)))}),
@@ -1137,15 +1352,95 @@ def _selftest_split(labels, rng):
     return ~test, test
 
 
+def _basis_world(rng, strata_names: Sequence[str], n_per: int = 40,
+                 d_a: int = 48, d_b: int = 56, noise: float = 0.15):
+    """A paired world whose strata are named by the CALLER — any vocabulary.
+
+    Used to prove that the per-stratum machinery is vocabulary-free: the same
+    generator produces a v2.1-shaped basis, the webtext-v3 four-stratum basis and
+    a single-stratum basis, and nothing in this module knows any of their names.
+    Rows are emitted stratum-block by stratum-block, which is the shape both real
+    manifests have, so the derived first-occurrence order is `strata_names`.
+    """
+    n_latent = 10
+    rows = [(s, t) for s in strata_names for t in range(n_per)]
+    n = len(rows)
+    gmeans = {s: rng.standard_normal(n_latent) * 1.2 for s in strata_names}
+    tmeans = rng.standard_normal((20, n_latent)) * 0.8
+    z = np.zeros((n, n_latent))
+    strat, grp, top = [], [], []
+    for i, (s, t) in enumerate(rows):
+        topic = t % 20
+        z[i] = gmeans[s] + tmeans[topic] + rng.standard_normal(n_latent)
+        strat.append(s)
+        grp.append(f"{s}|neutral|neutral")      # the real v3 manifest's group key
+        top.append(topic)
+    a_map = np.linalg.qr(rng.standard_normal((d_a, n_latent)))[0].T
+    b_map = np.linalg.qr(rng.standard_normal((d_b, n_latent)))[0].T
+    x = z @ a_map + noise * rng.standard_normal((n, d_a))
+    y = z @ b_map + noise * rng.standard_normal((n, d_b))
+    entries = [{"text_id": f"{s}-{i:04d}", "stratum": s}
+               for i, (s, _) in enumerate(rows)]
+    labels = Labels(stratum=np.array(strat), group=np.array(grp),
+                    topic=np.array(top), s2_rank=np.full(n, -1),
+                    strata=derive_strata(entries))
+    ids = [e["text_id"] for e in entries]
+    banks = (
+        StateBank("srcM", "native", ids, {1: x.astype(np.float32)},
+                  {1: float(np.median(np.linalg.norm(x, axis=1)))}),
+        StateBank("tgtM", "native", ids, {1: y.astype(np.float32)},
+                  {1: float(np.median(np.linalg.norm(y, axis=1)))}))
+    return banks, labels, entries
+
+
+def _topic_split(labels: Labels, rng) -> tuple[np.ndarray, np.ndarray]:
+    """A topic-grouped train/test split for a basis with NO S2 shard ranks.
+
+    `_selftest_split` reaches for `s2_rank`, which only a v2.1-shaped basis has —
+    a live demonstration of the NAMED GAP recorded in `load_labels`: the SPLIT
+    machinery still carries v2.1 vocabulary and is a separate question from the
+    stratum vocabulary this change derives. The blocks below need a split, not a
+    ruling about splits, so they take this one.
+    """
+    topics = np.array(sorted({int(t) for t in labels.topic if t >= 0}))
+    held = set(rng.choice(topics, size=max(2, len(topics) // 4),
+                          replace=False).tolist())
+    test = np.array([int(t) in held for t in labels.topic])
+    return ~test, test
+
+
 def selftest() -> int:
     rng = np.random.default_rng(0)
     failures: list[str] = []
+    checks: list[str] = []
+    skips: list[str] = []
 
     def check(cond: bool, msg: str):
         status = "PASS" if cond else "FAIL"
+        checks.append(msg)
         print(f"  [{status}] {msg}")
         if not cond:
             failures.append(msg)
+
+    def skip(name: str, why: str) -> None:
+        """RAKE M44: a block this CONFIGURATION cannot run, named and counted.
+
+        A third state beside pass and fail — nothing was asserted and found
+        wanting — so it never contributes to the exit code, and the reason names
+        the triggering condition rather than merely noting an absence.
+        """
+        skips.append(name)
+        checks.append(f"SKIPPED: {name}")
+        print(f"  [SKIP] {name} — {why}")
+
+    #  RAKE M44: the count below is only readable beside the configuration that
+    #  produced it. The axis that matters for THIS suite is the data tree: the
+    #  v2.1 fitting manifest is a repo artifact and is absent from a deployed
+    #  code tree, so the block that reads it is availability-branched.
+    real_v21 = Path("corpus/fitting-v21/corpus_manifest.meta.json")
+    print(f"[config] cwd={Path.cwd()}  numpy={np.__version__}  "
+          f"v2.1 fitting manifest {'PRESENT' if real_v21.exists() else 'ABSENT'} "
+          f"at {real_v21}")
 
     print("== selftest 1: planted paired world (recovery expected) ==")
     (src, tgt), labels, (v_a, v_b) = _synthetic_world(rng, paired=True)
@@ -1204,7 +1499,154 @@ def selftest() -> int:
         check(np.allclose(back.states[1], src.states[1]), "states round-trip (fp32)")
         check(abs(back.median_norms[1] - src.median_norms[1]) < 1e-9, "norms round-trip")
 
+    print("== selftest 5: THE STRATUM VOCABULARY IS DERIVED, NEVER TYPED ==")
+    #  The defect this closes (canary, 2026-08-03): a hardcoded v2.1 tuple here
+    #  would have produced an EMPTY per-stratum readout on the webtext-v3 basis,
+    #  so the frozen §3.4 carry rule could never be met and every v3 fit would
+    #  have been marked invalid for a reason that is not about the data.
+    v21_rows = ([{"text_id": f"S1-{i}", "stratum": "S1"} for i in range(4)]
+                + [{"text_id": f"S2-{i}", "stratum": "S2"} for i in range(3)]
+                + [{"text_id": f"S3-{i}", "stratum": "S3"} for i in range(2)])
+    v21_s5_rows = v21_rows + [{"text_id": f"S5-{i}", "stratum": "S5"}
+                              for i in range(2)]
+    v3_rows = [{"text_id": f"{s}-{i}", "stratum": s}
+               for s in ("wikitext", "c4", "pg19", "stackexchange")
+               for i in range(3)]
+    check(derive_strata(v21_rows) == LEGACY_V21_STRATA,
+          f"a v2.1-shaped manifest derives {LEGACY_V21_STRATA} — exactly the "
+          f"tuple this module used to hardcode (backward compatibility, proven)")
+    check(derive_strata(v21_s5_rows) == ("S1", "S2", "S3", "S5"),
+          "the Leg-4 S5-augmented manifest derives S1,S2,S3,S5 — the appended "
+          "stratum enters the readout instead of being silently dropped, which "
+          "is what the old ('S1','S2','S3') constant did to it")
+    check(derive_strata(v3_rows) == ("wikitext", "c4", "pg19", "stackexchange"),
+          "the webtext-v3 basis derives its four strata IN MANIFEST ORDER — the "
+          "frozen prereg §3.4 denominator, read from the corpus rather than "
+          "restated here")
+    check(derive_strata([{"text_id": "only-0", "stratum": "only"}]) == ("only",),
+          "a SINGLE-stratum basis derives one stratum and works by construction")
+    check(derive_strata([{"text_id": "b", "stratum": "beta"},
+                         {"text_id": "a", "stratum": "alpha"},
+                         {"text_id": "b2", "stratum": "beta"}])
+          == ("beta", "alpha"),
+          "an UNKNOWN vocabulary derives in FIRST-OCCURRENCE order (never "
+          "sorted): the order is a property of the manifest bytes, which is what "
+          "makes it deterministic under the manifest sha")
+    check(list(stratum_counts(v21_s5_rows).items())
+          == [("S1", 4), ("S2", 3), ("S3", 2), ("S5", 2)],
+          "the census is keyed in the SAME derived order, so a stamp's counts "
+          "and its vocabulary cannot disagree about membership or order")
+    for rows, why in (
+            ([], "an EMPTY manifest cannot name a vocabulary"),
+            ([{"text_id": "x"}], "an entry with NO stratum key is refused"),
+            ([{"text_id": "x", "stratum": ""}], "a BLANK stratum is refused"),
+            ([{"text_id": "x", "stratum": None}], "a null stratum is refused")):
+        try:
+            derive_strata(rows)                       # type: ignore[arg-type]
+            check(False, f"{why} — must raise StrataDerivationError")
+        except StrataDerivationError:
+            check(True, f"{why} (StrataDerivationError, never a silent default)")
+
+    print("== selftest 5b: the webtext-v3 basis can SATISFY the §3.4 carry rule ==")
+    (src3, tgt3), labels3, entries3 = _basis_world(
+        np.random.default_rng(5), ("wikitext", "c4", "pg19", "stackexchange"))
+    train3, test3 = _topic_split(labels3, np.random.default_rng(5))
+    recs3, _ = run_pair_arm(src3, tgt3, 1, 1, labels3, train3, test3,
+                            np.random.default_rng(5), k_grid=(8,), n_null=8)
+    r3 = recs3[0]
+    check(tuple(r3.per_stratum_null_q95) == labels3.strata,
+          f"per_stratum_null_q95 is keyed by the DERIVED set in derived order: "
+          f"{list(r3.per_stratum_null_q95)}")
+    check(set(r3.per_stratum_r2) == set(labels3.strata),
+          f"per_stratum_r2 covers all four v3 strata: {sorted(r3.per_stratum_r2)}")
+    check(len(r3.strata_carried) >= MIN_STRATA_CARRIED and r3.valid,
+          f"strata_carried={r3.strata_carried} clears the frozen §3.4 bar "
+          f"(>= {MIN_STRATA_CARRIED} of {len(labels3.strata)}) and the fit is "
+          f"VALID — under the old hardcoded tuple this list was EMPTY and no v3 "
+          f"fit could ever have been used")
+    check(all(g.endswith("|neutral|neutral") for g in labels3.group)
+          and all(g.split("|")[0] in labels3.strata for g in labels3.group),
+          "the stratum-preserving null re-pairs within the DERIVED strata: its "
+          "permutation group key leads with the manifest's own stratum name, so "
+          "the sharp null needs no vocabulary of its own")
+    perm = null_permutations(labels3, train3, np.random.default_rng(1), "stratum")
+    strat_train = labels3.stratum[train3]
+    check(bool((strat_train[perm] == strat_train).all()),
+          "and that is PROVEN on the permutation itself — every re-paired row "
+          "keeps its stratum, on a vocabulary this module has never seen")
+
+    print("== selftest 5c: a single-stratum basis is ANNOUNCED, not silently invalid ==")
+    (src1, tgt1), labels1, _ = _basis_world(np.random.default_rng(6), ("only",))
+    train1, test1 = _topic_split(labels1, np.random.default_rng(6))
+    recs1, _ = run_pair_arm(src1, tgt1, 1, 1, labels1, train1, test1,
+                            np.random.default_rng(6), k_grid=(8,), n_null=4)
+    check(labels1.strata == ("only",) and len(recs1[0].per_stratum_r2) == 1,
+          "the readout has exactly one stratum row, named by the basis")
+    check(not recs1[0].valid,
+          f"and the fit cannot be VALID: §3.4 needs >= {MIN_STRATA_CARRIED} "
+          f"carries and one stratum cannot supply them. `run_grid` logs a "
+          f"WARNING naming this before it fits, so the verdict is never read as "
+          f"a statement about the maps")
+
+    print("== selftest 5d: the derived set survives subsetting (the basis, not the slice) ==")
+    keep = np.isin(labels3.stratum, ("wikitext", "c4"))
+    sub = subset_labels(labels3, keep)
+    check(sub.strata == labels3.strata and len(sub.stratum) == int(keep.sum()),
+          f"--fit-strata subsets the ROWS and keeps the basis vocabulary "
+          f"{list(sub.strata)}: a stratum the fit excluded reports as absent "
+          f"rather than redefining the §3.4 denominator (and this is what keeps "
+          f"the v2.1 --fit-strata behaviour byte-identical to the old constant)")
+
+    print("== selftest 5e: load_labels derives from a real manifest file ==")
+    import tempfile as _tempfile
+    with _tempfile.TemporaryDirectory(prefix="a8_basis_") as td:
+        man = Path(td) / "corpus_manifest.json"
+        rows = [{**e, "voice": "neutral", "mode": "neutral", "topic_idx": None}
+                for e in entries3]
+        man.write_text(json.dumps({"entries": rows}))
+        got = load_labels(man, [rows[0]["text_id"], rows[-1]["text_id"]])
+        check(got.strata == ("wikitext", "c4", "pg19", "stackexchange"),
+              "the vocabulary comes from the WHOLE manifest even when the bank "
+              "holds two rows — the basis is not redefined by what was banked")
+        check(list(got.group) == [f"{rows[0]['stratum']}|neutral|neutral",
+                                  f"{rows[-1]['stratum']}|neutral|neutral"],
+              "and the null group key is built from the manifest's own fields")
+        bad = Path(td) / "not_a_manifest.json"
+        bad.write_text(json.dumps({"rows": []}))
+        for path, why in ((bad, "a file with no `entries` list"),
+                          (Path(td) / "absent.json", "an ABSENT manifest")):
+            try:
+                manifest_entries(path)
+                check(False, f"{why} must raise StrataDerivationError")
+            except StrataDerivationError:
+                check(True, f"{why} raises StrataDerivationError, naming the path")
+
+    print("== selftest 5f: the v2.1 fitting manifest of record derives S1,S2,S3 ==")
+    if real_v21.exists():
+        rows21 = manifest_entries(real_v21)
+        derived21 = derive_strata(rows21)
+        check(derived21 == LEGACY_V21_STRATA,
+              f"{real_v21} ({len(rows21)} entries) derives {list(derived21)} — "
+              f"identical to the constant this module carried, so no banked v2.1 "
+              f"fit's per-stratum readout moves")
+        check(list(stratum_counts(rows21).values()) == [320, 160, 295],
+              f"census {stratum_counts(rows21)}")
+    else:
+        skip("the REAL v2.1 fitting manifest derives the legacy vocabulary",
+             f"{real_v21} is absent from this tree (a repo data artifact; a "
+             f"deployed code tree has none). The synthetic v2.1-shaped fixture "
+             f"in selftest 5 covers the same claim shape")
+
     print(f"\nselftest: {len(failures)} failure(s)")
+    #  RAKE M44: coverage is part of the verdict, and per configuration — a bare
+    #  pass count cannot be read without knowing which cell produced it.
+    print(f"selftest checks run: {len(checks)} ({len(skips)} named skip(s))")
+    for name in skips:
+        print(f"  SKIPPED {name}")
+    for name in failures:
+        print(f"  FAILING CHECK: {name}")
+    print(f"TOTAL fit_transport_maps: {len(checks)} check(s), "
+          f"{len(failures)} failure(s), {len(skips)} skip(s)")
     return 1 if failures else 0
 
 
