@@ -35,9 +35,27 @@ Artifacts (under --arm-root/fits/):
   fit_{src}L{s}__{tgt}L{t}_{arm}_proc_k{k}.npz / _ridge.npz + .json sidecars
   cp2_summary.json                         the CP-2 table, one record per fit
 
+THE SPLIT IS BASIS-DEPENDENT AND HAS THREE LANES (brief BRIEF-v3-splits-wiring
+-2026-08-03). The webtext-v3 membership is NOT derived at fit time: it is FROZEN
+by `derive_webtext_splits.py` per prereg §2 / §6-I1 and CONSUMED here.
+  --splits-artifact …/splits.json   the frozen v3 main split (280/1200)
+  --half a|b + --halves-artifact …/halves.json
+                                    one frozen §6-I1 half, fitted on that half's
+                                    OWN internal train/test split
+  (neither)                         the LEGACY in-code v2.1 topic-grouped
+                                    derivation — byte-exact, and the ONLY lane
+                                    that derives anything
+A webtext-v3 manifest with no artifact REFUSES (never an empty test set, never a
+re-derivation); an artifact that does not belong to the loaded corpus REFUSES.
+
 Run (from pipeline/):
   python -m metabasis.scripts.fit_transport_maps --selftest          # synthetic validation
   python -m metabasis.scripts.fit_transport_maps                      # real grid (post CP-1)
+  python -m metabasis.scripts.fit_transport_maps \\
+      --splits-artifact staging/webtext-v3-draft/splits.json          # the v3 grid
+  python -m metabasis.scripts.fit_transport_maps --half a \\
+      --halves-artifact staging/webtext-v3-draft/halves.json \\
+      --fits-dirname fits_half_a                                      # the I1 half
 """
 from __future__ import annotations
 
@@ -52,7 +70,7 @@ from pathlib import Path
 from typing import Any, Literal, Optional
 
 import numpy as np
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
 
 from metabasis.roster import SCAN_GRIDS, fiat_grid_problems
 from metabasis.threads import THREAD_STAMP_KEY, thread_config_stamp
@@ -777,23 +795,93 @@ def load_labels(manifest_path: Path, text_ids: list[str]) -> Labels:
         strat.append(e["stratum"])
         grp.append(f"{e['stratum']}|{e['voice']}|{e['mode']}")
         top.append(e["topic_idx"] if e["topic_idx"] is not None else -1)
-        #  ⚠ NAMED GAP, DELIBERATELY NOT CLOSED HERE (2026-08-03): `s2_rank` and
-        #  `make_split` below still carry v2.1 SPLIT vocabulary — the literal
-        #  "S2" and the topic-grouped holdout rule. That is a different question
-        #  from the stratum VOCABULARY this change derives, and it has its own
-        #  authority: the webtext-v3 splits are derived by
-        #  `derive_webtext_splits.py` into splits.json (frozen prereg §2), which
-        #  `run_grid` does not yet consume. On a v3 manifest topic_idx is None
-        #  and no id is "S2", so `make_split` would hold NOTHING out — a fit run
-        #  would surface as n_test=0 rather than as a wrong number, and wiring
-        #  splits.json in is a separate brief. Recorded so it is not rediscovered.
+        #  `s2_rank` and `make_split` below carry v2.1 SPLIT vocabulary — the
+        #  literal "S2" and the topic-grouped holdout rule. THAT IS DELIBERATE
+        #  AND IT IS NOW BOUNDED (2026-08-03, brief BRIEF-v3-splits-wiring): the
+        #  legacy derivation is the v2.1 lane and ONLY the v2.1 lane. A basis
+        #  that cannot supply the legacy rule's quota (no topics, no S2 shard
+        #  ranks — i.e. every webtext-v3 manifest) no longer falls through to an
+        #  empty holdout: `make_split` REFUSES and names `--splits-artifact`.
+        #  The v3 membership is FROZEN by `derive_webtext_splits.py` into
+        #  splits.json / halves.json (prereg §2 / §6-I1) and CONSUMED below —
+        #  never re-derived here.
         s2r.append(int(t.rsplit("-", 1)[1]) if e["stratum"] == "S2" else -1)
     return Labels(stratum=np.array(strat), group=np.array(grp),
                   topic=np.array(top), s2_rank=np.array(s2r), strata=strata)
 
 
+#: THE CERTIFIED v2.1 SPLIT (gate-identity discipline, brief item 3). Recorded
+#: 2026-08-03 by running the PRE-WIRING `make_split` on the v2.1 fitting manifest
+#: of record — `corpus/fitting-v21/corpus_manifest.meta.json`, 775 entries, the
+#: fit code's own A8_SEED=80 path — and re-proved by selftest 6a on every run.
+#: The banked v2.1 fits were computed against THIS membership; it is an input to
+#: certified results, so it must provably not move. `test_ids_sha256` is the
+#: sha256 of the newline-joined held-out text_ids IN MANIFEST ORDER, which pins
+#: the membership itself and not merely the mask's byte pattern.
+V21_SPLIT_OF_RECORD: dict[str, Any] = {
+    "manifest": "corpus/fitting-v21/corpus_manifest.meta.json",
+    "manifest_sha256":
+        "804996ccd7ad081cf3328cec4dc76fdadb1fc066cbdd906535119906865a4369",
+    "n_entries": 775, "n_train": 598, "n_test": 177,
+    "held_topics": [0, 12, 14, 18, 19],
+    "split_sha256":
+        "4bee46911c08d1bd21648ce11f9026350efe35584303641219dd1428640730f1",
+    "test_ids_sha256":
+        "d2f0554aec64e8c91bdbddcdf01505fa1c3c0f3f922a6f7a1bcdaaf7107f9887",
+}
+
+
+class SplitSelectionError(RuntimeError):
+    """A split lane that must REFUSE rather than resolve to something plausible.
+
+    Three failure modes, all of which the campaign can actually hit:
+
+      * a basis the LEGACY v2.1 derivation cannot express (no topic_idx, no S2
+        shard ranks — every webtext-v3 manifest). Before 2026-08-03 this held
+        NOTHING out and surfaced as `n_test=0` inside a summary full of
+        `valid: false`; now it names `--splits-artifact` and stops;
+      * a FROZEN artifact that does not belong to the loaded corpus (its
+        recorded manifest sha differs, an id does not resolve, a count
+        disagrees with its own id lists);
+      * an artifact whose ineligible set leaks into a realized test side —
+        re-checked here rather than trusted, per the brief.
+
+    An exception, never `sys.exit` (rake M45 rule (c)): an all-module selftest
+    sweep survives it and still prints its terminal TOTAL line.
+    """
+
+
+def legacy_split_capacity(labels: Labels) -> tuple[int, int]:
+    """(distinct topics, distinct S2 shard ranks) the LEGACY rule could draw from."""
+    return (len({int(t) for t in labels.topic if t >= 0}),
+            len({int(r) for r in labels.s2_rank if r >= 0}))
+
+
 def make_split(labels: Labels, seed: int = A8_SEED) -> tuple[np.ndarray, np.ndarray, dict]:
-    """Topic-grouped stratified split: 5/20 topics + 40/160 S2 shards held out."""
+    """Topic-grouped stratified split: 5/20 topics + 40/160 S2 shards held out.
+
+    THE LEGACY (v2.1-shaped) LANE, and it stays byte-exact: the draw below is
+    untouched — same seed, same two `rng.choice` calls in the same order — so the
+    realized membership on the v2.1 fitting manifest of record is the certified
+    input the banked fits were computed against (598/177, `split_sha256`
+    `4bee4691…`; proven in selftest 6a).
+
+    What is NEW is only the PRECONDITION: a basis that cannot supply the rule's
+    quota is refused instead of silently held-out-empty. Nothing about a basis
+    that CAN supply it changes.
+    """
+    n_topics, n_s2 = legacy_split_capacity(labels)
+    if n_topics < HELD_OUT_TOPICS or n_s2 < HELD_OUT_S2:
+        raise SplitSelectionError(
+            f"the legacy in-code split cannot be derived on this basis: it "
+            f"offers {n_topics} topic(s) (the rule holds out {HELD_OUT_TOPICS}) "
+            f"and {n_s2} S2 shard rank(s) (the rule holds out {HELD_OUT_S2}). "
+            f"This is the shape of EVERY webtext-v3 manifest (topic_idx is null "
+            f"and no id is an S2 shard), and its split is NOT derived at fit "
+            f"time — it is FROZEN by derive_webtext_splits.py per prereg §2 / "
+            f"§6-I1. Pass --splits-artifact <…/splits.json> (or --half a|b with "
+            f"--halves-artifact <…/halves.json>) so the fit CONSUMES the frozen "
+            f"membership. Never an empty test set, never a re-derivation.")
     rng = np.random.default_rng(seed)
     topics = np.array(sorted({int(t) for t in labels.topic if t >= 0}))
     held_topics = set(rng.choice(topics, size=HELD_OUT_TOPICS, replace=False).tolist())
@@ -808,6 +896,638 @@ def make_split(labels: Labels, seed: int = A8_SEED) -> tuple[np.ndarray, np.ndar
             "n_test": int(test.sum()),
             "split_sha256": hashlib.sha256(test.tobytes()).hexdigest()}
     return train, test, info
+
+
+# ------------------------------------------- THE FROZEN SPLIT ARTIFACTS (v3)
+# THE v3 SPLIT IS CONSUMED, NEVER DERIVED HERE (desk brief BRIEF-v3-splits-wiring
+# -2026-08-03; frozen prereg webtext-v3 §2 / §6-I1, tag `freeze/webtext-v3`).
+#
+# `derive_webtext_splits.py` computes the membership ONCE at freeze, from the
+# two read-only full manifests, and records it in two artifacts whose shas are in
+# the freeze act: splits.json (the realized 280/1200 train/test membership) and
+# halves.json (the §6-I1 halving, each half carrying its OWN internal §2 split).
+# This module MIRRORS those shapes below — it never reimplements the draw, and
+# there is deliberately no code path here that could produce a v3 membership.
+#
+# WHAT IS VALIDATED BEFORE A SINGLE FIT RUNS (all refusals, no fallbacks):
+#   1. the artifact's recorded manifest sha == the sha of the corpus manifest
+#      this run loaded (the artifact must belong to THIS basis);
+#   2. every text_id in the artifact resolves in the loaded corpus, and every
+#      loaded row lands on exactly one side (never "absent => train");
+#   3. the artifact's self-reported counts match its own id lists, and the
+#      realized counts match the artifact (or, under an explicit row subset,
+#      the coverage is recorded and named);
+#   4. ZERO ineligible ids (the §2 v2.1-overlap set the artifact carries) in any
+#      realized test membership — the artifact already guarantees it; the fitter
+#      RE-CHECKS rather than trusts.
+# The artifact's self-described rule is echoed into cp2_summary["split"], so a
+# reader of a v3 fit sees which rule produced its holdout without opening staging.
+
+#: The key `derive_webtext_splits` records the v3 corpus manifest under in
+#: `basis.inputs_sha256` (it uses the input file's NAME). Only a fallback: the
+#: sha is preferentially identified by matching `expected_v3_manifest_sha256`.
+CORPUS_MANIFEST_NAME = "corpus_manifest.json"
+
+#: The two §6-I1 halves, as the CLI names them -> as halves.json names them.
+HalfName = Literal["a", "b"]
+HALF_KEYS: dict[str, str] = {"a": "half_a", "b": "half_b"}
+
+
+class ArtifactBasis(BaseModel):
+    """`basis` — what the frozen draw was computed FROM. Mirrors `_basis_block`."""
+
+    model_config = {"extra": "ignore"}
+
+    corpus: str = ""
+    prereg: str = ""
+    freeze_tag: str = ""
+    derivation_date: str = ""
+    derived_by: str = ""
+    inputs_sha256: dict[str, str] = {}
+    expected_v3_manifest_sha256: str = ""
+
+    def derived_from_manifest_sha256(self) -> tuple[str, bool]:
+        """(the sha the draw ACTUALLY read, does it match the prereg identity).
+
+        `derive_webtext_splits` WARNS rather than halts when the manifest it was
+        handed is not the prereg's basis identity, and records the sha it really
+        used — so the binding comparison for a fit is against THAT sha (these
+        ids were drawn from THAT corpus), with the prereg-identity agreement
+        reported beside it rather than conflated with it.
+        """
+        expected = self.expected_v3_manifest_sha256
+        if expected and expected in set(self.inputs_sha256.values()):
+            return expected, True
+        named = self.inputs_sha256.get(CORPUS_MANIFEST_NAME)
+        if named:
+            return named, (not expected) or named == expected
+        if len(self.inputs_sha256) == 1:
+            only = next(iter(self.inputs_sha256.values()))
+            return only, (not expected) or only == expected
+        raise SplitSelectionError(
+            f"the artifact's basis names inputs {sorted(self.inputs_sha256)} and "
+            f"expected_v3_manifest_sha256={expected or '<absent>'!r}: none of them "
+            f"identifies WHICH input was the corpus manifest, so the "
+            f"belongs-to-this-basis check cannot be made. Refusing rather than "
+            f"guessing which sha to compare against")
+
+
+class OverlapBlock(BaseModel):
+    """`overlap` — the §2 v2.1-overlap set: ids that are TRAIN-side BY RULE."""
+
+    model_config = {"extra": "ignore"}
+
+    n_shared_with_v21_S2: int = Field(ge=0)
+    ledgered: Optional[int] = None
+    ineligible_text_ids: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def _count_matches_list(self) -> "OverlapBlock":
+        if len(self.ineligible_text_ids) != self.n_shared_with_v21_S2:
+            raise ValueError(
+                f"overlap block disagrees with itself: n_shared_with_v21_S2="
+                f"{self.n_shared_with_v21_S2} but {len(self.ineligible_text_ids)} "
+                f"ineligible ids are listed")
+        if self.ledgered is not None and self.ledgered != self.n_shared_with_v21_S2:
+            raise ValueError(
+                f"overlap block disagrees with the LEDGERED figure "
+                f"({self.n_shared_with_v21_S2} vs {self.ledgered}) — the derivation "
+                f"HALTs on this, so an artifact carrying it is not of record")
+        return self
+
+
+class SplitRule(BaseModel):
+    """`rule` of splits.json — echoed verbatim into the run's stamp."""
+
+    model_config = {"extra": "ignore"}
+
+    statement: str = Field(min_length=1)
+    seed: Optional[int] = None
+    stream: str = ""
+    grouping_keys: dict[str, str] = {}
+    quota_rule: str = ""
+    overlap_rule: str = ""
+    stream_construction: str = ""
+
+
+class HalvesRule(BaseModel):
+    """`rule` of halves.json — the halving stream plus each half's own stream."""
+
+    model_config = {"extra": "ignore"}
+
+    statement: str = Field(min_length=1)
+    halving_stream: str = ""
+    internal_split_streams: dict[str, str] = {}
+    internal_quota: str = ""
+    construction: str = ""
+    independence: str = ""
+    quota_rule: str = ""
+    overlap_rule: str = ""
+    stream_construction: str = ""
+
+
+class SplitCounts(BaseModel):
+    """`counts` of splits.json — the artifact's own totals, re-checked here."""
+
+    model_config = {"extra": "ignore"}
+
+    n_texts: int = Field(ge=0)
+    n_test: int = Field(ge=0)
+    n_train: int = Field(ge=0)
+    per_stratum: dict[str, dict[str, Any]] = {}
+
+
+class PerStratumSplit(BaseModel):
+    """`per_stratum[st]` of splits.json — the realized per-stratum holdout."""
+
+    model_config = {"extra": "ignore"}
+
+    holdout_group_keys: tuple[str, ...] = ()
+    test_ids: tuple[str, ...] = ()
+
+
+class InternalSplit(BaseModel):
+    """A half's OWN §2 train/test split, as frozen. Never recomputed here."""
+
+    model_config = {"extra": "ignore"}
+
+    stream: str = ""
+    test_ids: tuple[str, ...] = Field(min_length=1)
+    train_ids: tuple[str, ...] = Field(min_length=1)
+
+
+class HalfBlock(BaseModel):
+    """`half_a` / `half_b` of halves.json: the membership + its internal split."""
+
+    model_config = {"extra": "ignore"}
+
+    text_ids: tuple[str, ...] = Field(min_length=1)
+    internal_split: InternalSplit
+
+    @model_validator(mode="after")
+    def _internal_partitions_the_half(self) -> "HalfBlock":
+        half = set(self.text_ids)
+        if len(half) != len(self.text_ids):
+            raise ValueError("a half repeats a text_id")
+        test, train = set(self.internal_split.test_ids), set(self.internal_split.train_ids)
+        if test & train:
+            raise ValueError(f"{len(test & train)} id(s) on BOTH sides of a half's "
+                             f"internal split")
+        if test | train != half:
+            raise ValueError(
+                f"a half's internal split does not partition the half: "
+                f"{len(half - (test | train))} half id(s) on neither side, "
+                f"{len((test | train) - half)} split id(s) outside the half")
+        return self
+
+
+class SplitsArtifact(BaseModel):
+    """splits.json — the FROZEN realized webtext-v3 train/test membership.
+
+    A mirror of `derive_webtext_splits.build_splits_artifact`, not a
+    reimplementation: every field here is READ, none is computed.
+    """
+
+    model_config = {"extra": "ignore"}
+
+    artifact: str = ""
+    basis: ArtifactBasis
+    rule: SplitRule
+    overlap: OverlapBlock
+    counts: SplitCounts
+    per_stratum: dict[str, PerStratumSplit] = {}
+    test_ids: tuple[str, ...] = Field(min_length=1)
+    train_ids: tuple[str, ...] = Field(min_length=1)
+    #: set by the loader, never by the file
+    source_path: str = ""
+    sha256: str = ""
+
+    @model_validator(mode="after")
+    def _self_consistent(self) -> "SplitsArtifact":
+        test, train = set(self.test_ids), set(self.train_ids)
+        if len(test) != len(self.test_ids) or len(train) != len(self.train_ids):
+            raise ValueError("the artifact repeats a text_id on one of its sides")
+        if test & train:
+            raise ValueError(f"{len(test & train)} text_id(s) on BOTH sides")
+        if self.counts.n_test != len(test) or self.counts.n_train != len(train):
+            raise ValueError(
+                f"counts disagree with the id lists: n_test={self.counts.n_test} vs "
+                f"{len(test)}, n_train={self.counts.n_train} vs {len(train)}")
+        if self.counts.n_texts != len(test) + len(train):
+            raise ValueError(
+                f"counts.n_texts={self.counts.n_texts} != {len(test) + len(train)} ids")
+        if self.per_stratum:
+            union: set[str] = set()
+            for block in self.per_stratum.values():
+                union |= set(block.test_ids)
+            if union != test:
+                raise ValueError(
+                    "the per-stratum holdouts do not reassemble the test side "
+                    f"({len(union ^ test)} id(s) differ)")
+        leaked = test & set(self.overlap.ineligible_text_ids)
+        if leaked:
+            raise ValueError(
+                f"the artifact's OWN test side carries {len(leaked)} ineligible "
+                f"id(s) (e.g. {sorted(leaked)[:3]}) — the §2 overlap rule is "
+                f"violated inside the artifact itself")
+        return self
+
+
+class HalvesArtifact(BaseModel):
+    """halves.json — the FROZEN §6-I1 halving + each half's internal §2 split."""
+
+    model_config = {"extra": "ignore"}
+
+    artifact: str = ""
+    basis: ArtifactBasis
+    rule: HalvesRule
+    overlap: OverlapBlock
+    counts: dict[str, Any] = {}
+    half_a: HalfBlock
+    half_b: HalfBlock
+    #: set by the loader, never by the file
+    source_path: str = ""
+    sha256: str = ""
+
+    @model_validator(mode="after")
+    def _halves_are_disjoint_and_clean(self) -> "HalvesArtifact":
+        a, b = set(self.half_a.text_ids), set(self.half_b.text_ids)
+        if a & b:
+            raise ValueError(f"the halves share {len(a & b)} text_id(s) — they are "
+                             f"frozen as DISJOINT")
+        ineligible = set(self.overlap.ineligible_text_ids)
+        for name, block in (("half_a", self.half_a), ("half_b", self.half_b)):
+            leaked = set(block.internal_split.test_ids) & ineligible
+            if leaked:
+                raise ValueError(
+                    f"{name}: its internal test side carries {len(leaked)} "
+                    f"ineligible id(s) (e.g. {sorted(leaked)[:3]}) — the §2 overlap "
+                    f"rule applies INSIDE a half too")
+        for key, n in (("half_a", len(a)), ("half_b", len(b))):
+            recorded = self.counts.get(key)
+            if isinstance(recorded, int) and recorded != n:
+                raise ValueError(f"counts.{key}={recorded} != {n} listed ids")
+        return self
+
+    def half(self, half: str) -> HalfBlock:
+        key = HALF_KEYS.get(half)
+        if key is None:
+            raise SplitSelectionError(
+                f"unknown half {half!r}: the §6-I1 halving names exactly "
+                f"{sorted(HALF_KEYS)}")
+        return getattr(self, key)
+
+
+def _load_artifact(path: Path, model: type[BaseModel], kind: str) -> Any:
+    """Read a FROZEN artifact READ-ONLY, sha it, and validate its shape."""
+    try:
+        raw = Path(path).read_bytes()
+    except OSError as exc:
+        raise SplitSelectionError(
+            f"the frozen {kind} artifact cannot be read at {path} ({exc}). It is a "
+            f"desk-side staging artifact (never git) — check the path, and never "
+            f"substitute a re-derivation for it") from exc
+    sha = hashlib.sha256(raw).hexdigest()
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise SplitSelectionError(
+            f"the frozen {kind} artifact {path} (sha {sha[:12]}…) is not valid "
+            f"JSON ({exc})") from exc
+    if not isinstance(payload, dict):
+        raise SplitSelectionError(
+            f"the frozen {kind} artifact {path} (sha {sha[:12]}…) is not an object")
+    try:
+        art = model.model_validate(payload)
+    except Exception as exc:  # noqa: BLE001 — pydantic's detail IS the message
+        raise SplitSelectionError(
+            f"the frozen {kind} artifact {path} (sha {sha[:12]}…) is not a valid "
+            f"{kind} artifact: {exc}") from exc
+    return art.model_copy(update={"source_path": str(path), "sha256": sha})
+
+
+def load_splits_artifact(path: Path) -> SplitsArtifact:
+    """splits.json, read-only, shape-validated, sha recorded."""
+    return _load_artifact(path, SplitsArtifact, "splits")
+
+
+def load_halves_artifact(path: Path) -> HalvesArtifact:
+    """halves.json, read-only, shape-validated, sha recorded."""
+    return _load_artifact(path, HalvesArtifact, "halves")
+
+
+def require_basis_match(basis: ArtifactBasis, *, loaded_sha: str, manifest: Path,
+                        artifact_path: str, kind: str) -> dict[str, Any]:
+    """THE BELONGS-TO-THIS-BASIS GATE: the artifact's manifest sha == the loaded one."""
+    derived, matches_prereg = basis.derived_from_manifest_sha256()
+    if derived != loaded_sha:
+        raise SplitSelectionError(
+            f"the frozen {kind} artifact {artifact_path} was derived from corpus "
+            f"manifest sha {derived}, but this run loaded {manifest} with sha "
+            f"{loaded_sha}. A membership drawn from a different corpus is not a "
+            f"split of THIS one — refusing. (Two common causes: the arm-root "
+            f"manifest is the BODIES-STRIPPED meta manifest while the artifact "
+            f"was derived from the full one, or the basis moved and the artifacts "
+            f"were not re-derived. Neither is repairable at fit time.)")
+    if not matches_prereg:
+        logger.warning(
+            "%s: the artifact was derived from manifest sha %s, which is NOT the "
+            "prereg's basis identity %s recorded in the same artifact. The "
+            "membership belongs to the corpus this run loaded (that check "
+            "PASSED), but the basis identity disagreement is stamped and must be "
+            "resolved by the desk before any v3 claim files",
+            artifact_path, derived, basis.expected_v3_manifest_sha256)
+    return {"artifact_derived_from_manifest_sha256": derived,
+            "manifest_sha256_loaded": loaded_sha,
+            "expected_v3_manifest_sha256": basis.expected_v3_manifest_sha256,
+            "matches_prereg_basis_identity": bool(matches_prereg)}
+
+
+def _require_ids_resolve(ids: Sequence[str], corpus_ids: set[str], *,
+                         where: str, artifact_path: str) -> None:
+    """Every id the artifact names must exist in the loaded corpus manifest."""
+    missing = [i for i in ids if i not in corpus_ids]
+    if missing:
+        raise SplitSelectionError(
+            f"{artifact_path}: {len(missing)} text_id(s) in {where} do not resolve "
+            f"in the loaded corpus manifest (e.g. {missing[:3]}). The artifact "
+            f"and the corpus disagree about what exists — refusing rather than "
+            f"dropping ids")
+
+
+def _membership_masks(row_ids: Sequence[str], test_ids: set[str], train_ids: set[str],
+                      *, where: str, artifact_path: str
+                      ) -> tuple[np.ndarray, np.ndarray]:
+    """Masks over the LOADED rows. A row on neither side is a refusal, never train."""
+    unplaced = [t for t in row_ids if t not in test_ids and t not in train_ids]
+    if unplaced:
+        raise SplitSelectionError(
+            f"{artifact_path}: {len(unplaced)} loaded row(s) appear on NEITHER side "
+            f"of {where} (e.g. {unplaced[:3]}). An unplaced row would silently "
+            f"become train — refusing")
+    test = np.array([t in test_ids for t in row_ids], dtype=bool)
+    return ~test, test
+
+
+def _integrity_recheck(realized_test_ids: Sequence[str], ineligible: set[str], *,
+                       where: str, artifact_path: str) -> dict[str, Any]:
+    """Item 4: ZERO ineligible ids in a realized test membership. Re-checked."""
+    leaked = sorted(set(realized_test_ids) & ineligible)
+    if leaked:
+        raise SplitSelectionError(
+            f"{artifact_path}: {len(leaked)} ineligible id(s) reached the realized "
+            f"test side of {where} (e.g. {leaked[:3]}). The §2 v2.1-overlap rule "
+            f"makes these TRAIN-side by rule — no held-out quantity is ever "
+            f"computed on a text a prior result touched")
+    return {"rule": "PREREG §2 v2.1-overlap: ineligible ids are TRAIN-side by rule",
+            "n_ineligible_declared": len(ineligible),
+            "n_ineligible_in_test": 0,
+            "checked": where}
+
+
+def membership_sha256(test_ids: Sequence[str]) -> str:
+    """The sha256 of the realized held-out MEMBERSHIP (ordered text_ids).
+
+    `split_sha256` (the mask's bytes) is kept unchanged because banked v2.1
+    summaries carry it — but a mask is a pattern over WHICHEVER rows were
+    loaded, so two different memberships can share one. The two §6-I1 halves are
+    exactly that case: same shape, disjoint rows. This sha names the ids
+    themselves, so a reader can never confuse one half's split with the other's.
+    """
+    return hashlib.sha256("\n".join(test_ids).encode("utf-8")).hexdigest()
+
+
+@dataclass(frozen=True)
+class SplitPlan:
+    """The resolved lane: which rows to fit on, and their train/test masks.
+
+    `keep` indexes the rows AS LOADED (the half lane restricts them); `train`
+    and `test` index the KEPT rows, which is the order `run_pair_arm` wants.
+    """
+    keep: np.ndarray                     # bool [n_loaded]
+    train: np.ndarray                    # bool [n_kept]
+    test: np.ndarray                     # bool [n_kept]
+    info: dict[str, Any]
+
+
+def _coverage_block(row_ids: Sequence[str], artifact_test: set[str],
+                    artifact_train: set[str], subset_reason: Optional[str],
+                    realized_test: int, realized_train: int) -> dict[str, Any]:
+    """The counts-match read: realized vs the artifact's own, subsetting named."""
+    full = set(row_ids) == (artifact_test | artifact_train)
+    block = {"artifact_n_test": len(artifact_test),
+             "artifact_n_train": len(artifact_train),
+             "realized_n_test": realized_test, "realized_n_train": realized_train,
+             "covers_the_whole_artifact": bool(full),
+             "row_subset_reason": subset_reason}
+    if full and (realized_test != len(artifact_test)
+                 or realized_train != len(artifact_train)):
+        raise SplitSelectionError(
+            f"realized counts {realized_train}/{realized_test} (train/test) "
+            f"disagree with the artifact's {len(artifact_train)}/"
+            f"{len(artifact_test)} while covering it exactly — refusing")
+    if not full and subset_reason is None:
+        raise SplitSelectionError(
+            f"the loaded rows do not cover the artifact's membership "
+            f"({len(row_ids)} rows vs {len(artifact_test | artifact_train)} ids) "
+            f"and NO subset was requested. A partial corpus silently reweights "
+            f"every held-out number — refusing")
+    return block
+
+
+def split_from_artifact(artifact: SplitsArtifact, row_ids: Sequence[str],
+                        corpus_ids: set[str], *, manifest: Path,
+                        manifest_sha256: str,
+                        subset_reason: Optional[str] = None) -> SplitPlan:
+    """THE `--splits-artifact` LANE: membership READ from splits.json."""
+    basis = require_basis_match(artifact.basis, loaded_sha=manifest_sha256,
+                                manifest=manifest,
+                                artifact_path=artifact.source_path, kind="splits")
+    _require_ids_resolve(artifact.test_ids + artifact.train_ids, corpus_ids,
+                         where="splits.json", artifact_path=artifact.source_path)
+    test_ids, train_ids = set(artifact.test_ids), set(artifact.train_ids)
+    train, test = _membership_masks(row_ids, test_ids, train_ids,
+                                    where="splits.json",
+                                    artifact_path=artifact.source_path)
+    realized_test = [t for t, m in zip(row_ids, test) if m]
+    integrity = _integrity_recheck(realized_test,
+                                   set(artifact.overlap.ineligible_text_ids),
+                                   where="the main split's test side",
+                                   artifact_path=artifact.source_path)
+    coverage = _coverage_block(row_ids, test_ids, train_ids, subset_reason,
+                               int(test.sum()), int(train.sum()))
+    info = {
+        "source": "splits-artifact",
+        "lane": "the FROZEN webtext-v3 main split, CONSUMED (never re-derived)",
+        "artifact": artifact.source_path,
+        "artifact_sha256": artifact.sha256,
+        "artifact_kind": artifact.artifact,
+        "half": None,
+        "rule": artifact.rule.statement,
+        "artifact_rule": artifact.rule.model_dump(),
+        "basis": {**artifact.basis.model_dump(exclude={"inputs_sha256"}), **basis},
+        "artifact_counts": artifact.counts.model_dump(),
+        "coverage": coverage,
+        "overlap_integrity": integrity,
+        "n_train": int(train.sum()), "n_test": int(test.sum()),
+        "split_sha256": hashlib.sha256(test.tobytes()).hexdigest(),
+        "test_ids_sha256": membership_sha256(realized_test),
+    }
+    return SplitPlan(keep=np.ones(len(row_ids), dtype=bool), train=train, test=test,
+                     info=info)
+
+
+def split_from_half(artifact: HalvesArtifact, half: HalfName,
+                    row_ids: Sequence[str],
+                    corpus_ids: set[str], *, manifest: Path, manifest_sha256: str,
+                    subset_reason: Optional[str] = None) -> SplitPlan:
+    """THE `--half a|b` LANE: the half's membership AND its own internal split.
+
+    Both come from halves.json. Nothing is recomputed — not the halving, not the
+    internal train/test draw — and the half identity travels in the stamp.
+    """
+    basis = require_basis_match(artifact.basis, loaded_sha=manifest_sha256,
+                                manifest=manifest,
+                                artifact_path=artifact.source_path, kind="halves")
+    block = artifact.half(half)
+    key = HALF_KEYS[half]
+    _require_ids_resolve(block.text_ids, corpus_ids, where=f"{key}.text_ids",
+                         artifact_path=artifact.source_path)
+    half_ids = set(block.text_ids)
+    keep = np.array([t in half_ids for t in row_ids], dtype=bool)
+    kept = [t for t, k in zip(row_ids, keep) if k]
+    if not kept:
+        raise SplitSelectionError(
+            f"{artifact.source_path}: NONE of the {len(row_ids)} loaded rows are in "
+            f"{key} — the state bank and the halving do not describe the same "
+            f"corpus")
+    missing_rows = [t for t in block.text_ids if t not in set(row_ids)]
+    if missing_rows and subset_reason is None:
+        raise SplitSelectionError(
+            f"{artifact.source_path}: {len(missing_rows)} id(s) of {key} are absent "
+            f"from the loaded state bank (e.g. {missing_rows[:3]}) and no subset "
+            f"was requested — a half fitted on part of itself is not the frozen "
+            f"half; refusing")
+    test_ids = set(block.internal_split.test_ids)
+    train_ids = set(block.internal_split.train_ids)
+    train, test = _membership_masks(kept, test_ids, train_ids,
+                                    where=f"{key}.internal_split",
+                                    artifact_path=artifact.source_path)
+    realized_test = [t for t, m in zip(kept, test) if m]
+    integrity = _integrity_recheck(realized_test,
+                                   set(artifact.overlap.ineligible_text_ids),
+                                   where=f"{key}'s internal test side",
+                                   artifact_path=artifact.source_path)
+    reason = subset_reason or (f"restricted to {key} (PREREG §6-I1)"
+                               if len(kept) < len(row_ids) else None)
+    coverage = _coverage_block(kept, test_ids, train_ids,
+                               subset_reason if missing_rows else None,
+                               int(test.sum()), int(train.sum()))
+    other = artifact.half("b" if half == "a" else "a")
+    info = {
+        "source": "halves-artifact",
+        "lane": (f"the FROZEN §6-I1 {key}: membership AND its internal §2 split, "
+                 f"both CONSUMED (never recomputed)"),
+        "artifact": artifact.source_path,
+        "artifact_sha256": artifact.sha256,
+        "artifact_kind": artifact.artifact,
+        "half": half,
+        "half_key": key,
+        "half_stream": artifact.rule.internal_split_streams.get(key, ""),
+        "halving_stream": artifact.rule.halving_stream,
+        "n_half_texts": len(block.text_ids),
+        "n_half_rows_loaded": len(kept),
+        "disjoint_from_other_half": not (half_ids & set(other.text_ids)),
+        "row_restriction": reason,
+        "rule": artifact.rule.statement,
+        "artifact_rule": artifact.rule.model_dump(),
+        "basis": {**artifact.basis.model_dump(exclude={"inputs_sha256"}), **basis},
+        "artifact_counts": artifact.counts.get("internal", {}).get(key, {}),
+        "coverage": coverage,
+        "overlap_integrity": integrity,
+        "n_train": int(train.sum()), "n_test": int(test.sum()),
+        "split_sha256": hashlib.sha256(test.tobytes()).hexdigest(),
+        "test_ids_sha256": membership_sha256(realized_test),
+    }
+    return SplitPlan(keep=keep, train=train, test=test, info=info)
+
+
+def resolve_split_plan(labels: Labels, row_ids: Sequence[str], corpus_ids: set[str],
+                       *, manifest: Path, manifest_sha256: str,
+                       splits: Optional[SplitsArtifact] = None,
+                       halves: Optional[HalvesArtifact] = None,
+                       half: Optional[HalfName] = None,
+                       subset_reason: Optional[str] = None,
+                       seed: int = A8_SEED) -> SplitPlan:
+    """THE ONE PLACE A SPLIT IS CHOSEN. Three lanes, no fallback between them."""
+    if half is not None:
+        if halves is None:
+            raise SplitSelectionError(
+                f"--half {half} needs the frozen halves artifact: pass "
+                f"--halves-artifact <…/halves.json>. The §6-I1 halving is FROZEN "
+                f"and is never recomputed at fit time")
+        if splits is not None:
+            raise SplitSelectionError(
+                "--splits-artifact and --half are two different memberships (the "
+                "whole corpus vs one half with its own internal split) — pass one, "
+                "never both")
+        return split_from_half(halves, half, row_ids, corpus_ids, manifest=manifest,
+                               manifest_sha256=manifest_sha256,
+                               subset_reason=subset_reason)
+    if splits is not None:
+        return split_from_artifact(splits, row_ids, corpus_ids, manifest=manifest,
+                                   manifest_sha256=manifest_sha256,
+                                   subset_reason=subset_reason)
+    if halves is not None:
+        raise SplitSelectionError(
+            "--halves-artifact was given without --half a|b: which half is the "
+            "fit? Never guessed")
+    train, test, info = make_split(labels, seed=seed)      # the LEGACY v2.1 lane
+    info = {"source": "legacy-derivation",
+            "lane": ("the in-code v2.1 topic-grouped derivation — the legacy lane, "
+                     "kept byte-exact for the banked v2.1 fits' certified split"),
+            "half": None, "artifact": None, "artifact_sha256": None,
+            "manifest_sha256_loaded": manifest_sha256, **info,
+            "test_ids_sha256": membership_sha256(
+                [t for t, m in zip(row_ids, test) if m])}
+    return SplitPlan(keep=np.ones(len(row_ids), dtype=bool), train=train, test=test,
+                     info=info)
+
+
+def split_identity(info: Mapping[str, Any]) -> dict[str, Any]:
+    """The identity a fits/ directory is stamped with — what must not silently mix."""
+    return {"source": info.get("source"), "half": info.get("half"),
+            "artifact_sha256": info.get("artifact_sha256"),
+            "split_sha256": info.get("split_sha256"),
+            "test_ids_sha256": info.get("test_ids_sha256")}
+
+
+def guard_fits_dir(fits_dir: Path, info: Mapping[str, Any]) -> None:
+    """Refuse to overwrite a fits/ directory banked under a DIFFERENT split.
+
+    Half A's maps and half B's summary in one directory is a silent mixture, and
+    a v3 run landing on the default `fits/` would overwrite banked v2.1 objects.
+    Same identity (a rerun) passes; anything else names --fits-dirname.
+    """
+    prior_path = fits_dir / "cp2_summary.json"
+    if not prior_path.exists():
+        return
+    try:
+        prior = json.loads(prior_path.read_text()).get("split", {})
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning("%s exists but cannot be read (%s) — the split-identity "
+                       "guard cannot compare against it", prior_path, exc)
+        return
+    now, before = split_identity(info), split_identity(prior)
+    if before["source"] is None and now["source"] == "legacy-derivation":
+        return                        # a pre-2026-08-03 summary; the same lane
+    if before == now:
+        return
+    raise SplitSelectionError(
+        f"{fits_dir} already holds fits banked under a DIFFERENT split "
+        f"({before}) than this run's ({now}). Writing here would mix two "
+        f"memberships in one directory (and overwrite the banked maps). Pass "
+        f"--fits-dirname <name> for this column")
 
 
 # ---------------------------------------------------------------- fit families
@@ -1172,7 +1892,10 @@ def run_grid(arm_root: Path, src_model: str, tgt_model: str,
              n_null: int = N_NULL_REPS, fit_strata: Optional[list[str]] = None,
              fits_dirname: str = "fits", k_grid=K_GRID,
              sites_override: dict[str, tuple[int, ...]] | None = None,
-             arms: tuple[str, ...] = ARMS) -> dict:
+             arms: tuple[str, ...] = ARMS,
+             splits_artifact: Optional[Path] = None,
+             halves_artifact: Optional[Path] = None,
+             half: Optional[HalfName] = None) -> dict:
     states_dir = arm_root / "states"
     fits_dir = arm_root / fits_dirname
     fits_dir.mkdir(parents=True, exist_ok=True)
@@ -1198,6 +1921,27 @@ def run_grid(arm_root: Path, src_model: str, tgt_model: str,
             "line, and do not read `valid: false` as a statement about the maps",
             len(basis_strata), list(basis_strata), MIN_STRATA_CARRIED)
 
+    #  THE SPLIT LANE, RESOLVED ONCE AND UP FRONT (brief BRIEF-v3-splits-wiring
+    #  -2026-08-03). The artifacts are read and validated against THIS corpus
+    #  before any bank is loaded, so a membership that does not belong to this
+    #  basis refuses in the first second of the run rather than after the grid.
+    splits: Optional[SplitsArtifact] = (
+        load_splits_artifact(splits_artifact) if splits_artifact else None)
+    halves: Optional[HalvesArtifact] = (
+        load_halves_artifact(halves_artifact) if halves_artifact else None)
+    corpus_ids = {str(e["text_id"]) for e in basis_entries}
+    for art, label in ((splits, "splits"), (halves, "halves")):
+        if art is not None:
+            require_basis_match(art.basis, loaded_sha=manifest_sha,
+                                manifest=manifest, artifact_path=art.source_path,
+                                kind=label)
+            logger.info("frozen %s artifact: %s (sha %s…) — derived from manifest "
+                        "%s…, MATCHES this run's corpus", label, art.source_path,
+                        art.sha256[:12], manifest_sha[:12])
+    if half is not None:
+        logger.info("half lane: %s (PREREG §6-I1) — membership and internal split "
+                    "both read from the artifact", HALF_KEYS.get(half, half))
+
     all_records: list[FitRecord] = []
     agreement: dict[str, dict] = {}
     split_info: dict = {}
@@ -1218,11 +1962,24 @@ def run_grid(arm_root: Path, src_model: str, tgt_model: str,
                 if src.text_ids != tgt.text_ids:
                     raise RuntimeError(f"text_id order mismatch {src_model}/{tgt_model} ({arm})")
                 labels = load_labels(manifest, src.text_ids)
+                subset_reason: Optional[str] = None
                 if fit_strata:
                     keep = np.isin(labels.stratum, fit_strata)
                     src, tgt = subset_bank(src, keep), subset_bank(tgt, keep)
                     labels = subset_labels(labels, keep)
-                train, test, split_info = make_split(labels)
+                    subset_reason = f"--fit-strata {','.join(fit_strata)}"
+                plan = resolve_split_plan(labels, list(src.text_ids), corpus_ids,
+                                          manifest=manifest,
+                                          manifest_sha256=manifest_sha,
+                                          splits=splits, halves=halves, half=half,
+                                          subset_reason=subset_reason)
+                if not bool(plan.keep.all()):
+                    #  The half lane restricts the rows BEFORE fitting; the masks
+                    #  it returns already index the kept rows.
+                    src, tgt = subset_bank(src, plan.keep), subset_bank(tgt, plan.keep)
+                    labels = subset_labels(labels, plan.keep)
+                train, test, split_info = plan.train, plan.test, plan.info
+                guard_fits_dir(fits_dir, split_info)
                 rng = np.random.default_rng(A8_SEED + s_site * 100 + t_site)
                 recs, maps = run_pair_arm(src, tgt, s_site, t_site, labels,
                                           train, test, rng, k_grid=k_grid,
@@ -1241,7 +1998,17 @@ def run_grid(arm_root: Path, src_model: str, tgt_model: str,
         "arm": "A8_conjugation", "leg": 0, "builder": "fit_transport_maps.py",
         "prereg_tag": "prereg-arm8-v1",
         "pair": f"{src_model}->{tgt_model}",
+        # ── THE SPLIT, AND WHERE IT CAME FROM ────────────────────────────────
+        # `split` carries the whole lane record: source, the artifact's path and
+        # sha, the half identity, the artifact's own rule echoed verbatim, the
+        # coverage read and the re-checked overlap integrity. The three keys
+        # beside it are the same identity hoisted to the top level, because every
+        # downstream reader that resolves fits BY PATH from this file needs to
+        # see WHICH membership banked them without walking into `split`.
         "split": split_info, "n_null_reps": n_null, "k_grid": list(k_grid),
+        "split_source": split_info.get("source"),
+        "half": split_info.get("half"),
+        "splits_artifact_sha256": split_info.get("artifact_sha256"),
         "fit_strata": fit_strata, "arms": list(arms),
         "null_group_key": "(stratum|voice|mode)",
         # ── THE STRATUM BASIS (desk ruling 2026-08-03) ───────────────────────
@@ -1409,7 +2176,128 @@ def _topic_split(labels: Labels, rng) -> tuple[np.ndarray, np.ndarray]:
     return ~test, test
 
 
-def selftest() -> int:
+def _raises(fn, exc: type[BaseException] = Exception) -> bool:
+    """True iff `fn()` raises `exc` — a refusal asserted, never merely expected."""
+    try:
+        fn()
+    except exc:
+        return True
+    except Exception:  # noqa: BLE001 — the WRONG exception is not a pass
+        return False
+    return False
+
+
+def _ok(fn) -> bool:
+    try:
+        fn()
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+#: The four webtext-v3 stratum names appear ONLY in selftest fixtures — never in
+#: the module's logic (the vocabulary is basis-derived). They are here so the
+#: fixtures have the real corpus's shape.
+_V3_FIXTURE_STRATA: tuple[str, ...] = ("wikitext", "c4", "pg19", "stackexchange")
+
+
+def _v3_fixture_rows(n_per: int = 8,
+                     strata: Sequence[str] = _V3_FIXTURE_STRATA) -> list[dict]:
+    """A webtext-v3-SHAPED manifest: no topic_idx, no S2 shard ranks.
+
+    Exactly the shape on which the legacy in-code derivation would have held
+    NOTHING out, which is the defect this wiring closes.
+    """
+    return [{"text_id": f"{s}-{i:03d}", "stratum": s, "voice": "neutral",
+             "mode": "neutral", "topic_idx": None}
+            for s in strata for i in range(n_per)]
+
+
+def _write_fixture_manifest(path: Path, rows: Sequence[Mapping[str, Any]]) -> str:
+    path.write_text(json.dumps({"entries": list(rows)}, indent=1))
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _splits_fixture(manifest_sha: str, ids: Sequence[str], test_ids: Sequence[str],
+                    ineligible: Sequence[str] = ()) -> dict:
+    """A splits.json fixture in the REAL artifact's shape (mirrors the builder)."""
+    test = list(test_ids)
+    train = [i for i in ids if i not in set(test)]
+    per_stratum: dict[str, dict[str, Any]] = {}
+    for tid in test:
+        st = tid.rsplit("-", 1)[0]
+        per_stratum.setdefault(st, {"holdout_group_keys": [], "test_ids": []})
+        per_stratum[st]["test_ids"].append(tid)
+        per_stratum[st]["holdout_group_keys"].append(tid)
+    return {
+        "artifact": "splits.json — the realized webtext-v3 train/test membership",
+        "basis": {"corpus": "webtext-v3", "prereg": "PREREG §2 (fixture)",
+                  "freeze_tag": "freeze/webtext-v3",
+                  "derivation_date": "2026-08-03",
+                  "derived_by": "metabasis/scripts/derive_webtext_splits.py",
+                  "inputs_sha256": {CORPUS_MANIFEST_NAME: manifest_sha,
+                                    "v21.json": "1" * 64},
+                  "expected_v3_manifest_sha256": manifest_sha},
+        "rule": {"statement": "fixture holdout, per-stratum, grouped, seed 80",
+                 "seed": 80, "stream": "split-v3",
+                 "grouping_keys": {s: "fixture" for s in _V3_FIXTURE_STRATA},
+                 "quota_rule": "exact-quota grouped draw (fixture)",
+                 "overlap_rule": "PREREG §2 v2.1-overlap rule (fixture)",
+                 "stream_construction": "SeedSequence(entropy=80, spawn_key=…)"},
+        "overlap": {"n_shared_with_v21_S2": len(ineligible),
+                    "ledgered": len(ineligible),
+                    "ineligible_text_ids": sorted(ineligible)},
+        "counts": {"n_texts": len(test) + len(train), "n_test": len(test),
+                   "n_train": len(train),
+                   "per_stratum": {s: {"n_test": len(d["test_ids"])}
+                                   for s, d in per_stratum.items()}},
+        "per_stratum": per_stratum,
+        "test_ids": sorted(test), "train_ids": sorted(train)}
+
+
+def _halves_fixture(manifest_sha: str, ids: Sequence[str], half_a: Sequence[str],
+                    a_test: Sequence[str], b_test: Sequence[str],
+                    ineligible: Sequence[str] = ()) -> dict:
+    """A halves.json fixture: disjoint halves, each with its OWN internal split."""
+    a = list(half_a)
+    b = [i for i in ids if i not in set(a)]
+    def block(members: Sequence[str], test: Sequence[str], stream: str) -> dict:
+        return {"text_ids": sorted(members),
+                "internal_split": {
+                    "stream": stream, "test_ids": sorted(test),
+                    "train_ids": sorted(i for i in members if i not in set(test))}}
+    return {
+        "artifact": "halves.json — the PREREG §6-I1 corpus half-split",
+        "basis": {"corpus": "webtext-v3", "prereg": "PREREG §6-I1 (fixture)",
+                  "freeze_tag": "freeze/webtext-v3",
+                  "derivation_date": "2026-08-03",
+                  "derived_by": "metabasis/scripts/derive_webtext_splits.py",
+                  "inputs_sha256": {CORPUS_MANIFEST_NAME: manifest_sha},
+                  "expected_v3_manifest_sha256": manifest_sha},
+        "rule": {"statement": "two disjoint exhaustive halves; each takes the §2 "
+                              "split rule internally (fixture)",
+                 "halving_stream": "halfsplit-v3",
+                 "internal_split_streams": {"half_a": "split-v3-half-a",
+                                            "half_b": "split-v3-half-b"},
+                 "internal_quota": "the §2 rate applied to the half",
+                 "construction": "half A drawn, half B the complement",
+                 "independence": "named substreams (fixture)",
+                 "quota_rule": "exact-quota grouped draw (fixture)",
+                 "overlap_rule": "PREREG §2 v2.1-overlap rule (fixture)",
+                 "stream_construction": "SeedSequence(entropy=80, spawn_key=…)"},
+        "overlap": {"n_shared_with_v21_S2": len(ineligible),
+                    "ineligible_text_ids": sorted(ineligible)},
+        "counts": {"half_a": len(a), "half_b": len(b),
+                   "internal": {"half_a": {"n_test": len(a_test),
+                                           "n_train": len(a) - len(a_test)},
+                                "half_b": {"n_test": len(b_test),
+                                           "n_train": len(b) - len(b_test)}}},
+        "half_a": block(a, a_test, "split-v3-half-a"),
+        "half_b": block(b, b_test, "split-v3-half-b")}
+
+
+def selftest(splits_artifact: Optional[Path] = None,
+             halves_artifact: Optional[Path] = None) -> int:
     rng = np.random.default_rng(0)
     failures: list[str] = []
     checks: list[str] = []
@@ -1437,10 +2325,14 @@ def selftest() -> int:
     #  produced it. The axis that matters for THIS suite is the data tree: the
     #  v2.1 fitting manifest is a repo artifact and is absent from a deployed
     #  code tree, so the block that reads it is availability-branched.
-    real_v21 = Path("corpus/fitting-v21/corpus_manifest.meta.json")
+    real_v21 = Path(str(V21_SPLIT_OF_RECORD["manifest"]))
+    have_splits = splits_artifact is not None and Path(splits_artifact).exists()
+    have_halves = halves_artifact is not None and Path(halves_artifact).exists()
     print(f"[config] cwd={Path.cwd()}  numpy={np.__version__}  "
           f"v2.1 fitting manifest {'PRESENT' if real_v21.exists() else 'ABSENT'} "
-          f"at {real_v21}")
+          f"at {real_v21}  frozen splits.json "
+          f"{'PRESENT' if have_splits else 'ABSENT'}  frozen halves.json "
+          f"{'PRESENT' if have_halves else 'ABSENT'}")
 
     print("== selftest 1: planted paired world (recovery expected) ==")
     (src, tgt), labels, (v_a, v_b) = _synthetic_world(rng, paired=True)
@@ -1637,6 +2529,278 @@ def selftest() -> int:
              f"deployed code tree has none). The synthetic v2.1-shaped fixture "
              f"in selftest 5 covers the same claim shape")
 
+    import tempfile as _tf
+
+    print("== selftest 6a: THE v2.1 LEGACY SPLIT IS BYTE-EXACT (certified input) ==")
+    #  The banked v2.1 fits were computed against ONE realized membership. This
+    #  block is the gate-identity proof that the splits wiring did not move it:
+    #  the numbers below were recorded from the PRE-WIRING code and are asserted,
+    #  not printed. If this fails, no v2.1 readout downstream is comparable.
+    if real_v21.exists():
+        rows21 = manifest_entries(real_v21)
+        ids21 = [str(e["text_id"]) for e in rows21]
+        sha21 = hashlib.sha256(real_v21.read_bytes()).hexdigest()
+        check(sha21 == V21_SPLIT_OF_RECORD["manifest_sha256"]
+              and len(rows21) == V21_SPLIT_OF_RECORD["n_entries"],
+              f"the v2.1 manifest of record is the recorded one "
+              f"(sha {sha21[:12]}…, {len(rows21)} entries)")
+        labels21 = load_labels(real_v21, ids21)
+        tr21, te21, info21 = make_split(labels21, seed=A8_SEED)
+        test_ids21 = [t for t, m in zip(ids21, te21) if m]
+        ids_sha = hashlib.sha256("\n".join(test_ids21).encode()).hexdigest()
+        check(int(tr21.sum()) == V21_SPLIT_OF_RECORD["n_train"]
+              and int(te21.sum()) == V21_SPLIT_OF_RECORD["n_test"],
+              f"counts {int(tr21.sum())}/{int(te21.sum())} == the recorded "
+              f"{V21_SPLIT_OF_RECORD['n_train']}/{V21_SPLIT_OF_RECORD['n_test']}")
+        check(info21["split_sha256"] == V21_SPLIT_OF_RECORD["split_sha256"],
+              f"split_sha256 {info21['split_sha256'][:16]}… == the recorded mask")
+        check(ids_sha == V21_SPLIT_OF_RECORD["test_ids_sha256"],
+              f"the HELD-OUT MEMBERSHIP itself is byte-exact "
+              f"(sha of the ordered test text_ids = {ids_sha[:16]}…)")
+        check(info21["held_topics"] == V21_SPLIT_OF_RECORD["held_topics"],
+              f"the held topics are the recorded {info21['held_topics']}")
+        plan21 = resolve_split_plan(labels21, ids21, set(ids21),
+                                    manifest=real_v21, manifest_sha256=sha21)
+        check(bool((plan21.test == te21).all()) and bool(plan21.keep.all())
+              and plan21.info["source"] == "legacy-derivation",
+              "the lane resolver with NO artifact takes the legacy lane and "
+              "reproduces the same mask — the v2.1 command line is unchanged")
+        check(plan21.info["split_sha256"] == V21_SPLIT_OF_RECORD["split_sha256"]
+              and plan21.info["test_ids_sha256"]
+              == V21_SPLIT_OF_RECORD["test_ids_sha256"]
+              and plan21.info["rule"].startswith("topic-grouped:"),
+              "and its stamp carries the recorded split_sha256, the recorded "
+              "membership sha and the same rule string the banked summaries carry")
+    else:
+        skip("the v2.1 BYTE-EXACT split proof",
+             f"{real_v21} is absent from this tree (a repo data artifact). The "
+             f"proof asserts recorded shas and cannot be synthesized")
+
+    print("== selftest 6b: a webtext-v3 basis with NO artifact REFUSES ==")
+    with _tf.TemporaryDirectory(prefix="a8_v3_") as td:
+        root = Path(td)
+        v3_rows = _v3_fixture_rows()
+        v3_man = root / "corpus_manifest.json"
+        v3_sha = _write_fixture_manifest(v3_man, v3_rows)
+        v3_ids = [str(r["text_id"]) for r in v3_rows]
+        v3_labels = load_labels(v3_man, v3_ids)
+        n_top, n_s2 = legacy_split_capacity(v3_labels)
+        check((n_top, n_s2) == (0, 0),
+              "the v3-shaped basis offers 0 topics and 0 S2 shard ranks — the "
+              "legacy rule has nothing to draw from")
+        try:
+            make_split(v3_labels)
+            check(False, "make_split on a v3 basis must REFUSE")
+        except SplitSelectionError as exc:
+            check("--splits-artifact" in str(exc) and "empty test set" in str(exc),
+                  "make_split REFUSES and names --splits-artifact (never an empty "
+                  "test set, never a re-derivation)")
+        try:
+            resolve_split_plan(v3_labels, v3_ids, set(v3_ids), manifest=v3_man,
+                               manifest_sha256=v3_sha)
+            check(False, "the lane resolver must refuse too")
+        except SplitSelectionError:
+            check(True, "and the lane resolver refuses on the same basis — there "
+                        "is no path from a v3 manifest to a derived split")
+
+        print("== selftest 6c: the --splits-artifact happy path ==")
+        held = [f"{s}-00{i}" for s in _V3_FIXTURE_STRATA for i in (1, 5)]
+        inel = [f"{_V3_FIXTURE_STRATA[0]}-000", f"{_V3_FIXTURE_STRATA[0]}-007"]
+        sp_path = root / "splits.json"
+        sp_path.write_text(json.dumps(_splits_fixture(v3_sha, v3_ids, held, inel),
+                                      indent=1))
+        art = load_splits_artifact(sp_path)
+        check(art.sha256 == hashlib.sha256(sp_path.read_bytes()).hexdigest()
+              and art.source_path == str(sp_path),
+              "the loader records the artifact's own sha256 and path")
+        plan = resolve_split_plan(v3_labels, v3_ids, set(v3_ids), manifest=v3_man,
+                                  manifest_sha256=v3_sha, splits=art)
+        realized = [t for t, m in zip(v3_ids, plan.test) if m]
+        check(sorted(realized) == sorted(held) and int(plan.test.sum()) == len(held),
+              f"the realized test membership IS the artifact's ({len(held)} ids), "
+              f"row for row")
+        check(int(plan.train.sum()) == len(v3_ids) - len(held)
+              and plan.info["coverage"]["covers_the_whole_artifact"],
+              "train is the complement and the coverage read says so")
+        check(plan.info["source"] == "splits-artifact"
+              and plan.info["artifact_sha256"] == art.sha256
+              and plan.info["rule"] == art.rule.statement,
+              "the stamp names the source, the artifact sha and echoes the "
+              "artifact's OWN rule statement")
+        check(plan.info["overlap_integrity"]["n_ineligible_in_test"] == 0
+              and plan.info["overlap_integrity"]["n_ineligible_declared"] == len(inel),
+              "the overlap integrity re-check ran on the REALIZED membership and "
+              "found zero ineligible ids in the test side")
+        check(plan.info["basis"]["matches_prereg_basis_identity"]
+              and plan.info["basis"]["manifest_sha256_loaded"] == v3_sha,
+              "and the stamp records both manifest shas it compared")
+
+        print("== selftest 6d: an artifact from ANOTHER corpus REFUSES ==")
+        bad = _splits_fixture("f" * 64, v3_ids, held, inel)
+        bad_path = root / "splits_other_basis.json"
+        bad_path.write_text(json.dumps(bad, indent=1))
+        try:
+            resolve_split_plan(v3_labels, v3_ids, set(v3_ids), manifest=v3_man,
+                               manifest_sha256=v3_sha,
+                               splits=load_splits_artifact(bad_path))
+            check(False, "a manifest-sha mismatch must REFUSE")
+        except SplitSelectionError as exc:
+            check(v3_sha[:16] in str(exc) and "f" * 16 in str(exc),
+                  "a membership drawn from a different corpus REFUSES, naming "
+                  "both shas")
+
+        print("== selftest 6e: ids that do not resolve REFUSE ==")
+        ghost = _splits_fixture(v3_sha, v3_ids, held, inel)
+        ghost["test_ids"] = sorted(set(ghost["test_ids"]) | {"ghost-999"})
+        ghost["counts"]["n_test"] += 1
+        ghost["counts"]["n_texts"] += 1
+        ghost["per_stratum"]["ghost"] = {"holdout_group_keys": ["ghost-999"],
+                                         "test_ids": ["ghost-999"]}
+        gp = root / "splits_ghost.json"
+        gp.write_text(json.dumps(ghost, indent=1))
+        try:
+            resolve_split_plan(v3_labels, v3_ids, set(v3_ids), manifest=v3_man,
+                               manifest_sha256=v3_sha,
+                               splits=load_splits_artifact(gp))
+            check(False, "an unresolvable text_id must REFUSE")
+        except SplitSelectionError as exc:
+            check("ghost-999" in str(exc) and "do not resolve" in str(exc),
+                  "an artifact id absent from the corpus REFUSES, naming it")
+        short = _splits_fixture(v3_sha, v3_ids[:-1], held, inel)
+        shp = root / "splits_short.json"
+        shp.write_text(json.dumps(short, indent=1))
+        try:
+            resolve_split_plan(v3_labels, v3_ids, set(v3_ids), manifest=v3_man,
+                               manifest_sha256=v3_sha,
+                               splits=load_splits_artifact(shp))
+            check(False, "a corpus row on NEITHER side must REFUSE")
+        except SplitSelectionError as exc:
+            check("NEITHER side" in str(exc),
+                  "a loaded row the artifact does not place REFUSES rather than "
+                  "silently becoming train")
+        leak = _splits_fixture(v3_sha, v3_ids, held + [inel[0]], inel)
+        lp = root / "splits_leak.json"
+        lp.write_text(json.dumps(leak, indent=1))
+        try:
+            load_splits_artifact(lp)
+            check(False, "an ineligible id on the test side must REFUSE")
+        except SplitSelectionError as exc:
+            check("ineligible" in str(exc),
+                  "an artifact whose OWN test side carries an ineligible id is "
+                  "refused at load — the fitter re-checks rather than trusts")
+
+        print("== selftest 6f: the --half a|b lane ==")
+        half_a_ids = [i for i in v3_ids if int(i.rsplit("-", 1)[1]) % 2 == 0]
+        a_test = [i for i in half_a_ids if i.endswith("-002")]
+        half_b_ids = [i for i in v3_ids if i not in set(half_a_ids)]
+        b_test = [i for i in half_b_ids if i.endswith("-003")]
+        hv_path = root / "halves.json"
+        hv_path.write_text(json.dumps(
+            _halves_fixture(v3_sha, v3_ids, half_a_ids, a_test, b_test, inel),
+            indent=1))
+        hv = load_halves_artifact(hv_path)
+        plans = {}
+        for hf, members, htest in (("a", half_a_ids, a_test),
+                                   ("b", half_b_ids, b_test)):
+            p = resolve_split_plan(v3_labels, v3_ids, set(v3_ids), manifest=v3_man,
+                                   manifest_sha256=v3_sha, halves=hv, half=hf)
+            plans[hf] = p
+            kept = [t for t, k in zip(v3_ids, p.keep) if k]
+            realized = [t for t, m in zip(kept, p.test) if m]
+            check(sorted(kept) == sorted(members),
+                  f"half {hf}: the fit is restricted to the artifact's "
+                  f"{len(members)} members")
+            check(sorted(realized) == sorted(htest),
+                  f"half {hf}: the internal split is the artifact's own "
+                  f"({len(htest)} held out), never recomputed")
+            check(p.info["half"] == hf and p.info["artifact_sha256"] == hv.sha256
+                  and p.info["half_stream"] == f"split-v3-half-{hf}",
+                  f"half {hf}: the stamp carries the half identity, the artifact "
+                  f"sha and the half's own stream")
+            check(p.info["overlap_integrity"]["n_ineligible_in_test"] == 0,
+                  f"half {hf}: zero ineligible ids in its internal test side "
+                  f"(re-checked on the realized membership)")
+        ka = {t for t, k in zip(v3_ids, plans["a"].keep) if k}
+        kb = {t for t, k in zip(v3_ids, plans["b"].keep) if k}
+        check(not (ka & kb) and ka | kb == set(v3_ids),
+              "the two halves are DISJOINT and exhaustive as realized by the fitter")
+        check(plans["a"].info["test_ids_sha256"] != plans["b"].info["test_ids_sha256"],
+              "and the two halves stamp different MEMBERSHIPS "
+              "(test_ids_sha256), so no reader can confuse an I1 half with the "
+              "other — note the mask-only split_sha256 CAN coincide across "
+              "halves, which is why the membership sha exists")
+        for kwargs, why in (
+                ({"half": "a"}, "--half without the halves artifact"),
+                ({"halves": hv}, "--halves-artifact without --half"),
+                ({"halves": hv, "half": "a", "splits": art},
+                 "--splits-artifact AND --half together")):
+            try:
+                resolve_split_plan(v3_labels, v3_ids, set(v3_ids), manifest=v3_man,
+                                   manifest_sha256=v3_sha, **kwargs)  # type: ignore[arg-type]
+                check(False, f"{why} must REFUSE")
+            except SplitSelectionError:
+                check(True, f"{why} REFUSES rather than guessing")
+        try:
+            hv.half("c")
+            check(False, "an unknown half must REFUSE")
+        except SplitSelectionError:
+            check(True, "an unknown half name REFUSES")
+
+        print("== selftest 6g: a fits/ dir is never silently re-banked ==")
+        fdir = root / "fits"
+        fdir.mkdir()
+        (fdir / "cp2_summary.json").write_text(
+            json.dumps({"split": plans["a"].info}))
+        check(_ok(lambda: guard_fits_dir(fdir, plans["a"].info)),
+              "the same split re-runs into the same directory (a rerun is fine)")
+        for other, why in ((plans["b"].info, "the OTHER half"),
+                           (plan.info, "the whole-corpus artifact split")):
+            try:
+                guard_fits_dir(fdir, other)
+                check(False, f"banking {why} over half a must REFUSE")
+            except SplitSelectionError:
+                check(True, f"banking {why} into half a's directory REFUSES "
+                            f"(--fits-dirname is the answer)")
+
+    print("== selftest 6h: the FROZEN artifacts themselves ==")
+    if have_splits:
+        assert splits_artifact is not None
+        real_sp = load_splits_artifact(Path(splits_artifact))
+        derived_sha, matches = real_sp.basis.derived_from_manifest_sha256()
+        check(real_sp.counts.n_test == len(real_sp.test_ids)
+              and real_sp.counts.n_train == len(real_sp.train_ids)
+              and real_sp.counts.n_texts == len(set(real_sp.test_ids)
+                                                | set(real_sp.train_ids)),
+              f"the frozen splits.json (sha {real_sp.sha256[:12]}…) is internally "
+              f"consistent: {real_sp.counts.n_test}/{real_sp.counts.n_texts} held "
+              f"out, basis {real_sp.basis.corpus}")
+        check(matches and derived_sha == real_sp.basis.expected_v3_manifest_sha256,
+              f"and it was derived from the prereg's basis identity "
+              f"{derived_sha[:12]}…")
+        check(_raises(lambda: require_basis_match(
+            real_sp.basis, loaded_sha="0" * 64, manifest=Path("x"),
+            artifact_path=real_sp.source_path, kind="splits"), SplitSelectionError),
+              "and the belongs-to-this-basis gate REFUSES a corpus it was not "
+              "derived from")
+    else:
+        skip("the FROZEN splits.json block",
+             "no --splits-artifact path was given (the artifacts are desk-side "
+             "staging, never git); the fixtures above cover the same claims")
+    if have_halves:
+        assert halves_artifact is not None
+        real_hv = load_halves_artifact(Path(halves_artifact))
+        a_ids, b_ids = set(real_hv.half_a.text_ids), set(real_hv.half_b.text_ids)
+        check(not (a_ids & b_ids) and len(a_ids) == len(b_ids),
+              f"the frozen halves.json (sha {real_hv.sha256[:12]}…) holds two "
+              f"disjoint halves of {len(a_ids)}")
+        check(all(set(getattr(real_hv, k).internal_split.test_ids)
+                  <= set(getattr(real_hv, k).text_ids)
+                  for k in ("half_a", "half_b")),
+              "each half's internal test side lies INSIDE that half")
+    else:
+        skip("the FROZEN halves.json block",
+             "no --halves-artifact path was given (desk-side staging, never git)")
+
     print(f"\nselftest: {len(failures)} failure(s)")
     #  RAKE M44: coverage is part of the verdict, and per configuration — a bare
     #  pass count cannot be read without knowing which cell produced it.
@@ -1678,10 +2842,36 @@ def main() -> int:
                          "chat template, so its native arm does not exist) — and see "
                          "A8-add-7.1: a raw-arm-only model's constants live in the "
                          "PARALLEL RAW-ARM star system, never the native one.")
+    ap.add_argument("--splits-artifact", type=Path, default=None,
+                    help="the FROZEN webtext-v3 splits.json (prereg §2). The "
+                         "membership is CONSUMED, never re-derived; without it a "
+                         "webtext-v3 manifest REFUSES rather than holding nothing "
+                         "out. Desk-side staging path (never git).")
+    ap.add_argument("--halves-artifact", type=Path, default=None,
+                    help="the FROZEN halves.json (prereg §6-I1). Required by "
+                         "--half; carries each half's membership AND its own "
+                         "internal train/test split.")
+    ap.add_argument("--half", default=None, choices=sorted(HALF_KEYS),
+                    help="fit ONE §6-I1 half: restrict to its membership and use "
+                         "that half's internal split from the artifact. The half "
+                         "identity and the artifact sha go into the stamp.")
     ap.add_argument("--selftest", action="store_true")
     args = ap.parse_args()
     if args.selftest:
-        return selftest()
+        return selftest(splits_artifact=args.splits_artifact,
+                        halves_artifact=args.halves_artifact)
+    if args.half and not args.halves_artifact:
+        raise SystemExit(
+            f"--half {args.half} needs --halves-artifact <…/halves.json>: the "
+            f"§6-I1 halving is FROZEN and is never recomputed at fit time")
+    if args.half and args.splits_artifact:
+        raise SystemExit(
+            "--splits-artifact and --half are two different memberships (the whole "
+            "corpus vs one half with its own internal split) — pass one, never both")
+    if args.halves_artifact and not args.half:
+        raise SystemExit(
+            "--halves-artifact was given without --half a|b: which half is the fit? "
+            "Never guessed")
     strata = ([s.strip() for s in args.fit_strata.split(",") if s.strip()]
               if args.fit_strata else None)
     arms = tuple(a.strip() for a in args.arms.split(",") if a.strip())
@@ -1701,6 +2891,8 @@ def main() -> int:
                 f"explicitly — sites from curves, never fiat.")
     run_grid(args.arm_root, args.source_model, args.target_model, n_null=args.n_null,
              fit_strata=strata, fits_dirname=args.fits_dirname, arms=arms,
+             splits_artifact=args.splits_artifact,
+             halves_artifact=args.halves_artifact, half=args.half,
              k_grid=(tuple(int(k) for k in args.k_grid.split(","))
                      if args.k_grid else K_GRID),
              sites_override={
