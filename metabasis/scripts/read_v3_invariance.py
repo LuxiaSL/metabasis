@@ -1274,6 +1274,24 @@ def _floor_diagnosis(floor: SeparationFloor) -> str:
         f"bar of {floor.alpha} — near-misses rather than collapses.")
 
 # ═══════════════════════════════════════════════════════════ the emitter
+def relativize(value: Any, repo: Path) -> Any:
+    """Rewrite any absolute path under `repo` to a repo-relative one, in place.
+
+    THE SANITIZATION RULE APPLIED AT THE SOURCE, not left to the desk sweep: an
+    absolute desk path carries a username, and an artifact is the wrong place
+    for one. Repo-relative is also the identity every other artifact in this
+    campaign cites, so this makes the reads artifact quotable beside them.
+    """
+    root = str(repo)
+    if isinstance(value, str):
+        return value.replace(root + "/", "").replace(root, ".")
+    if isinstance(value, dict):
+        return {k: relativize(v, repo) for k, v in value.items()}
+    if isinstance(value, list):
+        return [relativize(v, repo) for v in value]
+    return value
+
+
 def canonical_json(payload: Any) -> str:
     """Sorted keys, fixed separators, no NaN — the byte sequence is the artifact."""
     return json.dumps(payload, sort_keys=True, indent=1, ensure_ascii=False,
@@ -1482,6 +1500,8 @@ def hub_guard(banks: Banks, basis: Sequence[BasisSlot], ctx: Context,
         max_rank_guard_ratio=max_ratio,
         min_r2=(0.0 if min_r2 == float("inf") else min_r2),
         quotable=(n_rank == 0 and n_invalid == 0), violations=violations[:40])
+    # (`violations` names DIRECTORY BASENAMES only, never a resolved path — see
+    # the `.name` uses above — so it carries no root to sanitize.)
 
 
 # ═══════════════════════════════════════════════════ the HL-2 predictor slate
@@ -3017,11 +3037,11 @@ def run_reads(repo: Path, out_dir: Path, verify: bool = True,
             "33ba8290487813a80001c4cf5b71bbb57b57004ff610aa9fcf1f651005875902"),
         artifact_path=str(banks.artifact_path.relative_to(repo)),
         artifact_sha256=verification.sha256_recomputed,
-        stamp_verification=verification.model_dump(),
+        stamp_verification=relativize(verification.model_dump(), repo),
         corpus_manifest_sha256=self_desc["corpus_manifest_sha256"],
         splits_sha256=sha256_of(splits_path),
         halves_sha256=sha256_of(halves_path),
-        manifests_verified=[c.model_dump() for c in checks],
+        manifests_verified=[relativize(c.model_dump(), repo) for c in checks],
         family_of_record=RANK_OF_RECORD, basis_n=len(basis),
         contexts=[c.key for c in grid], hub_sites=hub_sites,
         scores={k: {h: s.model_dump() for h, s in v.items()}
@@ -3223,7 +3243,18 @@ def selftest() -> int:                                   # noqa: C901 — a chec
     check(canonical_json(payload) == canonical_json(dict(reversed(list(
         payload.items())))), "key order does not change the bytes")
 
-    print("── 8. tier membership on a constructed fixture")
+    print("── 8. the sanitizing relativizer")
+    repo = Path("/somewhere/a-user/proj")
+    got = relativize({"p": "/somewhere/a-user/proj/staging/x.json",
+                      "l": ["/somewhere/a-user/proj/y", "staging/z"],
+                      "n": 3, "root": "/somewhere/a-user/proj"}, repo)
+    check(got["p"] == "staging/x.json", "an absolute path under the repo goes relative")
+    check(got["l"] == ["y", "staging/z"], "lists are walked; relatives untouched")
+    check(got["n"] == 3, "non-strings pass through")
+    check(got["root"] == ".", "the bare root becomes '.'")
+    check("a-user" not in json.dumps(got), "no username survives")
+
+    print("── 9. tier membership on a constructed fixture")
     # leader clearly best; one candidate significantly worse but INSIDE delta
     # (must be quoted practically-equivalent, NOT expelled); one worse and
     # outside delta (must be expelled).
@@ -3254,7 +3285,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
           "a significant-but-sub-delta candidate is quoted “statistically "
           "distinguishable, practically equivalent” and NOT expelled")
 
-    print("── 9. the population filter re-aggregates, never re-measures")
+    print("── 10. the population filter re-aggregates, never re-measures")
     mixed_errors = [
         SlotError(ordinal=i, prediction_id=f"p{i}",
                   arm=("native" if i < 6 else "raw"), a_comp=0.0, a_obs=0.0,
@@ -3282,7 +3313,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
           "a hub with no slot in the requested arm is DROPPED from the "
           "population rather than carried with an empty median")
 
-    print("── 10. the rank guard arithmetic")
+    print("── 11. the rank guard arithmetic")
     row = FitRow(site_pair="a->b", arm="native", family="proc_k256",
                  n_train=460, n_test=140, r2=0.5, valid=True, k_effective=256)
     check(row.rank_guard_ok, "k256 clears the guard at per-half n_train = 460")
