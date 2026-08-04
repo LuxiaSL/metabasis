@@ -508,7 +508,53 @@ SITES = {"3b": (13, 14, 18), "8b": (14, 16, 18), "qwen-7b": (19, 21, 23),
          # L38 build + L35/L38 v2.1 state banks + their hub fits are REQUIRED
          # before any qwen3 slot files — the re-bank is QUEUED, census-first. See
          # `read_composed_predictions.SITE_OF_RECORD`.
-         "qwen3-30b-a3b": (35, 38)}                    # ⋆ L38 primary, L35 robustness
+         "qwen3-30b-a3b": (35, 38),                   # ⋆ L38 primary, L35 robustness
+         # --- webtext-v3 base siblings (roster rows 25/26) ----------------------
+         # BOTH RULED BY LUXIA 2026-08-03 (ledger "TWO SITE RULINGS") from the
+         # webtext-v3 sibling SCAN FITS — 12-site grids, raw arm, hub 8B, fitted
+         # on the FROZEN `--splits-artifact` membership (920/280, 36/36 cells
+         # valid each). These are the two §5 CORE adds that were SCAN-REGISTRY
+         # ONLY at freeze; §5 required the ceremony inside their collection
+         # window, and this is it.
+         #
+         # EACH GRID CARRIES ONE SITE THE CURVE NEVER VISITED, AND THAT IS THE
+         # POINT OF THE RULING. Frozen §7's C4 read compares each sibling pair
+         # base-vs-instruct AT THE SAME REGISTERED SITE and EXCLUDES a pair whose
+         # sites differ as site-confounded (the F3 lesson). So each base row is
+         # registered at its own curve pick PLUS its instruct partner's site of
+         # record — a requirement of the read, ruled explicitly, never a curve
+         # finding. Both extra sites are carried in `metabasis.roster` as
+         # `scan_grid_extension`, which is what makes them part of the EFFECTIVE
+         # scan grid and keeps the ratification invariant true rather than
+         # waived: the check below is against the extension-inclusive grid, the
+         # same mechanism gemma3-27b and pythia-6.9b use.
+         # ⚠ NEITHER PAIR-READ SITE IS BANKED YET (the scans collected the
+         # computed 12). The ruled re-collects join wave 3; until they land, a
+         # default-grid fit here resolves one site the bank does not hold, which
+         # fails loudly at load rather than quietly.
+         #
+         # llama-3.1-8b-base (row 25) — cp2 of record `488a81d1…`:
+         #  · L15 ⋆ is the RIDGE + CKA peak (ridge .7224, cka_after .9781).
+         #  · L13 is kept because it is the PROC-family peak (k128 AND k32) — the
+         #    families disagree on this node, and the grid records both answers
+         #    rather than hiding the disagreement behind one number.
+         #  · L16 is the C4 pair-read site, matched to instruct `8b`'s L16 (the
+         #    hub's own banked column, HUB_SITE_OF_RECORD). A 32-layer computed
+         #    grid is odd-only, so no curve could have produced it.
+         "llama-3.1-8b-base": (13, 15, 16),            # ⋆ L15 (L13 proc peak, L16 C4)
+         # qwen2.5-7b-base (row 26) — cp2 of record `cc9d474c…`:
+         #  · L20 ⋆ is the UNANIMOUS peak: every fit family agrees, .7796. This is
+         #    the clean case, and it is worth naming as such beside the llama
+         #    sibling's family split.
+         #  · 18 and 22 are its curve bracket (the usual flanking neighbours).
+         #  · L21 is the C4 pair-read site, matched to instruct `qwen-7b`'s L21.
+         #  · CURVE CAVEAT: the proc family COLLAPSES over L4–L8 (shallow-half
+         #    divergence); all families agree from L15 on, which is where the
+         #    ruling is drawn from. Nothing shallow is registered.
+         # The tuple is in the ORDER LUXIA RULED IT — bracket first, pair-read
+         # site appended — and is deliberately NOT re-sorted, so a reader sees
+         # the ruling's shape. Every consumer treats it as a set or iterates it.
+         "qwen2.5-7b-base": (18, 20, 22, 21)}          # ⋆ L20 (L21 C4 pair-read)
 
 # Every model key the CLIs will accept. SITES = models whose FIT grid is fixed;
 # metabasis.roster.SCAN_GRIDS = the 12-site alignment-curve scan grids (prereg §4,

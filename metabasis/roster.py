@@ -871,6 +871,114 @@ BEHAVIORAL_TIER: tuple[RosterNode, ...] = (
               "as always and is never hardcoded here."),
 )
 
+# The webtext-v3 SCALE ADD (2026-08-03): roster row 24, the third checkpoint the
+# frozen webtext-v3 prereg §5 names in the CORE roster ("the 17 collected star
+# nodes + Qwen2.5-72B-Instruct + Llama-3.1-8B base + Qwen2.5-7B base") and the
+# only one of the three that is an INSTRUCT checkpoint. It exists for the §7 C2
+# READ (recipe-vs-range): this node's descriptive hub rank and median |e| against
+# two PRE-NAMED outcomes — top-tier-equivalent at 72B supports the recipe
+# reading, degradation to llama-3.1-70b-instruct's tier supports the
+# range-artifact reading — scored by a paired sign test against row 11 on their
+# shared slots. The row is therefore only useful if it is comparable to the
+# 70Bs, which is what the grid note below is about.
+#
+# ⚠ BANK KEY, AND IT IS A CHOICE THIS ROW HAD TO MAKE: the frozen §5/§7 prose
+# names this checkpoint "Qwen2.5-72B-Instruct" and "qwen2.5-72b" and registers no
+# bank key. `qwen2.5-72b-instruct` continues the family's OWN key convention on
+# this roster (rows 8/9/10: qwen2.5-3b-instruct · qwen2.5-14b-instruct ·
+# qwen2.5-32b-instruct) rather than the prose's short form. Nothing was collected
+# under any other spelling — the bank does not exist yet — so this is a naming
+# decision and not a rename.
+#
+# ARCHITECTURE + IDENTITY are read from the staged, sha-certified pull of
+# 2026-08-03 (ledger "THE ROSTER-V3 WEIGHTS ARE STAGED"), never from this file's
+# memory: the checkpoint's own config.json at the pinned revision, and the
+# node-side `.metabasis-provenance.json` the fetcher wrote beside it.
+V3_SCALE_ADD: tuple[RosterNode, ...] = (
+    RosterNode(
+        key="qwen2.5-72b-instruct", model_id="Qwen/Qwen2.5-72B-Instruct",
+        roster_row=24, arms=("native", "raw"), num_hidden_layers=80,
+        hidden_size=8192, weights_dirname="Qwen2.5-72B-Instruct",
+        checkpoint_identity="instruct",
+        config_sha256="14ca217334fe0fd10148413592d68c99eeb33431ed89c1afa130fee560be2a29",
+        max_position_embeddings=32768,
+        notes="WEBTEXT-V3 CORE ADD (frozen prereg §5), and the §7 C2 "
+              "recipe-vs-range node: the Qwen2.5 family's TOP RUNG, set against "
+              "llama-3.1-70b-instruct (row 11) by a paired sign test on their "
+              "shared slots. PINNED REVISION "
+              "495f39366efef23836d0cfae4fbe635880d2be31 — the staging pull of "
+              "2026-08-03 fetched that commit (47 files, 145.42 GB) and verified "
+              "every LFS file's sha256 against the hub at it, two-sided, 100% of "
+              "weight bytes; the node-side provenance record carries the same "
+              "revision as `head_at_fetch`, and a COLD spot-rehash reproduced "
+              "config.json 14ca2173…, the first and last shards (18d5d2b7… / "
+              "d9e72766…) and the index (6c1d85ca…). Nothing was excluded from "
+              "this repo. "
+              "ARCHITECTURE, read from the checkpoint's own config.json at that "
+              "revision: Qwen2ForCausalLM, 80 decoder layers, hidden_size 8192, "
+              "64 attention heads / 8 kv heads (GQA 8:1), intermediate_size "
+              "29568, vocab 152064, rope_theta 1e6, tie_word_embeddings False, "
+              "torch_dtype bfloat16, transformers 4.43.1. "
+              "POSITIONAL CAPACITY 32768 — recorded because it is the SMALLEST "
+              "on the Qwen2.5 rungs (rows 8/9/10 and the base siblings all carry "
+              "131072) and because the job preflight's corpus-length check is "
+              "mechanical rather than folklore. `sliding_window` 131072 appears "
+              "in the config with `use_sliding_window` FALSE, so it is inert and "
+              "32768 is the ceiling that binds. No `max_seq_len` is set: the "
+              "corpus fits or the preflight blocks, and a truncation is a ruling, "
+              "not a default. "
+              "IDENTITY (rakes M9/M17(a)), STATED WITH ITS LIMIT: the "
+              "DISCRIMINATOR OF RECORD IS THE CONFIG SHA 14ca2173…, and what it "
+              "is verified against is the HUB — the two-sided pull above compares "
+              "this tree file-for-file with Qwen/Qwen2.5-72B-Instruct at the "
+              "pinned revision, so the row does not rest on the directory name "
+              "(M9). ⚠ NO SAME-SIZE SEPARATION WAS PERFORMED, because there is "
+              "nothing to separate from: Qwen2.5-72B (the base repo) is NOT on "
+              "either store, so unlike rows 25/26 this row shows no "
+              "base-vs-instruct discriminator table for its OWN size. What IS "
+              "shown, from the same staged config log: eos_token_id 151645 here "
+              "against 151643 on the staged Qwen2.5-7B BASE config (bos is "
+              "151643 on both) — the family's instruct signature, read off two "
+              "configs in one log rather than assumed. The conventional NAMES "
+              "for those ids (<|im_end|> / <|endoftext|>) are not re-verified "
+              "here; the IDS are what the log holds and what this row claims. "
+              "CHAT TEMPLATE: tokenizer_config.json sha "
+              "5b5d4f65d0acd3b2d56a35b56d374a36cbc1c8fa5cf3b3febbbfabf22f359583 "
+              "(7305 bytes), which MATCHES the value row 26 records for the "
+              "already-banked Qwen2.5-7B-Instruct sibling (`5b5d4f65…`) — the "
+              "Qwen2.5 instruct rungs appear to ship ONE template, so the native "
+              "arm here is template-matched to the banked `qwen-7b`. Recorded as "
+              "an observation at the recorded (prefix) precision, NOT as an arm "
+              "proof: the arm proof is `build_ids` at collection preflight, which "
+              "is where every other row's template facts came from. "
+              "ARMS native+raw by the instruct-class rule (frozen §3.2 scores an "
+              "instruct endpoint in both arms), the same rule rows 8/9/10 run "
+              "under — not an inference from the template sha above. "
+              "SCAN GRID: 80 layers, so the computed 12-site [0.15,0.85] grid is "
+              "(12,17,22,27,32,37,43,48,53,58,63,68) — DERIVED by `scan_grid`, "
+              "never typed. IT IS THE SAME GRID AS ROWS 11 AND 12 "
+              "(llama-3.1-70b-instruct and llama-3.3-70b-instruct, also 80 "
+              "layers), which is what makes the C2 comparison readable "
+              "SITE-FOR-SITE and not only by fractional depth. No ruled "
+              "extension. "
+              "NO SITE IS REGISTERED: `fit_transport_maps.SITES` and "
+              "`read_composed_predictions.SITE_OF_RECORD` stay UNSET until the "
+              "site-curve ceremony runs and Luxia rules on it — frozen §5 "
+              "requires exactly that for a core model without a registered site "
+              "at freeze. "
+              "NOT YET COLLECTED, WITH A NAMED BLOCKER THAT IS NOT A `blocked_"
+              "reason`: at 136 GiB on disk this node exceeds the 100 GiB "
+              "cohabitation ceiling on two cards, and the desk ruled "
+              "SHARD-ACROSS-3 for it and the 70B pair (72.2 GiB/card, a sharded "
+              "job runs as the SOLE job). That is a scheduling deviation the JOB "
+              "carries, not a registry block — the node is collectable, so "
+              "`blocked_reason` stays None and the scan joins wave 3. "
+              "WEIGHTS: the metabasis-owned v3 roster tree on the RAID (standing "
+              "placement ruling 2026-07-29), a plain directory named by "
+              "`weights_dirname`, 37 shards, index-complete; the full path is "
+              "passed via --model-path and is never hardcoded here."),
+)
+
 # The webtext-v3 BASE SIBLINGS (2026-08-03): the two base checkpoints the frozen
 # webtext-v3 prereg §5 names in the CORE roster ("the 17 collected star nodes +
 # Qwen2.5-72B-Instruct + Llama-3.1-8B base + Qwen2.5-7B base"). They exist to make
@@ -883,18 +991,27 @@ BEHAVIORAL_TIER: tuple[RosterNode, ...] = (
 # prereg's (rows 1–23); the webtext-v3 prereg names these three adds in PROSE and
 # numbers none of them. `roster_row` is a required field, so a number had to be
 # written: 24/25/26 continue the campaign table in the order §5 lists the adds
-# (Qwen2.5-72B-Instruct · Llama-3.1-8B base · Qwen2.5-7B base), which is why 24 is
-# LEFT FREE here for the 72B. Nothing keys off the number.
+# (Qwen2.5-72B-Instruct · Llama-3.1-8B base · Qwen2.5-7B base) — row 24 is
+# `V3_SCALE_ADD` above. Nothing keys off the number.
 #
 # WHAT A ROW BUYS, AND WHAT IT DOES NOT. It buys exactly one thing, the same one
 # it buys anywhere in this module: SCAN_GRIDS gains the key, so `MODEL_KEYS =
 # SITES ∪ SCAN_GRIDS` accepts it and `collect_mean_states.py --model` will run it.
-# It registers NO site. `fit_transport_maps.SITES` and
-# `read_composed_predictions.SITE_OF_RECORD` stay UNSET for both keys until each
-# has had its site-curve ceremony and Luxia has ruled — sites from curves, never
-# fiat, and the frozen §5 requires exactly that ("Core models without a registered
-# site at freeze receive the site-curve ceremony inside their collection window,
+# A row registers NO site by itself — sites from curves, never fiat, and the
+# frozen §5 requires exactly that ("Core models without a registered site at
+# freeze receive the site-curve ceremony inside their collection window,
 # registered BEFORE any fit of theirs is quoted").
+#
+# THE CEREMONY HAS NOW RUN FOR BOTH OF THESE KEYS AND LUXIA HAS RULED
+# (2026-08-03, on the sibling scan curves; ledger "TWO SITE RULINGS"): both are
+# registered in `fit_transport_maps.SITES` and
+# `read_composed_predictions.SITE_OF_RECORD`, and each carries a
+# `scan_grid_extension` of ONE site — the ruled SAME-SITE pair-read site that the
+# computed 12 never visited. The per-row notes below carry the evidence; the
+# extension field is what keeps the ratification invariant honest about it (a
+# site registered off the effective scan grid is a fiat grid by construction, and
+# `fiat_grid_problems` would fail the import). Row 24 above is still UNSET: its
+# collection has not happened, so its ceremony has not either.
 #
 # ARMS ARE RAW-ONLY, BY DESK RULING (2026-08-03, ledger block of record) — and
 # note that this is a RULING and not an inference from the checkpoints: llama-base
@@ -921,6 +1038,13 @@ V3_BASE_SIBLINGS: tuple[RosterNode, ...] = (
         weights_dirname="Llama-3.1-8B", checkpoint_identity="base",
         config_sha256="54acfad3cffe057640904ca8a1e83525e6551c70c7a04c641f5a9eda0bbf64bd",
         max_position_embeddings=131072,
+        # RULED BY LUXIA 2026-08-03 (ledger "TWO SITE RULINGS"): L16 is the §7
+        # C4 SAME-SITE pair-read site, matched to instruct `8b`'s L16, and the
+        # computed [0.15,0.85] grid (odd sites only on a 32-layer stack) never
+        # visits it. Recorded HERE, as the ruled deviation, because
+        # `fit_transport_maps.SITES` registers it and the ratification invariant
+        # checks registrations against the EFFECTIVE scan grid — see the notes.
+        scan_grid_extension=(16,),
         notes="WEBTEXT-V3 CORE ADD (frozen prereg §5): the pretrain PARENT of the "
               "campaign's primary hub `8b` (Llama-3.1-8B-Instruct), which is what "
               "makes the §C4 sibling read a post-training contrast and not a "
@@ -953,10 +1077,29 @@ V3_BASE_SIBLINGS: tuple[RosterNode, ...] = (
               "SCAN GRID: 32 layers, so the computed 12-site [0.15,0.85] grid is "
               "(5,7,9,11,13,15,17,19,21,23,25,27) — DERIVED by `scan_grid`, never "
               "typed, and identical to the value the staged evidence log "
-              "computed. No ruled extension. "
-              "NO SITE IS REGISTERED: `fit_transport_maps.SITES` and "
-              "`read_composed_predictions.SITE_OF_RECORD` stay UNSET until the "
-              "site-curve ceremony runs and Luxia rules on it. "
+              "computed. That grid is what the SCAN ran on (12 sites, raw, 36/36 "
+              "cells valid). "
+              "⚠ ONE RULED EXTENSION, L16, AND IT IS NOT A CURVE SITE: see "
+              "`scan_grid_extension` above. L16 was added by Luxia's ruling for "
+              "the §7 C4 SAME-SITE sibling read against instruct `8b`'s L16 — "
+              "frozen §7 EXCLUDES a sibling pair whose sites differ as "
+              "site-confounded, so the pair-read site is a requirement of the "
+              "read rather than a finding of the curve. The 32-layer computed "
+              "grid is odd-only and cannot contain 16 at all, so no curve could "
+              "have produced it. "
+              "SITES REGISTERED (13, 15, 16) ⋆ L15 — RULED BY LUXIA 2026-08-03 "
+              "on the webtext-v3 sibling scan curve (fits_scan cp2 `488a81d1…`, "
+              "36/36 valid, on the FROZEN --splits-artifact membership 920/280): "
+              "L15 is the ridge + cka peak (ridge .7224, cka_after .9781), L13 is "
+              "kept because it is the PROC-family peak (k128 and k32 both), and "
+              "L16 is the pair-read site above. `fit_transport_maps.SITES` and "
+              "`read_composed_predictions.SITE_OF_RECORD` carry the same ruling; "
+              "the two registries must agree. "
+              "⚠ L16 IS NOT BANKED YET: the scan collected the computed 12, so a "
+              "default-grid fit resolves a site the bank does not hold until the "
+              "ruled ~70s re-collect lands (it joins wave 3 with the ⋆-site "
+              "collections). The registry states the RULING; the bank catches up "
+              "to it. "
               "WEIGHTS: the metabasis-owned v3 roster tree on the RAID (standing "
               "placement ruling 2026-07-29), a plain directory named by "
               "`weights_dirname`; the full path is passed via --model-path and is "
@@ -970,6 +1113,11 @@ V3_BASE_SIBLINGS: tuple[RosterNode, ...] = (
         weights_dirname="Qwen2.5-7B", checkpoint_identity="base",
         config_sha256="267ce68584c5f24c3b267d934db2de68dd21d1ca677fb78ed809eb60067f7642",
         max_position_embeddings=131072,
+        # RULED BY LUXIA 2026-08-03, exactly as on the llama sibling above: L21
+        # is the §7 C4 SAME-SITE pair-read site, matched to instruct `qwen-7b`'s
+        # L21, and the computed 28-layer grid does not visit it (it holds 20 and
+        # 22, straddling it).
+        scan_grid_extension=(21,),
         notes="WEBTEXT-V3 CORE ADD (frozen prereg §5): the pretrain PARENT of the "
               "carried banked node `qwen-7b` (Qwen2.5-7B-Instruct), the second "
               "sibling pair of the §C4 base-vs-instruct read. PINNED REVISION "
@@ -1002,10 +1150,27 @@ V3_BASE_SIBLINGS: tuple[RosterNode, ...] = (
               "SCAN GRID: 28 layers, so the computed 12-site [0.15,0.85] grid is "
               "(4,6,8,10,11,13,15,17,18,20,22,24) — DERIVED by `scan_grid`, never "
               "typed, and identical to the value the staged evidence log "
-              "computed. Note the DEDUPE-FREE 12 despite the shallow stack. No "
-              "ruled extension. "
-              "NO SITE IS REGISTERED: SITES and SITE_OF_RECORD stay UNSET until "
-              "the site-curve ceremony runs and Luxia rules. "
+              "computed. Note the DEDUPE-FREE 12 despite the shallow stack. That "
+              "grid is what the SCAN ran on (raw, 36/36 cells valid). "
+              "⚠ ONE RULED EXTENSION, L21, AND IT IS NOT A CURVE SITE: see "
+              "`scan_grid_extension` above — the §7 C4 SAME-SITE pair-read site "
+              "matched to instruct `qwen-7b`'s L21, required by the read (a pair "
+              "whose sites differ is quoted site-confounded and EXCLUDED) rather "
+              "than found by the curve, which straddles it at 20 and 22. "
+              "SITES REGISTERED (18, 20, 22, 21) ⋆ L20 — RULED BY LUXIA "
+              "2026-08-03 on the webtext-v3 sibling scan curve (fits_scan cp2 "
+              "`cc9d474c…`, 36/36 valid, FROZEN --splits-artifact membership): "
+              "L20 is the UNANIMOUS peak — every fit family agrees, .7796 — and "
+              "18/22 are its curve bracket; L21 is the pair-read site. The tuple "
+              "is written in the ORDER LUXIA RULED IT (bracket first, pair-read "
+              "site appended), not re-sorted, so the registry reads as the ruling "
+              "reads; nothing downstream depends on the order. CURVE CAVEAT "
+              "RECORDED WITH THE PICK: the proc family COLLAPSES over L4–L8 "
+              "(shallow-half divergence); all families agree from L15 on, which "
+              "is the region the ruling is drawn from. "
+              "⚠ L21 IS NOT BANKED YET — same state as the llama sibling's L16: "
+              "the ruled re-collect joins wave 3, and until it lands a "
+              "default-grid fit resolves one site the bank does not hold. "
               "WEIGHTS: the metabasis-owned v3 roster tree on the RAID, flat "
               "directory layout, 4 shards, index-complete; the full path is "
               "passed via --model-path and is never hardcoded here."),
@@ -1013,7 +1178,8 @@ V3_BASE_SIBLINGS: tuple[RosterNode, ...] = (
 
 ROSTER: dict[str, RosterNode] = {
     n.key: n for n in WAVE1 + HUB_RUNGS_2 + MOE_CHAT + BIG_CHAIN_SINGLE_CARD
-    + BIG_CHAIN_MULTICARD + CARRIED_BANKED + BEHAVIORAL_TIER + V3_BASE_SIBLINGS}
+    + BIG_CHAIN_MULTICARD + CARRIED_BANKED + BEHAVIORAL_TIER + V3_SCALE_ADD
+    + V3_BASE_SIBLINGS}
 
 #: model key -> the grid it was actually collected and curve-scanned on. This is
 #: what `--sites` should carry for a scan collection, and what `--tgt-sites`

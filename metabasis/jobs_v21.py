@@ -800,8 +800,60 @@ class FitSpec(_LaneBase):
     n_null: Optional[int] = None
     k_grid: str = ""
     fits_dirname: str
+    #  ── THE SPLIT LANE (`ced99f7`, prereg §2 / §6-I1) ────────────────────────
+    #  The webtext-v3 membership is FROZEN by `derive_webtext_splits.py` and
+    #  CONSUMED by the fitter; it is never re-derived at fit time. Three lanes,
+    #  no fallback between them, and this spec carries whichever one the job
+    #  means so the CHOICE is reviewable in the spec rather than only in a shell
+    #  history:
+    #      splits_artifact          the frozen main split (920/280)
+    #      half + halves_artifact   one frozen §6-I1 half, on its OWN internal split
+    #      neither                  the legacy v2.1 in-code derivation
+    #  Left as strings (not Path) for the same reason every other node-side path
+    #  here is: they are DEPLOYMENT facts, so they carry `<<TOKEN>>` placeholders
+    #  and are resolved by the overlay at render time.
+    splits_artifact: str = Field(
+        default="",
+        description="node-side path to the FROZEN splits.json; renders "
+                    "--splits-artifact. Empty = this job does not use that lane")
+    halves_artifact: str = Field(
+        default="",
+        description="node-side path to the FROZEN halves.json; renders "
+                    "--halves-artifact. Required by `half`, meaningless without it")
+    half: Optional[Literal["a", "b"]] = Field(
+        default=None,
+        description="fit ONE §6-I1 half; renders --half. The §6-I1 halving names "
+                    "exactly two halves, so the type is the vocabulary — a "
+                    "typo'd half is refused by the spec, not by the node")
     marker: str = Field(default="FIT-PAIR-V21")
     log_stem: str = Field(default="fit-pair-v21")
+
+    @model_validator(mode="after")
+    def _one_split_lane(self) -> "FitSpec":
+        """The fitter's OWN three refusals, moved to spec-load time.
+
+        `fit_transport_maps.main` raises `SystemExit` on each of these. A job
+        script that carries the malformed combination is a job that queues,
+        dispatches, loads a venv and THEN dies on its own argv — so the same
+        three rules are enforced here, where the spec is read, and the wording
+        stays close to the CLI's so a reader meets one refusal, not two.
+        """
+        pair = f"{self.source_model}->{self.target_model}"
+        if self.half and not self.halves_artifact:
+            raise ValueError(
+                f"{pair}: half={self.half!r} needs `halves_artifact` "
+                f"(…/halves.json) — the §6-I1 halving is FROZEN and is never "
+                f"recomputed at fit time")
+        if self.half and self.splits_artifact:
+            raise ValueError(
+                f"{pair}: `splits_artifact` and `half` are two different "
+                f"memberships (the whole corpus vs one half with its own "
+                f"internal split) — carry one, never both")
+        if self.halves_artifact and not self.half:
+            raise ValueError(
+                f"{pair}: `halves_artifact` without `half` — which half is the "
+                f"fit? Never guessed")
+        return self
 
 
 JobSpec = Annotated[
@@ -998,6 +1050,18 @@ def _context(spec: JobSpec, *, fidelity: bool = False) -> RenderContext:
             "n_null": spec.n_null or 0, "has_n_null": spec.n_null is not None,
             "fits_dirname": spec.fits_dirname, "marker": spec.marker,
             "log_stem": spec.log_stem,
+            #  The split lane. `has_*` is what the template switches on, so an
+            #  unset lane emits NOTHING — the legacy in-code derivation is the
+            #  absence of both flags, exactly as the CLI defines it.
+            "splits_artifact": spec.splits_artifact,
+            "has_splits_artifact": bool(spec.splits_artifact),
+            "halves_artifact": spec.halves_artifact,
+            "has_halves_artifact": bool(spec.halves_artifact),
+            "half": spec.half or "", "has_half": spec.half is not None,
+            #  The third lane is an ABSENCE, so it gets its own flag: a log that
+            #  says which membership was used beats a reader inferring it from
+            #  two flags that are not there.
+            "legacy_split": not (spec.splits_artifact or spec.half),
         })
     return ctx
 

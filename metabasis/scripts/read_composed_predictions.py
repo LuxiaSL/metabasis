@@ -629,6 +629,23 @@ SITE_OF_RECORD: dict[str, int] = {
     # `--candidates` must NOT enumerate it (there is no collection vectors dir at
     # all; see also `vector_bank_paths`).
     "qwen3-30b-a3b": 38,
+    # webtext-v3 base siblings (roster rows 25/26), BOTH RULED BY LUXIA
+    # 2026-08-03 from the sibling scan fits on the FROZEN --splits-artifact
+    # membership. `fit_transport_maps.SITES` carries the full rationale and the
+    # cp2 shas; the two registries must agree.
+    #  · llama-3.1-8b-base L15 — ridge + cka peak (.7224 / .9781). Its grid also
+    #    holds L13 (the PROC-family peak, the families disagree here) and L16
+    #    (the §7 C4 same-site pair-read site, matched to instruct `8b`).
+    #  · qwen2.5-7b-base L20 — the UNANIMOUS all-families peak (.7796), bracketed
+    #    by 18/22, with L21 as its C4 pair-read site (matched to `qwen-7b`).
+    # ⚠ THE COLLECTION SIDE IS NOT COMPLETE, AND IT IS NAMED RATHER THAN
+    # ASSUMED: the scans banked the computed 12-site grids, so the ruled
+    # pair-read sites (L16 / L21) and the ⋆-site re-collects join wave 3. Until
+    # they land these keys resolve to a site the banks hold for the ⋆ but not
+    # for the C4 partner column, and no v3 slot filed off this registry may
+    # quote a C4 sibling delta before that re-collect is certified.
+    "llama-3.1-8b-base": 15,
+    "qwen2.5-7b-base": 20,
 }
 
 #: Checkpoint identity for models NOT in `metabasis.roster.ROSTER` (which holds

@@ -50,11 +50,11 @@ echo "host $(hostname)  model $MODEL  arms $ARMS  cvd=$CUDA_VISIBLE_DEVICES"
 echo "code $CODE   arm-root $ARM   sites $SITES   spot-replay K=$SPOT_K"
 echo "{{corpus_label}} verified in place: ${{corpus_var}}   log $LOG"
 
-python - "$MODEL" "$SITES" "$ARM" "${{corpus_var}}" "$ARMS" <<'PREFLIGHT'
+python - "$MODEL" "$SITES" "$ARM" "${{corpus_var}}" "$ARMS" "$MODEL_PATH" <<'PREFLIGHT'
 import hashlib, json, sys
 from pathlib import Path
 
-model, sites, arm_root, corpus_sha, arms = sys.argv[1:6]
+model, sites, arm_root, corpus_sha, arms, model_path = sys.argv[1:7]
 
 # --- the node must not be BLOCKED, and the block lives in the registry -------
 from metabasis.roster import ROSTER, SCAN_GRIDS, blocked_nodes
@@ -117,6 +117,53 @@ else:
     print(f"preflight: {model} is a CARRIED-BANKED key (no roster row) — arms "
           f"and deviations are the ones its banked collection stamp used, "
           f"passed explicitly: arms={list(staged_arms)}")
+
+# --- THE POSITION CEILING IS CHECKED, NOT ANNOUNCED --------------------------
+# The wave-1 scan script BLOCKS on the position capacity; this template used to
+# print the registry's deviations and assert nothing, so a row whose recorded
+# `max_position_embeddings` had drifted from the checkpoint at --model-path (a
+# stale row, or a DIFFERENT checkpoint wearing the expected dirname) reached the
+# collector unchallenged. Two refusals, both read from the checkpoint's OWN
+# config.json — plain JSON, no transformers, before any weights load:
+#   registry ceiling != checkpoint ceiling   the row does not describe this tree
+#   registry max_seq_len > checkpoint ceiling  the ruled truncation cannot run
+# A row that records NO ceiling (the wave-1 rows, and gemma3-27b whose config
+# carries none at all) is a NAMED GAP and not a refusal — the registry never
+# claimed a number to disagree with.
+# ⚠ NOT REPRODUCED HERE, AND NAMED SO IT IS NOT MISTAKEN FOR COVERED: the wave-1
+# script also templates every corpus text and blocks when the LONGEST sequence
+# exceeds the capacity. That needs the tokenizer (`build_ids`), which this
+# preflight deliberately does not load. It is a desk call whether the collect
+# lane grows that check or keeps it in the collector.
+ckpt_cfg_path = Path(model_path) / "config.json"
+ckpt_cap = None
+try:
+    ckpt_cfg = json.loads(ckpt_cfg_path.read_bytes())
+    raw_cap = ckpt_cfg.get("max_position_embeddings")
+    ckpt_cap = int(raw_cap) if isinstance(raw_cap, int) else None
+except (OSError, ValueError) as exc:
+    print(f"preflight: NOT CHECKED — {ckpt_cfg_path} is unreadable ({exc}); the "
+          f"loader refuses on its own a moment later, and a preflight is not the "
+          f"place to re-diagnose that")
+registry_cap = node.max_position_embeddings if node is not None else None
+if node is not None and registry_cap is not None and ckpt_cap is not None \
+        and registry_cap != ckpt_cap:
+    print(f"PREFLIGHT-BLOCKED: roster row {node.roster_row} records "
+          f"max_position_embeddings {registry_cap} for {model}, but the "
+          f"checkpoint at --model-path reports {ckpt_cap}. Either the row is "
+          f"stale or this is not that checkpoint — both are rulings, never a "
+          f"job's call"); sys.exit(2)
+if node is not None and node.max_seq_len and ckpt_cap is not None \
+        and node.max_seq_len > ckpt_cap:
+    print(f"PREFLIGHT-BLOCKED: the registry's ruled truncation "
+          f"--max-seq-len {node.max_seq_len} exceeds the checkpoint's positional "
+          f"capacity {ckpt_cap} — a longer sequence indexes past the position "
+          f"table"); sys.exit(2)
+print(f"preflight: position capacity — registry "
+      f"{registry_cap if registry_cap is not None else 'UNRECORDED (named gap)'}"
+      f", checkpoint {ckpt_cap if ckpt_cap is not None else 'absent from config'}"
+      f", ruled truncation "
+      f"{node.max_seq_len if node is not None and node.max_seq_len else 'none'}")
 
 # --- the corpus, asserted from the manifest bytes AND through the loader -----
 man = Path(arm_root) / "corpus" / "corpus_manifest.json"

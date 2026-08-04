@@ -25,6 +25,19 @@ K_GRID="{{k_grid}}"
 {{#if has_n_null}}
 N_NULL="{{n_null}}"
 {{/if}}
+# The FROZEN split membership this fit CONSUMES (prereg §2 / §6-I1). Three
+# lanes, no fallback between them: the main split, one §6-I1 half on its own
+# internal split, or neither (the legacy v2.1 in-code derivation). Which one
+# this job is in, is visible right here rather than only in the fitter's stamp.
+{{#if has_splits_artifact}}
+SPLITS_ARTIFACT="{{splits_artifact}}"
+{{/if}}
+{{#if has_halves_artifact}}
+HALVES_ARTIFACT="{{halves_artifact}}"
+{{/if}}
+{{#if has_half}}
+HALF="{{half}}"
+{{/if}}
 
 ROOT="{{root}}"
 CODE="$ROOT/{{code_dirname}}"
@@ -46,6 +59,15 @@ export OMP_NUM_THREADS={{omp_num_threads}}
 
 echo "host $(hostname)  src $SRC  tgt $TGT  arms $ARMS  fits-dirname $FITS_DIRNAME"
 echo "code $CODE   arm-root $ARM   log $LOG"
+{{#if has_splits_artifact}}
+echo "split membership: FROZEN MAIN split, consumed from $SPLITS_ARTIFACT"
+{{/if}}
+{{#if has_half}}
+echo "split membership: FROZEN half $HALF (its own internal split), consumed from $HALVES_ARTIFACT"
+{{/if}}
+{{#if legacy_split}}
+echo "split membership: LEGACY in-code v2.1 derivation (no frozen artifact passed)"
+{{/if}}
 
 python - "$SRC" "$TGT" "$ARM" "$FITS_DIRNAME" <<'PREFLIGHT'
 import sys
@@ -102,6 +124,15 @@ python -m metabasis.scripts.fit_transport_maps \
 {{/if}}
 {{#if has_n_null}}
   --n-null "$N_NULL" \
+{{/if}}
+{{#if has_splits_artifact}}
+  --splits-artifact "$SPLITS_ARTIFACT" \
+{{/if}}
+{{#if has_halves_artifact}}
+  --halves-artifact "$HALVES_ARTIFACT" \
+{{/if}}
+{{#if has_half}}
+  --half "$HALF" \
 {{/if}}
   2>&1 | tee -a "$LOG"
 rc=${PIPESTATUS[0]}

@@ -41,6 +41,17 @@ a deviation); it can never fail a run (rake M19 — it degrades to the named sen
 which returns None for every pre-M41 stamp and keeps that case distinct from a
 collector that ran and could not name its host.
 
+Thread configuration (desk ruling 3, 2026-08-03): the COLLECTION stamp carries
+`thread_config` — the effective BLAS/OpenMP thread count read at runtime by
+`metabasis.threads`, the same block the vector builders write since ruling 8
+(2026-08-01). UNCONDITIONAL, on the M41 argument: an absent key means the stamp
+predates the field, and `metabasis.threads.stamp_thread_config` is the reader.
+⚠ IT IS IDENTITY HYGIENE, NOT A GATE INPUT. These bytes come off the GPU forward,
+so no thread count decides them; the spot-replay gate compares the STATE ARRAYS
+bitwise and never this block, and it must not start to. (Contrast the entropy-
+gradient builder, where the same block IS load-bearing because its vector comes
+off `eigh`, which is bitwise-deterministic only at a fixed thread count.)
+
 Dtype regime (prereg ADDENDUM 2026-07-26-A, roster row 21): a checkpoint whose own
 config carries a block-wise FP8 `quantization_config` would load its NATIVE FP8
 forward — a different object from every other bank, and not differentiable. The
@@ -107,6 +118,10 @@ import numpy as np
 from metabasis.scripts.fit_transport_maps import (
     ARMS, DEFAULT_ARM_ROOT, MODEL_KEYS, StateBank, StrataDerivationError,
     derive_strata, load_state_bank, save_state_bank, sites_for, stratum_counts)
+#  The thread stamp is read through `metabasis.threads` and never re-derived
+#  here: one probe, one vocabulary, and a reader that can tell "the stamp
+#  predates the field" from "the probe ran and could not answer".
+from metabasis.threads import THREAD_STAMP_KEY, thread_config_stamp
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("collect_mean_states")
@@ -1013,6 +1028,33 @@ def collect(arm_root: Path, model: str, model_path: str, arms: list[str],
                 "n_strata": len(strata),
                 "counts": counts,
             },
+            # ── THE EFFECTIVE THREAD CONFIGURATION (desk ruling 3, 2026-08-03) ─
+            # IDENTITY HYGIENE, AND NOT A GATE INPUT — the distinction is the
+            # whole point of the ruling, so it is written where a reader of the
+            # stamp will meet it.
+            #
+            # WHY IT IS RECORDED. Ruling 8 (Luxia, 2026-08-01) made the thread
+            # count part of an instrument's identity, and hygiene consistency
+            # says a bank should be able to say what instrument produced it —
+            # the same argument that made the M41 hostname unconditional. So the
+            # key is UNCONDITIONAL: an absent `thread_config` means ONE thing,
+            # that the stamp predates 2026-08-03, and
+            # `metabasis.threads.stamp_thread_config` is the reader that keeps
+            # that apart from a probe that ran and could not answer.
+            #
+            # ⚠ THE SPOT-REPLAY GATE DOES NOT COMPARE THIS, AND MUST NOT START.
+            # These bytes come off the GPU forward (`compute_means`), not off a
+            # BLAS reduction, so the thread count does not decide them — which is
+            # exactly why `spot_replay` compares the STATE ARRAYS bitwise and
+            # nothing else. A gate that compared this block would fail a
+            # legitimately re-gated bank for a difference that cannot reach the
+            # numbers, and would make the ruled OMP default un-changeable
+            # retroactively. Contrast `build_entropy_gradient`, where the same
+            # block IS load-bearing because its vector comes off `eigh`.
+            #
+            # APPENDED LAST, so every historical key keeps its historical
+            # position in a stamp read as an ordered document.
+            THREAD_STAMP_KEY: thread_config_stamp(),
         }
         # ADDENDUM 2026-07-27-B: the deviation is recorded in EVERY stamp of a
         # truncated node. Absent on every other node, so historical stamps keep
@@ -1090,6 +1132,23 @@ def spot_replay(arm_root: Path, model: str, model_path: str, arms: list[str],
                 shard: Optional[ShardSpec] = None,
                 max_length: int | None = None,
                 dequantize_fp8: bool = False) -> int:
+    """THE CP-1 GATE: a fresh process recomputes K stratified texts and byte-
+    compares them against the banked means.
+
+    WHAT THE GATE COMPARES, EXHAUSTIVELY: the STATE ARRAYS, cell by cell
+    (`np.array_equal` per text per site, with the max abs difference recorded
+    beside it so a failure is diagnosable). Nothing else. It does not compare
+    stamps, and specifically it does NOT compare the collection stamp's
+    `thread_config` block (desk ruling 3, 2026-08-03): collection bytes are
+    GPU-forward-derived, so the BLAS/OpenMP thread count cannot reach them, and
+    a gate that compared it would refuse a legitimately re-gated bank over a
+    difference that cannot change a number. That block is identity hygiene and
+    is read, never asserted.
+
+    Returns 0 only when every cell is bitwise exact — and the verdict of record
+    is `all_bitwise_exact` in the written report, not this exit code (the job
+    template reads the artifact).
+    """
     entries, manifest_sha = load_corpus(arm_root)
     strata = derive_strata(entries)
     counts = stratum_counts(entries)
@@ -1486,6 +1545,55 @@ def selftest() -> int:
           stamp_hostname({}) is None and stamp_hostname(None) is None  # type: ignore[arg-type]
           and stamp_hostname({"trunk": "not a dict"}) is None,
           "a stamp reader is instrumentation too (rake M19)")
+
+    print("== selftest 3c: the COLLECTION stamp records its thread config, and "
+          "the GATE ignores it ==")
+    #  Desk ruling 3 (2026-08-03). No deep-learning stack is needed for any of
+    #  this: the block is read from the loaded BLAS runtimes by
+    #  `metabasis.threads`, and the gate-scope check is structural.
+    import inspect as _inspect
+
+    from metabasis.threads import (RULED_OMP_NUM_THREADS, THREAD_STAMP_STATUS,
+                                   stamp_thread_config)
+    block = thread_config_stamp()
+    check("`thread_config_stamp()` yields a STATUS-first block of plain types",
+          isinstance(block, dict) and list(block)[0] == "STATUS"
+          and block["STATUS"] == THREAD_STAMP_STATUS,
+          f"effective_num_threads={block.get('effective_num_threads')!r} "
+          f"consensus={block.get('consensus')!r}")
+    read_back = stamp_thread_config({THREAD_STAMP_KEY: block})
+    check("and the tolerant reader reads it back off a stamp-shaped dict",
+          read_back is not None
+          and read_back.ruled_default == RULED_OMP_NUM_THREADS,
+          f"quoted {read_back.quoted if read_back else None}, ruled default "
+          f"{RULED_OMP_NUM_THREADS} (ruling 8, 2026-08-01)")
+    check("a stamp WITHOUT the key reads as None — 'predates the field', which "
+          "is not 'the probe could not answer'",
+          stamp_thread_config({"builder": "collect_mean_states.py"}) is None,
+          "every bank collected before 2026-08-03 is that case, and a reader "
+          "that conflated the two would attribute a thread count to a bank "
+          "that never recorded one")
+    #  THE RULING'S OTHER HALF, ASSERTED STRUCTURALLY: the gate cannot compare
+    #  what it never mentions. `spot_replay` compares state arrays and nothing
+    #  else, so its source must not reach for the thread block at all — if a
+    #  later edit makes it, this check is where that shows up.
+    try:
+        body = _inspect.getsource(spot_replay).split('"""', 2)[-1]
+    except (OSError, TypeError) as exc:                 # no source for this frame
+        body = None
+        skip("the spot-replay gate never reads the thread block, asserted over "
+             "the gate's own source", f"the source is unavailable here ({exc})")
+    if body is not None:
+        check("the spot-replay gate never reads the thread block (ruling 3: "
+              "collection bytes are GPU-forward-derived, so it is hygiene, not "
+              "a gate input)",
+              "THREAD_STAMP_KEY" not in body and "thread_config" not in body,
+              "the gate's own comparison is np.array_equal over the banked vs "
+              "fresh state arrays, cell by cell, and nothing else")
+    check("and the gate SAYS so where a reader of the gate will meet it",
+          "thread_config" in (spot_replay.__doc__ or ""),
+          "the docstring names the exclusion and the reason, so nobody adds "
+          "the comparison back as an obvious improvement")
 
     print("== selftest 4: the post-load witness passes on a clean bf16 model ==")
     if stack_ok:
