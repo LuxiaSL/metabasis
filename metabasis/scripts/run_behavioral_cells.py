@@ -2169,9 +2169,23 @@ def render_prompt(prompt: BehavioralPrompt, tok: Any, arm: str,
 
     Mirrors `collect_mean_states.build_ids`'s arm semantics (the same
     `date_string` pin, the same TypeError fall-back for templates that take no
-    `date_string`) so a behavioral prompt and a collected text are tokenized under
-    the same arm rules. §5.1's frame is the BARE SYSTEM PROMPT — the standard
-    entropy frame, frozen — so nothing is added here that the pool does not carry.
+    `date_string`, and the same MAPPING unwrap) so a behavioral prompt and a
+    collected text are tokenized under the same arm rules. §5.1's frame is the
+    BARE SYSTEM PROMPT — the standard entropy frame, frozen — so nothing is added
+    here that the pool does not carry.
+
+    ⚠ THE MAPPING UNWRAP IS NOT COSMETIC. `apply_chat_template` returns a bare id
+    list for some tokenizers and a `BatchEncoding` for others — on transformers
+    5.3.0 the Llama-3.2-3B tokenizer returns the mapping and the Qwen2.5-3B one
+    returns the list, so the two shapes appear on ONE roster at ONE version.
+    Iterating the mapping yields its KEYS, and `int("input_ids")` is where that
+    surfaced (3B certification, 2026-08-05). `build_ids` — the collection lane of
+    record — has always carried
+        `list(res["input_ids"] if hasattr(res, "keys") else res)`
+    and this function's own docstring claimed to mirror it while omitting exactly
+    that line. The unwrap is restored here in the ancestor's form, so a behavioral
+    prompt and a collected text tokenize identically on every tokenizer in the
+    roster rather than on the subset that happens to return a list.
     """
     if arm not in ("native", "raw"):
         raise ValueError(f"unknown arm {arm!r} (valid: native, raw)")
@@ -2188,6 +2202,8 @@ def render_prompt(prompt: BehavioralPrompt, tok: Any, arm: str,
                                       date_string=date_string)
     except TypeError:
         ids = tok.apply_chat_template(messages, add_generation_prompt=True)
+    if hasattr(ids, "keys"):                      # BatchEncoding / dict-like
+        ids = ids["input_ids"]
     if hasattr(ids, "tolist"):
         ids = ids.tolist()
     while isinstance(ids, list) and ids and isinstance(ids[0], list):
@@ -4644,6 +4660,27 @@ def selftest() -> int:                                   # noqa: C901 — a chec
     check("an unknown arm is refused",
           _raises(lambda: render_prompt(pool.prompts[0], tok, "sideways"),
                   ValueError))
+
+    # The BatchEncoding shape. `apply_chat_template` returns a bare list for some
+    # tokenizers and a mapping for others — both appear on this roster at one
+    # transformers version — and iterating the mapping yields its KEYS, which is
+    # how `int("input_ids")` reached a live node (3B certification, 2026-08-05).
+    # The stub below returns the mapping and nothing else changes, so this check
+    # fails the moment the unwrap is removed again.
+    class _MappingTemplateTokenizer(_ToyTokenizer):
+        def apply_chat_template(self, messages: list[dict],
+                                add_generation_prompt: bool = True,
+                                **kwargs: Any) -> Any:
+            ids = _ToyTokenizer.apply_chat_template(
+                self, messages, add_generation_prompt=add_generation_prompt,
+                **kwargs)
+            return {"input_ids": ids, "attention_mask": [1] * len(ids)}
+
+    _mtok = _MappingTemplateTokenizer()
+    check("a chat template returning a BatchEncoding is unwrapped, not iterated "
+          "(the collection lane's own `res['input_ids'] if hasattr(res,'keys')`)",
+          render_prompt(pool.prompts[0], _mtok, "native")
+          == render_prompt(pool.prompts[0], tok, "native"))
 
     # ---- 12. ruling 4's bridge cell ------------------------------------------
     print("== selftest 12: the bridge cell (ruling 4) ==")
