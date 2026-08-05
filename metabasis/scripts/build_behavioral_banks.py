@@ -65,6 +65,7 @@ import argparse
 import hashlib
 import json
 import logging
+import re
 import sys
 from pathlib import Path
 from typing import Any, Callable, Literal, Optional, Sequence
@@ -299,6 +300,40 @@ VectorClass = Literal["entropy_gradient", "caa", "repeng_pca"]
 #: rather than off `!= "caa"`, so a third class added later inherits the class rules.
 EGV_VECTOR_CLASS: str = "entropy_gradient"
 CLASS_VECTOR_CLASSES: tuple[str, ...] = ("caa", "repeng_pca")
+
+#: HALT E (2026-08-05, the standing HALT-D ruling at its fourth site). The KEY the
+#: campaign's entropy-gradient objects are banked under, before their `_L<site>`
+#: suffix. It spells the same word as `EGV_VECTOR_CLASS` because the object of record
+#: and its class share a name — kept as its own constant so a reader is never asked
+#: to read a CLASS where a KEY belongs, and so the fallback below (a plan written
+#: before its source vector is banked) says which of the two it means.
+EGV_OBJECT_KEY: str = "entropy_gradient"
+#: The site suffix a banked vector key carries (`entropy_gradient_L26`,
+#: `caa_sentiment_L26`). A transported object is named for the cell it is injected
+#: INTO — `CELL_ID_TEMPLATE` appends the TARGET site — so the SOURCE's site is
+#: dropped when the object travels. This is the banked convention, not a new one:
+#: 16 transported columns carry `gentropy_gradient` + `_L<target site>`.
+SITE_SUFFIX_RE = re.compile(r"_L\d+$")
+#: HALT E: how a vector CLASS reads inside a provenance sentence. The entropy-gradient
+#: phrasing is the exact wording every banked transported cell already carries, so an
+#: EGV column's provenance does not move by one byte; a class object gets its own name
+#: instead of the campaign's, which is the whole point of the ruling.
+VECTOR_CLASS_PHRASE: dict[str, str] = {
+    "entropy_gradient": "entropy-gradient",
+    "caa": "CAA",
+    "repeng_pca": "repeng-PCA",
+}
+
+
+def vector_class_phrase(vector_class: str) -> str:
+    """The provenance wording for a class, never the campaign's word for another's.
+
+    A class added to `VectorClass` later and not to the table above still reads as
+    ITSELF (hyphenated), never as "entropy-gradient" — a missing table row must not
+    be able to reintroduce the false provenance this ruling closes.
+    """
+    return VECTOR_CLASS_PHRASE.get(vector_class, vector_class.replace("_", "-"))
+
 
 #: The two BASES a behavioral cell stands on, as a closed vocabulary. `corpus-manifest`
 #: is the GENERATION basis (the corpus the prompts and generations are of);
@@ -805,6 +840,51 @@ class BankSpec(BaseModel):
     def transported_prefix(self) -> str:
         """The banked `g`-prefix convention for a transported object."""
         return "g"
+
+    @property
+    def source_object_key(self) -> str:
+        """The SOURCE object's name, site suffix stripped — the transported stem.
+
+        HALT E (2026-08-05). The transported and naive keys were HARDCODED to
+        `entropy_gradient` at four sites, so a CAA column stamped CAA content under
+        an entropy-gradient name (false provenance — HALT D's own defect class), and
+        every axis of one node produced identical cell ids, collapsing four per-column
+        gate selections into one per-node. The name now comes from the object itself.
+
+        An EGV column's source key is `entropy_gradient_L<source site>`, whose stem is
+        `entropy_gradient`, so every banked column keeps the byte-identical
+        `gentropy_gradient` / `naive_entropy_gradient` it already carries. A class
+        column's source key is `caa_<axis>_L<source site>`, whose stem carries the
+        AXIS — which is what makes four axes four columns.
+
+        An absent `source_vector` (a plan written before its vector is banked; the
+        build refuses without one) falls back to the campaign's object of record,
+        which is what every pre-ruling spec meant.
+        """
+        if self.source_vector is None:
+            return EGV_OBJECT_KEY
+        return SITE_SUFFIX_RE.sub("", self.source_vector.key)
+
+    @property
+    def transported_key(self) -> str:
+        """§5's transported object key: `g` + the source object's own name."""
+        return f"{self.transported_prefix}{self.source_object_key}"
+
+    @property
+    def naive_key(self) -> str:
+        """Ruling 5's naive-null key: `naive_` + the source object's own name.
+
+        The null is the SAME object without the map, so it is named after the same
+        object; a naive cell keyed `naive_entropy_gradient` beside a transported
+        `gcaa_sentiment` would be a control for something that never fired.
+        """
+        return f"{NAIVE_KEY_PREFIX}_{self.source_object_key}"
+
+    @property
+    def source_vector_class(self) -> str:
+        """The CLASS of the transported object — what its provenance may call it."""
+        return (self.source_vector.vector_class if self.source_vector is not None
+                else EGV_VECTOR_CLASS)
 
     @property
     def map_of_record(self) -> Optional[TransportMapRef | ComposedMapRef]:
@@ -1832,9 +1912,10 @@ def plan_cells(spec: BankSpec, *, vector_npz: Optional[str] = None,
 
     if spec.include_transported:
         src = spec.source_key or "source"
-        signal_key = f"{spec.transported_prefix}entropy_gradient"
+        signal_key = spec.transported_key
         fam = spec.transport_map.family if spec.transport_map else "(map)"
-        prov = (f"unit({fam} · {src} entropy-gradient at L"
+        prov = (f"unit({fam} · {src} "
+                f"{vector_class_phrase(spec.source_vector_class)} at L"
                 f"{spec.source_site if spec.source_site is not None else '?'}) → "
                 f"{spec.node_key} L{spec.site}; sign-anchored BEFORE transport "
                 "(standing rule); banked UNIT (the hook re-normalizes at attach)")
@@ -1876,7 +1957,7 @@ def plan_cells(spec: BankSpec, *, vector_npz: Optional[str] = None,
                                         vector_sha256=vector_sha256, **src_class))
 
     if spec.include_naive:
-        key = f"{NAIVE_KEY_PREFIX}_entropy_gradient"
+        key = spec.naive_key
         nprov = (f"{NAIVE_CONSTRUCTION}; {spec.source_key or 'source'} → "
                  f"{spec.node_key} L{spec.site}, pair {spec.pair or '(unnamed)'}")
         assert_no_lesion_recipe(nprov, key)
@@ -2152,7 +2233,7 @@ def build_banks(spec: BankSpec, *, construct_bands: bool = False,
                 return tmap.transport(v, direction=direction)
 
         src = load_npz_vector(spec.source_vector)
-        gkey = f"{spec.transported_prefix}entropy_gradient"
+        gkey = spec.transported_key
         gv, mag = transport_vector(carry, src, key=gkey)
         vectors[gkey] = gv.astype(np.float32)
         magnitudes[gkey] = round(mag, 6)
@@ -2217,7 +2298,7 @@ def build_banks(spec: BankSpec, *, construct_bands: bool = False,
                 constructions[key] = (SIGMA_BAND_CONSTRUCTION + " then "
                                       + constructions[gkey])
         if spec.include_naive:
-            nkey = f"{NAIVE_KEY_PREFIX}_entropy_gradient"
+            nkey = spec.naive_key
             vectors[nkey] = coordinate_identify(src, target_dim, key=nkey
                                                 ).astype(np.float32)
             constructions[nkey] = NAIVE_CONSTRUCTION
@@ -2973,7 +3054,11 @@ def selftest() -> int:                                   # noqa: C901 — a chec
         corpus_sha = sha256_file(corpus)
         native = _toy_vector_npz(root, "entropy_gradient", d_tgt, seed=5,
                                  vintage=corpus_sha)
-        source = _toy_vector_npz(root, "source_entropy_gradient", d_src, seed=6,
+        # HALT E: the toy SOURCE now carries the banked key shape — `<object>_L<site>`
+        # at the SOURCE's own site (3, below) — because the transported and naive keys
+        # are derived from it. A fixture whose key did not look like a banked one is
+        # part of why the hardcode could sit here unnoticed.
+        source = _toy_vector_npz(root, "entropy_gradient_L3", d_src, seed=6,
                                  vintage=corpus_sha)
         gate = root / "naive_gate.json"
         gate.write_text(json.dumps({"rows": [{"pair": "src->tgt", "verdict": "CLEAR",
@@ -3721,6 +3806,131 @@ def selftest() -> int:                                   # noqa: C901 — a chec
               and _raises(lambda: StagedCell(spec=class_cells[0].spec,
                                              vector_basis=basis),
                           VectorBasisConflated))
+
+        # ---- 12. HALT E: the transported/naive keys come from the OBJECT ------
+        print("== selftest 12: HALT E — the transported name is the object's own ==")
+        from metabasis.scripts.run_behavioral_cells import select_replay_cells
+
+        def _ids(cells: Sequence[StagedCell], kind: str) -> list[str]:
+            return [c.spec.cell_id for c in cells if c.spec.kind == kind]
+
+        def _prov(cells: Sequence[StagedCell], kind: str) -> str:
+            return next(c.spec.vector_provenance for c in cells if c.spec.kind == kind)
+
+        # (a) THE BACKWARD-COMPATIBILITY PROPERTY, spelled out against the literals
+        # 16 banked transported columns carry. `spec`'s source is the banked shape
+        # `entropy_gradient_L3` at the SOURCE's site 3; the column fires at L7.
+        egv_cells = plan_cells(spec)
+        check("(HALT E) an ENTROPY-GRADIENT column derives the names it was "
+              "hardcoded to — the banked keys, letter for letter",
+              spec.transported_key == "gentropy_gradient"
+              and spec.naive_key == "naive_entropy_gradient"
+              and spec.source_object_key == EGV_OBJECT_KEY,
+              f"{spec.source_vector.key!r} → {spec.transported_key!r}")
+        check("(HALT E) …and its cell ids name the TARGET's site, not the source's "
+              "— the transported object is named for the cell it lands in",
+              _ids(egv_cells, "transported") == [
+                  f"gentropy_gradient_L7_a{f:+.2f}" for f in DOSE_LADDER]
+              and _ids(egv_cells, "naive") == [
+                  f"naive_entropy_gradient_L7_a{f:+.2f}" for f in SCORING_DOSES],
+              _ids(egv_cells, "transported")[0])
+        check("(HALT E) the EGV provenance sentence still says entropy-gradient, "
+              "in the same words (the byte-identity the re-freeze rests on)",
+              "entropy-gradient at L3" in _prov(egv_cells, "transported")
+              and vector_class_phrase(EGV_VECTOR_CLASS) == "entropy-gradient")
+        no_ref = spec.model_copy(update={"source_vector": None})
+        check("(HALT E) a plan whose source vector is not banked YET falls back to "
+              "the object of record — a pre-ruling spec means what it meant",
+              no_ref.transported_key == "gentropy_gradient"
+              and no_ref.naive_key == "naive_entropy_gradient"
+              and no_ref.source_vector_class == EGV_VECTOR_CLASS)
+
+        # (b) A CLASS COLUMN: the axis travels with the object, in the key AND in
+        # the sentence. Four axes, one node, one site — the pilot's own shape.
+        (root / "classcol").mkdir(exist_ok=True)
+        axis_specs: dict[str, BankSpec] = {}
+        for i, axis in enumerate(("sentiment", "formality", "refusal", "language")):
+            tgt_npz = _toy_class_vector_npz(root / "classcol", f"caa_{axis}_L7",
+                                            d_tgt, seed=40 + i, set_sha256=set_sha)
+            src_npz = _toy_class_vector_npz(root / "classcol", f"caa_{axis}_L3",
+                                            d_src, seed=50 + i, set_sha256=set_sha)
+
+            def _ref(key: str, npz: Path) -> VectorRef:
+                return VectorRef(key=key, npz=npz, sha256=sha256_file(npz),
+                                 build_stamp=npz.with_name(f"{key}_stamps.json"),
+                                 vector_class="caa", fd_gate_not_applicable=True,
+                                 vector_basis=basis,
+                                 provenance=f"text-contrast CAA of record ({key})")
+            axis_specs[axis] = spec_c.model_copy(update={
+                "native_vector": _ref(f"caa_{axis}_L7", tgt_npz),
+                "source_vector": _ref(f"caa_{axis}_L3", src_npz)})
+        caa_spec = axis_specs["sentiment"]
+        caa_cells = plan_cells(caa_spec)
+        check("(HALT E) a CAA column's transported object carries its AXIS: "
+              "gcaa_<axis>, and the cell id gcaa_<axis>_L<target site>",
+              caa_spec.transported_key == "gcaa_sentiment"
+              and _ids(caa_cells, "transported") == [
+                  f"gcaa_sentiment_L7_a{f:+.2f}" for f in DOSE_LADDER],
+              f"{caa_spec.source_vector.key!r} → {caa_spec.transported_key!r}")
+        check("(HALT E) the naive null is named after the SAME object — a control "
+              "for something that never fired would be no control at all",
+              caa_spec.naive_key == "naive_caa_sentiment"
+              and _ids(caa_cells, "naive") == [
+                  f"naive_caa_sentiment_L7_a{f:+.2f}" for f in SCORING_DOSES])
+        check("(HALT E) the provenance sentence names the CLASS truthfully and "
+              "never the campaign's object — the false-provenance site itself",
+              "CAA at L3" in _prov(caa_cells, "transported")
+              and "entropy-gradient" not in _prov(caa_cells, "transported")
+              and "entropy_gradient" not in caa_spec.transported_key,
+              _prov(caa_cells, "transported")[:72])
+        check("(HALT E) a class the phrase table does not carry still reads as "
+              "ITSELF — a missing row cannot restore the false provenance",
+              vector_class_phrase("repeng_pca") == "repeng-PCA"
+              and "entropy" not in vector_class_phrase("some_future_class"))
+
+        # (c) THE COLLISION THE ENACTOR NOTICED: four axes of ONE node had one set
+        # of cell ids between them, so the §2.7 gate selected the same three cells
+        # four times. Four distinct selections is the fix, measured through the
+        # engine's own selector.
+        gate_reads = {axis: select_replay_cells(
+            [c.spec for c in plan_cells(s)], s.node_key, s.corpus_sha_of_record)
+            for axis, s in axis_specs.items()}
+        selections = {axis: tuple(sel) for axis, (sel, _, _) in gate_reads.items()}
+        digests = {axis: hashlib.sha256(
+            json.dumps([sel, strata, dig], sort_keys=True).encode()).hexdigest()
+            for axis, (sel, strata, dig) in gate_reads.items()}
+        check("(HALT E) FOUR axes of one node now produce FOUR DISTINCT §2.7 gate "
+              "selections — the per-column read that had collapsed to per-node",
+              len(set(selections.values())) == 4 == len(set(digests.values()))
+              and all(f"gcaa_{axis}" in " ".join(sel)
+                      for axis, sel in selections.items()),
+              f"{len(set(selections.values()))} distinct of {len(axis_specs)}")
+        check("(HALT E) …and they differ ONLY through the cell ids: the §2.7 seed "
+              "digest is sha256(node|corpus) and is the SAME for all four",
+              len({dig for _, _, dig in gate_reads.values()}) == 1,
+              "the discrimination comes from the object's name, as it should")
+
+        # (d) THE BUILD names the vectors it banks the same way the PLAN does —
+        # one derivation, so the npz key and the cell's vector_key cannot drift.
+        caa_built, caa_doc = build_banks(
+            caa_spec.model_copy(update={"out_dir": root / "out_caa"}),
+            construct_bands=True, write=True)
+        caa_npz_keys = _npz_keys(Path(caa_built.vectors_npz))
+        check("(HALT E) the BUILD banks the transported and naive objects under "
+              "the same derived names the PLAN wrote (the drift this closes)",
+              {"gcaa_sentiment", "naive_caa_sentiment"} <= caa_npz_keys
+              and "gentropy_gradient" not in caa_npz_keys
+              and "naive_entropy_gradient" not in caa_npz_keys
+              and {c.spec.vector_key for c in caa_doc.cells
+                   if c.spec.kind in ("transported", "naive")}
+              == {"gcaa_sentiment", "naive_caa_sentiment"},
+              f"{caa_built.n_vectors} vectors: {sorted(caa_npz_keys)}")
+        egv_built, _ = build_banks(
+            spec_c.model_copy(update={"out_dir": root / "out_egv"}),
+            construct_bands=True, write=True)
+        check("(HALT E) …and the EGV column banks exactly what it always banked",
+              {"gentropy_gradient", "naive_entropy_gradient"}
+              <= _npz_keys(Path(egv_built.vectors_npz)))
 
     failures = [c for c in checks if not c[1]]
     print(f"\nselftest: {len(failures)} failure(s)")
