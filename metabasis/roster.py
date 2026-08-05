@@ -1217,6 +1217,222 @@ SCAN_GRIDS: dict[str, tuple[int, ...]] = {
     k: n.effective_scan_grid for k, n in ROSTER.items()}
 
 
+# ------------------------------------------------- the §7 race candidates' revisions
+#: WHY THIS TABLE EXISTS, AND WHAT IT IS NOT.
+#:
+#: The §7 selection criterion crowns "the SMALLEST eligible candidate by total
+#: parameter count, config-derived at the pinned revision and recorded in the
+#: race artifact". When the race ran (2026-08-04) **no pinned revision was on
+#: record anywhere in the campaign** for any of the five candidates: roster rows
+#: carry `model_id` and a `config_sha256` but no revision, and collection stamps
+#: carry a local checkpoint path and that path's `config_sha256` — a revision
+#: appears in neither. What the race could record was the revision each repo's
+#: DEFAULT BRANCH RESOLVED TO at fetch time, stated as such, and that is what
+#: this table pins. It is a PROVENANCE ANCHOR, not a claim that the campaign
+#: chose these revisions in advance.
+#:
+#: THREE OF THE FIVE ARE BOUND TO THE COLLECTED CHECKPOINT BY VALUE — the node
+#: cross-check of 2026-08-04 sha256'd each candidate's LOCAL config.json and
+#: compared it against the webtext-v3 collection stamps' `trunk.config_sha256`
+#: (10 of 10 rows MATCH, both arms, zero mismatches). On top of that:
+#:
+#:   · qwen2.5-3b-instruct, qwen2.5-32b-instruct — `hub_config_sha256`, fetched
+#:     from the hub AT THE REVISION BELOW, EQUALS the collected checkpoint's
+#:     config sha (and equals this registry's own `config_sha256` for the row).
+#:     The revision and the collected weights are therefore the same object by
+#:     value, not by assumption. Binding: `config-sha-identity`.
+#:   · gemma3-27b — the collected checkpoint's directory IS an HF cache
+#:     `snapshots/<revision>` path whose terminal component is byte-identical to
+#:     the revision below, and `metabasis/roster.py`'s own gemma row already
+#:     quoted that revision before the race. Binding: `snapshot-path-identity`.
+#:   · 3b, 8b — meta-llama repos are GATED; `config.json` is unfetchable (401)
+#:     with no token, so no hub-side sha exists to compare. Their parameter
+#:     totals come from each repo's public safetensors index metadata at the
+#:     same revision. Binding: `unbound` — the revision is resolved-HEAD and
+#:     NOTHING ties it to the collected checkpoint. **Stated, not smoothed.**
+#:
+#: 3b AND 8b HAVE NO ROSTER ROW. They are the founding star pair and live in
+#: `metabasis.config.MODEL_PRESETS`, which carries no `config_sha256` field. That
+#: is why this is a table of its own keyed by bank key rather than a field on
+#: `RosterNode`: a field there could pin only three of the five, and a criterion
+#: that ranks five candidates needs all five in one place.
+#:
+#: `race_revision_problems()` is the guard: wherever a key DOES have a roster
+#: row, that row's `config_sha256` must equal the checkpoint config sha recorded
+#: here, and a `config-sha-identity` binding must actually exhibit the identity
+#: it claims.
+class PinnedRevision(BaseModel):
+    """One §7 race candidate's revision, pinned at race time with its provenance.
+
+    Every sha here is a sha256 of a `config.json` — three DIFFERENT config.json
+    files that happen (where the binding says so) to be the same bytes:
+    `hub_config_sha256` is the hub's copy at `revision`; `checkpoint_config_sha256`
+    is the collected local checkpoint's; and `ROSTER[key].config_sha256`, where a
+    row exists, is the one the architecture facts were read from.
+    """
+
+    model_config = {"frozen": True}
+
+    key: str = Field(description="bank key — the same key the state banks use")
+    repo: str = Field(description="HF repo id")
+    revision: str = Field(description="40-hex commit sha on the repo")
+    total_parameters: int = Field(
+        description="config/safetensors-derived total at THIS revision; the "
+                    "§7 clause-5 tiebreak reads this and nothing else")
+    hub_config_sha256: str | None = Field(
+        default=None,
+        description="sha256 of the hub's config.json AT `revision`. None means "
+                    "the repo is gated and it could not be fetched — NOT that "
+                    "nobody looked.")
+    checkpoint_config_sha256: str = Field(
+        description="sha256 of the COLLECTED local checkpoint's config.json, "
+                    "cross-checked by value against the webtext-v3 collection "
+                    "stamp's trunk.config_sha256 on 2026-08-04")
+    binding: Literal["config-sha-identity", "snapshot-path-identity", "unbound"] = (
+        Field(description="how (or whether) the revision is tied to the collected "
+                          "checkpoint. `unbound` is a real state and is quoted as "
+                          "one, never rounded up to a pin."))
+    provenance: str = Field(
+        description="where the revision came from, in one sentence")
+    notes: str = ""
+
+    @field_validator("revision")
+    @classmethod
+    def _forty_hex(cls, v: str) -> str:
+        if len(v) != 40 or any(c not in "0123456789abcdef" for c in v):
+            raise ValueError(f"revision {v!r} is not a 40-char lowercase hex sha")
+        return v
+
+    @field_validator("hub_config_sha256", "checkpoint_config_sha256")
+    @classmethod
+    def _sixty_four_hex(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        if len(v) != 64 or any(c not in "0123456789abcdef" for c in v):
+            raise ValueError(f"config sha {v!r} is not a 64-char lowercase hex sha")
+        return v
+
+    @model_validator(mode="after")
+    def _binding_is_exhibited(self) -> "PinnedRevision":
+        if self.binding == "config-sha-identity":
+            if self.hub_config_sha256 is None:
+                raise ValueError(
+                    f"{self.key}: binding claims config-sha identity but no hub-side "
+                    f"sha was fetched — that is `unbound`, and it is quoted as such")
+            if self.hub_config_sha256 != self.checkpoint_config_sha256:
+                raise ValueError(
+                    f"{self.key}: binding claims config-sha identity but the hub sha "
+                    f"{self.hub_config_sha256[:12]}… and the checkpoint sha "
+                    f"{self.checkpoint_config_sha256[:12]}… DIFFER")
+        return self
+
+
+#: The five §7 race candidates, revisions resolved at race time 2026-08-04.
+#: Parameter totals and revisions from the race's own
+#: `PARAM-COUNTS-race-candidates.json`; checkpoint config shas from the node-side
+#: cross-check of the same date (10/10 rows MATCH against the collection stamps).
+RACE_CANDIDATE_REVISIONS: dict[str, PinnedRevision] = {
+    p.key: p for p in (
+        PinnedRevision(
+            key="qwen2.5-3b-instruct", repo="Qwen/Qwen2.5-3B-Instruct",
+            revision="aa8e72537993ba99e69dfaafa59ed015b17504d1",
+            total_parameters=3_085_938_688,
+            hub_config_sha256="eed00b17e22553979d090fa492e587e92885e328914c8e0b0b78f0a0d3576b3b",
+            checkpoint_config_sha256="eed00b17e22553979d090fa492e587e92885e328914c8e0b0b78f0a0d3576b3b",
+            binding="config-sha-identity",
+            provenance="the repo default-branch HEAD resolved at race time "
+                       "2026-08-04; no revision was on record before it",
+            notes="THE PROPOSED HUB OF RECORD (smallest eligible, §7 clause 5). "
+                  "The hub config at this revision, the collected checkpoint's "
+                  "config and this registry's own wave-1 config_sha256 are all "
+                  "the same 32 bytes, so the crowning number is anchored to the "
+                  "weights the campaign actually banked."),
+        PinnedRevision(
+            key="3b", repo="meta-llama/Llama-3.2-3B-Instruct",
+            revision="0cb88a4f764b7a12671c53f0838cd831a0843b95",
+            total_parameters=3_212_749_824,
+            hub_config_sha256=None,
+            checkpoint_config_sha256="39fb36dc5416f445ebc4e71cb71fbcf6727e80a35836d8ba1a1474c318467b7a",
+            binding="unbound",
+            provenance="the repo default-branch HEAD resolved at race time "
+                       "2026-08-04; no revision was on record before it",
+            notes="No roster row (founding star pair; metabasis.config."
+                  "MODEL_PRESETS). GATED repo — config.json 401s with no token, "
+                  "so the parameter total comes from the repo's public "
+                  "safetensors index metadata at this revision, and NOTHING ties "
+                  "the revision to the collected checkpoint. The checkpoint sha "
+                  "above is still cross-checked against the collection stamp "
+                  "(MATCH, both arms) — that binds the STAMP to the WEIGHTS, "
+                  "which is a different and weaker claim than binding the "
+                  "REVISION to them."),
+        PinnedRevision(
+            key="8b", repo="meta-llama/Llama-3.1-8B-Instruct",
+            revision="0e9e39f249a16976918f6564b8830bc894c89659",
+            total_parameters=8_030_261_248,
+            hub_config_sha256=None,
+            checkpoint_config_sha256="29e4c210b0d6ac178b16b2a255a568bdb23b581e50ca1ef6a6d071dd85704e6e",
+            binding="unbound",
+            provenance="the repo default-branch HEAD resolved at race time "
+                       "2026-08-04; no revision was on record before it",
+            notes="THE INCUMBENT HUB, and the hub every composed column in the "
+                  "campaign runs through. No roster row (see 3b). Same gated-repo "
+                  "situation as 3b: revision unbound to the checkpoint."),
+        PinnedRevision(
+            key="gemma3-27b", repo="google/gemma-3-27b-it",
+            revision="005ad3404e59d6023443cb575daa05336842228a",
+            total_parameters=27_432_406_640,
+            hub_config_sha256=None,
+            checkpoint_config_sha256="cabd884f5e0d4f01a5bd7fe14bd4bacd0bd83f3725a02acbdc4e72dc001835fa",
+            binding="snapshot-path-identity",
+            provenance="the repo default-branch HEAD resolved at race time "
+                       "2026-08-04, INDEPENDENTLY CORROBORATED: this row's own "
+                       "notes quoted the same revision before the race, and the "
+                       "collected checkpoint sits at an HF cache snapshots/"
+                       "<revision> path whose terminal component is this sha",
+            notes="The §7 predicted-poor control. Gated repo, so no hub-side "
+                  "config sha; the binding is the snapshot path plus the "
+                  "pre-existing roster quote, which is why this candidate is the "
+                  "one the race could corroborate at all."),
+        PinnedRevision(
+            key="qwen2.5-32b-instruct", repo="Qwen/Qwen2.5-32B-Instruct",
+            revision="5ede1c97bbab6ce5cda5812749b4c0bdf79b18dd",
+            total_parameters=32_763_876_352,
+            hub_config_sha256="9c6772f138ef9e5b3d1c18f2c87e451bbc01f5f1a4eabb36f9bf4f53829b903e",
+            checkpoint_config_sha256="9c6772f138ef9e5b3d1c18f2c87e451bbc01f5f1a4eabb36f9bf4f53829b903e",
+            binding="config-sha-identity",
+            provenance="the repo default-branch HEAD resolved at race time "
+                       "2026-08-04; no revision was on record before it",
+            notes="Largest candidate. Same three-way config-sha identity as the "
+                  "3B rung."),
+    )}
+
+
+def race_revision_problems() -> list[str]:
+    """Cross-check the pinned revisions against the roster rows that exist.
+
+    Cheap enough to run at import time by any caller that cares, and it is what
+    keeps this table from drifting away from the rows it overlaps: a candidate
+    with a roster row must agree with that row about which config.json the
+    architecture facts came from.
+    """
+    problems: list[str] = []
+    for key, pin in RACE_CANDIDATE_REVISIONS.items():
+        node = ROSTER.get(key)
+        if node is None:
+            continue
+        if node.model_id != pin.repo:
+            problems.append(
+                f"{key}: roster model_id {node.model_id!r} != pinned repo "
+                f"{pin.repo!r} — one of the two names a different checkpoint")
+        if node.config_sha256 and node.config_sha256 != pin.checkpoint_config_sha256:
+            problems.append(
+                f"{key}: roster config_sha256 {node.config_sha256[:12]}… != the "
+                f"collected checkpoint's {pin.checkpoint_config_sha256[:12]}… — "
+                f"the architecture facts and the raced weights are not the same "
+                f"config.json")
+    return problems
+
+
 def scan_grid_table() -> str:
     """The desk-ratification table: model · row · arms · n_layers · grid."""
     w = max(len(k) for k in ROSTER)
@@ -1381,6 +1597,21 @@ if __name__ == "__main__":                                   # desk convenience
     for line in audit.expected:
         print(f"COLLISION-GUARD [expected]: {line}")
     print(f"registry audit: {'OK' if audit.ok else 'FATAL — fix before fitting'}")
+
+    print(f"\n§7 race candidates, revisions pinned at race time 2026-08-04 "
+          f"({len(RACE_CANDIDATE_REVISIONS)}):")
+    kw = max(len(k) for k in RACE_CANDIDATE_REVISIONS)
+    for key, pin in sorted(RACE_CANDIDATE_REVISIONS.items(),
+                           key=lambda kv: kv[1].total_parameters):
+        print(f"  {key:<{kw}}  {pin.total_parameters / 1e9:7.4f}B  "
+              f"{pin.revision}  {pin.binding}"
+              + ("" if key in ROSTER else "   [no roster row]"))
+    rev_problems = race_revision_problems()
+    for line in rev_problems:
+        print(f"RACE-REVISION-GUARD [FATAL]: {line}")
+    print(f"race revision audit: "
+          f"{'OK' if not rev_problems else 'FATAL — reconcile before quoting'}")
+
     print(f"\nfixed fit grids (SITES): {sorted(SITES)}")
     print(f"scan grids (SCAN_GRIDS): {sorted(SCAN_GRIDS)}")
     print(f"collectable now:          {list(collectable())}")
