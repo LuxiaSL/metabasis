@@ -47,12 +47,21 @@ corpus sha.
 
 ## Using it
 
-The intended loop, end to end (module surface is stable; flags stabilize
-with corpus v3 — `--help` on any module is the authority):
+The intended loop, end to end (module surface is stable; **webtext-v3 is
+the corpus of record** — `--help` on any module is the authority):
 
 ```
 uv venv && source .venv/bin/activate
 uv pip install -e '.[gpu]'        # CPU spine alone suffices for fits/transfer
+
+# 0. corpus: reconstruct webtext-v3 byte-for-byte from pinned public
+#    sources — the golden path is corpus/webtext-v3/RECONSTRUCT.md
+#    (one command; every artifact sha it must reproduce is listed there;
+#    per-text verification via corpus/webtext-v3/corpus_manifest.meta.json)
+python -m metabasis.scripts.build_webtext_corpus --seed 80 \
+    --n-per-stratum 300 --tokenizer meta-llama/Llama-3.1-8B-Instruct \
+    --out-dir <OUT>
+python -m metabasis.scripts.derive_webtext_splits --help
 
 # 1. site: scan each model's alignment curve; the site of record comes
 #    from the curve
@@ -88,7 +97,9 @@ metabasis/
 manifests/       sha256 baselines over the data tree — the replication anchor
 outputs/         data: states, transport maps, banks, readouts
                  (LOCAL ONLY, never tracked; verify against manifests/)
-corpus/          the published fitting-corpus manifest + composition census
+corpus/          the published fitting corpora — webtext-v3/ (OF RECORD:
+                 reconstruction golden path + per-text sha manifest) and
+                 fitting-v21/ (historical, with its composition census)
 docs/            research docs and methodology (largely local-only)
 ```
 
