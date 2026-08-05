@@ -115,7 +115,7 @@ Node-side run (§2.1; Heimdall CLI only, the HTTP API is read-only verification)
     OMP_NUM_THREADS=1 CUDA_VISIBLE_DEVICES=3 \
     python -m metabasis.scripts.run_behavioral_cells --run \
         --node-key qwen2.5-3b-instruct --model-path <LOCAL_WEIGHTS_DIR> \
-        --arm-root <ARM_ROOT> --work-root /models/metabasis-behavioral/<node> \
+        --arm-root <ARM_ROOT> --work-root <NODE_DATA_ROOT>/metabasis-behavioral/<node> \
         --cells-json <STAGED_CELLS>.json --prompt-pool <POOL>.json --arm native
 
     python -m metabasis.scripts.run_behavioral_cells --preflight ...   # M10: a
@@ -5193,7 +5193,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--arm-root", type=Path, default=None)
     ap.add_argument("--work-root", type=Path, default=None,
                     help="node-side work root; all new node-side data lives under "
-                         "/models/metabasis-behavioral/<node> (standing rule 2026-07-29)")
+                         "<NODE_DATA_ROOT>/metabasis-behavioral/<node> (standing rule 2026-07-29)")
     ap.add_argument("--cells-json", type=Path, default=None,
                     help="staged cell specs (build_behavioral_banks.py output)")
     ap.add_argument("--prompt-pool", type=Path, default=None)
@@ -5289,7 +5289,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             ap.error("--run needs --model-path")
         if args.work_root is None:
             ap.error("--run needs --work-root (all new node-side data lives under "
-                     "/models/metabasis-behavioral/<node>, standing rule 2026-07-29)")
+                     "<NODE_DATA_ROOT>/metabasis-behavioral/<node>, standing rule 2026-07-29)")
         result = run_column(
             runtime, doc=doc, pool=pool, work_root=args.work_root,
             corpus_sha_of_record=basis, n_per_cell=args.n_per_cell,
