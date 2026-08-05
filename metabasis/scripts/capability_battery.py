@@ -74,9 +74,9 @@ import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from metabasis.scripts.run_behavioral_cells import (
-    BASELINE_DOSE, BRIEF_OF_RECORD, BRIEF_SHA256, CELL_ID_TEMPLATE, DOSE_LADDER,
-    GRADE_LINE, N_PER_CELL, BehavioralHarnessError, CellSpec, GenerationRecord,
-    apply_dose_ladder, seed_int)
+    BASELINE_DOSE, BESIDE_BAND_FAMILIES, BRIEF_OF_RECORD, BRIEF_SHA256,
+    CELL_ID_TEMPLATE, DOSE_LADDER, GRADE_LINE, N_PER_CELL, BehavioralHarnessError,
+    CellSpec, GenerationRecord, apply_dose_ladder, seed_int)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("capability_battery")
@@ -726,7 +726,13 @@ def dose_metric_table(blocks: Sequence[CapabilityBlock]) -> dict:
     if not blocks:
         raise BatteryError("dose × metric table over zero cells")
     signal = [b for b in blocks if not b.is_null]
-    band = [b for b in blocks if b.is_null]
+    # B4 (Luxia 2026-08-04): a Σ-shaped band is a null DRAW but not THE null. Pooling
+    # it into `random_band` would move the dose-matched capability floor this table
+    # exists to report, so the beside is split out and filed under its own key.
+    band = [b for b in blocks
+            if b.is_null and b.band_family not in BESIDE_BAND_FAMILIES]
+    beside = [b for b in blocks
+              if b.is_null and b.band_family in BESIDE_BAND_FAMILIES]
     if signal and not band:
         raise BatteryError(
             "§6's table needs the RANDOM BAND beside every dose (the dose-matched "
@@ -746,19 +752,30 @@ def dose_metric_table(blocks: Sequence[CapabilityBlock]) -> dict:
             out[m] = round(float(np.mean(vals)), 4) if vals else None
         return out
 
-    table: dict[str, Any] = {"item_set_sha256": BATTERY_ITEM_SET_SHA256,
-                             "metrics": list(metrics), "by_dose": {}}
+    table: dict[str, Any] = {
+        "item_set_sha256": BATTERY_ITEM_SET_SHA256,
+        "metrics": list(metrics), "by_dose": {},
+        "beside_families": list(BESIDE_BAND_FAMILIES),
+        "beside_note": (
+            "`sigma_beside` rows are the Σ-shaped BESIDE (pre-statement §2 / O-2, "
+            "Luxia's B4 ruling). They are NEVER pooled into `random_band`: the band "
+            "row is the dose-matched capability floor of record and the beside is a "
+            "stricter comparison quoted next to it, on designated cells only."),
+    }
     for dose in (BASELINE_DOSE,) + DOSE_LADDER:
         sig = [b for b in signal if b.alpha_frac == dose]
         bnd = [b for b in band if b.alpha_frac == dose]
-        if not sig and not bnd:
+        bes = [b for b in beside if b.alpha_frac == dose]
+        if not sig and not bnd and not bes:
             continue
         table["by_dose"][f"{dose:+g}"] = {
             "signal": row(sig) if sig else None,
             "random_band": row(bnd) if bnd else None,
+            "sigma_beside": row(bes) if bes else None,
             "n_signal_cells": len(sig), "n_band_cells": len(bnd),
+            "n_beside_cells": len(bes),
             "not_quotable_cells": sorted(
-                b.cell_id for b in sig + bnd if not b.panel.quotable) or None,
+                b.cell_id for b in sig + bnd + bes if not b.panel.quotable) or None,
         }
     table["past_coherence_collapse_cells"] = sorted(
         b.cell_id for b in blocks if b.panel.coherence_label
@@ -1338,6 +1355,31 @@ def selftest() -> int:                                   # noqa: C901 — a chec
           and t2["by_dose"]["+0.3"]["not_quotable_cells"] == [band_cell.cell_id])
     check("an empty table is refused",
           _raises(lambda: dose_metric_table([]), BatteryError))
+    # B4: a Σ-shaped band is a null DRAW but not THE null. Pooling it into
+    # `random_band` would move the dose-matched capability floor this table reports.
+    sigma_cell = CellSpec(cell_id=CELL_ID_TEMPLATE.format(
+        vector_key="SigmaBand1", site=26, frac=0.3), kind="transported_band",
+        vector_key="SigmaBand1", site=26, alpha_frac=0.3, band_family="SigmaBand",
+        vector_provenance="toy")
+    sigma_block = capability_block(
+        cell=sigma_cell,
+        likelihood=[score_likelihood_subtest(s, _fake_nll(-3.0))
+                    for s in LIKELIHOOD_SUBTESTS],
+        format_result=score_format_probe(chatty), panel=panel, baseline=b0)
+    t3 = dose_metric_table([b0, dosed, band_block, sigma_block])
+    check("a Σ-BESIDE block files under `sigma_beside`, never inside `random_band` "
+          "(B4: never the null of record)",
+          t3["by_dose"]["+0.3"]["sigma_beside"] is not None
+          and t3["by_dose"]["+0.3"]["n_beside_cells"] == 1
+          and t3["by_dose"]["+0.3"]["n_band_cells"] == 1
+          and t3["by_dose"]["+0.3"]["random_band"]
+          == table["by_dose"]["+0.3"]["random_band"],
+          "the band row is byte-for-byte what it was without the beside")
+    check("a beside alone does NOT satisfy §6's band requirement",
+          _raises(lambda: dose_metric_table([b0, dosed, sigma_block]), BatteryError))
+    check("the table names its beside families and why they are separate",
+          t3["beside_families"] == list(BESIDE_BAND_FAMILIES)
+          and "NEVER pooled" in t3["beside_note"])
 
     # ---- 8. ruling 7's judged pre-generation --------------------------------
     print("== selftest 8: judged texts PRE-GENERATED, never judged (ruling 7) ==")

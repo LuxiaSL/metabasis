@@ -133,7 +133,8 @@ import json
 import logging
 import sys
 from pathlib import Path
-from typing import Any, Callable, Literal, Optional, Protocol, Sequence
+from typing import (Any, Callable, Collection, Literal, Optional, Protocol,
+                    Sequence)
 
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -219,12 +220,36 @@ CVD_UNSET_SENTINEL = "(unset)"
 CellKind = Literal["baseline", "calibration", "calibration_band", "transported",
                    "transported_band", "naive", "bridge", "judged"]
 
+#: The band families that ARE the null of record — the two §4.1 keeps distinct, and the
+#: only two any gate population may contain.
+GATE_BAND_FAMILIES: tuple[str, ...] = ("Rband", "gRband")
+#: The BESIDE families (Luxia's B4 ruling, 2026-08-04, on the staging wave's blocker B4):
+#: a Σ-shaped band is a STRICTER null quoted BESIDE the null of record, on the two
+#: DESIGNATED cell tuples only (pre-statement §2 / open word O-2). Widening
+#: `CellSpec.band_family` to admit it is the whole of that authorization — it does NOT
+#: make a Σ cell a gate input. Every gate population in this file filters on
+#: `GATE_BAND_FAMILIES` rather than on `is_null`, precisely so "never the null of
+#: record, never inside any gate" is mechanical rather than a habit; the actuation
+#: criteria in `actuation_calibration` filter narrower still (`Rband` only).
+BESIDE_BAND_FAMILIES: tuple[str, ...] = ("SigmaBand",)
+BAND_FAMILIES: tuple[str, ...] = GATE_BAND_FAMILIES + BESIDE_BAND_FAMILIES
+
 #: The strata the §2.7 gate must cover, in order. Each contributes exactly one cell,
 #: so K == 3 is not a tunable but the arity of this tuple.
 REPLAY_GATE_STRATA: tuple[str, ...] = ("signal_at_0.3", "random_band", "calibration")
 
 
 # ---------------------------------------------------------------- error taxonomy
+class BesideCellInGatePopulation(RuntimeError):
+    """A BESIDE cell (Σ-shaped band) reached a population a gate reads.
+
+    Not a §9 HALT of the brief's numbering — it is the mechanical expression of the
+    B4 ruling's own condition ("the engine's gates must never read them as gate
+    inputs"). It is an exception rather than a filter-and-continue because silently
+    dropping a cell from a gate population is how a gate quietly changes arity.
+    """
+
+
 class BehavioralHarnessError(RuntimeError):
     """Base class for every failure specific to the behavioral harness.
 
@@ -564,14 +589,33 @@ class CellSpec(BaseModel):
     #: control: does the TRANSPORT carry). §4.1 keeps them distinct in name and in
     #: stamp because conflating them is the fastest way to make a null
     #: uninterpretable.
-    band_family: Optional[Literal["Rband", "gRband"]] = None
+    #: `SigmaBand` is admitted as a BESIDE family ONLY (B4, Luxia 2026-08-04): it
+    #: schedules and generates like any other band cell and it is never a gate input.
+    #: See `is_beside` / `is_null_of_record` and `BESIDE_BAND_FAMILIES`.
+    band_family: Optional[Literal["Rband", "gRband", "SigmaBand"]] = None
     vector_npz: Optional[str] = None
     vector_provenance: str = ""
     sampling: SamplingConfig = SAMPLING_OF_RECORD
 
     @property
     def is_null(self) -> bool:
+        """True for ANY band cell — a Σ-beside cell is a null draw, just not THE null.
+
+        Kept deliberately broad so no consumer can mistake a Σ cell for signal (the
+        capability battery's dose × metric table splits on exactly this, then splits
+        the band again on `is_beside`). Gate populations use `is_null_of_record`.
+        """
         return self.band_family is not None
+
+    @property
+    def is_beside(self) -> bool:
+        """True iff this cell's band family is a BESIDE family (never a gate input)."""
+        return self.band_family in BESIDE_BAND_FAMILIES
+
+    @property
+    def is_null_of_record(self) -> bool:
+        """True iff this cell is a band of record (`Rband`/`gRband`) — the gate test."""
+        return self.band_family in GATE_BAND_FAMILIES
 
     @property
     def is_baseline(self) -> bool:
@@ -579,6 +623,14 @@ class CellSpec(BaseModel):
 
     @model_validator(mode="after")
     def _consistent(self) -> "CellSpec":
+        if self.is_beside and self.kind not in ("calibration_band",
+                                                "transported_band"):
+            raise ValueError(
+                f"{self.cell_id}: a BESIDE band cell (band_family="
+                f"{self.band_family!r}) must be staged as a band cell "
+                "('calibration_band' beside an Rband, 'transported_band' beside a "
+                f"gRband), not as {self.kind!r} — a beside that wore a signal kind "
+                "would be pooled as signal by every consumer that splits on kind")
         if self.is_baseline:
             if self.alpha_frac != BASELINE_DOSE or self.vector_key is not None:
                 raise ValueError(
@@ -1763,6 +1815,11 @@ def characterize_probe_batch_invariance(
 
 # ---------------------------------------------------------------- replay gate (§2.7)
 def _stratum_of(cell: CellSpec) -> Optional[str]:
+    # B4: a BESIDE cell holds NO stratum. Written as the first test rather than left
+    # to fall through the family comparisons below, so that adding a stratum later
+    # cannot accidentally admit one.
+    if cell.is_beside:
+        return None
     if cell.kind in ("calibration", "calibration_band"):
         return "calibration" if cell.kind == "calibration" else None
     if cell.band_family == "gRband":
@@ -1786,10 +1843,18 @@ def select_replay_cells(cells: Sequence[CellSpec], node_key: str, corpus_sha: st
     digest = hashlib.sha256(f"{node_key}|{corpus_sha}".encode()).hexdigest()
     seed = int.from_bytes(bytes.fromhex(digest)[:8], "big")
     buckets: dict[str, list[str]] = {s: [] for s in REPLAY_GATE_STRATA}
+    beside_ids = {c.cell_id for c in cells if c.is_beside}
     for c in cells:
         s = _stratum_of(c)
         if s is not None:
             buckets[s].append(c.cell_id)
+    leaked = sorted(beside_ids.intersection(
+        cid for ids in buckets.values() for cid in ids))
+    if leaked:                                                    # pragma: no cover
+        raise BesideCellInGatePopulation(
+            f"{node_key}: BESIDE cell(s) {leaked} entered a §2.7 replay-gate stratum. "
+            "B4 admits Σ-shaped bands as besides ONLY; a beside inside the blocking "
+            "gate would make the gate's population depend on a designation.")
     chosen: dict[str, str] = {}
     missing = []
     for i, stratum in enumerate(REPLAY_GATE_STRATA):
@@ -2237,6 +2302,17 @@ def build_stamp(*, cell: CellSpec, alpha: float, layout: CanonicalLayout,
         "vector_key": cell.vector_key,
         "band_family": cell.band_family,
         "is_null": cell.is_null,
+        # B4, written into every stamp so a beside can never be read back as the null
+        # of record by anything downstream that only has the stamp.
+        "is_null_of_record": cell.is_null_of_record,
+        "is_beside_only": cell.is_beside,
+        "beside_discipline": (
+            "BESIDE families " + ", ".join(BESIDE_BAND_FAMILIES) + " are a stricter "
+            "null quoted BESIDE the null of record on DESIGNATED cell tuples only "
+            "(pre-statement §2 / O-2; Luxia's B4 ruling 2026-08-04). A beside cell "
+            "schedules and generates like any other cell and enters NO gate: not the "
+            "§2.7 replay gate, not the §4 actuation criteria, not the §7 expected-N "
+            "of record."),
         "n_expected": cell.n,
         "corpus_manifest_sha256": corpus_sha,
         "behavioral_prompt_pool_sha256": pool.sha256,
@@ -2582,12 +2658,48 @@ def order_cells(cells: Sequence[CellSpec]) -> list[CellSpec]:
 
 
 def assert_column_complete(outcomes: Sequence[CellOutcome], expected_cells: int,
-                           *, n_per_cell: int, node_key: str = "") -> None:
-    """§7's completeness guard / §9 item 10 — a count one short is a rake (M23)."""
+                           *, n_per_cell: int, node_key: str = "",
+                           beside_cell_ids: Collection[str] = ()) -> None:
+    """§7's completeness guard / §9 item 10 — a count one short is a rake (M23).
+
+    `beside_cell_ids` names the BESIDE cells (Σ-shaped bands, B4) among the planned
+    set. Expected-N is then asserted TWICE — on the whole column and on the column
+    MINUS its besides — so a Σ cell can never stand in for a missing cell of record.
+    Without the second assertion a designated row could lose a gRband dose and still
+    count complete, which is exactly the substitution "never a gate input" forbids.
+    """
     if len(outcomes) != expected_cells:
         raise ExpectedNShortfall(
             f"{node_key or 'column'}: {len(outcomes)} cells completed, {expected_cells} "
             "planned (§9 item 10 / M23: a count one short is a rake, not a rounding)")
+    beside = set(beside_cell_ids)
+    completed = {o.cell_id for o in outcomes}
+    missing_beside = sorted(beside - completed)
+    if missing_beside:
+        raise ExpectedNShortfall(
+            f"{node_key or 'column'}: BESIDE cell(s) {missing_beside} were planned "
+            "and did not complete, yet the total came out right — which means a cell "
+            "of record ran in a beside's place. B4: the two populations are counted "
+            "separately precisely so that substitution cannot pass.")
+    # A cell that STAMPED itself a beside but was never planned as one is the same
+    # substitution from the other side, and the stamp is the only place the fact
+    # survives into `CellOutcome`.
+    undeclared = sorted(o.cell_id for o in outcomes
+                        if (o.stamp or {}).get("is_beside_only") is True
+                        and o.cell_id not in beside)
+    if undeclared:
+        raise ExpectedNShortfall(
+            f"{node_key or 'column'}: cell(s) {undeclared} stamped themselves BESIDE "
+            "but are not in the planned beside set — an undeclared beside inside the "
+            "expected-N of record (B4).")
+    of_record, expected_of_record = len(outcomes) - len(beside), (
+        expected_cells - len(beside))
+    if of_record != expected_of_record:                           # pragma: no cover
+        raise ExpectedNShortfall(
+            f"{node_key or 'column'}: {of_record} cells OF RECORD completed, "
+            f"{expected_of_record} planned ({len(beside)} BESIDE cells declared). "
+            "B4: a Σ-beside cell never counts toward the expected-N of the column "
+            "of record.")
     short = [o.cell_id for o in outcomes if o.n != n_per_cell]
     if short:
         raise ExpectedNShortfall(
@@ -2874,7 +2986,8 @@ def run_column(runtime: NodeRuntime, *, doc: Any, pool: PromptPool,
             coherence=panel.model_dump() if panel is not None else None,
             stamp=stamp))
 
-    assert_column_complete(outcomes, len(specs), n_per_cell=n, node_key=node_key)
+    assert_column_complete(outcomes, len(specs), n_per_cell=n, node_key=node_key,
+                           beside_cell_ids=[c.cell_id for c in specs if c.is_beside])
 
     # ---- the in-job replay gate (§2.7) ---------------------------------------
     selection, strata, digest = select_replay_cells(specs, node_key, corpus_sha)
@@ -4202,6 +4315,76 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                        vector_key="gRband1", site=site, alpha_frac=0.3,
                        band_family="gRband").band_family == "gRband")
 
+    # ---- 5b. the Σ-beside BESIDE family (B4, Luxia 2026-08-04) ----------------
+    print("== selftest 5b: SigmaBand is a BESIDE family, never a gate input (B4) ==")
+    sigma_cal = CellSpec(cell_id=f"SigmaBand1_L{site}_a+0.30", kind="calibration_band",
+                         vector_key="SigmaBand1", site=site, alpha_frac=0.3,
+                         band_family="SigmaBand", vector_provenance="toy::SigmaBand1")
+    sigma_tr = CellSpec(cell_id=f"SigmaBand2_L{site}_a-0.30", kind="transported_band",
+                        vector_key="SigmaBand2", site=site, alpha_frac=-0.3,
+                        band_family="SigmaBand", vector_provenance="toy::SigmaBand2")
+    check("(a) a SigmaBand cell CONSTRUCTS like any cell — banked id formatting, "
+          "frozen ladder, n of record",
+          sigma_cal.cell_id == CELL_ID_TEMPLATE.format(
+              vector_key="SigmaBand1", site=site, frac=0.3)
+          and sigma_cal.alpha_frac in DOSE_LADDER and sigma_cal.n == N_PER_CELL)
+    check("(a) …and it SCHEDULES like any cell: the §2.1 fire order ranks it with its "
+          "own band kind, and it takes a dose exactly like the band it sits beside",
+          order_cells([sigma_tr, sigma_cal, baseline_cell(site)])[0].cell_id
+          == baseline_cell(site).cell_id
+          and order_cells([sigma_tr, sigma_cal])[0].cell_id == sigma_cal.cell_id
+          and resolve_alpha(sigma_cal.alpha_frac, norm) == 0.3 * norm)
+    check("(a) …and it generates from the SAME seed table as any other cell (the "
+          "beside is a different DRAW, never a different mechanism)",
+          seed_int(seed_material(corpus_sha="c" * 64, node_key="n", arm="native",
+                                 site=site, cell_id=sigma_cal.cell_id, gen_id=3))
+          == seed_int(seed_material(corpus_sha="c" * 64, node_key="n", arm="native",
+                                    site=site, cell_id=sigma_cal.cell_id, gen_id=3)))
+    check("a beside is `is_null` (a null DRAW) but NOT `is_null_of_record`",
+          sigma_cal.is_null and sigma_cal.is_beside
+          and not sigma_cal.is_null_of_record
+          and CellSpec(cell_id=f"gRband1_L{site}_a+0.30", kind="transported_band",
+                       vector_key="gRband1", site=site, alpha_frac=0.3,
+                       band_family="gRband").is_null_of_record)
+    check("(b) a beside holds NO replay-gate stratum, on either side of the column",
+          _stratum_of(sigma_cal) is None and _stratum_of(sigma_tr) is None)
+    with_beside = list(full) + [sigma_cal, sigma_tr]
+    sel_b, strata_b, _ = select_replay_cells(with_beside, node, corpus)
+    sel_plain, strata_plain, _ = select_replay_cells(full, node, corpus)
+    check("(b) adding besides does not change the §2.7 gate's selection AT ALL",
+          sel_b == sel_plain and strata_b == strata_plain, str(sel_b))
+    from metabasis.scripts.actuation_calibration import (
+        N_CALIBRATION_BAND_CELLS, CalibrationCellPlan, calibration_cell_plan)
+    _plan = calibration_cell_plan(node_key=node, site=site, arm="native",
+                                  per_token_median_resid_norm=norm)
+    _swapped = [c.model_dump() for c in _plan.band_cells]
+    _swapped[0] = sigma_cal.model_dump()          # dict, not the object: the engine runs
+    _plan_fields = {**_plan.model_dump(), "band_cells": _swapped}  # as __main__ here
+    check("(b) the §4 ACTUATION criteria refuse a beside in the band population — the "
+          "18-cell arity holds, so the FAMILY test is the one that fires",
+          len(_swapped) == N_CALIBRATION_BAND_CELLS
+          and _raises(lambda: CalibrationCellPlan(**_plan_fields), ValueError)
+          and all(c.band_family == "Rband" for c in _plan.band_cells))
+    check("(c) a beside outside a band KIND is refused by CellSpec itself — a beside "
+          "wearing a signal kind would be pooled as signal",
+          _raises(lambda: CellSpec(
+              cell_id=f"SigmaBand1_L{site}_a+0.30", kind="transported",
+              vector_key="SigmaBand1", site=site, alpha_frac=0.3,
+              band_family="SigmaBand"), ValueError)
+          and _raises(lambda: CellSpec(
+              cell_id=f"SigmaBand1_L{site}_a+0.30", kind="calibration",
+              vector_key="SigmaBand1", site=site, alpha_frac=0.3,
+              band_family="SigmaBand"), ValueError))
+    check("(c) an unknown band family is still refused (the literal is widened, "
+          "not opened)",
+          _raises(lambda: CellSpec(
+              cell_id=f"Wband1_L{site}_a+0.30", kind="calibration_band",
+              vector_key="Wband1", site=site, alpha_frac=0.3,
+              band_family="Wband"), ValueError))
+    check("the family tuples partition: GATE ∪ BESIDE == BAND_FAMILIES, disjoint",
+          set(GATE_BAND_FAMILIES) | set(BESIDE_BAND_FAMILIES) == set(BAND_FAMILIES)
+          and not set(GATE_BAND_FAMILIES) & set(BESIDE_BAND_FAMILIES))
+
     # ---- 6. norm conventions + the 10% HALT ----------------------------------
     print("== selftest 6: both norm conventions, delta recorded not absorbed ==")
     nc = resolve_norms(site=site, measured=12.2391, measured_provenance="in-job",
@@ -4760,6 +4943,21 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                                                          len(column.cells),
                                                          n_per_cell=80),
                           ExpectedNShortfall))
+        # B4: expected-N is a gate, so a beside may not fill a hole in it, from either
+        # side — a planned beside that did not run (the total is right because a cell
+        # of record ran in its place), or a cell that stamped itself a beside without
+        # being planned as one.
+        _smuggled = column.cells[0].model_copy(update={
+            "stamp": {**column.cells[0].stamp, "is_beside_only": True}})
+        check("(b) expected-N refuses to let a Σ-beside stand in for a cell of record",
+              _ok(lambda: assert_column_complete(
+                  column.cells, len(column.cells), n_per_cell=4, beside_cell_ids=()))
+              and _raises(lambda: assert_column_complete(
+                  column.cells, len(column.cells), n_per_cell=4,
+                  beside_cell_ids=[f"SigmaBand1_L{site}_a+0.30"]), ExpectedNShortfall)
+              and _raises(lambda: assert_column_complete(
+                  [_smuggled] + list(column.cells[1:]), len(column.cells),
+                  n_per_cell=4, beside_cell_ids=()), ExpectedNShortfall))
         check("a pool whose sha disagrees with the document is a HALT (M4)",
               _raises(lambda: run_column(
                   _StubRuntime(pool, tok, arm, site), doc=doc.model_copy(

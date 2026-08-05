@@ -73,14 +73,14 @@ import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from metabasis.scripts.run_behavioral_cells import (
-    ArtifactShaMismatch, BASELINE_DOSE, BRIEF_OF_RECORD, BRIEF_SHA256,
-    BehavioralHarnessError, CELL_ID_TEMPLATE, CORPUS_SHA_V21, CellKind, CellSpec,
-    CorpusVintageError, DOSE_LADDER, ENVELOPE_RULING_OF_RECORD, ExpectedNShortfall,
-    GRADE_LINE, LesionRecipeViolation, MAX_NEW_TOKENS, N_PER_CELL,
-    NaiveTransplantRowMissing, NativeVectorUnavailable, SCORING_DOSES,
-    SEED_MATERIAL_TEMPLATE, SEED_MATERIAL_TEMPLATE_DIGEST, SamplingConfig,
-    SiteNotOfRecord, apply_dose_ladder, assert_corpus_vintage, assert_naive_row_banked,
-    assert_no_lesion_recipe, baseline_cell, seed_int)
+    ArtifactShaMismatch, BASELINE_DOSE, BESIDE_BAND_FAMILIES, BRIEF_OF_RECORD,
+    BRIEF_SHA256, BehavioralHarnessError, CELL_ID_TEMPLATE, CORPUS_SHA_V21, CellKind,
+    CellSpec, CorpusVintageError, DOSE_LADDER, ENVELOPE_RULING_OF_RECORD,
+    ExpectedNShortfall, GATE_BAND_FAMILIES, GRADE_LINE, LesionRecipeViolation,
+    MAX_NEW_TOKENS, N_PER_CELL, NaiveTransplantRowMissing, NativeVectorUnavailable,
+    SCORING_DOSES, SEED_MATERIAL_TEMPLATE, SEED_MATERIAL_TEMPLATE_DIGEST,
+    SamplingConfig, SiteNotOfRecord, apply_dose_ladder, assert_corpus_vintage,
+    assert_naive_row_banked, assert_no_lesion_recipe, baseline_cell, seed_int)
 from metabasis.threads import (PRE_RULING_UNRECORDED, RULED_OMP_NUM_THREADS,
                                THREAD_COUNT_MISMATCH_LABEL, ThreadConfig,
                                stamp_thread_config, thread_config_stamp,
@@ -105,6 +105,20 @@ N_NAIVE_CELLS = len(SCORING_DOSES)                               # 2 (ruling 5)
 N_FULL_COLUMN_CELLS = (N_BASELINE_CELLS + N_CALIBRATION_SIGNAL_CELLS
                        + N_CALIBRATION_BAND_CELLS + N_TRANSPORTED_SIGNAL_CELLS
                        + N_TRANSPORTED_BAND_CELLS + N_NAIVE_CELLS)          # 51
+
+#: **B4 (Luxia, 2026-08-04): 6 Σ-beside cells per DESIGNATED row.** The arithmetic is
+#: derived from the pre-statement's own pairing convention rather than asserted:
+#: §4.1/§5.1 pair every band MEMBER with every dose the signal it controls rides, which
+#: is why the isotropic band is `N_BAND_MEMBERS × len(DOSE_LADDER) == 18`. The Σ band is
+#: a BESIDE quoted at the SCORING doses only — the ±.3 pair that §4.2(b) and §5.5 read
+#: and the same two doses ruling 5's naive null fires at — so the same pairing
+#: convention over `SCORING_DOSES` gives `3 × 2 == 6`. The 18-cell alternative (the full
+#: signed ladder) was the other option filed to Luxia at staging; she ruled 6.
+N_SIGMA_BESIDE_CELLS = N_BAND_MEMBERS * len(SCORING_DOSES)       # 6
+#: The doses a Σ-beside cell is staged at, in ladder order (a subset of DOSE_LADDER, so
+#: `CellSpec`'s frozen-ladder validator accepts every one of them).
+SIGMA_BESIDE_DOSES: tuple[float, ...] = tuple(
+    d for d in DOSE_LADDER if d in SCORING_DOSES)
 
 #: Ruling 5: the behavioral naive-transplant null fires at ±0.3 ONLY (~4% of a pair's
 #: budget), and the object injected is the coordinate-identified RAW source vector —
@@ -448,6 +462,65 @@ class TransportMapRef(BaseModel):
     corpus_vintage: Optional[str] = None
 
 
+class ComposedMapRef(BaseModel):
+    """A TWO-HOP composed map: source → hub → target, through two banked hub legs.
+
+    The composed-object behavioral leg (brief ruling 6 / pre-statement §4) carries the
+    SOURCE's object back to the hub through `hub_to_source` in REVERSE and out to the
+    target through `hub_to_target` FORWARDS. That is exactly the arithmetic
+    `read_composed_predictions.composed_exchange_rate` performs on the two banked hub
+    legs — reused, not re-derived, so the behavioral object rides the same composition
+    the â_comp prediction is made of.
+
+    The two legs must name ONE hub at ONE hub site in ONE arm and ONE family, or the
+    two-hop is not composable (the composed-path module raises on exactly this) — so
+    the agreement is a validator here rather than a comment.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    hub_key: str = Field(min_length=1)
+    hub_site: int = Field(ge=0)
+    family: str = Field(min_length=1)
+    arm: Literal["native", "raw"]
+    #: the hub→SOURCE leg, ridden in REVERSE (source space → hub space).
+    hub_to_source: TransportMapRef
+    #: the hub→TARGET leg, ridden FORWARDS (hub space → target space).
+    hub_to_target: TransportMapRef
+    #: the pre-statement's ranking rule for the pair, recorded so the artifact and the
+    #: spec agree on WHY this pair is here (B2: the product of the two legs' âs).
+    selection_rule: str = ""
+    a_hat_hub_to_source: Optional[float] = None
+    a_hat_hub_to_target: Optional[float] = None
+    a_hat_product: Optional[float] = None
+    product_rank: Optional[int] = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def _one_hub_one_arm_one_family(self) -> "ComposedMapRef":
+        for name, leg in (("hub_to_source", self.hub_to_source),
+                          ("hub_to_target", self.hub_to_target)):
+            if leg.arm != self.arm:
+                raise ValueError(
+                    f"{name} is banked in the {leg.arm!r} arm but the composed map "
+                    f"runs in {self.arm!r} — a behavioral cell inherits ONE arm from "
+                    "the map it rides (v3 prereg §3.2), so two legs in different arms "
+                    "are not composable")
+            if leg.family != self.family:
+                raise ValueError(
+                    f"{name} is family {leg.family!r}, the composed map is "
+                    f"{self.family!r} — the composed object must ride ONE family end "
+                    "to end or its â_comp is not the filed prediction's")
+        if self.hub_to_source.fit == self.hub_to_target.fit:
+            raise ValueError(
+                "the two hub legs are the SAME fit — a composed 'pair' whose two legs "
+                "coincide is the identity dressed as a composition")
+        return self
+
+    @property
+    def legs(self) -> tuple[TransportMapRef, TransportMapRef]:
+        return (self.hub_to_source, self.hub_to_target)
+
+
 class BankSpec(BaseModel):
     """Everything one (node, arm, site) column is staged from — the whole basis.
 
@@ -479,6 +552,10 @@ class BankSpec(BaseModel):
     source_vector: Optional[VectorRef] = None
     source_band: BandRef = BandRef(family="gRband")
     transport_map: Optional[TransportMapRef] = None
+    #: the composed-object alternative to `transport_map` (brief ruling 6 / B2). Exactly
+    #: one of the two is set on a transported column: a direct pair fit OR a two-hop
+    #: through the crowned hub, never both, because a cell rides ONE road.
+    composed_map: Optional[ComposedMapRef] = None
     naive_gate: Optional[Path] = None
 
     include_calibration: bool = True
@@ -510,12 +587,51 @@ class BankSpec(BaseModel):
             raise ValueError(
                 f"n/cell is frozen at {N_PER_CELL} (§5.1/§11); a reduced n is a "
                 "rehearsal and must carry a `label` saying so")
+        if self.transport_map is not None and self.composed_map is not None:
+            raise ValueError(
+                "a transported column rides ONE road: `transport_map` (a direct pair "
+                "fit) or `composed_map` (the two-hop through the hub), never both")
+        for half, band in (("native_band", self.native_band),
+                           ("source_band", self.source_band)):
+            sig = band.sigma_beside
+            if sig is None:
+                continue
+            # The Σ-beside designates a CELL TUPLE (O-2). A spec that carried a recipe
+            # describing SOMEONE ELSE's cell would pass `assert_sigma_beside_designated`
+            # (which reads the recipe, not the spec) while banking the beside into this
+            # column, so the two are tied together here.
+            if (sig.node_key, sig.arm, sig.site) != (self.node_key, self.arm,
+                                                     self.site):
+                raise ValueError(
+                    f"{half}: Σ-beside recipe describes "
+                    f"({sig.node_key}, {sig.arm}, L{sig.site}) but this spec is "
+                    f"({self.node_key}, {self.arm}, L{self.site}) — O-2 designates "
+                    "CELLS, and a beside cannot be banked into a cell it was not "
+                    "designated for")
+            assert_sigma_beside_designated(sig)
         return self
 
     @property
     def transported_prefix(self) -> str:
         """The banked `g`-prefix convention for a transported object."""
         return "g"
+
+    @property
+    def map_of_record(self) -> Optional[TransportMapRef | ComposedMapRef]:
+        """Whichever road the transported half rides, or None on a calibration-only."""
+        return self.transport_map or self.composed_map
+
+    @property
+    def map_family(self) -> Optional[str]:
+        m = self.map_of_record
+        return None if m is None else m.family
+
+    @property
+    def sigma_beside_designations(self) -> tuple[str, ...]:
+        """The Σ-beside designations this spec carries, in (native, transported) order."""
+        return tuple(b.sigma_beside.designation
+                     for b in (self.native_band, self.source_band)
+                     if b.sigma_beside is not None)
 
 
 # ---------------------------------------------------------------- census types
@@ -1150,6 +1266,42 @@ def _band_row(name: str, role: CensusRole, band: BandRef, *, cells_at_risk: int,
                         "improvised.")
 
 
+def _map_row(name: str, tm: Optional[TransportMapRef], *, cells_at_risk: int,
+             corpus_sha_of_record: str) -> ArtifactRow:
+    """One transport-map fit's from-disk row — a direct fit or one composed leg.
+
+    An ABSENT fit is a row, never an exception: that is exactly the state a
+    PENDING-FIT column is in (the 4 hub→race-member columns, B1), and the census's
+    job is to report it as OWED with the count of cells it kills.
+    """
+    if tm is None or not tm.fit.exists():
+        return ArtifactRow(
+            name=name, role="transport_map", path=str(tm.fit) if tm else None,
+            present=False, cells_at_risk=cells_at_risk, ready=False,
+            blocking_reason=("absent from disk — the fit is OWED; no placeholder map "
+                             "is ever substituted") if tm else "not named in the spec")
+    try:
+        sha, verified = verify_sha(tm.fit, tm.sha256, what="transport map fit")
+    except ArtifactShaMismatch as exc:
+        return ArtifactRow(
+            name=name, role="transport_map", path=str(tm.fit), present=True,
+            sha256=sha256_file(tm.fit), expected_sha256=tm.sha256, sha_verified=False,
+            cells_at_risk=cells_at_risk, ready=False, blocking_reason=str(exc))
+    blocking = None
+    if tm.corpus_vintage is None:
+        blocking = ("the map's corpus vintage is unrecorded — §2.8 requires the "
+                    "corpus vintage OF THE MAP on every stamp")
+    elif tm.corpus_vintage != corpus_sha_of_record:
+        blocking = (f"map fit at basis {tm.corpus_vintage[:12]}…, not the basis of "
+                    f"record {corpus_sha_of_record[:12]}… (§9 item 2: MIXED vintage)")
+    return ArtifactRow(
+        name=name, role="transport_map", path=str(tm.fit), present=True, sha256=sha,
+        expected_sha256=tm.sha256, sha_verified=verified,
+        corpus_vintage=tm.corpus_vintage,
+        cells_at_risk=0 if not blocking else cells_at_risk,
+        ready=not blocking, blocking_reason=blocking)
+
+
 def census(spec: BankSpec) -> BankCensus:
     """§4.3's first act: RE-DERIVE readiness from disk, and report rather than raise.
 
@@ -1214,39 +1366,28 @@ def census(spec: BankSpec) -> BankCensus:
             "source random band (→ gRband*)", "source_band", spec.source_band,
             cells_at_risk=N_TRANSPORTED_BAND_CELLS,
             corpus_sha_of_record=spec.corpus_sha_of_record))
-        tm = spec.transport_map
-        if tm is None or not tm.fit.exists():
-            rows.append(ArtifactRow(
-                name="transport map fit", role="transport_map",
-                path=str(tm.fit) if tm else None, present=False,
-                cells_at_risk=N_TRANSPORTED_SIGNAL_CELLS + N_TRANSPORTED_BAND_CELLS,
-                ready=False,
-                blocking_reason="absent" if tm else "not named in the spec"))
+        transported_at_risk = (N_TRANSPORTED_SIGNAL_CELLS
+                               + N_TRANSPORTED_BAND_CELLS
+                               + (N_SIGMA_BESIDE_CELLS
+                                  if spec.source_band.sigma_beside is not None else 0))
+        if spec.composed_map is not None:
+            # Two legs, two rows. A composed object is only as staged as its WEAKER
+            # leg, so each leg reports the SAME kill count rather than half of it.
+            rows.append(_map_row(
+                f"composed leg hub→source ({spec.composed_map.hub_key}→"
+                f"{spec.source_key}, ridden REV)", spec.composed_map.hub_to_source,
+                cells_at_risk=transported_at_risk,
+                corpus_sha_of_record=spec.corpus_sha_of_record))
+            rows.append(_map_row(
+                f"composed leg hub→target ({spec.composed_map.hub_key}→"
+                f"{spec.node_key}, ridden FWD)", spec.composed_map.hub_to_target,
+                cells_at_risk=transported_at_risk,
+                corpus_sha_of_record=spec.corpus_sha_of_record))
         else:
-            try:
-                sha, verified = verify_sha(tm.fit, tm.sha256, what="transport map fit")
-                blocking = None
-                if tm.corpus_vintage is None:
-                    blocking = ("the map's corpus vintage is unrecorded — §2.8 requires "
-                                "the corpus vintage OF THE MAP on every stamp")
-                elif tm.corpus_vintage != spec.corpus_sha_of_record:
-                    blocking = (f"map fit at basis {tm.corpus_vintage[:12]}…, not the "
-                                f"basis of record {spec.corpus_sha_of_record[:12]}… "
-                                "(§9 item 2: MIXED vintage)")
-                rows.append(ArtifactRow(
-                    name="transport map fit", role="transport_map", path=str(tm.fit),
-                    present=True, sha256=sha, expected_sha256=tm.sha256,
-                    sha_verified=verified, corpus_vintage=tm.corpus_vintage,
-                    cells_at_risk=0 if not blocking else
-                    N_TRANSPORTED_SIGNAL_CELLS + N_TRANSPORTED_BAND_CELLS,
-                    ready=not blocking, blocking_reason=blocking))
-            except ArtifactShaMismatch as exc:
-                rows.append(ArtifactRow(
-                    name="transport map fit", role="transport_map", path=str(tm.fit),
-                    present=True, sha256=sha256_file(tm.fit), expected_sha256=tm.sha256,
-                    sha_verified=False,
-                    cells_at_risk=N_TRANSPORTED_SIGNAL_CELLS + N_TRANSPORTED_BAND_CELLS,
-                    ready=False, blocking_reason=str(exc)))
+            rows.append(_map_row(
+                "transport map fit", spec.transport_map,
+                cells_at_risk=transported_at_risk,
+                corpus_sha_of_record=spec.corpus_sha_of_record))
 
     if spec.include_naive:
         gate = _read_json(spec.naive_gate, what="naive-transplant gate")
@@ -1280,8 +1421,14 @@ def census(spec: BankSpec) -> BankCensus:
 
 
 # ---------------------------------------------------------------- the plan (§4.1/§5.1)
-def planned_cell_count(spec: BankSpec) -> int:
-    """The cell arithmetic this spec plans — computed, never narrated."""
+def planned_cell_count(spec: BankSpec, *, of_record_only: bool = False) -> int:
+    """The cell arithmetic this spec plans — computed, never narrated.
+
+    `of_record_only=True` returns the column WITHOUT its Σ-beside cells: the count the
+    §4.1/§5.1 table fixes and the one §7's expected-N guard asserts on the column of
+    record. Keeping the two counts separate is what stops a beside from filling a hole
+    (B4: never a gate input, and expected-N is a gate).
+    """
     n = N_BASELINE_CELLS
     if spec.include_calibration:
         n += N_CALIBRATION_SIGNAL_CELLS + N_CALIBRATION_BAND_CELLS
@@ -1289,6 +1436,18 @@ def planned_cell_count(spec: BankSpec) -> int:
         n += N_TRANSPORTED_SIGNAL_CELLS + N_TRANSPORTED_BAND_CELLS
     if spec.include_naive:
         n += N_NAIVE_CELLS
+    if not of_record_only:
+        n += planned_sigma_beside_count(spec)
+    return n
+
+
+def planned_sigma_beside_count(spec: BankSpec) -> int:
+    """B4's 6 cells per DESIGNATED row, counted from the designations the spec carries."""
+    n = 0
+    if spec.include_calibration and spec.native_band.sigma_beside is not None:
+        n += N_SIGMA_BESIDE_CELLS
+    if spec.include_transported and spec.source_band.sigma_beside is not None:
+        n += N_SIGMA_BESIDE_CELLS
     return n
 
 
@@ -1299,6 +1458,36 @@ def _ladder_cells(vector_key: str, site: int, *, kind: CellKind,
     return apply_dose_ladder(
         vector_key, site, per_token_median_resid_norm=norm, kind=kind,
         band_family=band_family, vector_npz=npz, vector_provenance=provenance, n=n)
+
+
+def _sigma_beside_cells(recipe: SigmaBandRecipe, site: int, *, kind: CellKind,
+                        provenance: str, npz: Optional[str], n: int,
+                        norm: float) -> list[tuple[CellSpec, float]]:
+    """B4's Σ-beside cells for ONE designated row: 3 members × the SCORING doses.
+
+    The designation is re-asserted here — the guard already fires inside
+    `build_sigma_band`, but that only runs under `--construct-bands`, and a spec that
+    reached `--census`/`plan_cells` with an undesignated Σ recipe would otherwise
+    ANNOUNCE cells that could never be built. Refusing at plan time is what makes the
+    designation part of the engine-facing contract rather than of the builder alone.
+    """
+    assert_sigma_beside_designated(recipe)
+    assert_no_lesion_recipe(provenance, SIGMA_BAND_KIND)
+    out: list[tuple[CellSpec, float]] = []
+    for i in range(1, recipe.n_members + 1):
+        key = f"{SIGMA_BAND_KIND}{i}"
+        for frac in SIGMA_BESIDE_DOSES:
+            out.append((CellSpec(
+                cell_id=CELL_ID_TEMPLATE.format(vector_key=key, site=site, frac=frac),
+                kind=kind, vector_key=key, site=site, alpha_frac=frac, n=n,
+                band_family=SIGMA_BAND_KIND, vector_npz=npz,
+                vector_provenance=provenance), frac * norm))
+    if len(out) != N_SIGMA_BESIDE_CELLS:                          # pragma: no cover
+        raise ExpectedNShortfall(
+            f"Σ-beside {recipe.designation}: planned {len(out)} cells, B4 says "
+            f"{N_SIGMA_BESIDE_CELLS} ({recipe.n_members} members × "
+            f"{len(SIGMA_BESIDE_DOSES)} scoring doses)")
+    return out
 
 
 def plan_cells(spec: BankSpec, *, vector_npz: Optional[str] = None,
@@ -1343,6 +1532,18 @@ def plan_cells(spec: BankSpec, *, vector_npz: Optional[str] = None,
                                       npz=vector_npz, n=n, norm=norm):
                 cells.append(StagedCell(spec=c, provisional_alpha=a,
                                         vector_sha256=vector_sha256))
+        if spec.native_band.sigma_beside is not None:
+            sig = spec.native_band.sigma_beside
+            sprov = (f"Σ-BESIDE ({sig.designation}) — {spec.node_key}'s own site "
+                     f"covariance at L{spec.site}: unit(Σ^{{1/2}}g) beside the Rband "
+                     "at the SCORING doses. A stricter null quoted BESIDE the null of "
+                     "record; NEVER the null of record and never an input to any gate "
+                     "(pre-statement §2 / O-2; Luxia's B4 ruling 2026-08-04)")
+            for c, a in _sigma_beside_cells(sig, spec.site, kind="calibration_band",
+                                            provenance=sprov, npz=vector_npz, n=n,
+                                            norm=norm):
+                cells.append(StagedCell(spec=c, provisional_alpha=a,
+                                        vector_sha256=vector_sha256))
 
     if spec.include_transported:
         src = spec.source_key or "source"
@@ -1372,6 +1573,21 @@ def plan_cells(spec: BankSpec, *, vector_npz: Optional[str] = None,
                                         transport_map=transport_map_stamp,
                                         naive_row=naive_row,
                                         vector_sha256=vector_sha256))
+        if spec.source_band.sigma_beside is not None:
+            sig = spec.source_band.sigma_beside
+            sprov = (f"Σ-BESIDE ({sig.designation}) — {src}'s site covariance, drawn "
+                     f"in the SOURCE's space and carried through the SAME {fam} map "
+                     f"→ {spec.node_key} L{spec.site}, at the SCORING doses. A "
+                     "stricter null quoted BESIDE the transported null of record; "
+                     "NEVER the null of record and never an input to any gate "
+                     "(pre-statement §2 / O-2; Luxia's B4 ruling 2026-08-04)")
+            for c, a in _sigma_beside_cells(sig, spec.site, kind="transported_band",
+                                            provenance=sprov, npz=vector_npz, n=n,
+                                            norm=norm):
+                cells.append(StagedCell(spec=c, provisional_alpha=a,
+                                        transport_map=transport_map_stamp,
+                                        naive_row=naive_row,
+                                        vector_sha256=vector_sha256))
 
     if spec.include_naive:
         key = f"{NAIVE_KEY_PREFIX}_entropy_gradient"
@@ -1397,6 +1613,15 @@ def plan_cells(spec: BankSpec, *, vector_npz: Optional[str] = None,
             f"{spec.node_key}: planned {len(cells)} cells, the §4.1+§5.1 table says "
             f"{expected} (§9 item 10 / M23: a count one short is a rake, not a "
             "rounding)")
+    # …and again on the column MINUS its besides, so a Σ cell can never be the reason
+    # the total came out right (B4: never a gate input, and expected-N is a gate).
+    of_record = [c for c in cells if not c.spec.is_beside]
+    expected_of_record = planned_cell_count(spec, of_record_only=True)
+    if len(of_record) != expected_of_record:                      # pragma: no cover
+        raise ExpectedNShortfall(
+            f"{spec.node_key}: planned {len(of_record)} cells OF RECORD, the "
+            f"§4.1+§5.1 table says {expected_of_record} "
+            f"({len(cells) - len(of_record)} Σ-beside cells were staged beside them)")
     return cells
 
 
@@ -1518,23 +1743,48 @@ def build_banks(spec: BankSpec, *, construct_bands: bool = False,
     # --- §5's transported half ------------------------------------------------
     tm_stamp: Optional[dict] = None
     if spec.include_transported:
-        if spec.source_vector is None or spec.transport_map is None:  # pragma: no cover
+        if spec.source_vector is None or spec.map_of_record is None:  # pragma: no cover
             raise SpecError("the transported half needs a source vector and a map")
         from metabasis.scripts.fit_transport_maps import load_transport_map
 
-        tmap = load_transport_map(spec.transport_map.fit)
-        direction = spec.transport_map.direction
+        if spec.composed_map is not None:
+            comp = spec.composed_map
+            leg_in = load_transport_map(comp.hub_to_source.fit)
+            leg_out = load_transport_map(comp.hub_to_target.fit)
+            in_dir, out_dir_ = comp.hub_to_source.direction, comp.hub_to_target.direction
+            # `hub_to_source` is a hub→source leg ridden BACKWARDS and `hub_to_target`
+            # a hub→target leg ridden FORWARDS, each composed with whatever orientation
+            # the fit was banked in (§8.3). `_flip` turns a banked orientation into the
+            # one this hop needs, so a mirror-banked leg composes identically.
+            def _flip(d: str) -> str:
+                return "rev" if d == "fwd" else "fwd"
 
-        def carry(v: np.ndarray) -> np.ndarray:
-            return tmap.transport(v, direction=direction)
+            def carry(v: np.ndarray) -> np.ndarray:
+                at_hub = leg_in.transport(v, direction=_flip(in_dir))
+                return leg_out.transport(at_hub, direction=out_dir_)
+
+            direction = "composed"
+        else:
+            tmap = load_transport_map(spec.transport_map.fit)
+            direction = spec.transport_map.direction
+
+            def carry(v: np.ndarray) -> np.ndarray:
+                return tmap.transport(v, direction=direction)
 
         src = load_npz_vector(spec.source_vector)
         gkey = f"{spec.transported_prefix}entropy_gradient"
         gv, mag = transport_vector(carry, src, key=gkey)
         vectors[gkey] = gv.astype(np.float32)
         magnitudes[gkey] = round(mag, 6)
-        constructions[gkey] = (f"transport({spec.transport_map.family}, "
-                               f"{direction}) then unit")
+        if spec.composed_map is not None:
+            constructions[gkey] = (
+                f"COMPOSED two-hop transport({spec.composed_map.family}): "
+                f"{spec.source_key} →(rev {spec.composed_map.hub_key} leg)→ hub "
+                f"→(fwd)→ {spec.node_key}, then unit — the same composition "
+                "`read_composed_predictions.composed_exchange_rate` makes â_comp from")
+        else:
+            constructions[gkey] = (f"transport({spec.transport_map.family}, "
+                                   f"{direction}) then unit")
         target_dim = gv.size
         sband = spec.source_band
         if sband.members:
@@ -1591,14 +1841,51 @@ def build_banks(spec: BankSpec, *, construct_bands: bool = False,
             vectors[nkey] = coordinate_identify(src, target_dim, key=nkey
                                                 ).astype(np.float32)
             constructions[nkey] = NAIVE_CONSTRUCTION
-        tm_stamp = {
-            "fit_path": str(spec.transport_map.fit),
-            "fit_sha256": sha256_file(spec.transport_map.fit),
-            "family": spec.transport_map.family,
-            "arm": spec.transport_map.arm,
-            "direction": direction,
-            "corpus_vintage": spec.transport_map.corpus_vintage,
-        }
+        if spec.composed_map is not None:
+            comp = spec.composed_map
+            tm_stamp = {
+                "road": "composed",
+                "hub_key": comp.hub_key, "hub_site": comp.hub_site,
+                "family": comp.family, "arm": comp.arm, "direction": "composed",
+                "legs": [
+                    {"role": "hub_to_source", "ridden": "rev",
+                     "fit_path": str(comp.hub_to_source.fit),
+                     "fit_sha256": sha256_file(comp.hub_to_source.fit),
+                     "banked_direction": comp.hub_to_source.direction,
+                     "corpus_vintage": comp.hub_to_source.corpus_vintage},
+                    {"role": "hub_to_target", "ridden": "fwd",
+                     "fit_path": str(comp.hub_to_target.fit),
+                     "fit_sha256": sha256_file(comp.hub_to_target.fit),
+                     "banked_direction": comp.hub_to_target.direction,
+                     "corpus_vintage": comp.hub_to_target.corpus_vintage},
+                ],
+                # §2.8 wants ONE fit sha per stamp field; a composed road has two, so
+                # the field carries a digest OVER the two in leg order and the legs are
+                # listed above. A stamp that named only one leg would be unreproducible.
+                "fit_sha256": hashlib.sha256(
+                    (sha256_file(comp.hub_to_source.fit) + "|"
+                     + sha256_file(comp.hub_to_target.fit)).encode()).hexdigest(),
+                "fit_path": (f"{comp.hub_to_source.fit} (rev) ∘ "
+                             f"{comp.hub_to_target.fit} (fwd)"),
+                "corpus_vintage": (comp.hub_to_target.corpus_vintage
+                                   if (comp.hub_to_source.corpus_vintage
+                                       == comp.hub_to_target.corpus_vintage) else None),
+                "selection_rule": comp.selection_rule or None,
+                "a_hat_hub_to_source": comp.a_hat_hub_to_source,
+                "a_hat_hub_to_target": comp.a_hat_hub_to_target,
+                "a_hat_product": comp.a_hat_product,
+                "product_rank": comp.product_rank,
+            }
+        else:
+            tm_stamp = {
+                "road": "direct",
+                "fit_path": str(spec.transport_map.fit),
+                "fit_sha256": sha256_file(spec.transport_map.fit),
+                "family": spec.transport_map.family,
+                "arm": spec.transport_map.arm,
+                "direction": direction,
+                "corpus_vintage": spec.transport_map.corpus_vintage,
+            }
 
     naive_row: Optional[dict] = None
     if spec.include_naive:
@@ -1621,6 +1908,10 @@ def build_banks(spec: BankSpec, *, construct_bands: bool = False,
         "source_vector_build": _vintage_of(spec.source_vector),
         "transport_map": spec.transport_map.corpus_vintage if spec.transport_map
         else None,
+        "composed_leg_hub_to_source": (spec.composed_map.hub_to_source.corpus_vintage
+                                       if spec.composed_map else None),
+        "composed_leg_hub_to_target": (spec.composed_map.hub_to_target.corpus_vintage
+                                       if spec.composed_map else None),
     }
     present_chain = {k: v for k, v in vintage_chain.items() if v is not None}
     if present_chain:
@@ -1767,6 +2058,8 @@ def bank_stamp(spec: BankSpec, *, cells: Sequence[StagedCell],
         "n_per_cell": spec.n_per_cell,
         "max_new_tokens": spec.max_new_tokens,
         "n_cells": len(cells),
+        "n_cells_of_record": sum(1 for c in cells if not c.spec.is_beside),
+        "n_sigma_beside_cells": sum(1 for c in cells if c.spec.is_beside),
         "n_generations": len(cells) * spec.n_per_cell,
         "seed_recipe": SEED_MATERIAL_TEMPLATE,
         "seed_material_template_digest": SEED_MATERIAL_TEMPLATE_DIGEST,
@@ -1783,6 +2076,11 @@ def bank_stamp(spec: BankSpec, *, cells: Sequence[StagedCell],
         "transport_map_family": (transport_map or {}).get("family"),
         "transport_map_arm": (transport_map or {}).get("arm"),
         "transport_map_corpus_vintage": (transport_map or {}).get("corpus_vintage"),
+        "transport_road": (transport_map or {}).get("road"),
+        # A composed road's two legs, verbatim — the single `transport_map_fit_sha256`
+        # above is a digest OVER them and cannot be resolved back to either leg.
+        "composed_map": (transport_map
+                         if (transport_map or {}).get("road") == "composed" else None),
         "naive_transplant_gate_row": naive_row,
         "naive_transplant_verdict": (naive_row or {}).get("verdict"),
         "naive_construction": NAIVE_CONSTRUCTION if spec.include_naive else None,
@@ -1818,6 +2116,25 @@ def bank_stamp(spec: BankSpec, *, cells: Sequence[StagedCell],
                     "and the stamp says which",
         },
         "sigma_beside": sigma_beside or None,
+        "sigma_beside_cells": {
+            "designations": list(spec.sigma_beside_designations) or None,
+            "n_cells_per_designated_row": N_SIGMA_BESIDE_CELLS,
+            "doses": list(SIGMA_BESIDE_DOSES),
+            "ruling": "B4 (Luxia, 2026-08-04): 6 Σ-beside cells at the SCORING doses "
+                      "per designated row; the CellSpec band-family widening authorized "
+                      "as a beside family only",
+            "derivation": f"§4.1/§5.1 pair every band MEMBER with every dose the "
+                          f"signal it controls rides ({N_BAND_MEMBERS} × "
+                          f"{len(DOSE_LADDER)} = {N_CALIBRATION_BAND_CELLS} for the "
+                          f"isotropic band). The Σ band is quoted at the SCORING doses "
+                          f"only, so the same convention over {list(SCORING_DOSES)} "
+                          f"gives {N_BAND_MEMBERS} × {len(SIGMA_BESIDE_DOSES)} = "
+                          f"{N_SIGMA_BESIDE_CELLS}",
+            "gate_discipline": "these cells enter NO gate: not the §2.7 replay gate "
+                               "(no stratum), not the §4 actuation criteria (Rband "
+                               "only, 18-cell arity), not the §7 expected-N of record "
+                               "(counted separately)",
+        } if spec.sigma_beside_designations else None,
         "lesion_recipe_law": "§5.4: asserted at CONSTRUCTION — the admissible set is "
                              "closed (transport, coordinate_identify, random_band, "
                              "identity) and every forbidden name is refused",
@@ -2402,6 +2719,150 @@ def selftest() -> int:                                   # noqa: C901 — a chec
               _raises(_shortfall_probe, ExpectedNShortfall),
               "table arity injected; the planner refuses rather than rounds")
 
+        # ---- 6b. B4: the Σ-beside CELLS, on designated rows only ---------------
+        print("== selftest 6b: Σ-beside CELLS — 6 per designated row (B4) ==")
+        dn, da, ds, dk = SIGMA_BESIDE_DESIGNATIONS["3b-certification-calibration"]
+        sig_native = _sigma_recipe(vector_key="entropy_gradient")
+
+        def _designated_spec(**over: Any) -> BankSpec:
+            base: dict[str, Any] = dict(
+                node_key=dn, arm=da, site=ds, corpus_manifest=corpus,
+                corpus_sha_of_record=corpus_sha, native_vector=native,
+                native_band=BandRef(family=dk,
+                                    recipe=native_recipe.model_copy(update={
+                                        "node_key": dn, "arm": da, "site": ds,
+                                        "draw_space_key": dn}),
+                                    sigma_beside=sig_native),
+                include_transported=False, include_naive=False,
+                out_dir=root / "out_sigma")
+            base.update(over)
+            return BankSpec(**base)
+
+        sig_spec = _designated_spec()
+        sig_cells = plan_cells(sig_spec)
+        beside = [c for c in sig_cells if c.spec.is_beside]
+        check("a designated calibration row plans 25 + 6 = 31 cells",
+              len(sig_cells) == 31 and planned_cell_count(sig_spec) == 31
+              and planned_cell_count(sig_spec, of_record_only=True) == 25,
+              f"{len(sig_cells)} cells, {len(beside)} beside")
+        check("B4's 6 = 3 members × the 2 SCORING doses, and the doses ARE ±0.3",
+              len(beside) == N_SIGMA_BESIDE_CELLS == 6
+              and sorted({c.spec.vector_key for c in beside})
+              == ["SigmaBand1", "SigmaBand2", "SigmaBand3"]
+              and sorted({c.spec.alpha_frac for c in beside}) == sorted(SCORING_DOSES),
+              str(sorted(c.spec.cell_id for c in beside)))
+        check("every Σ cell is a BAND cell of the family it sits beside's KIND, and "
+              "carries band_family=SigmaBand",
+              all(c.spec.kind == "calibration_band" and c.spec.band_family == "SigmaBand"
+                  and c.spec.is_beside and not c.spec.is_null_of_record
+                  for c in beside))
+        check("the isotropic band of record is UNTOUCHED beside them (18 Rband cells)",
+              sum(1 for c in sig_cells
+                  if c.spec.band_family == "Rband") == N_CALIBRATION_BAND_CELLS)
+        check("a Σ recipe describing ANOTHER cell is refused BY THE SPEC (O-2 "
+              "designates cells), before any census or build",
+              _raises(lambda: _designated_spec(site=ds + 1), ValueError)
+              and _raises(lambda: _designated_spec(
+                  native_band=BandRef(family=dk, recipe=native_recipe,
+                                      sigma_beside=_sigma_recipe(
+                                          node_key="toy-node"))), ValueError),
+              "the guard that used to live only in build_sigma_band now also gates "
+              "the spec, so an undesignated Σ never reaches the engine contract")
+        check("an undesignated Σ is refused at PLAN time too (not only at --build)",
+              _raises(lambda: _sigma_beside_cells(
+                  _sigma_recipe(designation="a-third-cell"), ds,
+                  kind="calibration_band", provenance="p", npz=None, n=80, norm=1.0),
+                  ConstructionRefused))
+
+        # ---- 6c. B2: the COMPOSED road (source → hub → target) ----------------
+        print("== selftest 6c: the composed two-hop road (B2's composed-leg pairs) ==")
+        d_hub = 11
+        (root / "leg_in").mkdir(exist_ok=True)
+        (root / "leg_out").mkdir(exist_ok=True)
+        leg_in_path = _toy_map_npz(root / "leg_in", d_hub, d_src, seed=21)
+        leg_out_path = _toy_map_npz(root / "leg_out", d_hub, d_tgt, seed=22)
+
+        def _leg(path: Path, **over: Any) -> TransportMapRef:
+            base: dict[str, Any] = dict(fit=path, family="proc_k256", arm="native",
+                                        direction="fwd", corpus_vintage=corpus_sha)
+            base.update(over)
+            return TransportMapRef(**base)
+
+        composed = ComposedMapRef(
+            hub_key="toy-hub-of-record", hub_site=26, family="proc_k256", arm="native",
+            hub_to_source=_leg(leg_in_path), hub_to_target=_leg(leg_out_path),
+            selection_rule="B2: product of the two crowned-hub leg âs",
+            a_hat_hub_to_source=0.5, a_hat_hub_to_target=0.4, a_hat_product=0.2,
+            product_rank=1)
+        comp_spec = BankSpec(
+            node_key="toy-node", arm="native", site=7, source_key="toy-hub",
+            source_site=3, pair="src->tgt", corpus_manifest=corpus,
+            corpus_sha_of_record=corpus_sha, native_vector=native,
+            source_vector=source, composed_map=composed, naive_gate=gate,
+            native_band=BandRef(family="Rband", recipe=native_recipe),
+            source_band=BandRef(family="gRband", recipe=source_recipe),
+            out_dir=root / "out_composed")
+        check("a spec may name a direct fit OR a composed road, never both",
+              _raises(lambda: comp_spec.model_copy(update={}).__class__(
+                  **{**json.loads(comp_spec.model_dump_json()),
+                     "transport_map": {"fit": str(map_path), "family": "proc_k256",
+                                       "arm": "native", "corpus_vintage": corpus_sha}}),
+                  ValueError))
+        check("two legs in different arms / families / the same fit are refused",
+              _raises(lambda: ComposedMapRef(
+                  hub_key="h", hub_site=26, family="proc_k256", arm="native",
+                  hub_to_source=_leg(leg_in_path),
+                  hub_to_target=_leg(leg_out_path, arm="raw")), ValueError)
+              and _raises(lambda: ComposedMapRef(
+                  hub_key="h", hub_site=26, family="proc_k256", arm="native",
+                  hub_to_source=_leg(leg_in_path),
+                  hub_to_target=_leg(leg_out_path, family="proc_k128")), ValueError)
+              and _raises(lambda: ComposedMapRef(
+                  hub_key="h", hub_site=26, family="proc_k256", arm="native",
+                  hub_to_source=_leg(leg_in_path),
+                  hub_to_target=_leg(leg_in_path)), ValueError))
+        comp_cen = census(comp_spec)
+        check("the census reports BOTH composed legs as their own rows",
+              sum(1 for r in comp_cen.rows if r.role == "transport_map") == 2
+              and all(r.ready for r in comp_cen.rows if r.role == "transport_map"),
+              str([r.name for r in comp_cen.rows if r.role == "transport_map"]))
+        comp_res, comp_doc = build_banks(comp_spec, construct_bands=True, write=True)
+        with np.load(comp_res.vectors_npz) as _cz:
+            comp_dims = {k: int(np.asarray(_cz[k]).reshape(-1).size) for k in _cz.files}
+        check("every composed object lands in the TARGET's dimension after two hops "
+              f"(source d={d_src} → hub d={d_hub} → target d={d_tgt})",
+              comp_res.n_cells == 51 and set(comp_dims.values()) == {d_tgt}
+              and {"gentropy_gradient", "gRband1", "gRband2", "gRband3"}
+              <= set(comp_dims),
+              str(sorted(set(comp_dims.values()))))
+        st = comp_doc.bank_stamp
+        check("the stamp says COMPOSED and names BOTH legs with their shas and the "
+              "orientation each was ridden in",
+              st["transport_road"] == "composed"
+              and [lg["role"] for lg in st["composed_map"]["legs"]]
+              == ["hub_to_source", "hub_to_target"]
+              and [lg["ridden"] for lg in st["composed_map"]["legs"]] == ["rev", "fwd"]
+              and all(len(lg["fit_sha256"]) == 64
+                      for lg in st["composed_map"]["legs"]))
+        check("the composed construction NAMES the two-hop rather than a single map",
+              "COMPOSED two-hop" in st["vector_constructions"]["gentropy_gradient"])
+        check("the composed vintage chain carries a link PER LEG (a hole is visible)",
+              set(comp_doc.vintage_chain) >= {"composed_leg_hub_to_source",
+                                              "composed_leg_hub_to_target"}
+              and comp_doc.vintage_chain["transport_map"] is None
+              and comp_doc.vintage_chain["composed_leg_hub_to_target"] == corpus_sha)
+        # the fit sha field is a DIGEST over the two legs — a changed leg must move it
+        alt = ComposedMapRef(**{**json.loads(composed.model_dump_json()),
+                                "hub_to_source": json.loads(
+                                    _leg(leg_out_path).model_dump_json()),
+                                "hub_to_target": json.loads(
+                                    _leg(leg_in_path).model_dump_json())})
+        check("the composed fit-sha digest is ORDER-SENSITIVE (swapping the legs "
+              "moves it — the two hops are not interchangeable)",
+              hashlib.sha256((sha256_file(alt.hub_to_source.fit) + "|"
+                              + sha256_file(alt.hub_to_target.fit)).encode()
+                             ).hexdigest() != st["composed_map"]["fit_sha256"])
+
         # ---- 7. the cells document contract -----------------------------------
         print("== selftest 7: the staging→engine document contract ==")
         res, doc = build_banks(spec_c, construct_bands=True, write=True)
@@ -2425,7 +2886,10 @@ def selftest() -> int:                                   # noqa: C901 — a chec
               len(loaded.cells) == 51 and {c.spec.site for c in loaded.cells} == {7})
         check("the vintage chain is explicit, with holes visible as None",
               set(loaded.vintage_chain) == {"corpus_manifest", "native_vector_build",
-                                            "source_vector_build", "transport_map"})
+                                            "source_vector_build", "transport_map",
+                                            "composed_leg_hub_to_source",
+                                            "composed_leg_hub_to_target"},
+              str(sorted(loaded.vintage_chain)))
         check("the banked npz holds every planned vector key",
               _npz_keys(Path(res.vectors_npz)) ==
               {"entropy_gradient", "Rband1", "Rband2", "Rband3", "gentropy_gradient",

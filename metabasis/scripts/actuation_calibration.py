@@ -287,7 +287,12 @@ class CalibrationCellPlan(BaseModel):
             raise ValueError(
                 "§4.1: the calibration control is the node's OWN NATIVE random band "
                 "(`Rband*`), never the transported band (`gRband*`) — the two ask "
-                "different questions and conflating them makes a null uninterpretable")
+                "different questions and conflating them makes a null uninterpretable. "
+                "This test is also what keeps the §4 ACTUATION CRITERIA free of "
+                "BESIDE cells: `SigmaBand*` is admitted by the engine's CellSpec (B4, "
+                "Luxia 2026-08-04) as a beside only, and the 18-cell arity above plus "
+                "this family test are the two independent reasons one cannot arrive "
+                "here.")
         return self
 
     @property
