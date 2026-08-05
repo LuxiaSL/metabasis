@@ -238,6 +238,47 @@ BAND_FAMILIES: tuple[str, ...] = GATE_BAND_FAMILIES + BESIDE_BAND_FAMILIES
 #: so K == 3 is not a tunable but the arity of this tuple.
 REPLAY_GATE_STRATA: tuple[str, ...] = ("signal_at_0.3", "random_band", "calibration")
 
+#: B-1, RULED (Luxia, 2026-08-05 ~03:00, session 12), quoted verbatim from the ledger
+#: row: "**B-1 = the DESK READING RULED**: for a column with no transported cells the
+#: §2.7 replay strata map to the column's own work-types — signal role = native EGV at
+#: |0.3| · band role = the node's own Rband · calibration role = a small-dose cell;
+#: dated interpretation, quoted in the gate code + a pre-statement addendum; the gate's
+#: intent (one of each work-type, deterministic selection, bitwise replay) is
+#: preserved."
+#:
+#: What the ruling is NOT: a second gate, a second stratum set, or a weaker gate.
+#: `REPLAY_GATE_STRATA` and K == 3 are untouched, so a calibration-only column's gate
+#: record has exactly the same shape and the same blocking force as a transported
+#: column's; only WHICH cells fill the three roles changes, and only on a column that
+#: has no transported cells at all. A column that cannot fill a mapped role still
+#: raises `ExpectedNShortfall` — "incomplete, not exempt" is unchanged.
+REPLAY_ROLE_MAPPING_OF_RECORD = "of_record"
+REPLAY_ROLE_MAPPING_CALIBRATION_ONLY = "calibration_only"
+#: The dose magnitude the |0.3| signal role reads at (`SCORING_DOSES` as a magnitude).
+SCORING_DOSE_MAGNITUDE = 0.3
+#: The enactor's reading of "a small-dose cell", recorded so the desk can rule
+#: differently without hunting for the assumption: the calibration ROLE is filled by a
+#: native-lever cell at a NON-SCORING, non-zero dose — |0.03| or |0.10| on the frozen
+#: ladder. The named alternative (the ladder's SMALLEST magnitude, |0.03|, only) is
+#: narrower and was NOT taken, because the role's job is "the lever below the scoring
+#: dose" and both sub-scoring rungs are that; the choice is presence-independent
+#: either way, so the selection stays deterministic from the digest alone.
+CALIBRATION_ONLY_ROLE_READING = (
+    "B-1 ruled (Luxia 2026-08-05, session 12): on a column with NO transported cells "
+    "the three frozen §2.7 roles map to the column's own work-types — signal role = "
+    "the native EGV cell at |0.3| · band role = the node's own Rband · calibration "
+    "role = a small-dose native-lever cell (non-scoring, non-zero: |0.03| or |0.10| "
+    "on the frozen ladder). Deterministic selection, bitwise replay and the blocking "
+    "HALT are unchanged; a transported column never reaches this mapping.")
+#: The kinds whose presence makes a column "transported" for B-1's trigger. `naive`
+#: is in the set BY CONSTRUCTION: a naive cell carries a SOURCE object into a target
+#: (ruling 5), so a column holding one is not a calibration-only column. `judged` is
+#: in the set conservatively — a judged cell's provenance is not decidable from its
+#: kind, and the conservative outcome is the of-record mapping's HALT (a report to the
+#: desk), never a silently substituted role.
+TRANSPORTED_CELL_KINDS: tuple[str, ...] = ("transported", "transported_band", "bridge",
+                                           "naive", "judged")
+
 
 # ---------------------------------------------------------------- error taxonomy
 class BesideCellInGatePopulation(RuntimeError):
@@ -721,6 +762,10 @@ class ReplayGateResult(BaseModel):
     k: int
     selection_digest: str
     selection_rule: str
+    #: B-1 (ruled 2026-08-05): which role mapping filled the three frozen strata —
+    #: `of_record` (the transported column's) or `calibration_only`. Defaulted so a
+    #: record written before the ruling reads back as what it was.
+    role_mapping: str = REPLAY_ROLE_MAPPING_OF_RECORD
     cells: list[str]
     strata: dict[str, str]
     token_id_sha256: dict[str, str]
@@ -1814,12 +1859,14 @@ def characterize_probe_batch_invariance(
 
 
 # ---------------------------------------------------------------- replay gate (§2.7)
-def _stratum_of(cell: CellSpec) -> Optional[str]:
+def _stratum_of(cell: CellSpec, *, calibration_only: bool = False) -> Optional[str]:
     # B4: a BESIDE cell holds NO stratum. Written as the first test rather than left
     # to fall through the family comparisons below, so that adding a stratum later
-    # cannot accidentally admit one.
+    # cannot accidentally admit one. It is the first test under BOTH role mappings.
     if cell.is_beside:
         return None
+    if calibration_only:
+        return _stratum_of_calibration_only(cell)
     if cell.kind in ("calibration", "calibration_band"):
         return "calibration" if cell.kind == "calibration" else None
     if cell.band_family == "gRband":
@@ -1827,6 +1874,58 @@ def _stratum_of(cell: CellSpec) -> Optional[str]:
     if cell.kind in ("transported", "bridge") and abs(cell.alpha_frac) == 0.3:
         return "signal_at_0.3"
     return None
+
+
+def _stratum_of_calibration_only(cell: CellSpec) -> Optional[str]:
+    """B-1's RULED role mapping (`CALIBRATION_ONLY_ROLE_READING`), for one cell.
+
+    Reached ONLY through `_stratum_of(..., calibration_only=True)`, which
+    `select_replay_cells` engages only for a column that has no transported cells AND
+    cannot constitute the gate under the mapping of record — so a transported column's
+    selection is byte-identical to its selection before this ruling was implemented.
+    """
+    if cell.band_family == "Rband":              # band role: the node's OWN band
+        return "random_band"
+    if cell.kind == "calibration":               # the native lever, split by dose
+        if abs(cell.alpha_frac) == SCORING_DOSE_MAGNITUDE:
+            return "signal_at_0.3"               # signal role: native EGV at |0.3|
+        if 0.0 < abs(cell.alpha_frac) < SCORING_DOSE_MAGNITUDE:
+            return "calibration"                 # calibration role: a small-dose cell
+    return None
+
+
+def _bucket_by_stratum(cells: Sequence[CellSpec], *, calibration_only: bool
+                       ) -> dict[str, list[str]]:
+    """The per-stratum cell_id buckets under one role mapping (never sorted here)."""
+    buckets: dict[str, list[str]] = {s: [] for s in REPLAY_GATE_STRATA}
+    for c in cells:
+        s = _stratum_of(c, calibration_only=calibration_only)
+        if s is not None:
+            buckets[s].append(c.cell_id)
+    return buckets
+
+
+def column_has_transported_cells(cells: Sequence[CellSpec]) -> bool:
+    """True iff ANY cell in the set is transported-family (B-1's trigger, negated)."""
+    return any(c.kind in TRANSPORTED_CELL_KINDS or c.band_family == "gRband"
+               for c in cells)
+
+
+def replay_gate_role_mapping(cells: Sequence[CellSpec]) -> str:
+    """Which §2.7 role mapping this cell SET falls under (B-1, ruled 2026-08-05).
+
+    The mapping of record wins whenever it CAN constitute the gate, so every column
+    that worked before this ruling selects exactly what it selected before — the
+    calibration-only mapping is unreachable for them by construction, not by care.
+    A column that is short a stratum AND holds transported cells also keeps the
+    mapping of record, so its shortfall still HALTs instead of being re-roled.
+    """
+    of_record = _bucket_by_stratum(cells, calibration_only=False)
+    if all(of_record[s] for s in REPLAY_GATE_STRATA):
+        return REPLAY_ROLE_MAPPING_OF_RECORD
+    if column_has_transported_cells(cells):
+        return REPLAY_ROLE_MAPPING_OF_RECORD
+    return REPLAY_ROLE_MAPPING_CALIBRATION_ONLY
 
 
 def select_replay_cells(cells: Sequence[CellSpec], node_key: str, corpus_sha: str
@@ -1839,15 +1938,19 @@ def select_replay_cells(cells: Sequence[CellSpec], node_key: str, corpus_sha: st
     contributes exactly one cell chosen by the digest modulo the stratum's size.
     Cells are sorted by cell_id first, so the choice depends on the cell SET and the
     digest, never on the order a cells-json happened to list them in.
+
+    B-1 (ruled 2026-08-05): a column with NO transported cells fills the same three
+    frozen roles from its own work-types (`CALIBRATION_ONLY_ROLE_READING`). The
+    mapping is chosen by `replay_gate_role_mapping`, which prefers the mapping of
+    record whenever it can constitute the gate — so nothing about a transported
+    column's selection, digest or strata changes.
     """
     digest = hashlib.sha256(f"{node_key}|{corpus_sha}".encode()).hexdigest()
     seed = int.from_bytes(bytes.fromhex(digest)[:8], "big")
-    buckets: dict[str, list[str]] = {s: [] for s in REPLAY_GATE_STRATA}
+    mapping = replay_gate_role_mapping(cells)
+    buckets = _bucket_by_stratum(
+        cells, calibration_only=(mapping == REPLAY_ROLE_MAPPING_CALIBRATION_ONLY))
     beside_ids = {c.cell_id for c in cells if c.is_beside}
-    for c in cells:
-        s = _stratum_of(c)
-        if s is not None:
-            buckets[s].append(c.cell_id)
     leaked = sorted(beside_ids.intersection(
         cid for ids in buckets.values() for cid in ids))
     if leaked:                                                    # pragma: no cover
@@ -1872,7 +1975,10 @@ def select_replay_cells(cells: Sequence[CellSpec], node_key: str, corpus_sha: st
             f"§2.7 replay gate cannot be constituted on {node_key}: no cell for "
             f"stratum(a) {missing}. The gate is BLOCKING and its composition is "
             f"frozen ({list(REPLAY_GATE_STRATA)}), so a column that cannot supply "
-            f"one of each is incomplete, not exempt.")
+            f"one of each is incomplete, not exempt. "
+            f"[role mapping: {mapping}"
+            + (f" — {CALIBRATION_ONLY_ROLE_READING}]"
+               if mapping == REPLAY_ROLE_MAPPING_CALIBRATION_ONLY else "]"))
     return [chosen[s] for s in REPLAY_GATE_STRATA], chosen, digest
 
 
@@ -1880,7 +1986,9 @@ def evaluate_replay_gate(*, selection: list[str], strata: dict[str, str],
                          digest: str,
                          token_first: dict[str, str], token_replay: dict[str, str],
                          entropy_first: dict[str, str],
-                         entropy_replay: dict[str, str]) -> ReplayGateResult:
+                         entropy_replay: dict[str, str],
+                         role_mapping: str = REPLAY_ROLE_MAPPING_OF_RECORD
+                         ) -> ReplayGateResult:
     """§2.7's blocking comparison. Any mismatch → HALT; no cell is quotable."""
     mismatches = []
     for cell in selection:
@@ -1896,7 +2004,10 @@ def evaluate_replay_gate(*, selection: list[str], strata: dict[str, str],
         k=REPLAY_GATE_K, selection_digest=digest,
         selection_rule="sha256(node_key|corpus_sha); one cell per frozen stratum "
                        f"{list(REPLAY_GATE_STRATA)}, chosen by the digest modulo "
-                       "the stratum's cell_id-sorted size (§2.7)",
+                       "the stratum's cell_id-sorted size (§2.7)"
+                       + ("" if role_mapping == REPLAY_ROLE_MAPPING_OF_RECORD
+                          else f" — ROLE MAPPING: {CALIBRATION_ONLY_ROLE_READING}"),
+        role_mapping=role_mapping,
         cells=selection, strata=strata,
         token_id_sha256=dict(token_first), token_id_sha256_replay=dict(token_replay),
         entropy_array_sha256=dict(entropy_first),
@@ -2259,6 +2370,31 @@ CALIBRATION_NULLABLE_FIELDS: frozenset[str] = frozenset({
     "naive_transplant_verdict",
 })
 
+#: B-2, RULED (Luxia, 2026-08-05 ~03:00, session 12), quoted verbatim from the ledger
+#: row: "**B-2 = ADOPTED**: `naive` joins the nullable-kind set for EXACTLY the four
+#: transport_map_* stamp fields; the naive gate row/verdict fields stay required; a
+#: selftest must prove a naive cell missing its gate row still HALTs."
+#:
+#: WHY the four and only the four: a naive cell is the ruling-5 null — the SOURCE's
+#: object dropped into the target's site with NO map applied — so there is no fit sha,
+#: no family, no arm and no map vintage to name, by construction. The naive-transplant
+#: gate row and its verdict are the opposite case: a naive cell is exactly the cell
+#: that gate was written for (§5.3 item 1 / §9 item 7), so they stay REQUIRED and a
+#: naive cell that lost them still HALTs.
+NAIVE_NULLABLE_FIELDS: frozenset[str] = frozenset({
+    "transport_map_fit_sha256", "transport_map_family", "transport_map_arm",
+    "transport_map_corpus_vintage",
+})
+#: The nullable-kind table, read by `assert_stamp_complete`. Every other kind gets the
+#: empty set — "null" stays a RULED state for named (kind, field) pairs and nothing
+#: else, which is the property the whole checklist rests on.
+NULLABLE_FIELDS_BY_KIND: dict[str, frozenset[str]] = {
+    "calibration": CALIBRATION_NULLABLE_FIELDS,
+    "calibration_band": CALIBRATION_NULLABLE_FIELDS,
+    "baseline": CALIBRATION_NULLABLE_FIELDS,
+    "naive": NAIVE_NULLABLE_FIELDS,
+}
+
 
 def assert_stamp_complete(stamp: dict, *, cell_kind: Optional[CellKind] = None
                           ) -> None:
@@ -2268,10 +2404,14 @@ def assert_stamp_complete(stamp: dict, *, cell_kind: Optional[CellKind] = None
     responses: a MISSING/NULL field is an OWED artifact (§10), and an unset CVD is
     the M10 rogue-run tell (a scheduler job carries a card index; a rogue carries
     the sentinel).
+
+    A null is legitimate only for a (kind, field) pair named in
+    `NULLABLE_FIELDS_BY_KIND` — the calibration half's six (no pair, so no map and no
+    naive row) and, since B-2 was ruled 2026-08-05, a `naive` cell's four
+    `transport_map_*` fields and NOTHING else. A MISSING field is refused for every
+    kind: `nullable` widens what may be null, never what may be absent.
     """
-    nullable = (CALIBRATION_NULLABLE_FIELDS
-                if cell_kind in ("calibration", "calibration_band", "baseline")
-                else frozenset())
+    nullable = NULLABLE_FIELDS_BY_KIND.get(cell_kind or "", frozenset())
     missing = [f for f in STAMP_REQUIRED_FIELDS if f not in stamp]
     null = [f for f in STAMP_REQUIRED_FIELDS
             if f in stamp and stamp[f] in (None, "", [], {})
@@ -3007,6 +3147,7 @@ def run_column(runtime: NodeRuntime, *, doc: Any, pool: PromptPool,
 
     # ---- the in-job replay gate (§2.7) ---------------------------------------
     selection, strata, digest = select_replay_cells(specs, node_key, corpus_sha)
+    role_mapping = replay_gate_role_mapping(specs)
     token_replay: dict[str, str] = {}
     entropy_replay: dict[str, str] = {}
     by_id = {c.cell_id: c for c in specs}
@@ -3025,7 +3166,7 @@ def run_column(runtime: NodeRuntime, *, doc: Any, pool: PromptPool,
         token_first={c: token_first[c] for c in selection},
         token_replay=token_replay,
         entropy_first={c: entropy_first[c] for c in selection},
-        entropy_replay=entropy_replay)
+        entropy_replay=entropy_replay, role_mapping=role_mapping)
 
     # ---- descriptive instrumentation (M19 — never a gate) --------------------
     invariance = None
@@ -3514,9 +3655,13 @@ def preflight_report(doc: Any, pool: PromptPool, *,
     report["site_cross_check"] = site_cross_check(doc.node_key, doc.site)
     selection, strata, digest = select_replay_cells(
         specs, doc.node_key, report["corpus_manifest_sha256"])
+    _mapping = replay_gate_role_mapping(specs)
     report["replay_gate"] = {"k": REPLAY_GATE_K, "cells": selection,
                              "strata": strata, "selection_digest": digest,
-                             "constituted": True}
+                             "constituted": True, "role_mapping": _mapping,
+                             **({"role_mapping_reading": CALIBRATION_ONLY_ROLE_READING}
+                                if _mapping == REPLAY_ROLE_MAPPING_CALIBRATION_ONLY
+                                else {})}
     report["seed_roots_sample"] = {
         spec.cell_id: cell_seed_root(
             corpus_sha=report["corpus_manifest_sha256"], node_key=doc.node_key,
@@ -3856,6 +4001,34 @@ def _toy_cells(site: int = 14) -> list[CellSpec]:
                                                 frac=frac),
                 kind=kind, vector_key=key, site=site, alpha_frac=frac,
                 band_family=band, vector_provenance=f"toy::{key}"))
+    return cells
+
+
+def _calibration_only_cells(site: int = 26, *, with_beside: bool = True
+                            ) -> list[CellSpec]:
+    """A miniature of the CALIBRATION-ONLY column (B-1's case): no transported cell.
+
+    Mirrors the staged qwen2.5-3b-instruct certification column in shape — the native
+    lever over the full ladder, one Rband member over the full ladder, and (optionally)
+    the designated Σ-beside cells at the scoring doses — which is exactly the column
+    that could not constitute the §2.7 gate before B-1 was ruled.
+    """
+    cells = [baseline_cell(site)]
+    for key, kind, band in (("entropy_gradient", "calibration", None),
+                            ("Rband1", "calibration_band", "Rband")):
+        for frac in DOSE_LADDER:
+            cells.append(CellSpec(
+                cell_id=CELL_ID_TEMPLATE.format(vector_key=key, site=site, frac=frac),
+                kind=kind, vector_key=key, site=site, alpha_frac=frac,
+                band_family=band, vector_provenance=f"toy::{key}"))
+    if with_beside:
+        for frac in SCORING_DOSES:
+            cells.append(CellSpec(
+                cell_id=CELL_ID_TEMPLATE.format(vector_key="SigmaBand1", site=site,
+                                                frac=frac),
+                kind="calibration_band", vector_key="SigmaBand1", site=site,
+                alpha_frac=frac, band_family="SigmaBand",
+                vector_provenance="toy::SigmaBand1"))
     return cells
 
 
@@ -4472,6 +4645,127 @@ def selftest() -> int:                                   # noqa: C901 — a chec
     check("the gate's token digest is computed in gen_id order",
           token_id_digest(ref) == token_id_digest(list(reversed(ref))))
 
+    # ---- 7b. B-1: the calibration-only ROLE MAPPING (RULED 2026-08-05) ---------
+    print("== selftest 7b: B-1's calibration-only replay-gate role mapping ==")
+    # The BYTE ASSERT. Both constants were read off the run of the code BEFORE B-1 was
+    # implemented (/tmp/claude-output/gate-baseline-BEFORE-*.log, case
+    # "toy26|qwen2.5-3b-instruct"), so this check fails the moment the ruling's
+    # implementation perturbs a transported column's gate by so much as one byte.
+    B1_PRE_RULING_SELECTION = ("gentropy_gradient_L26_a+0.30",
+                               "gRband1_L26_a-0.10",
+                               "entropy_gradient_L26_a+0.03")
+    B1_PRE_RULING_SHA256 = (
+        "4115092eff9d6ca1adca17ea8dc952dac546918cbf2d8841a9f58281f1c761c9")
+    _sel_blob = json.dumps([sel, strata, dig], sort_keys=True)
+    check("(B-1) a TRANSPORTED column's gate selection is BYTE-IDENTICAL to its "
+          "pre-ruling selection (frozen triple + strata + digest)",
+          tuple(sel) == B1_PRE_RULING_SELECTION
+          and hashlib.sha256(_sel_blob.encode()).hexdigest() == B1_PRE_RULING_SHA256,
+          hashlib.sha256(_sel_blob.encode()).hexdigest()[:16] + "…")
+    check("(B-1) …and a transported column never reaches the calibration-only "
+          "mapping — the mapping OF RECORD wins whenever it can constitute the gate",
+          replay_gate_role_mapping(full) == REPLAY_ROLE_MAPPING_OF_RECORD
+          and replay_gate_role_mapping(with_beside) == REPLAY_ROLE_MAPPING_OF_RECORD
+          and replay_gate_role_mapping(_compact_cells(site))
+          == REPLAY_ROLE_MAPPING_OF_RECORD
+          and column_has_transported_cells(full))
+    cal_only = _calibration_only_cells(site)
+    check("(B-1) the calibration-only column HAS no transported cell, and falls under "
+          "the ruled mapping",
+          not column_has_transported_cells(cal_only)
+          and replay_gate_role_mapping(cal_only)
+          == REPLAY_ROLE_MAPPING_CALIBRATION_ONLY)
+    csel, cstrata, cdig = select_replay_cells(cal_only, node, corpus)
+    csel2, cstrata2, _ = select_replay_cells(list(reversed(cal_only)), node, corpus)
+    check("(B-1) it constitutes the gate: K=3, one cell per FROZEN stratum (the "
+          "stratum set and K are untouched by the ruling)",
+          len(csel) == 3 and sorted(cstrata) == sorted(REPLAY_GATE_STRATA)
+          and REPLAY_GATE_K == 3, json.dumps(cstrata))
+    check("(B-1) signal role = the native EGV cell at |0.3| (ruled)",
+          cstrata["signal_at_0.3"].startswith("entropy_gradient")
+          and abs(float(cstrata["signal_at_0.3"].rsplit("_a", 1)[1]))
+          == SCORING_DOSE_MAGNITUDE, cstrata["signal_at_0.3"])
+    check("(B-1) band role = the node's OWN Rband (never a gRband, never a beside)",
+          cstrata["random_band"].startswith("Rband"), cstrata["random_band"])
+    check("(B-1) calibration role = a SMALL-DOSE cell (native lever, non-scoring, "
+          "non-zero)",
+          cstrata["calibration"].startswith("entropy_gradient")
+          and 0.0 < abs(float(cstrata["calibration"].rsplit("_a", 1)[1]))
+          < SCORING_DOSE_MAGNITUDE, cstrata["calibration"])
+    check("(B-1) the three roles are filled by three DISTINCT cells",
+          len(set(csel)) == 3, str(csel))
+    check("(B-1) selection is deterministic and order-independent, from the same "
+          "sha256(node_key|corpus_sha) as any other column",
+          csel == csel2 and cstrata == cstrata2
+          and cdig == hashlib.sha256(f"{node}|{corpus}".encode()).hexdigest(),
+          str(csel))
+    check("(B-1) a Σ-BESIDE cell still enters NO role — the B4 rule holds under the "
+          "new mapping (dropping the besides changes nothing)",
+          select_replay_cells(_calibration_only_cells(site, with_beside=False),
+                              node, corpus)[1] == cstrata
+          and all(_stratum_of(c, calibration_only=True) is None
+                  for c in cal_only if c.is_beside))
+    check("(B-1) a calibration-only column with NO Rband still HALTs "
+          "(ExpectedNShortfall — incomplete, not exempt)",
+          _raises(lambda: select_replay_cells(
+              [c for c in cal_only if c.band_family != "Rband"], node, corpus),
+              ExpectedNShortfall))
+    check("(B-1) a calibration-only column with no SMALL-DOSE cell still HALTs",
+          _raises(lambda: select_replay_cells(
+              [c for c in cal_only
+               if c.kind != "calibration" or abs(c.alpha_frac)
+               == SCORING_DOSE_MAGNITUDE], node, corpus),
+              ExpectedNShortfall))
+    check("(B-1) a calibration-only column with no |0.3| lever cell still HALTs",
+          _raises(lambda: select_replay_cells(
+              [c for c in cal_only
+               if c.kind != "calibration" or abs(c.alpha_frac)
+               != SCORING_DOSE_MAGNITUDE], node, corpus),
+              ExpectedNShortfall))
+    check("(B-1) a column that HOLDS transported cells but is short a stratum is NOT "
+          "re-roled — it keeps the mapping of record and HALTs as before",
+          replay_gate_role_mapping([c for c in full if c.kind != "calibration"])
+          == REPLAY_ROLE_MAPPING_OF_RECORD
+          and _raises(lambda: select_replay_cells(
+              [c for c in full if c.kind != "calibration"], node, corpus),
+              ExpectedNShortfall))
+    check("(B-1) a naive cell makes a column transported-family (ruling 5: it carries "
+          "a SOURCE object), so a naive-bearing column is never calibration-only",
+          column_has_transported_cells(cal_only + [CellSpec(
+              cell_id=CELL_ID_TEMPLATE.format(vector_key="naive_entropy_gradient",
+                                              site=site, frac=0.3),
+              kind="naive", vector_key="naive_entropy_gradient", site=site,
+              alpha_frac=0.3, vector_provenance="toy::naive")])
+          and "naive" in TRANSPORTED_CELL_KINDS)
+    cgate = evaluate_replay_gate(
+        selection=csel, strata=cstrata, digest=cdig,
+        token_first={c: f"{i:064x}" for i, c in enumerate(csel)},
+        token_replay={c: f"{i:064x}" for i, c in enumerate(csel)},
+        entropy_first={c: f"{i + 5:064x}" for i, c in enumerate(csel)},
+        entropy_replay={c: f"{i + 5:064x}" for i, c in enumerate(csel)},
+        role_mapping=REPLAY_ROLE_MAPPING_CALIBRATION_ONLY)
+    check("(B-1) the gate RECORD names which role mapping filled the strata, and "
+          "quotes the dated ruling's reading",
+          cgate.role_mapping == REPLAY_ROLE_MAPPING_CALIBRATION_ONLY
+          and "2026-08-05" in cgate.selection_rule
+          and CALIBRATION_ONLY_ROLE_READING in cgate.selection_rule
+          and cgate.passed)
+    check("(B-1) a transported column's gate record still reads `of_record` and its "
+          "selection_rule is UNCHANGED (no ruling text leaks onto it)",
+          gate.role_mapping == REPLAY_ROLE_MAPPING_OF_RECORD
+          and "2026-08-05" not in gate.selection_rule
+          and gate.selection_rule.endswith("(§2.7)"))
+    check("(B-1) a calibration-only column's gate is just as BLOCKING — a token-id "
+          "mismatch on it HALTs like any other",
+          _raises(lambda: evaluate_replay_gate(
+              selection=csel, strata=cstrata, digest=cdig,
+              token_first={c: f"{i:064x}" for i, c in enumerate(csel)},
+              token_replay={c: "f" * 64 for c in csel},
+              entropy_first={c: f"{i + 5:064x}" for i, c in enumerate(csel)},
+              entropy_replay={c: f"{i + 5:064x}" for i, c in enumerate(csel)},
+              role_mapping=REPLAY_ROLE_MAPPING_CALIBRATION_ONLY),
+              ReplayGateNotBitwise))
+
     # ---- 8. stamp completeness against §2.8 ----------------------------------
     print("== selftest 8: stamp completeness as a §2.8 checklist assertion ==")
     os.environ["CUDA_VISIBLE_DEVICES"] = "3"
@@ -4512,6 +4806,88 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                    transport_map_corpus_vintage=None,
                    naive_transplant_gate_row=None,
                    naive_transplant_verdict=None), cell_kind="calibration")))
+
+    # ---- 8b. B-2: the naive cell's four nullable map fields (RULED 2026-08-05) --
+    print("== selftest 8b: B-2's naive-cell stamp nullability ==")
+    naive_stamp = dict(stamp, transport_map_fit_sha256=None, transport_map_family=None,
+                       transport_map_arm=None, transport_map_corpus_vintage=None)
+    check("(B-2) a NAIVE cell with all four transport_map_* fields null passes the "
+          "§2.8 checklist (ruling 5: it rides no map BY CONSTRUCTION)",
+          _ok(lambda: assert_stamp_complete(naive_stamp, cell_kind="naive")),
+          "transport_map_fit_sha256/family/arm/corpus_vintage")
+    check("(B-2) the naive nullable set is EXACTLY the four transport_map_* fields",
+          NAIVE_NULLABLE_FIELDS == frozenset({
+              "transport_map_fit_sha256", "transport_map_family",
+              "transport_map_arm", "transport_map_corpus_vintage"})
+          and all(f in STAMP_REQUIRED_FIELDS for f in NAIVE_NULLABLE_FIELDS)
+          and "naive_transplant_gate_row" not in NAIVE_NULLABLE_FIELDS
+          and "naive_transplant_verdict" not in NAIVE_NULLABLE_FIELDS,
+          str(sorted(NAIVE_NULLABLE_FIELDS)))
+    check("(B-2) a naive cell whose gate ROW is null still HALTs (the gate row is what "
+          "a naive cell is FOR — §5.3 item 1 / §9 item 7)",
+          _raises(lambda: assert_stamp_complete(
+              dict(naive_stamp, naive_transplant_gate_row=None), cell_kind="naive"),
+              StampIncompleteError))
+    check("(B-2) a naive cell whose gate VERDICT is null still HALTs",
+          _raises(lambda: assert_stamp_complete(
+              dict(naive_stamp, naive_transplant_verdict=None), cell_kind="naive"),
+              StampIncompleteError))
+    for _f in ("naive_transplant_gate_row", "naive_transplant_verdict"):
+        _holed = {k: v for k, v in naive_stamp.items() if k != _f}
+        check(f"(B-2) a naive cell MISSING {_f} still HALTs (absence is never a pass)",
+              _raises(lambda h=_holed: assert_stamp_complete(h, cell_kind="naive"),
+                      StampIncompleteError))
+    check("(B-2) a naive cell null on any OTHER required field still HALTs — the "
+          "widening is four fields, not a kind-wide exemption",
+          all(_raises(lambda f=f: assert_stamp_complete(
+              dict(naive_stamp, **{f: None}), cell_kind="naive"),
+              StampIncompleteError)
+              for f in ("model_config_sha256", "vector_npz_sha256",
+                        "replay_gate_digests", "canonical_batch_layout",
+                        "battery_item_set_sha256")))
+    check("(B-2) non-naive kinds are UNCHANGED: a transported cell's null map field "
+          "is still refused, and an unnamed kind gets no nullable set at all",
+          _raises(lambda: assert_stamp_complete(naive_stamp, cell_kind="transported"),
+                  StampIncompleteError)
+          and _raises(lambda: assert_stamp_complete(naive_stamp,
+                                                    cell_kind="transported_band"),
+                      StampIncompleteError)
+          and _raises(lambda: assert_stamp_complete(naive_stamp, cell_kind="bridge"),
+                      StampIncompleteError)
+          and _raises(lambda: assert_stamp_complete(naive_stamp, cell_kind=None),
+                      StampIncompleteError))
+    check("(B-2) the nullable-kind table names exactly the ruled kinds, and the "
+          "calibration half's set is untouched by the ruling",
+          set(NULLABLE_FIELDS_BY_KIND) == {"calibration", "calibration_band",
+                                           "baseline", "naive"}
+          and NULLABLE_FIELDS_BY_KIND["calibration"] == CALIBRATION_NULLABLE_FIELDS
+          and NULLABLE_FIELDS_BY_KIND["naive"] == NAIVE_NULLABLE_FIELDS
+          and NAIVE_NULLABLE_FIELDS < CALIBRATION_NULLABLE_FIELDS)
+    check("(B-2) a naive cell's stamp BUILDS end-to-end through `build_stamp` with a "
+          "banked gate row and no map (the path the column actually takes)",
+          _ok(lambda: build_stamp(
+              cell=CellSpec(
+                  cell_id=CELL_ID_TEMPLATE.format(
+                      vector_key="naive_entropy_gradient", site=site, frac=0.3),
+                  kind="naive", vector_key="naive_entropy_gradient", site=site,
+                  alpha_frac=0.3, vector_provenance="toy::naive transplant"),
+              alpha=0.3 * norm,
+              layout=freeze_layout(80, dtype="bfloat16", headroom_note="selftest"),
+              pool=pool, norms=nc, corpus_sha=corpus, node_key=node, arm=arm,
+              site_cross_check={"SITES": [site], "SITE_OF_RECORD": site,
+                                "agrees": True},
+              model_config_sha256="c" * 64, vector_npz_sha256="d" * 64,
+              vector_fd_gate={"PASSES": True},
+              vector_build_stamp={"builder": "selftest"},
+              transport_map=None,
+              naive_row={"pair": "8b->qwen2.5-3b-instruct", "verdict": "CLEAR",
+                         "bare_cos": 0.04, "q95": 0.09},
+              trunk={"transformers": "5.3.0", "hostname": "selftest"},
+              replay_gate_digests={"token_ids": "d" * 64, "entropy": "e" * 64},
+              battery_item_set_sha256="f" * 64,
+              actuation_calibration={"job_id": "selftest", "verdict": "PASS"},
+              per_cell_seed_roots=roots)),
+          "transport_map=None + a banked naive row")
     os.environ["CUDA_VISIBLE_DEVICES"] = ""
     check("an unset CVD is a HALT (M10: the field that caught the rogue run)",
           _raises(lambda: assert_stamp_complete(
