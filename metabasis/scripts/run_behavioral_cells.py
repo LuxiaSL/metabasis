@@ -116,7 +116,19 @@ Node-side run (§2.1; Heimdall CLI only, the HTTP API is read-only verification)
     python -m metabasis.scripts.run_behavioral_cells --run \
         --node-key qwen2.5-3b-instruct --model-path <LOCAL_WEIGHTS_DIR> \
         --arm-root <ARM_ROOT> --work-root <NODE_DATA_ROOT>/metabasis-behavioral/<node> \
-        --cells-json <STAGED_CELLS>.json --prompt-pool <POOL>.json --arm native
+        --cells-json <STAGED_CELLS>.json --prompt-pool <POOL>.json --arm native \
+        --actuation-calibration <VERDICT>.json    # §4.2, see below
+
+§4.2'S VERDICT ON THE STAMP (2026-08-05, Luxia's ruling ①). §4.2 closes by requiring
+every §5 cell to NAME its site's actuation calibration by job id + verdict + the three
+criterion values. `run_column` has always accepted that block as the
+`actuation_calibration_stamp` kwarg, but nothing on the CLI could fill it, so a
+CLI-fired column stamped OWED — TRUE while no verdict existed (batch A/B), a FALSE
+provenance statement the moment the desk filed one. `--actuation-calibration` takes
+the desk's typed verdict document, refuses it if it names another (node, site, arm)
+or is not a §4.2 document at all, and transcribes it. WITHOUT the flag nothing about
+this module changes: the OWED default and its honest note stand, byte for byte. The
+verdict is never derived here — the desk scores, this module transcribes (C§8).
 
     python -m metabasis.scripts.run_behavioral_cells --preflight ...   # M10: a
         first-class exit-early mode, never output truncation.
@@ -132,12 +144,13 @@ import hashlib
 import json
 import logging
 import sys
+from datetime import date
 from pathlib import Path
 from typing import (Any, Callable, Collection, Literal, Optional, Protocol,
                     Sequence)
 
 import numpy as np
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("run_behavioral_cells")
@@ -279,6 +292,36 @@ CALIBRATION_ONLY_ROLE_READING = (
 TRANSPORTED_CELL_KINDS: tuple[str, ...] = ("transported", "transported_band", "bridge",
                                            "naive", "judged")
 
+#: §4.2's closing line — "Every behavioral cell in §5 NAMES its site's actuation
+#: calibration in its stamp, by job id + verdict + the three criterion values" — is a
+#: STATEMENT OF PROVENANCE the engine transcribes, never one it derives. C§8 and the
+#: overnight go both say the same thing from the other side: "the desk is the scorer
+#: (module never self-scores)". So the verdict arrives as a document the desk wrote,
+#: this module validates its SHAPE and its IDENTITY (does it name THIS column?), and
+#: it copies the numbers through verbatim. Nothing here re-applies a §4.2 threshold.
+ACTUATION_CALIBRATION_SCORER_OF_RECORD = (
+    "DESK-SCORED (C§8 unstamped arithmetic). The §4.2 verdict is the desk's act on "
+    "the column's own ingredients; this engine transcribes it into the stamp and "
+    "NEVER re-derives, re-scores or adjudicates it — including §4.2's consequence "
+    "(only a PASS licenses transported-write cells at a site), which is asserted by "
+    "actuation_calibration.gate_transported_cells at the desk, not here.")
+#: The kwarg has existed since the harness was frozen; before 2026-08-05 nothing on
+#: the CLI could fill it, so every CLI-fired column stamped OWED. That was TRUE for
+#: batch A/B (no verdict existed yet) and became a FALSE provenance statement the
+#: moment the desk filed verdicts — which is the gap `--actuation-calibration` closes
+#: (Luxia's ruling ① of the 2026-08-05 morning round). Absent the flag this module's
+#: behavior is unchanged in every byte: the OWED default below still applies.
+ACTUATION_CALIBRATION_FLAG = "--actuation-calibration"
+#: sha256 over the canonical JSON of the OWED block `run_column` writes when no
+#: calibration stamp is handed in, taken from the FROZEN engine
+#: (`run_behavioral_cells.py` `85500d36196cbf15…`) BEFORE the flag existed. The
+#: selftest asserts a flag-absent column still stamps exactly this — a frozen
+#: pre-change digest, in the shape of B-1's `4115092e…` triple digest, so a future
+#: edit to the OWED text is a FAILING check rather than a quiet re-wording of a
+#: provenance statement that 100+ banked cells already carry.
+OWED_ACTUATION_BLOCK_DIGEST = (
+    "117c51bbecf8e0d4024ce4d7c5d35229aadb0a4eb3e8fc08e6a97e80ab514b06")
+
 
 # ---------------------------------------------------------------- error taxonomy
 class BesideCellInGatePopulation(RuntimeError):
@@ -399,6 +442,40 @@ class VectorizedSamplerNotIdentical(BehavioralHarnessError):
     spelling of `sample_token`; a platform on which it spells something else must not
     produce one token of record, so this fires BEFORE the first token of a sub-batch
     shape is drawn (`assert_batched_sampler_identity`) and stops the run for the desk.
+    """
+
+
+class ActuationCalibrationNotFound(BehavioralHarnessError):
+    """`--actuation-calibration` named a path that is not a readable file.
+
+    Its own exception, deliberately not folded into the schema refusal, because the
+    two have different remedies: an absent document means the desk has not filed the
+    verdict (or the job script points at the wrong path), while a malformed one means
+    the document exists and is wrong. Never a fall-back to OWED — silently stamping
+    OWED because the named verdict could not be read is exactly the false provenance
+    statement the flag exists to end.
+    """
+
+
+class ActuationCalibrationSchemaError(BehavioralHarnessError):
+    """The verdict document is not a valid §4.2 verdict document.
+
+    Unreadable JSON, a non-object body, a missing field, an UNKNOWN field
+    (`extra="forbid"`: a typo'd key is a refusal, never a silently dropped value) or
+    an out-of-range criterion value. A stamp built from a half-understood document
+    would name a calibration whose thresholds nobody can re-apply by hand, which is
+    the whole point of filing the three criterion values rather than a bare verdict.
+    """
+
+
+class ActuationCalibrationMismatch(BehavioralHarnessError):
+    """The verdict document names a different (node, site, arm) than this column.
+
+    §4 gates a SITE, so a verdict is a statement about exactly one (node, site, arm)
+    and about no other. Stamping this column with another column's verdict is the
+    same class of error as running one column under another column's stamp — which
+    the CLI's `--node-key/--arm/--site` cross-check already refuses. Every disagreeing
+    field is named in ONE message, so a misrouted job script is fixed in one pass.
     """
 
 
@@ -2552,6 +2629,189 @@ def assert_naive_row_banked(pair: str, gate: Optional[dict]) -> dict:
     return row
 
 
+# ------------------------------------------------- §4.2's verdict, as a document
+class ActuationCalibrationVerdict(BaseModel):
+    """§4.2's closing requirement as a typed document the desk files and the CLI reads.
+
+    "Every behavioral cell in §5 NAMES its site's actuation calibration in its stamp,
+    by job id + verdict + the three criterion values." The three values are §4.2's
+    own: (a) Spearman ρ(dose, entropy_rise) over the full signed ladder, (b) how many
+    of the ladder's doses sit outside the node's OWN native random band — and whether
+    BOTH |0.3| doses do, because (b) is one criterion with two parts and a stamp that
+    dropped the second could not re-apply the threshold — and (c) the mean
+    distinct-word ratio at the scoring dose.
+
+    THE ROLE BOUNDARY, IN THE TYPE. `verdict` is a field, not a computation. No
+    validator here re-derives PASS/FAIL/DEGENERATE from the criterion values, and a
+    document whose verdict disagrees with its own numbers still loads verbatim: the
+    desk is the scorer (C§8), this module transcribes. The engine's job is to refuse a
+    document that is not a §4.2 document at all, and to refuse one that is about some
+    OTHER column.
+
+    `extra="forbid"`: an unrecognized key is a refusal, because a mistyped criterion
+    name that silently defaulted would put a number in a stamp that no one filed.
+
+    Field names deliberately echo `actuation_calibration.stamp_fragment`'s keys
+    (`job_id`, `verdict`, `spearman_rho`, `outside_band_doses`,
+    `coherence_at_scoring_dose`) so a reader of a §5 stamp meets ONE vocabulary
+    whether the block came from a desk-scored document or from that module's own
+    evaluation. The two modules are NOT wired together — `actuation_calibration`
+    imports this one, so importing it back would be a cycle — and the alignment is by
+    name, on purpose, with this sentence as the record of it.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    #: WHICH column this verdict is about. Cross-checked against the cells document
+    #: before the stamp is built; a disagreement is `ActuationCalibrationMismatch`.
+    node_key: str = Field(min_length=1)
+    site: int = Field(ge=0)
+    arm: Literal["native", "raw"]
+    #: the scheduler job that produced the calibration cells (§4.2's "job id").
+    job_id: str = Field(min_length=1)
+    #: the desk's verdict string, VERBATIM. DEGENERATE is its own state and is never
+    #: folded into PASS (§4.2), so it is a member of the literal rather than a note.
+    verdict: Literal["PASS", "FAIL", "DEGENERATE"]
+    #: (a) dose-ordering across the full signed 6-dose ladder.
+    spearman_rho_dose_vs_rise: float = Field(ge=-1.0, le=1.0)
+    #: (b) band separation vs the node's OWN native Rband, as VALUES: the count, its
+    #: denominator (the ladder's arity, so the fraction is self-describing) and
+    #: §4.2(b)'s second half.
+    outside_band_doses: int = Field(ge=0, le=len(DOSE_LADDER))
+    outside_band_of: int = Field(default=len(DOSE_LADDER), ge=1, le=len(DOSE_LADDER))
+    outside_band_at_both_extremes: bool
+    #: (c) the coherence floor's measurement at the scoring dose (+0.3).
+    coherence_at_scoring_dose: float = Field(ge=0.0, le=1.0)
+    #: where the desk's scoring arithmetic is on the record, and the ledger day it
+    #: was ruled — the two pointers that make the verdict auditable from the stamp.
+    scoring_log_path: str = Field(min_length=1)
+    ledger_date: date
+    #: the site's role, for the §4.2 remedy ladder (a robustness-site calibration is
+    #: a different statement from a site-of-record one). Defaulted, never inferred.
+    site_role: Literal["site_of_record", "robustness_site"] = "site_of_record"
+
+    @model_validator(mode="after")
+    def _counts_are_consistent(self) -> "ActuationCalibrationVerdict":
+        """Arithmetic self-consistency ONLY — never a re-reading of §4.2.
+
+        A count cannot exceed its own denominator, and "outside at both |0.3| doses"
+        cannot be true when fewer than two doses are outside at all. Both are
+        statements about the document's internal arithmetic, not about whether the
+        criteria are MET; the thresholds are never applied here.
+        """
+        if self.outside_band_doses > self.outside_band_of:
+            raise ValueError(
+                f"outside_band_doses {self.outside_band_doses} exceeds its own "
+                f"denominator {self.outside_band_of} — the count is of the frozen "
+                f"{len(DOSE_LADDER)}-dose ladder")
+        if self.outside_band_at_both_extremes and self.outside_band_doses < 2:
+            raise ValueError(
+                f"outside_band_at_both_extremes is true but only "
+                f"{self.outside_band_doses} dose(s) are outside the band — §4.2(b)'s "
+                "two halves contradict each other in this document")
+        return self
+
+    def stamp_block(self, *, document_path: str, document_sha256: str) -> dict:
+        """The object a §5 stamp embeds, under `actuation_calibration`.
+
+        Values, not booleans, so a downstream reader re-applies §4.2's thresholds by
+        hand without re-running anything — and the document's own sha, so the stamp
+        is M4-checkable against the file the desk filed.
+        """
+        return {
+            "verdict": self.verdict,
+            "job_id": self.job_id,
+            "node_key": self.node_key,
+            "site": self.site,
+            "site_role": self.site_role,
+            "arm": self.arm,
+            "control_band_family": "Rband",
+            "spearman_rho": self.spearman_rho_dose_vs_rise,
+            "outside_band_doses":
+                f"{self.outside_band_doses}/{self.outside_band_of}",
+            "outside_band_at_both_extremes": self.outside_band_at_both_extremes,
+            "coherence_at_scoring_dose": self.coherence_at_scoring_dose,
+            "dose_ladder": list(DOSE_LADDER),
+            "scoring_doses": list(SCORING_DOSES),
+            "scoring_log_path": self.scoring_log_path,
+            "ledger_date": self.ledger_date.isoformat(),
+            "scored_by": ACTUATION_CALIBRATION_SCORER_OF_RECORD,
+            "verdict_document_path": document_path,
+            "verdict_document_sha256": document_sha256,
+            "brief_of_record": BRIEF_OF_RECORD,
+            "brief_sha256": BRIEF_SHA256,
+        }
+
+
+def load_actuation_calibration(path: Path, *, node_key: str, arm: str, site: int
+                               ) -> dict:
+    """Read `--actuation-calibration`'s document and return THIS column's stamp block.
+
+    Three refusals, each its own exception because each has its own remedy:
+    `ActuationCalibrationNotFound` (no readable file at that path),
+    `ActuationCalibrationSchemaError` (not a §4.2 verdict document) and
+    `ActuationCalibrationMismatch` (a verdict about some other column). All three are
+    `BehavioralHarnessError`, so the CLI's existing HALT path reports them and exits
+    2 — an enactor never adjudicates a live HALT.
+
+    There is no fourth outcome. In particular there is no degrade-to-OWED: a named
+    verdict that cannot be read stops the job, because OWED means "no verdict has
+    been filed" and stamping it while one exists is the false provenance statement
+    this whole flag was ruled to fix.
+    """
+    if not path.is_file():
+        raise ActuationCalibrationNotFound(
+            f"no actuation-calibration verdict document at {path} "
+            f"({ACTUATION_CALIBRATION_FLAG}). §4.2 requires every §5 cell to NAME its "
+            "site's calibration by job id + verdict + the three criterion values; "
+            "this job named a document that is not a readable file. It does NOT fall "
+            "back to OWED — OWED means no verdict exists, and that would be a false "
+            "provenance statement if one does.")
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        raise ActuationCalibrationNotFound(
+            f"actuation-calibration verdict document at {path} is not readable "
+            f"({type(exc).__name__}: {exc})") from exc
+    document_sha256 = hashlib.sha256(raw).hexdigest()
+    try:
+        body = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ActuationCalibrationSchemaError(
+            f"{path}: not JSON ({exc}) — a §4.2 verdict document is a JSON "
+            "object") from exc
+    if not isinstance(body, dict):
+        raise ActuationCalibrationSchemaError(
+            f"{path}: a §4.2 verdict document is a JSON object, got "
+            f"{type(body).__name__}")
+    try:
+        verdict = ActuationCalibrationVerdict(**body)
+    except ValidationError as exc:
+        raise ActuationCalibrationSchemaError(
+            f"{path}: not a §4.2 verdict document ({exc}). Required: node_key, site, "
+            "arm, job_id, verdict, spearman_rho_dose_vs_rise, outside_band_doses, "
+            "outside_band_at_both_extremes, coherence_at_scoring_dose, "
+            "scoring_log_path, ledger_date. Unknown keys are REFUSED, never "
+            "ignored.") from exc
+    except (TypeError, ValueError) as exc:               # a non-string key, etc.
+        raise ActuationCalibrationSchemaError(f"{path}: {exc}") from exc
+    disagreements = [f"{name}: document says {theirs!r}, this column is {ours!r}"
+                     for name, theirs, ours in
+                     (("node_key", verdict.node_key, node_key),
+                      ("site", verdict.site, site),
+                      ("arm", verdict.arm, arm))
+                     if theirs != ours]
+    if disagreements:
+        raise ActuationCalibrationMismatch(
+            f"{path}: this verdict is about another column — " +
+            "; ".join(disagreements) +
+            ". §4 gates a SITE, so a verdict is a statement about exactly one "
+            "(node, site, arm); stamping this column with it would name a "
+            "calibration that never ran here.")
+    return verdict.stamp_block(document_path=str(path),
+                               document_sha256=document_sha256)
+
+
 # ---------------------------------------------------------------- HF stepper
 class HFStepper:
     """`Stepper` over a real HF causal LM with a KV cache (§2.2's generation path).
@@ -4034,6 +4294,8 @@ def _calibration_only_cells(site: int = 26, *, with_beside: bool = True
 
 def selftest() -> int:                                   # noqa: C901 — a checklist
     """CPU-only, data-independent verification of every load-bearing property."""
+    import contextlib
+    import io
     import tempfile
 
     checks: list[tuple[str, bool, str]] = []
@@ -5415,6 +5677,251 @@ def selftest() -> int:                                   # noqa: C901 — a chec
           freeze_layout(80, dtype="bfloat16").frozen
           and not freeze_layout(80, dtype="bfloat16").characterization_only)
 
+    # ---- 16. §4.2's verdict document and the CLI flag that carries it ---------
+    # The gap this closes (ledger ROUND-2, 2026-08-05): the frozen harness accepted
+    # `actuation_calibration_stamp` as a PYTHON kwarg only, so a CLI-fired column
+    # could not name a verdict that existed and stamped OWED — true for batch A/B,
+    # a FALSE provenance statement afterwards. Luxia's ruling ① adds the flag; these
+    # checks are the flag's contract, and 16b is the byte proof that WITHOUT it
+    # nothing moved.
+    print("== selftest 16: §4.2's actuation-calibration verdict document (CLI flag) ==")
+    cal_node, cal_arm, cal_site = "qwen2.5-3b-instruct", "native", 26
+    cal_doc_body = {
+        "node_key": cal_node, "site": cal_site, "arm": cal_arm,
+        "job_id": "cd6b6a765340", "verdict": "PASS",
+        "spearman_rho_dose_vs_rise": 1.0,
+        "outside_band_doses": 6, "outside_band_of": 6,
+        "outside_band_at_both_extremes": True,
+        "coherence_at_scoring_dose": 0.8117,
+        "scoring_log_path": "/desk/score-batchA-VERDICTS.log",
+        "ledger_date": "2026-08-05",
+    }
+
+    def _load_cal(body: Any, *, node: str = cal_node, arm: str = cal_arm,
+                  site: int = cal_site, name: str = "verdict.json",
+                  raw: Optional[str] = None) -> dict:
+        with tempfile.TemporaryDirectory(prefix="behav_cal_") as cd:
+            p = Path(cd) / name
+            p.write_text(raw if raw is not None else json.dumps(body))
+            return load_actuation_calibration(p, node_key=node, arm=arm, site=site)
+
+    block = _load_cal(cal_doc_body)
+    # RAKE M44: every read of the block goes through `.get`, so a DROPPED key is a
+    # named MISS with the missing name in its detail rather than a KeyError — a
+    # crashing suite and a failing suite are indistinguishable, and only one of them
+    # says what broke.
+    check("(16a) a valid §4.2 verdict document round-trips into a stamp block",
+          block.get("verdict") == "PASS" and block.get("job_id") == "cd6b6a765340"
+          and block.get("node_key") == cal_node and block.get("site") == cal_site
+          and block.get("arm") == cal_arm,
+          json.dumps({k: block.get(k) for k in ("verdict", "job_id", "site", "arm")}))
+    check("(16a) the block names §4.2's THREE criterion values, as VALUES not booleans",
+          block.get("spearman_rho") == 1.0
+          and block.get("outside_band_doses") == "6/6"
+          and block.get("outside_band_at_both_extremes") is True
+          and block.get("coherence_at_scoring_dose") == 0.8117
+          and not any(isinstance(block.get(k), bool)
+                      for k in ("spearman_rho", "coherence_at_scoring_dose")),
+          f"ρ {block.get('spearman_rho')} · band {block.get('outside_band_doses')} · "
+          f"coherence {block.get('coherence_at_scoring_dose')} "
+          f"(absent: {[k for k in ('spearman_rho', 'outside_band_doses',
+                                   'outside_band_at_both_extremes',
+                                   'coherence_at_scoring_dose') if k not in block]})")
+    check("(16a) the block carries the two audit pointers and the ledger date",
+          block.get("scoring_log_path") == "/desk/score-batchA-VERDICTS.log"
+          and block.get("ledger_date") == "2026-08-05"
+          and block.get("verdict_document_sha256") == hashlib.sha256(
+              json.dumps(cal_doc_body).encode()).hexdigest(),
+          f"document sha {str(block.get('verdict_document_sha256'))[:12]}…")
+    check("(16a) the block says on its face that the DESK scored it (C§8, never here)",
+          "DESK-SCORED" in str(block.get("scored_by"))
+          and "NEVER re-derives" in str(block.get("scored_by")))
+    check("(16a) DEGENERATE is its own state and FAIL loads too — the engine "
+          "transcribes a verdict, it never adjudicates §4.2's consequence",
+          _load_cal({**cal_doc_body, "verdict": "DEGENERATE"})["verdict"]
+          == "DEGENERATE"
+          and _load_cal({**cal_doc_body, "verdict": "FAIL"})["verdict"] == "FAIL")
+    check("(16a) …and a verdict that DISAGREES with its own criteria still loads "
+          "verbatim: the module never self-scores",
+          _load_cal({**cal_doc_body, "verdict": "FAIL",
+                     "spearman_rho_dose_vs_rise": 1.0,
+                     "coherence_at_scoring_dose": 0.99})["verdict"] == "FAIL")
+    # the three refusals, each its own exception
+    check("(16a) an ABSENT document is ActuationCalibrationNotFound (never OWED)",
+          _raises(lambda: load_actuation_calibration(
+              Path("/nonexistent/verdict.json"), node_key=cal_node, arm=cal_arm,
+              site=cal_site), ActuationCalibrationNotFound))
+    check("(16a) a DIRECTORY at the path is the same refusal, not a crash",
+          _raises(lambda: load_actuation_calibration(
+              Path(tempfile.gettempdir()), node_key=cal_node, arm=cal_arm,
+              site=cal_site), ActuationCalibrationNotFound))
+    check("(16a) non-JSON is ActuationCalibrationSchemaError",
+          _raises(lambda: _load_cal(None, raw="not json at all"),
+                  ActuationCalibrationSchemaError))
+    check("(16a) a JSON array (not an object) is a schema refusal",
+          _raises(lambda: _load_cal(None, raw="[1, 2, 3]"),
+                  ActuationCalibrationSchemaError))
+    for absent in ("job_id", "verdict", "spearman_rho_dose_vs_rise",
+                   "outside_band_doses", "outside_band_at_both_extremes",
+                   "coherence_at_scoring_dose", "scoring_log_path", "ledger_date",
+                   "node_key", "site", "arm"):
+        check(f"(16a) a document MISSING {absent} is refused, never defaulted",
+              _raises(lambda f=absent: _load_cal(
+                  {k: v for k, v in cal_doc_body.items() if k != f}),
+                  ActuationCalibrationSchemaError))
+    check("(16a) an UNKNOWN key is refused (a typo'd criterion is not a silent drop)",
+          _raises(lambda: _load_cal({**cal_doc_body, "spearman_rho": 1.0}),
+                  ActuationCalibrationSchemaError))
+    check("(16a) an off-menu verdict string is refused",
+          _raises(lambda: _load_cal({**cal_doc_body, "verdict": "PASSED"}),
+                  ActuationCalibrationSchemaError))
+    check("(16a) out-of-range criterion values are refused (ρ, count, coherence)",
+          _raises(lambda: _load_cal({**cal_doc_body,
+                                     "spearman_rho_dose_vs_rise": 1.5}),
+                  ActuationCalibrationSchemaError)
+          and _raises(lambda: _load_cal({**cal_doc_body, "outside_band_doses": 7}),
+                      ActuationCalibrationSchemaError)
+          and _raises(lambda: _load_cal({**cal_doc_body,
+                                         "coherence_at_scoring_dose": 1.4}),
+                      ActuationCalibrationSchemaError))
+    check("(16a) §4.2(b)'s two halves must not contradict each other",
+          _raises(lambda: _load_cal({**cal_doc_body, "outside_band_doses": 1,
+                                     "outside_band_at_both_extremes": True}),
+                  ActuationCalibrationSchemaError))
+    check("(16a) a malformed ledger date is refused",
+          _raises(lambda: _load_cal({**cal_doc_body, "ledger_date": "5 Aug 2026"}),
+                  ActuationCalibrationSchemaError))
+    check("(16a) a WRONG NODE is ActuationCalibrationMismatch",
+          _raises(lambda: _load_cal(cal_doc_body, node="phi-4"),
+                  ActuationCalibrationMismatch))
+    check("(16a) a WRONG SITE is ActuationCalibrationMismatch (§4 gates a SITE)",
+          _raises(lambda: _load_cal(cal_doc_body, site=14),
+                  ActuationCalibrationMismatch))
+    check("(16a) a WRONG ARM is ActuationCalibrationMismatch",
+          _raises(lambda: _load_cal(cal_doc_body, arm="raw"),
+                  ActuationCalibrationMismatch))
+    _mismatch_msg = ""
+    try:
+        _load_cal(cal_doc_body, node="phi-4", site=14, arm="raw")
+    except ActuationCalibrationMismatch as exc:
+        _mismatch_msg = str(exc)
+    check("(16a) …and ONE message names EVERY disagreeing field",
+          all(f in _mismatch_msg for f in ("node_key", "site", "arm"))
+          and "phi-4" in _mismatch_msg,
+          _mismatch_msg[:90] + "…")
+    check("(16a) all three refusals are BehavioralHarnessError, so the CLI HALTs (rc 2)",
+          all(issubclass(e, BehavioralHarnessError)
+              for e in (ActuationCalibrationNotFound,
+                        ActuationCalibrationSchemaError,
+                        ActuationCalibrationMismatch)))
+
+    # 16b: the CLI, end to end, weightless — the flag's ONLY effect, byte-proved.
+    print("== selftest 16b: the CLI's flag-absent path is byte-identical (B-1 style) ==")
+    _saved_globals = {name: globals()[name] for name in
+                      ("load_model_and_tokenizer", "HFNodeRuntime", "load_vectors")}
+    _saved_cvd = os.environ.get("CUDA_VISIBLE_DEVICES")
+    with tempfile.TemporaryDirectory(prefix="behav_cli_") as cli_td:
+        cli = Path(cli_td)
+        cli_tok = _ToyTokenizer()
+        pool_path = cli / "pool.json"
+        pool_path.write_text(json.dumps(
+            [p.model_dump() for p in _toy_pool().prompts], indent=1, sort_keys=True))
+        filed_pool = load_prompt_pool(pool_path)
+        cli_doc = _toy_document(filed_pool, node=cal_node, arm=cal_arm, site=cal_site,
+                                corpus=CORPUS_SHA_V21,
+                                cells=_compact_cells(cal_site), n_per_cell=2,
+                                max_new_tokens=3)
+        cells_path = cli / "cells.json"
+        cells_path.write_text(cli_doc.model_dump_json(indent=1))
+        verdict_path = cli / "verdict.json"
+        verdict_path.write_text(json.dumps(cal_doc_body, indent=1, sort_keys=True))
+        os.environ["CUDA_VISIBLE_DEVICES"] = "3"
+
+        def _fire(work: Path, extra_argv: Sequence[str]) -> int:
+            """`main` itself, argv and all — the CLI contract, not a stand-in.
+
+            Its result summary goes to a buffer rather than the suite's stdout: the
+            selftest tail is read as a checklist and four run summaries in the middle
+            of it hide the checks. Nothing is discarded that matters — every HALT
+            travels on the logger (stderr) and the return code is the assertion.
+            """
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = main(["--run", "--model-path", "<STUB>", "--work-root",
+                           str(work), "--cells-json", str(cells_path),
+                           "--prompt-pool", str(pool_path), "--arm", cal_arm,
+                           "--site", str(cal_site), "--node-key", cal_node,
+                           "--no-characterize", *extra_argv])
+            return rc
+
+        def _banked(work: Path) -> dict:
+            return {p.parent.name: json.loads(p.read_text())
+                    for p in sorted((work / "cells").glob("*/stamp.json"))}
+
+        globals()["load_model_and_tokenizer"] = (
+            lambda *a, **k: (None, None, "bfloat16"))
+        globals()["load_vectors"] = lambda *a, **k: {}
+        globals()["HFNodeRuntime"] = (
+            lambda *a, **k: _StubRuntime(filed_pool, cli_tok, cal_arm, cal_site))
+        try:
+            rc_owed = _fire(cli / "owed", [])
+            rc_flag = _fire(cli / "flagged",
+                            ["--actuation-calibration", str(verdict_path)])
+            rc_wrong = _fire(cli / "wrong", [
+                "--actuation-calibration",
+                str(_write(cli / "other.json", {**cal_doc_body, "site": 14}))])
+            rc_absent = _fire(cli / "absent", [
+                "--actuation-calibration", str(cli / "nope.json")])
+        finally:
+            globals().update(_saved_globals)
+            if _saved_cvd is None:
+                os.environ.pop("CUDA_VISIBLE_DEVICES", None)
+            else:
+                os.environ["CUDA_VISIBLE_DEVICES"] = _saved_cvd
+
+        owed, flagged = _banked(cli / "owed"), _banked(cli / "flagged")
+        check("(16b) the CLI fires the column with and without the flag (rc 0)",
+              rc_owed == 0 and rc_flag == 0 and len(owed) == len(flagged) == 7,
+              f"rc {rc_owed}/{rc_flag}, {len(owed)} cells each")
+        check("(16b) a MISMATCHED verdict document HALTs the CLI (rc 2), no column",
+              rc_wrong == 2 and not (cli / "wrong" / "cells").exists())
+        check("(16b) an ABSENT verdict document HALTs the CLI (rc 2) — never OWED",
+              rc_absent == 2 and not (cli / "absent" / "cells").exists())
+        check("(16b) WITHOUT the flag every cell still stamps the OWED block, "
+              "byte-identical to the frozen engine's text",
+              all(hashlib.sha256(json.dumps(
+                  s["actuation_calibration"], sort_keys=True,
+                  ensure_ascii=True, separators=(",", ":")).encode()).hexdigest()
+                  == OWED_ACTUATION_BLOCK_DIGEST for s in owed.values()),
+              f"OWED block digest {OWED_ACTUATION_BLOCK_DIGEST[:16]}… × {len(owed)}")
+        _deltas = {cid: sorted(
+            k for k in set(owed[cid]) | set(flagged[cid])
+            if json.dumps(owed[cid].get(k), sort_keys=True)
+            != json.dumps(flagged[cid].get(k), sort_keys=True))
+            for cid in owed}
+        check("(16b) WITH the flag the ONLY stamp key that moves is "
+              "actuation_calibration (structural diff over every cell)",
+              all(d == ["actuation_calibration"] for d in _deltas.values()),
+              f"deltas: {sorted({tuple(v) for v in _deltas.values()})}")
+        check("(16b) …and the flagged block is the desk's verdict, not OWED",
+              all(s["actuation_calibration"].get("verdict") == "PASS"
+                  and s["actuation_calibration"].get("job_id") == "cd6b6a765340"
+                  for s in flagged.values()))
+        check("(16b) every flagged stamp still passes the §2.8 checklist",
+              all(_ok(lambda s=s: assert_stamp_complete(s, cell_kind=s["cell_kind"]))
+                  for s in flagged.values()))
+        _gate_owed = json.loads((cli / "owed" / "column_result.json").read_text())
+        _gate_flag = json.loads((cli / "flagged" / "column_result.json").read_text())
+        check("(16b) the §2.7 gate selection, strata and digests are UNMOVED by the flag",
+              _gate_owed["replay_gate"] == _gate_flag["replay_gate"]
+              and _gate_owed["replay_gate"]["passed"] is True,
+              json.dumps(_gate_owed["replay_gate"]["strata"]))
+        check("(16b) so are the token-id and entropy digests of every cell",
+              [(c["cell_id"], c["token_id_sha256"], c["entropy_array_sha256"])
+               for c in _gate_owed["cells"]]
+              == [(c["cell_id"], c["token_id_sha256"], c["entropy_array_sha256"])
+                  for c in _gate_flag["cells"]])
+
     failures = [c for c in checks if not c[1]]
     print(f"\nselftest: {len(failures)} failure(s)")
     for name, _, detail in failures:
@@ -5627,6 +6134,14 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--scheduler-card-index", default=None,
                     help="M10: a scheduler job carries a card index; a rogue carries "
                          "the sentinel, and §9 item 9 refuses the stamp without it")
+    ap.add_argument("--actuation-calibration", type=Path, default=None,
+                    help="§4.2: the DESK's verdict document for THIS column's site "
+                         "(JSON: node_key, site, arm, job_id, verdict, the three "
+                         "criterion values, scoring_log_path, ledger_date). Validated "
+                         "to name this column's node/site/arm and transcribed into "
+                         "every cell's stamp. WITHOUT it the stamp reads OWED with "
+                         "its honest note, exactly as before this flag existed — "
+                         "which is the truth only while no verdict has been filed.")
     ap.add_argument("--no-characterize", action="store_true",
                     help="skip §2.7's DESCRIPTIVE B=8/B=1 characterization (M19: it "
                          "can never fail a gate, so skipping it costs no assertion)")
@@ -5672,6 +6187,30 @@ def main(argv: Optional[list[str]] = None) -> int:
                 "another column's stamp.", name.replace('_', '-'), given,
                 getattr(doc, name))
             return 2
+    # §4.2's stamp requirement, filled from the desk's document or left OWED. This is
+    # the ONLY thing the flag does: absent it, `actuation_calibration_stamp` stays
+    # None and `run_column` writes the same OWED block it has always written.
+    actuation_calibration_stamp: Optional[dict] = None
+    if args.actuation_calibration is not None:
+        try:
+            actuation_calibration_stamp = load_actuation_calibration(
+                args.actuation_calibration, node_key=doc.node_key, arm=doc.arm,
+                site=doc.site)
+        except BehavioralHarnessError as exc:
+            logger.error("HALT (%s): %s", type(exc).__name__, exc)
+            return 2
+        # `.get` and not `[...]`: a log line must never be the thing that kills a
+        # column. The stamp block is built field-by-field by `stamp_block`, so every
+        # key below is present by construction — and if one ever is not, the run says
+        # `None` here and the stamp still carries whatever the document filed.
+        logger.info(
+            "§4.2 actuation calibration of record: %s L%s (%s) job %s — verdict %s "
+            "(ρ %s · outside band %s · coherence %s); %s",
+            *(actuation_calibration_stamp.get(k) for k in
+              ("node_key", "site", "arm", "job_id", "verdict", "spearman_rho",
+               "outside_band_doses", "coherence_at_scoring_dose")),
+            ACTUATION_CALIBRATION_SCORER_OF_RECORD)
+
     basis = args.corpus_sha_of_record or doc.corpus_manifest_sha256
     logger.info("cells document: %s L%d (%s arm), %d cells, basis %s%s",
                 doc.node_key, doc.site, doc.arm, len(doc.cells), basis[:12],
@@ -5706,6 +6245,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         result = run_column(
             runtime, doc=doc, pool=pool, work_root=args.work_root,
             corpus_sha_of_record=basis, n_per_cell=args.n_per_cell,
+            actuation_calibration_stamp=actuation_calibration_stamp,
             characterize=not args.no_characterize,
             scheduler_card_index=args.scheduler_card_index)
         print(json.dumps({
