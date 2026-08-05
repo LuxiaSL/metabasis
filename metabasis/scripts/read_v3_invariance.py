@@ -1902,7 +1902,7 @@ def build_battery(banks: Banks, basis: Sequence[BasisSlot],
     # ---- P1b and P6: NAMED, DEFINED, BUT NOT COMPUTABLE DESK-SIDE ----------
     blocker_states = (
         "the webtext-v3 per-text state banks are NOT desk-side — they exist "
-        "only under the node's /models/metabasis-webtext-v3 arm root (checked "
+        "only under the NODE-SIDE webtext-v3 arm root (checked "
         "by value: every states_*.npz beneath staging/ is v2.1-vintage). The "
         "brief is desk-local CPU only, so this member is SKIPPED with its "
         "blocker rather than improvised from a different object")
@@ -2328,8 +2328,8 @@ def i5_cross_basis(repo: Path, banks: Banks, basis: Sequence[BasisSlot],
         "blocker": (
             "A refit needs the per-text webtext-v3 STATE BANKS. They are not "
             "desk-side: checked by value, every states_*.npz beneath staging/ "
-            "is v2.1-vintage, and the v3 arm root the fit stamps name "
-            "(/models/metabasis-webtext-v3) is node-side only. The desk-side "
+            "is v2.1-vintage, and the v3 arm root the fit stamps name is "
+            "NODE-SIDE only. The desk-side "
             "v3 tree carries fitted maps (va/vb/omega/scale/norms) and "
             "entropy-gradient vectors, from which no re-fit on a train subset "
             "is derivable — the Procrustes needs the paired rows, not the "
@@ -2571,7 +2571,7 @@ def fetch_param_counts(cache_path: Optional[Path] = None) -> list[ParamCount]:
     revision", but NO PINNED REVISION IS RECORDED for the five race candidates
     anywhere in the campaign — `metabasis.roster` carries `model_id` and
     architecture facts but no revision, and the collection stamps carry a local
-    `/models/<name>` path plus a `config_sha256`, not a hub revision. What is
+    checkpoint-directory path plus a `config_sha256`, not a hub revision. What is
     recorded here is therefore the revision the repo's default branch RESOLVES
     TO at fetch time (`X-Repo-Commit` / the API's `sha`), stated as such.
 
