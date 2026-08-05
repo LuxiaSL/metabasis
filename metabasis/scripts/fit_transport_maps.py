@@ -1592,12 +1592,139 @@ def resolve_split_plan(labels: Labels, row_ids: Sequence[str], corpus_ids: set[s
                      info=info)
 
 
+class TrainExclusion(BaseModel):
+    """A ruled set of text_ids removed from the TRAIN side, and nothing else.
+
+    THE ONE THING THIS IS FOR (frozen webtext-v3 prereg §6-I5's *beside*): "the
+    same computation excluding the 59 shared wikitext texts' influence (legs
+    refit on the shared-text-free train subset) — the overlap-clean form". The
+    held-out membership is UNTOUCHED — the beside asks what the maps look like
+    when the shared texts never entered the fit, not what a different held-out
+    set would score. An id that lands on the test side is therefore a REFUSAL,
+    not a silent removal: it would mean the loaded split is not the one the
+    exclusion was derived against.
+
+    NO FIT MATH CHANGES. `run_pair_arm` already takes its train rows as a mask;
+    this only decides which mask it gets, and puts the exclusion's sha in the
+    stamp so an overlap-clean object can never be read as a primary one.
+    """
+
+    model_config = {"frozen": True}
+
+    source_path: str
+    sha256: str = Field(description="sha256 of the exclusion artifact's BYTES")
+    artifact: str = Field(description="the artifact's self-declared kind")
+    clause: str = Field(description="the frozen clause this beside serves")
+    excluded_text_ids: tuple[str, ...]
+    n_excluded: int
+
+    @model_validator(mode="after")
+    def _counts_agree(self) -> "TrainExclusion":
+        if len(set(self.excluded_text_ids)) != len(self.excluded_text_ids):
+            raise ValueError(f"{self.source_path}: duplicate ids in the exclusion set")
+        if self.n_excluded != len(self.excluded_text_ids):
+            raise ValueError(
+                f"{self.source_path}: n_excluded={self.n_excluded} but the list "
+                f"carries {len(self.excluded_text_ids)} ids")
+        if not self.excluded_text_ids:
+            raise ValueError(f"{self.source_path}: an EMPTY exclusion set is not a "
+                             f"beside — refusing rather than banking a duplicate "
+                             f"of the primary under a beside name")
+        return self
+
+
+def load_train_exclusion(path: Path) -> TrainExclusion:
+    """Read + digest an exclusion artifact. The sha is of the BYTES on disk."""
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        raise SplitSelectionError(f"{path}: cannot read the exclusion set ({exc})") from exc
+    try:
+        doc = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise SplitSelectionError(f"{path}: not JSON ({exc})") from exc
+    if not isinstance(doc, Mapping):
+        raise SplitSelectionError(f"{path}: the exclusion artifact is not an object")
+    try:
+        return TrainExclusion(
+            source_path=str(path), sha256=hashlib.sha256(raw).hexdigest(),
+            artifact=str(doc.get("artifact", "")),
+            clause=str(doc.get("clause", "")),
+            excluded_text_ids=tuple(str(t) for t in doc.get("excluded_text_ids", ())),
+            n_excluded=int(doc.get("n_excluded", -1)))
+    except (TypeError, ValueError) as exc:
+        raise SplitSelectionError(f"{path}: not a usable exclusion set ({exc})") from exc
+
+
+def apply_train_exclusion(plan: SplitPlan, kept_row_ids: Sequence[str],
+                          exclusion: TrainExclusion) -> SplitPlan:
+    """Drop the exclusion's ids from the TRAIN mask. Test side untouched.
+
+    Refuses on either integrity failure, because both mean the exclusion and the
+    loaded split describe different objects: an excluded id that resolves to no
+    loaded row, or one that resolves to a HELD-OUT row.
+    """
+    excluded = set(exclusion.excluded_text_ids)
+    index = {t: i for i, t in enumerate(kept_row_ids)}
+    missing = sorted(excluded - set(index))
+    if missing:
+        raise SplitSelectionError(
+            f"{exclusion.source_path}: {len(missing)} excluded id(s) resolve to no "
+            f"loaded row (e.g. {missing[:3]}) — the exclusion set and this corpus "
+            f"are not the same object; refusing")
+    mask = np.zeros(len(kept_row_ids), dtype=bool)
+    for text_id in excluded:
+        mask[index[text_id]] = True
+    on_test = sorted(t for t in excluded if bool(plan.test[index[t]]))
+    if on_test:
+        raise SplitSelectionError(
+            f"{exclusion.source_path}: {len(on_test)} excluded id(s) are HELD OUT in "
+            f"this split (e.g. {on_test[:3]}). This beside removes TRAIN influence "
+            f"only; removing a test row would change the held-out population and "
+            f"make the two readings incomparable — refusing")
+    n_before = int(plan.train.sum())
+    train = plan.train & ~mask
+    n_after = int(train.sum())
+    if n_after != n_before - len(excluded):
+        raise SplitSelectionError(
+            f"{exclusion.source_path}: train went {n_before} -> {n_after} while "
+            f"excluding {len(excluded)} ids — some excluded id was neither train "
+            f"nor test; refusing")
+    if n_after <= 1:
+        raise SplitSelectionError(
+            f"{exclusion.source_path}: the exclusion leaves {n_after} train row(s)")
+    info = dict(plan.info)
+    info["n_train"] = n_after
+    info["train_exclusion"] = {
+        "rule": ("ids removed from the TRAIN mask only; the held-out membership, "
+                 "the corpus and every fit path are otherwise unchanged"),
+        "artifact": exclusion.source_path,
+        "artifact_sha256": exclusion.sha256,
+        "artifact_kind": exclusion.artifact,
+        "clause": exclusion.clause,
+        "n_excluded": exclusion.n_excluded,
+        "n_train_before": n_before,
+        "n_train_after": n_after,
+        "all_excluded_were_train_side": True,
+    }
+    return SplitPlan(keep=plan.keep, train=train, test=plan.test, info=info)
+
+
 def split_identity(info: Mapping[str, Any]) -> dict[str, Any]:
-    """The identity a fits/ directory is stamped with — what must not silently mix."""
+    """The identity a fits/ directory is stamped with — what must not silently mix.
+
+    `train_exclusion_sha256` is part of the identity: an overlap-clean object and
+    a primary object have the same pair, sites, arm and held-out membership, and
+    differ ONLY in which train rows the map saw. Without this key the guard would
+    let one overwrite the other in place. Absent on every pre-2026-08-04 summary
+    and on every run with no exclusion, where it reads None on both sides.
+    """
     return {"source": info.get("source"), "half": info.get("half"),
             "artifact_sha256": info.get("artifact_sha256"),
             "split_sha256": info.get("split_sha256"),
-            "test_ids_sha256": info.get("test_ids_sha256")}
+            "test_ids_sha256": info.get("test_ids_sha256"),
+            "train_exclusion_sha256":
+                (info.get("train_exclusion") or {}).get("artifact_sha256")}
 
 
 def guard_fits_dir(fits_dir: Path, info: Mapping[str, Any]) -> None:
@@ -1993,7 +2120,8 @@ def run_grid(arm_root: Path, src_model: str, tgt_model: str,
              arms: tuple[str, ...] = ARMS,
              splits_artifact: Optional[Path] = None,
              halves_artifact: Optional[Path] = None,
-             half: Optional[HalfName] = None) -> dict:
+             half: Optional[HalfName] = None,
+             exclude_train_ids: Optional[Path] = None) -> dict:
     states_dir = arm_root / "states"
     fits_dir = arm_root / fits_dirname
     fits_dir.mkdir(parents=True, exist_ok=True)
@@ -2040,6 +2168,17 @@ def run_grid(arm_root: Path, src_model: str, tgt_model: str,
         logger.info("half lane: %s (PREREG §6-I1) — membership and internal split "
                     "both read from the artifact", HALF_KEYS.get(half, half))
 
+    #  THE TRAIN EXCLUSION, READ AND DIGESTED BEFORE THE FIRST FIT (sealed-stamp
+    #  discipline, as the pair wave). Read here rather than inside the loop so a
+    #  malformed or absent exclusion refuses in the first second, and so the sha
+    #  that will stamp every object is known before any state bank is opened.
+    exclusion: Optional[TrainExclusion] = (
+        load_train_exclusion(exclude_train_ids) if exclude_train_ids else None)
+    if exclusion is not None:
+        logger.info("train exclusion: %s (sha %s) — %d id(s) removed from the TRAIN "
+                    "side only; this is a LABELED BESIDE, never the primary",
+                    exclusion.source_path, exclusion.sha256, exclusion.n_excluded)
+
     all_records: list[FitRecord] = []
     agreement: dict[str, dict] = {}
     split_info: dict = {}
@@ -2076,6 +2215,10 @@ def run_grid(arm_root: Path, src_model: str, tgt_model: str,
                     #  it returns already index the kept rows.
                     src, tgt = subset_bank(src, plan.keep), subset_bank(tgt, plan.keep)
                     labels = subset_labels(labels, plan.keep)
+                if exclusion is not None:
+                    #  AFTER the keep-subset: `plan.train`/`plan.test` index the
+                    #  KEPT rows, and `src.text_ids` is now exactly that list.
+                    plan = apply_train_exclusion(plan, list(src.text_ids), exclusion)
                 train, test, split_info = plan.train, plan.test, plan.info
                 guard_fits_dir(fits_dir, split_info)
                 rng = np.random.default_rng(A8_SEED + s_site * 100 + t_site)
@@ -2107,6 +2250,15 @@ def run_grid(arm_root: Path, src_model: str, tgt_model: str,
         "split_source": split_info.get("source"),
         "half": split_info.get("half"),
         "splits_artifact_sha256": split_info.get("artifact_sha256"),
+        # ── THE TRAIN EXCLUSION, HOISTED (frozen webtext-v3 §6-I5's beside) ───
+        # None on every primary object. Non-None means these maps never saw the
+        # excluded rows, so they are a LABELED BESIDE and are not interchangeable
+        # with the primary tree's objects — hoisted beside the split identity for
+        # the same reason those keys are: a reader resolving fits BY PATH must be
+        # able to see it without walking into `split`.
+        "train_exclusion_sha256":
+            (split_info.get("train_exclusion") or {}).get("artifact_sha256"),
+        "train_exclusion_n": (split_info.get("train_exclusion") or {}).get("n_excluded"),
         "fit_strata": fit_strata, "arms": list(arms),
         "null_group_key": "(stratum|voice|mode)",
         # ── THE STRATUM BASIS (desk ruling 2026-08-03) ───────────────────────
@@ -2733,6 +2885,60 @@ def selftest(splits_artifact: Optional[Path] = None,
               and plan.info["basis"]["manifest_sha256_loaded"] == v3_sha,
               "and the stamp records both manifest shas it compared")
 
+        print("== selftest 6c2: the OVERLAP-CLEAN train exclusion (§6-I5 beside) ==")
+        primary_identity = split_identity(plan.info)
+        train_ids_fixture = [t for t, m in zip(v3_ids, plan.train) if m]
+        drop = train_ids_fixture[:2]
+
+        def _excl_doc(ids: list[str]) -> dict:
+            return {"artifact": "fixture-exclusion/v1",
+                    "clause": "selftest fixture, not a frozen clause",
+                    "excluded_text_ids": list(ids), "n_excluded": len(ids)}
+
+        ex_path = root / "exclusion_ok.json"
+        ex_path.write_text(json.dumps(_excl_doc(drop), indent=1))
+        ex = load_train_exclusion(ex_path)
+        check(ex.sha256 == hashlib.sha256(ex_path.read_bytes()).hexdigest()
+              and ex.n_excluded == 2,
+              "the loader digests the exclusion artifact's own BYTES")
+        clean = apply_train_exclusion(plan, v3_ids, ex)
+        check(int(clean.train.sum()) == int(plan.train.sum()) - 2,
+              f"train {int(plan.train.sum())} -> {int(clean.train.sum())}: exactly "
+              f"the excluded rows left the TRAIN mask")
+        check(bool((clean.test == plan.test).all()),
+              "and the HELD-OUT membership is untouched, row for row")
+        check(not any(bool(clean.train[v3_ids.index(t)]) for t in drop),
+              "no excluded id survives anywhere in the train mask")
+        blk = clean.info["train_exclusion"]
+        check(blk["artifact_sha256"] == ex.sha256 and blk["n_excluded"] == 2
+              and blk["n_train_before"] == int(plan.train.sum())
+              and blk["n_train_after"] == int(clean.train.sum())
+              and clean.info["n_train"] == int(clean.train.sum()),
+              "the stamp carries the exclusion sha, the count and BOTH train sizes")
+        beside_identity = split_identity(clean.info)
+        check(beside_identity != primary_identity
+              and beside_identity["train_exclusion_sha256"] == ex.sha256
+              and primary_identity["train_exclusion_sha256"] is None,
+              "the split IDENTITY separates a beside object from a primary one — "
+              "so guard_fits_dir refuses to bank one over the other")
+
+        held_path = root / "exclusion_held_out.json"
+        held_path.write_text(json.dumps(_excl_doc([held[0]]), indent=1))
+        check(_raises(lambda: apply_train_exclusion(
+            plan, v3_ids, load_train_exclusion(held_path)), SplitSelectionError),
+              "an excluded id that is HELD OUT in this split REFUSES (it would "
+              "change the held-out population, not just the train influence)")
+        ghost_path = root / "exclusion_ghost.json"
+        ghost_path.write_text(json.dumps(_excl_doc(["ghost-999"]), indent=1))
+        check(_raises(lambda: apply_train_exclusion(
+            plan, v3_ids, load_train_exclusion(ghost_path)), SplitSelectionError),
+              "an excluded id that resolves to no loaded row REFUSES")
+        empty_path = root / "exclusion_empty.json"
+        empty_path.write_text(json.dumps(_excl_doc([]), indent=1))
+        check(_raises(lambda: load_train_exclusion(empty_path), SplitSelectionError),
+              "an EMPTY exclusion set REFUSES — a beside that excludes nothing is "
+              "a duplicate of the primary wearing a beside name")
+
         print("== selftest 6d: an artifact from ANOTHER corpus REFUSES ==")
         bad = _splits_fixture("f" * 64, v3_ids, held, inel)
         bad_path = root / "splits_other_basis.json"
@@ -2953,6 +3159,14 @@ def main() -> int:
                     help="fit ONE §6-I1 half: restrict to its membership and use "
                          "that half's internal split from the artifact. The half "
                          "identity and the artifact sha go into the stamp.")
+    ap.add_argument("--exclude-train-ids", type=Path, default=None,
+                    help="a ruled exclusion artifact ({excluded_text_ids, "
+                         "n_excluded}) whose ids are dropped from the TRAIN side "
+                         "only — frozen webtext-v3 §6-I5's overlap-clean BESIDE. "
+                         "The held-out membership is untouched and an excluded id "
+                         "on the test side REFUSES. The artifact's sha stamps every "
+                         "object and joins the split identity, so a beside object "
+                         "can never overwrite or be read as a primary one.")
     ap.add_argument("--selftest", action="store_true")
     args = ap.parse_args()
     if args.selftest:
@@ -2970,6 +3184,12 @@ def main() -> int:
         raise SystemExit(
             "--halves-artifact was given without --half a|b: which half is the fit? "
             "Never guessed")
+    if args.exclude_train_ids and not (args.splits_artifact or args.half):
+        raise SystemExit(
+            "--exclude-train-ids needs a FROZEN membership (--splits-artifact, or "
+            "--half with --halves-artifact). On the legacy in-code lane the split "
+            "is re-derived at fit time, so 'the same computation minus these rows' "
+            "has no fixed thing to be the same as — refusing")
     strata = ([s.strip() for s in args.fit_strata.split(",") if s.strip()]
               if args.fit_strata else None)
     arms = tuple(a.strip() for a in args.arms.split(",") if a.strip())
@@ -2991,6 +3211,7 @@ def main() -> int:
              fit_strata=strata, fits_dirname=args.fits_dirname, arms=arms,
              splits_artifact=args.splits_artifact,
              halves_artifact=args.halves_artifact, half=args.half,
+             exclude_train_ids=args.exclude_train_ids,
              k_grid=(tuple(int(k) for k in args.k_grid.split(","))
                      if args.k_grid else K_GRID),
              sites_override={
