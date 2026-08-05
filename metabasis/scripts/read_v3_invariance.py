@@ -1662,6 +1662,129 @@ def predictor_p2(banks: Banks, basis: Sequence[BasisSlot], ctx: Context,
     return out
 
 
+# ═════════════════════════════════════════════ P6, from the node-built inputs
+#: The artifact kind the P6-INPUTS wave emits. Anything else is refused.
+P6_ARTIFACT_KIND = "webtext-v3-p6-inputs/v1"
+
+#: The census formula, CHARACTER-FOR-CHARACTER as `census_predictors.py`
+#: implements it (`participation_ratio`) and as the P6-INPUTS artifact quotes
+#: its own definition. The artifact's `definition` string must CONTAIN this, or
+#: the column is refused: a P6 computed under some other formula is a different
+#: slate member wearing P6's name.
+P6_CENSUS_FORMULA = ("lambda = svd(rows - mean, compute_uv=False)**2 / (n-1); "
+                     "PR = (sum lambda)^2 / sum lambda^2")
+
+#: The banked PR is recomputed from the banked eigenvalues and must agree to
+#: this. It is a float64 re-sum of the same numbers, so the tolerance is
+#: round-off, not physics.
+P6_RECOMPUTE_TOL = 1e-9
+
+
+class P6Inputs(BaseModel):
+    """The node-built P6 column, verified against its own banked eigenvalues.
+
+    P6 is BANK-ONLY (the hub's own train-row state spectrum) and needs the
+    webtext-v3 per-text state banks, which are node-side. This artifact is the
+    node's answer to that blocker: it carries, per hub, the participation ratio
+    AND the full eigenvalue spectrum it was computed from — so the desk can
+    re-derive the statistic rather than trust it.
+    """
+
+    path: str
+    sha256: str
+    artifact_kind: str
+    definition: str
+    corpus_manifest_sha256: str
+    splits_sha256: str
+    n_hubs: int
+    n_train_rows: list[int]
+    effective_num_threads: Optional[int] = None
+    values: dict[str, float]
+    sites: dict[str, int]
+    arms: dict[str, str]
+    recomputed_max_abs_delta: float
+    norm_column_invariance_abs_delta: Optional[float] = None
+    notes: list[str] = Field(default_factory=list)
+
+
+def load_p6_inputs(path: Path) -> P6Inputs:
+    """Read + VERIFY the P6-INPUTS artifact. Nothing is taken on its word.
+
+    Four checks, each of which would otherwise be an assumption:
+      1. the artifact kind is the one this reader understands;
+      2. its `definition` carries the census formula character-for-character;
+      3. every hub's `participation_ratio` is RE-DERIVED here from that hub's
+         own banked eigenvalues — the artifact does not get to assert its own
+         statistic;
+      4. the eigenvalue count matches the train-row count it claims.
+    """
+    if not path.exists():
+        raise ReadsError(f"P6-INPUTS artifact absent: {path}")
+    doc = json.loads(path.read_text())
+
+    kind = doc.get("artifact")
+    if kind != P6_ARTIFACT_KIND:
+        raise ReadsError(
+            f"{path.name}: artifact kind {kind!r} != {P6_ARTIFACT_KIND!r} — "
+            f"refusing to read a P6 column out of an artifact this reader does "
+            f"not understand")
+
+    definition = str(doc.get("definition", ""))
+    if P6_CENSUS_FORMULA not in definition:
+        raise ReadsError(
+            f"{path.name}: `definition` does not carry the census formula "
+            f"character-for-character. Expected to find:\n  {P6_CENSUS_FORMULA}"
+            f"\nGot:\n  {definition}\nA P6 computed under another formula is a "
+            f"different slate member wearing P6's name; NOT substituted")
+
+    values: dict[str, float] = {}
+    sites: dict[str, int] = {}
+    arms: dict[str, str] = {}
+    worst = 0.0
+    for hub in doc.get("hubs", []):
+        key = str(hub["key"])
+        banked = float(hub["participation_ratio"])
+        lam = np.asarray(hub["eigenvalues"], dtype=np.float64)
+        if lam.size != int(hub["n_eigenvalues"]):
+            raise ReadsError(
+                f"{path.name}: {key} banks {lam.size} eigenvalues but claims "
+                f"n_eigenvalues={hub['n_eigenvalues']}")
+        denominator = float((lam ** 2).sum())
+        if denominator <= 0.0:
+            raise ReadsError(f"{path.name}: {key} has a degenerate spectrum")
+        recomputed = float((lam.sum() ** 2) / denominator)
+        delta = abs(recomputed - banked)
+        worst = max(worst, delta)
+        if delta > P6_RECOMPUTE_TOL:
+            raise ReadsError(
+                f"{path.name}: {key} participation_ratio {banked!r} does not "
+                f"re-derive from its OWN banked eigenvalues (recomputed "
+                f"{recomputed!r}, |Δ| {delta:.3e} > {P6_RECOMPUTE_TOL:.0e}) — "
+                f"the artifact's statistic and its spectrum disagree")
+        values[key] = banked
+        sites[key] = int(hub["site"])
+        arms[key] = str(hub["arm"])
+
+    if len(values) != int(doc.get("n_hubs", -1)):
+        raise ReadsError(
+            f"{path.name}: {len(values)} hub rows but n_hubs="
+            f"{doc.get('n_hubs')}")
+
+    invariance = doc.get("norm_column_invariance") or {}
+    return P6Inputs(
+        path=str(path), sha256=sha256_of(path), artifact_kind=kind,
+        definition=definition,
+        corpus_manifest_sha256=str(doc.get("corpus_manifest_sha256", "")),
+        splits_sha256=str(doc.get("splits_sha256", "")),
+        n_hubs=len(values),
+        n_train_rows=[int(n) for n in doc.get("n_train_rows", [])],
+        effective_num_threads=doc.get("effective_num_threads"),
+        values=values, sites=sites, arms=arms,
+        recomputed_max_abs_delta=worst,
+        norm_column_invariance_abs_delta=invariance.get("abs_delta"),
+        notes=[str(doc.get("p1b_status", ""))] if doc.get("p1b_status") else [])
+
+
 #: §7's positive claim wording of record, VERBATIM. Quoted exactly, or not at
 #: all — "No other positive phrasing is quotable."
 HL2_POSITIVE_TEMPLATE = ("hub quality on webtext-v3 is predicted by "
@@ -1692,13 +1815,18 @@ class Battery(BaseModel):
     verdict_text: str
     skipped: list[dict[str, str]]
     flags: list[str]
+    #: The node-built P6 column's provenance, or None when P6 stayed skipped.
+    p6_inputs: Optional[P6Inputs] = None
+    #: §7's clustering rule as APPLIED, member by member.
+    multiplicity_clusters: dict[str, list[str]] = Field(default_factory=dict)
 
 
 def build_battery(banks: Banks, basis: Sequence[BasisSlot],
                   population: Sequence[str], hub_sites: dict[str, int],
                   scores_by_ctx: dict[str, dict[str, HubContextScore]],
                   family_of: dict[str, str], identities: dict[str, str],
-                  flags: list[str]) -> Battery:
+                  flags: list[str],
+                  p6: Optional[P6Inputs] = None) -> Battery:
     """§7's HL-2 battery — computed ONLY after the race lands, guards binding.
 
     THE DISJOINT-SPLIT READING, stated because §7's clause is unsatisfiable on
@@ -1774,7 +1902,7 @@ def build_battery(banks: Banks, basis: Sequence[BasisSlot],
     # ---- P1b and P6: NAMED, DEFINED, BUT NOT COMPUTABLE DESK-SIDE ----------
     blocker_states = (
         "the webtext-v3 per-text state banks are NOT desk-side — they exist "
-        "only under the node's /models/metabasis-webtext-v3 arm root (checked "
+        "only under the NODE-SIDE webtext-v3 arm root (checked "
         "by value: every states_*.npz beneath staging/ is v2.1-vintage). The "
         "brief is desk-local CPU only, so this member is SKIPPED with its "
         "blocker rather than improvised from a different object")
@@ -1790,24 +1918,90 @@ def build_battery(banks: Banks, basis: Sequence[BasisSlot],
     skipped.append({"member": "P1b-geometric-centrality",
                     "reason": "inputs absent desk-side AND the chance "
                               "correction is undefined at either tag"})
-    columns.append(PredictorColumn(
-        name="P6-participation-ratio", definition=SLATE_DEFINITIONS["P6"],
-        definition_source=SLATE_DEFINITION_SOURCE, available=False,
-        blocker=(blocker_states + ". The sigma_L*.npz beside the v3 entropy "
-                 "vectors carries an eigen-spectrum, but of a TOKEN-level "
-                 "residual covariance over a 60-text stride sample — not the "
-                 "train-row mean-state covariance P6 is defined over, so it is "
-                 "a different object and is not substituted"),
-        provenance="", circularity_guard=""))
-    skipped.append({"member": "P6-participation-ratio",
-                    "reason": "train-row state banks absent desk-side"})
+    if p6 is None:
+        columns.append(PredictorColumn(
+            name="P6-participation-ratio", definition=SLATE_DEFINITIONS["P6"],
+            definition_source=SLATE_DEFINITION_SOURCE, available=False,
+            blocker=(blocker_states + ". The sigma_L*.npz beside the v3 entropy "
+                     "vectors carries an eigen-spectrum, but of a TOKEN-level "
+                     "residual covariance over a 60-text stride sample — not the "
+                     "train-row mean-state covariance P6 is defined over, so it is "
+                     "a different object and is not substituted"),
+            provenance="", circularity_guard=""))
+        skipped.append({"member": "P6-participation-ratio",
+                        "reason": "train-row state banks absent desk-side"})
+    else:
+        missing = sorted(h for h in pop if h not in p6.values)
+        if missing:
+            raise ReadsError(
+                f"P6-INPUTS covers {p6.n_hubs} hubs but does not cover "
+                f"{missing} — a slate member scored on a SUBSET of the hub "
+                f"population would violate §7's full-ordering rule")
+        #  the artifact's own site/arm per hub must be the site/arm of record,
+        #  or the column is a different measurement wearing P6's name
+        for hub in pop:
+            if p6.sites[hub] != hub_sites[hub]:
+                raise ReadsError(
+                    f"P6-INPUTS has {hub} at L{p6.sites[hub]} but the sealed "
+                    f"artifact registers it at L{hub_sites[hub]}")
+            expected_arm = _registered_arm(identities, hub)
+            if p6.arms[hub] != expected_arm:
+                raise ReadsError(
+                    f"P6-INPUTS reads {hub} in the {p6.arms[hub]} arm but its "
+                    f"registered arm is {expected_arm} (§3.2) — P6 is a "
+                    f"per-model constant and must be read in the model's own arm")
+        columns.append(PredictorColumn(
+            name="P6-participation-ratio", definition=SLATE_DEFINITIONS["P6"],
+            definition_source=SLATE_DEFINITION_SOURCE, available=True,
+            values={h: p6.values[h] for h in pop},
+            provenance=(
+                f"participation ratio of the hub's own TRAIN-ROW mean-state "
+                f"covariance spectrum at its registered site, in its REGISTERED "
+                f"ARM, from the node-built P6-INPUTS artifact (sha256 "
+                f"{p6.sha256}); the census formula verbatim, and every hub's "
+                f"statistic RE-DERIVED desk-side from its own banked "
+                f"eigenvalues (max |Δ| {p6.recomputed_max_abs_delta:.3e})"),
+            circularity_guard=("BANK-ONLY: computed from the hub's own train-row "
+                               "state spectrum and from nothing about any "
+                               "pair's outcome")))
+        flags.append(
+            "⚠ P6 HALF COLUMNS DO NOT EXIST: the P6-INPUTS artifact carries ONE "
+            "value per hub, on the FROZEN MAIN SPLIT's train rows (n_train "
+            f"{p6.n_train_rows}); it holds no per-half spectrum. §7's per-half "
+            "condition is therefore evaluated for P6 as the FULL-CORPUS "
+            "predictor column against EACH HALF'S QUALITY — which is NOT the "
+            "mirror of P2's treatment, where the per-half pca_explained is read "
+            "off each half's own fit records. The asymmetry is stated, not "
+            "silently averaged; re-deriving a per-half P6 needs the node-side "
+            "state banks and a second P6-INPUTS wave.")
+        flags.append(
+            "⚠ gemma3-27b's P6 is a 3-50x LOW OUTLIER (PR "
+            f"{p6.values.get('gemma3-27b', float('nan')):.2f} against a field "
+            "of 11-211; 405B tops at 210.8). It is an INPUT FACT, stated "
+            "wherever P6 is quoted, and is NOT diagnosed here.")
 
     available = {c.name: c for c in columns if c.available}
     # §7's clustering rule: P2 and P6 count as ONE cluster in every
-    # multiplicity null (their rho was -.93). P6 is absent, so the cluster is
-    # P2 alone — the rule is applied, not skipped, and the cluster is named.
+    # multiplicity null (their rho was -.93). The cluster is named either way;
+    # with P6 restored it finally has BOTH members and the rule binds.
     clusters = {"P1a": ["P1a-family-excluded"],
-                "P2/P6": ["P2-compressibility"]}
+                "P2/P6": [n for n in ("P2-compressibility",
+                                      "P6-participation-ratio")
+                          if n in available]}
+    if len(clusters["P2/P6"]) > 1:
+        flags.append(
+            "⚠ THE P2/P6 CLUSTER RULE NOW HAS BOTH MEMBERS, AND IS "
+            "MATHEMATICALLY INERT IN THIS NULL — stated because it reads as a "
+            "correction and is not one. `max_statistic_null` collapses each "
+            "cluster to its best member and then takes the maximum over "
+            "clusters, which for a SINGLE cluster is just the maximum over its "
+            "members: grouping changes no number here. That is not a defect. A "
+            "max-statistic permutation null is correlation-aware BY "
+            "CONSTRUCTION — two members correlated at ρ ≈ −.9 make the null's "
+            "maximum barely exceed either member's own, so the multiplicity "
+            "cost §7 wanted capped is already capped by the resampling rather "
+            "than by a grouping constant. The rule is applied and named; the "
+            "instrument is simply one that honours it for free.")
 
     rho_full: dict[str, float] = {}
     rho_halves: dict[str, dict[str, float]] = {"halfa": {}, "halfb": {}}
@@ -1829,10 +2023,17 @@ def build_battery(banks: Banks, basis: Sequence[BasisSlot],
         else:
             rho_full[name] = spearman([quality[h] for h in pop],
                                       [column.values[h] for h in pop])
+            #  P2 has a per-half column (its pca_explained is read off each
+            #  half's own fit records). P6 does NOT — the P6-INPUTS artifact
+            #  carries one full-split value per hub — so its per-half condition
+            #  is the FULL-CORPUS column against each half's quality. The
+            #  asymmetry is flagged above, never hidden by an average.
             for half in ("halfa", "halfb"):
+                predictor_half = (p2_halves[half] if name == "P2-compressibility"
+                                  else column.values)
                 rho_halves[half][name] = spearman(
                     [quality_halves[half][h] for h in pop],
-                    [p2_halves[half][h] for h in pop])
+                    [predictor_half[h] for h in pop])
         # §7 asks P1b to "retain |rho| >= .4 after partialing out own-leg
         # r-squared". P1b is absent, so the control is applied to every
         # computable member instead of being skipped — it is the strictly
@@ -1864,7 +2065,7 @@ def build_battery(banks: Banks, basis: Sequence[BasisSlot],
     null_bank = max_statistic_null(
         perm_quality,
         {n: v for n, v in perm_columns.items() if n != "P1a-family-excluded"},
-        {"P2/P6": ["P2-compressibility"]},
+        {"P2/P6": clusters["P2/P6"]},
         seed_name=PERMUTATION_SEED_NAME + "/bank-only")
 
     p_values: dict[str, float] = dict(null_bank.p_max_statistic)
@@ -1924,7 +2125,7 @@ def build_battery(banks: Banks, basis: Sequence[BasisSlot],
         per_member_support=per_member, supported=supported,
         supporting_members=sorted(supporting),
         positive_claim_wording=wording, verdict_text=verdict, skipped=skipped,
-        flags=flags)
+        flags=flags, p6_inputs=p6, multiplicity_clusters=clusters)
 
 
 # ═══════════════════════════════════════════════════════ §6-I5 (cross-basis)
@@ -2127,8 +2328,8 @@ def i5_cross_basis(repo: Path, banks: Banks, basis: Sequence[BasisSlot],
         "blocker": (
             "A refit needs the per-text webtext-v3 STATE BANKS. They are not "
             "desk-side: checked by value, every states_*.npz beneath staging/ "
-            "is v2.1-vintage, and the v3 arm root the fit stamps name "
-            "(/models/metabasis-webtext-v3) is node-side only. The desk-side "
+            "is v2.1-vintage, and the v3 arm root the fit stamps name is "
+            "NODE-SIDE only. The desk-side "
             "v3 tree carries fitted maps (va/vb/omega/scale/norms) and "
             "entropy-gradient vectors, from which no re-fit on a train subset "
             "is derivable — the Procrustes needs the paired rows, not the "
@@ -2370,7 +2571,7 @@ def fetch_param_counts(cache_path: Optional[Path] = None) -> list[ParamCount]:
     revision", but NO PINNED REVISION IS RECORDED for the five race candidates
     anywhere in the campaign — `metabasis.roster` carries `model_id` and
     architecture facts but no revision, and the collection stamps carry a local
-    `/models/<name>` path plus a `config_sha256`, not a hub revision. What is
+    checkpoint-directory path plus a `config_sha256`, not a hub revision. What is
     recorded here is therefore the revision the repo's default branch RESOLVES
     TO at fetch time (`X-Repo-Commit` / the API's `sha`), stated as such.
 
@@ -2667,9 +2868,14 @@ STAGING_MANIFESTS: tuple[str, ...] = (
 
 # ═════════════════════════════════════════════════════════════ the driver
 def run_reads(repo: Path, out_dir: Path, verify: bool = True,
-              param_cache: Optional[Path] = None) -> ReadsRun:
+              param_cache: Optional[Path] = None,
+              p6_inputs: Optional[Path] = None) -> ReadsRun:
     """The whole enactment: one engine, every §6/§7 read, one artifact."""
     flags: list[str] = []
+    p6 = load_p6_inputs(p6_inputs) if p6_inputs is not None else None
+    if p6 is not None:
+        logger.info("P6-INPUTS: %d hubs, sha256 %s, PR re-derived max |Δ| %.3e",
+                    p6.n_hubs, p6.sha256, p6.recomputed_max_abs_delta)
     staging = repo/"staging"
     banks = Banks(
         vectors_root=staging/"webtext-v3-vectors"/"vectors",
@@ -2892,10 +3098,17 @@ def run_reads(repo: Path, out_dir: Path, verify: bool = True,
         "OTHER half's P1a — is used, both assignments are reported, and "
         "“full-ordering” is read as the challenge set words it: the whole hub "
         "population, never a top-k slice. FLAGGED.",
-        "⚠ TWO OF FOUR SLATE MEMBERS ARE SKIPPED WITH BLOCKERS (P1b, P6) — "
-        "see battery.skipped. The battery therefore runs on 2 members, and "
-        "the multiplicity null's P2/P6 cluster contains P2 alone.",
-    ])
+        ("⚠ TWO OF FOUR SLATE MEMBERS ARE SKIPPED WITH BLOCKERS (P1b, P6) — "
+         "see battery.skipped. The battery therefore runs on 2 members, and "
+         "the multiplicity null's P2/P6 cluster contains P2 alone."
+         if p6 is None else
+         "⚠ ONE OF FOUR SLATE MEMBERS IS SKIPPED WITH A BLOCKER (P1b) — §7 "
+         "asks for a CHANCE-CORRECTED P1b and no chance correction is defined "
+         "at either freeze tag, in the census pre-statement, or anywhere in "
+         "the repo. NOT invented. P6 is RESTORED from the node-built "
+         "P6-INPUTS artifact, so the battery runs on 3 members and the P2/P6 "
+         "cluster finally holds both of its named members."),
+    ], p6=p6)
     cache.clear_maps()
     c2 = c2_read(race, race_scores_record, ctx_record)
     sites = dict(rcp.SITE_OF_RECORD)
@@ -3322,6 +3535,108 @@ def selftest() -> int:                                   # noqa: C901 — a chec
     check(not row2.rank_guard_ok,
           "k512 FAILS the guard per-half — the excluded family, as frozen")
 
+    print("── 12. the P6-INPUTS reader, on a FIXTURE artifact")
+    import tempfile
+
+    def p6_fixture(**over: Any) -> dict[str, Any]:
+        rng6 = np.random.default_rng(20260804)
+        hubs = []
+        for i, key in enumerate(("h1", "h2", "h3")):
+            lam = np.sort(rng6.random(12) + 0.01)[::-1]
+            hubs.append({
+                "key": key, "site": 10 + i, "arm": "native",
+                "checkpoint_identity": "instruct",
+                "n_eigenvalues": int(lam.size), "n_train_rows": 12,
+                "hidden_dim": 64, "eigenvalues": [float(x) for x in lam],
+                "participation_ratio": float((lam.sum() ** 2) / (lam ** 2).sum()),
+            })
+        doc: dict[str, Any] = {
+            "artifact": P6_ARTIFACT_KIND,
+            "definition": f"census pre-statement §3 P6: {P6_CENSUS_FORMULA}",
+            "corpus_manifest_sha256": "c0ffee", "splits_sha256": "5171175",
+            "n_hubs": 3, "n_train_rows": [12], "effective_num_threads": 8,
+            "hubs": hubs,
+        }
+        doc.update(over)
+        return doc
+
+    with tempfile.TemporaryDirectory() as td6:
+        good = Path(td6)/"P6.json"
+        good.write_text(json.dumps(p6_fixture()))
+        loaded = load_p6_inputs(good)
+        check(loaded.n_hubs == 3 and set(loaded.values) == {"h1", "h2", "h3"},
+              "the P6 reader loads every hub row")
+        check(loaded.recomputed_max_abs_delta <= P6_RECOMPUTE_TOL,
+              f"every PR RE-DERIVES from its own banked eigenvalues "
+              f"(max |Δ| {loaded.recomputed_max_abs_delta:.2e})")
+        check(loaded.sites == {"h1": 10, "h2": 11, "h3": 12},
+              "sites travel with the column")
+
+        #  a PR that does not match its own spectrum must REFUSE, not round
+        bad = p6_fixture()
+        bad["hubs"][1]["participation_ratio"] += 1e-6
+        liar = Path(td6)/"liar.json"
+        liar.write_text(json.dumps(bad))
+        try:
+            load_p6_inputs(liar)
+            check(False, "a PR contradicting its own spectrum REFUSES")
+        except ReadsError:
+            check(True, "a PR contradicting its own spectrum REFUSES")
+
+        #  a different formula is a different slate member
+        wrong = Path(td6)/"wrong.json"
+        wrong.write_text(json.dumps(
+            p6_fixture(definition="PR = trace(C)^2 / trace(C@C), whitened")))
+        try:
+            load_p6_inputs(wrong)
+            check(False, "a NON-census formula REFUSES")
+        except ReadsError:
+            check(True, "a NON-census formula REFUSES")
+
+        #  an artifact of another kind is refused outright
+        alien = Path(td6)/"alien.json"
+        alien.write_text(json.dumps(p6_fixture(artifact="something-else/v9")))
+        try:
+            load_p6_inputs(alien)
+            check(False, "an artifact of another KIND refuses")
+        except ReadsError:
+            check(True, "an artifact of another KIND refuses")
+
+    print("── 13. §7's P2/P6 cluster rule with BOTH members present")
+    #  Two members inside ONE cluster: the null's statistic must be the maximum
+    #  over both, so a member is never cheaper to clear than the pair it is
+    #  clustered with. Built anti-correlated, as §7 describes them (ρ ≈ −.93).
+    rng7 = np.random.default_rng(760876)
+    q7 = list(rng7.random(21))
+    p2_7 = [-x + 0.02 * rng7.standard_normal() for x in q7]
+    p6_7 = [-v for v in p2_7]
+    both = max_statistic_null(
+        q7, {"P2-compressibility": p2_7, "P6-participation-ratio": p6_7},
+        {"P2/P6": ["P2-compressibility", "P6-participation-ratio"]},
+        n_perm=2000, seed_name="selftest/cluster/both")
+    check(sorted(both.members) == ["P2-compressibility",
+                                   "P6-participation-ratio"],
+          "both cluster members enter the null")
+    check(abs(both.observed_max - max(both.observed_abs_rho.values())) < 1e-12,
+          "the cluster's observed statistic is the max over its members")
+    alone = max_statistic_null(
+        q7, {"P2-compressibility": p2_7}, {"P2/P6": ["P2-compressibility"]},
+        n_perm=2000, seed_name="selftest/cluster/both")
+    check(both.p_max_statistic["P2-compressibility"]
+          >= alone.p_max_statistic["P2-compressibility"],
+          "a second member in the cluster never makes P2's p SMALLER "
+          f"({both.p_max_statistic['P2-compressibility']:.4f} vs "
+          f"{alone.p_max_statistic['P2-compressibility']:.4f})")
+    #  the grouping itself is inert in a max-statistic null; proving it here
+    #  keeps the report's claim honest rather than asserted.
+    split_clusters = max_statistic_null(
+        q7, {"P2-compressibility": p2_7, "P6-participation-ratio": p6_7},
+        {"P2": ["P2-compressibility"], "P6": ["P6-participation-ratio"]},
+        n_perm=2000, seed_name="selftest/cluster/both")
+    check(split_clusters.p_max_statistic == both.p_max_statistic,
+          "grouping the two as ONE cluster vs TWO changes no p — the "
+          "max-statistic null is correlation-aware by construction")
+
     print(f"\n{'ALL CHECKS PASS' if not failures else str(len(failures)) + ' FAILURE(S)'}")
     for label in failures:
         print("  FAILED:", label)
@@ -3345,6 +3660,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--build-twice", action="store_true",
                         help="build the artifact twice and prove the bytes "
                              "identical")
+    parser.add_argument("--p6-inputs", type=Path, default=None,
+                        help="the node-built P6-INPUTS artifact. Supplied: P6 "
+                             "enters the slate and the §7 P2/P6 cluster holds "
+                             "both members. Omitted: P6 stays SKIPPED with its "
+                             "blocker, exactly as before.")
+    parser.add_argument("--battery-out", type=Path, default=None,
+                        help="also write a standalone battery artifact here "
+                             "(+ sidecar); the reads/race artifacts are "
+                             "unaffected")
     parser.add_argument("--selftest", action="store_true")
     args = parser.parse_args(argv)
 
@@ -3356,7 +3680,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     param_cache = out_dir/"PARAM-COUNTS-race-candidates.json"
 
     run = run_reads(args.repo, out_dir, verify=not args.no_verify,
-                    param_cache=param_cache)
+                    param_cache=param_cache, p6_inputs=args.p6_inputs)
     payload = run.model_dump(mode="json")
     reads_path = out_dir/"READS-webtext-v3-2026-08-04.json"
     digest, sidecar = write_deterministic(payload, reads_path)
@@ -3397,13 +3721,28 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     i5_digest, _ = write_deterministic(i5_payload, i5_path)
     logger.info("I5 realized-slot list: %s sha256 %s", i5_path, i5_digest)
 
+    battery_digest = None
+    if args.battery_out is not None:
+        battery_payload = {
+            "artifact": "webtext-v3-battery-r2/v1",
+            "STATUS": run.STATUS,
+            "frozen_ref": run.frozen_ref,
+            "support_rule": run.battery.support_rule,
+            "battery": run.battery.model_dump(mode="json"),
+            "guard_quotable_population": run.guard_quotable_population,
+        }
+        battery_digest, _ = write_deterministic(
+            relativize(battery_payload, args.repo), args.battery_out)
+        logger.info("battery artifact: %s sha256 %s", args.battery_out,
+                    battery_digest)
+
     if args.build_twice:
         # The second build runs under the IDENTICAL settings, verification
         # included: a build-twice proof that changed a flag between the two
         # passes would prove the wrong thing (the first attempt did exactly
         # that and the manifest block differed — caught, not shipped).
         second = run_reads(args.repo, out_dir, verify=not args.no_verify,
-                           param_cache=param_cache)
+                           param_cache=param_cache, p6_inputs=args.p6_inputs)
         again = canonical_json(second.model_dump(mode="json"))
         identical = sha256_of_text(again) == digest
         print(f"BUILD-TWICE: {'BYTE-IDENTICAL' if identical else 'DIFFERENT'} "
@@ -3411,11 +3750,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if not identical:
             return 1
 
-    print(json.dumps({
+    summary: dict[str, Any] = {
         "reads_artifact": str(reads_path), "reads_sha256": digest,
         "race_artifact": str(race_path), "race_sha256": race_digest,
         "i5_artifact": str(i5_path), "i5_sha256": i5_digest,
-        "sidecar": str(sidecar)}, indent=1))
+        "sidecar": str(sidecar)}
+    if battery_digest is not None:
+        summary["battery_artifact"] = str(args.battery_out)
+        summary["battery_sha256"] = battery_digest
+    print(json.dumps(summary, indent=1))
     return 0
 
 
