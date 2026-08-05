@@ -131,12 +131,52 @@ PROVISIONAL_ALPHA_NOTE = (
 #: realized at attach time by the SAME α the signal cell uses — the construction only
 #: has to supply an orientation, and it supplies it from a digest so it is reproducible
 #: from the recipe string alone (M25: never `hash()`, never an unseeded RNG).
-RANDOM_BAND_SEED_TEMPLATE = "{basis_sha}|{owner}|L{site}|{family}|member{index:02d}"
+#:
+#: RULED 2026-08-04 (session 12; `PRESTATEMENT-behavioral-harness-ceremony-2026-08-04.md`
+#: §2, sha `386b500a…`) — the recipe of record is ISOTROPIC and its seed material is
+#: this template VERBATIM. Before the ruling this module carried a PROPOSAL template
+#: (`{basis_sha}|{owner}|L{site}|{family}|member{index:02d}`, family hardcoded to the
+#: literal "band"), which is why `--construct-bands` refused: there was no recipe of
+#: record to build against. The refusal now lifts for EXACTLY this recipe string and
+#: still refuses everything else, so a band built years from now is re-derivable from
+#: the stamp alone and a band built under any other recipe cannot exist.
+BAND_RECIPE_OF_RECORD = "isotropic-unit-gaussian/prestatement-2026-08-04-§2"
+RANDOM_BAND_SEED_TEMPLATE = (
+    "{corpus_sha}|{node_key}|{arm}|L{site}|{band_kind}|{vector_key}|member{m:02d}")
+RANDOM_BAND_SEED_TEMPLATE_DIGEST = hashlib.sha256(
+    RANDOM_BAND_SEED_TEMPLATE.encode()).hexdigest()
 RANDOM_BAND_CONSTRUCTION = (
-    "unit(standard normal drawn from np.random.default_rng(sha256(recipe)[:8])) at the "
-    "owner's hidden dimension; banked UNIT because the residual-write hook re-normalizes "
-    "at attach, so matched-norm is realized by the cell's own α and only ORIENTATION is "
-    "load-bearing (banked convention, build_injection_banks.py stamp)")
+    "unit(standard normal drawn from np.random.default_rng(sha256(seed_material)[:8])) "
+    "in the model's residual dim; banked UNIT because the residual-write hook "
+    "re-normalizes at attach, so matched-norm is realized by the cell's own α and only "
+    "ORIENTATION is load-bearing (banked convention, build_injection_banks.py stamp)")
+
+#: §2's Σ-BESIDE, ruled on the DESIGNATED CELLS ONLY (open word O-2). Members are
+#: Σ^{1/2}g renormalized to unit — randoms that "look like" typical residual
+#: directions, a strictly harder null than isotropic. **LABELED BESIDE, never the null
+#: of record, never inside any gate.** `band_kind` is `SigmaBand` so its seed material
+#: is phase-separate from `Rband`/`gRband`: the Σ band and the isotropic band at the
+#: same cell are different draws, never the same draw reshaped.
+SIGMA_BAND_RECIPE_OF_RECORD = "sigma-shaped-beside/prestatement-2026-08-04-§2"
+SIGMA_BAND_KIND = "SigmaBand"
+SIGMA_BAND_CONSTRUCTION = (
+    "unit(Σ^{1/2} g), g = standard normal drawn from "
+    "np.random.default_rng(sha256(seed_material)[:8]) with band_kind=SigmaBand; "
+    "Σ^{1/2} = V diag(sqrt(evals + ridge)) Vᵀ from the banked sigma_L*.npz beside the "
+    "vector (evals ascending, evecs in COLUMNS, the builder's own eigh convention); the "
+    "banked ridge is applied and named rather than dropped. BESIDE ONLY — never the "
+    "null of record, never an input to any gate (pre-statement §2, ruling O-2)")
+
+#: The two cells Luxia designated for the Σ-beside (O-2), as DATA. A designation is
+#: (node, arm, site, band family) — the tuple a cell is identified by — so the guard is
+#: mechanical and a third Σ cell cannot be added by prose. `vector_key` is deliberately
+#: NOT part of the designation: a cell's band travels with the cell, not with the key.
+SIGMA_BESIDE_DESIGNATIONS: dict[str, tuple[str, str, int, str]] = {
+    # the 3B certification node's CALIBRATION cell (native band, its own site)
+    "3b-certification-calibration": ("qwen2.5-3b-instruct", "native", 26, "Rband"),
+    # the bridge row's TRANSPORTED cell (8b → qwen-7b, the banked dose-monotone leg)
+    "bridge-row-transported": ("qwen-7b", "native", 21, "gRband"),
+}
 
 
 # ---------------------------------------------------------------- error taxonomy
@@ -202,24 +242,147 @@ class VectorRef(BaseModel):
 
 
 class RandomBandRecipe(BaseModel):
-    """A deterministic, sha256-seeded random band — used only when none is banked.
+    """The RULED isotropic band recipe (pre-statement §2) — the only one that builds.
 
-    The v2.1 bands do not exist anywhere (the certification census found zero rband
-    files in the node tree; the v1 anamnesis `load_axes` banks were the precedent and
-    have no v2.1 equivalent). This recipe is what a band WOULD be built from, written
-    so the members are re-derivable from the recipe string alone.
+    The v2.1/v3 bands do not exist anywhere as banked files (the certification census
+    found zero rband files in the node tree; the v1 anamnesis `load_axes` banks were the
+    precedent and have no successor). This recipe is what a band IS built from, written
+    so the members are re-derivable from the recipe string alone — and `recipe_of_record`
+    pins it to the ruled string, so a spec cannot smuggle in a different construction
+    while still passing `--construct-bands`.
+
+    Every field of the seed material is a field here, in the ruled order:
+    `{corpus_sha}|{node_key}|{arm}|L{site}|{band_kind}|{vector_key}|member{m:02d}`.
+    `band_kind` phase-separates the native band from the transported one (§4.1's
+    `Rband*` vs `gRband*`), and `vector_key` phase-separates two bands that ride the
+    same cell for different objects.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    owner: str = Field(min_length=1, description="whose space the band lives in")
-    site: int = Field(ge=0)
-    dim: int = Field(gt=0, description="hidden dimension of `owner` at `site`")
-    n_members: int = Field(gt=0, default=N_BAND_MEMBERS)
-    #: the basis the band is anchored to — a corpus/manifest sha, so a band built at
+    #: the ruled recipe string. Any other value is refused at construction, which is
+    #: what "the refusal lifts for exactly this recipe" means mechanically.
+    recipe_of_record: str = BAND_RECIPE_OF_RECORD
+    #: the basis the band is anchored to — the corpus manifest sha, so a band built at
     #: one basis can never be silently reused at another.
-    basis_sha: str = Field(min_length=8)
+    corpus_sha: str = Field(min_length=8)
+    node_key: str = Field(min_length=1, description="whose space the band lives in")
+    arm: Literal["native", "raw"]
+    site: int = Field(ge=0)
+    band_kind: Literal["Rband", "gRband"]
+    vector_key: str = Field(
+        min_length=1,
+        description="the object this band is the control FOR (its cell's vector key)")
+    #: WHOSE SPACE THE GAUSSIAN IS DRAWN IN — the one thing the ruled seed material
+    #: does not itself say. The seed material names the CELL (target node, target site,
+    #: arm); the draw happens in the space the member starts in, which is the target's
+    #: for `Rband` (a native control at the node's own site) and the SOURCE's for
+    #: `gRband`, because §5.1's transported band is "the source's randoms through the
+    #: SAME map" — the control travels the same road as the signal or it is not a
+    #: control for transport. Recorded explicitly so the two readings can never blur.
+    draw_space_key: str = Field(min_length=1)
+    dim: int = Field(gt=0, description="hidden dimension of `draw_space_key` at its site")
+    n_members: int = Field(gt=0, default=N_BAND_MEMBERS)
     construction: str = RANDOM_BAND_CONSTRUCTION
+
+    @model_validator(mode="after")
+    def _draw_space_matches_the_family(self) -> "RandomBandRecipe":
+        if self.band_kind == "Rband" and self.draw_space_key != self.node_key:
+            raise ValueError(
+                f"Rband draws in the node's OWN space: draw_space_key="
+                f"{self.draw_space_key!r} != node_key={self.node_key!r} (§4.1: the "
+                "native band asks whether the SITE actuates)")
+        if self.band_kind == "gRband" and self.draw_space_key == self.node_key:
+            raise ValueError(
+                f"gRband draws in the SOURCE's space and is carried through the same "
+                f"map (§5.1); draw_space_key={self.draw_space_key!r} is the target "
+                "itself, which would make the control a native band wearing a "
+                "transported name")
+        return self
+
+    @model_validator(mode="after")
+    def _is_the_recipe_of_record(self) -> "RandomBandRecipe":
+        if self.recipe_of_record != BAND_RECIPE_OF_RECORD:
+            raise ValueError(
+                f"recipe_of_record={self.recipe_of_record!r} is not the ruled recipe "
+                f"{BAND_RECIPE_OF_RECORD!r} (pre-statement §2). This module builds ONE "
+                "band recipe and refuses every other by name.")
+        if self.construction != RANDOM_BAND_CONSTRUCTION:
+            raise ValueError(
+                "construction text differs from the ruled construction — the recipe "
+                "string and its construction travel together or the stamp lies")
+        return self
+
+    def seed_material(self, index: int) -> str:
+        """The ruled seed material for member `index`, built from the template."""
+        return RANDOM_BAND_SEED_TEMPLATE.format(
+            corpus_sha=self.corpus_sha, node_key=self.node_key, arm=self.arm,
+            site=self.site, band_kind=self.band_kind, vector_key=self.vector_key,
+            m=index)
+
+
+class SigmaBandRecipe(BaseModel):
+    """§2's Σ-BESIDE — the stricter null, on the two DESIGNATED cells only (O-2).
+
+    Never the null of record and never an input to a gate: `build_sigma_band` refuses
+    to build for any cell outside `SIGMA_BESIDE_DESIGNATIONS`, and every member it does
+    build is keyed `SigmaBand*` so a scorer that pools it into a band would have to do
+    so by name.
+
+    The Σ estimator is NAMED here rather than implied: it is the banked
+    `sigma_L{site}_{node}.npz` written beside the v3 entropy-gradient vector — the
+    TOKEN-LEVEL residual covariance over the completion positions of a deterministic
+    60-text stride through the frozen corpus manifest, eigendecomposed (`evals`
+    ascending, `evecs` in columns) with a relative ridge banked beside it. That is a
+    covariance of token residuals, not of texts and not of the fit's train matrix; it is
+    stated because a "Σ-shaped" null means nothing until Σ is identified.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    recipe_of_record: str = SIGMA_BAND_RECIPE_OF_RECORD
+    designation: str = Field(
+        min_length=1, description="key into SIGMA_BESIDE_DESIGNATIONS")
+    corpus_sha: str = Field(min_length=8)
+    node_key: str = Field(min_length=1)
+    arm: Literal["native", "raw"]
+    site: int = Field(ge=0)
+    #: the isotropic band this Σ band sits BESIDE (Rband on a calibration cell,
+    #: gRband on a transported cell) — recorded so the beside is readable as a beside.
+    beside_band_kind: Literal["Rband", "gRband"]
+    vector_key: str = Field(min_length=1)
+    #: the SPACE the Σ lives in, which is the space the member is drawn in: the node's
+    #: own for a calibration (`Rband`) beside, and the SOURCE's for a transported
+    #: (`gRband`) beside — the Σ band travels the same road as the band it sits beside,
+    #: so `sigma_npz`/`dim` name the source's covariance on a transported designation.
+    dim: int = Field(gt=0)
+    n_members: int = Field(gt=0, default=N_BAND_MEMBERS)
+    sigma_npz: Path
+    sigma_sha256: Optional[str] = None
+    sigma_estimator: str = Field(
+        min_length=20,
+        description="the estimator, NAMED — never 'the covariance'")
+    sigma_provenance: str = Field(min_length=10)
+    apply_banked_ridge: bool = True
+    construction: str = SIGMA_BAND_CONSTRUCTION
+
+    @model_validator(mode="after")
+    def _is_the_recipe_of_record(self) -> "SigmaBandRecipe":
+        if self.recipe_of_record != SIGMA_BAND_RECIPE_OF_RECORD:
+            raise ValueError(
+                f"recipe_of_record={self.recipe_of_record!r} is not the ruled Σ-beside "
+                f"recipe {SIGMA_BAND_RECIPE_OF_RECORD!r} (pre-statement §2 / O-2)")
+        if self.construction != SIGMA_BAND_CONSTRUCTION:
+            raise ValueError(
+                "Σ-beside construction text differs from the ruled construction")
+        return self
+
+    def seed_material(self, index: int) -> str:
+        """Same template, `band_kind=SigmaBand` — phase-separate from the isotropic."""
+        return RANDOM_BAND_SEED_TEMPLATE.format(
+            corpus_sha=self.corpus_sha, node_key=self.node_key, arm=self.arm,
+            site=self.site, band_kind=SIGMA_BAND_KIND, vector_key=self.vector_key,
+            m=index)
 
 
 class BandRef(BaseModel):
@@ -239,6 +402,9 @@ class BandRef(BaseModel):
     n_members_required: int = N_BAND_MEMBERS
     #: present only when the spec authorizes CONSTRUCTING the band in writing.
     recipe: Optional[RandomBandRecipe] = None
+    #: the Σ-shaped BESIDE, on the two designated cells only (O-2). Never the null of
+    #: record; carried on the band it sits beside so the two are read together.
+    sigma_beside: Optional[SigmaBandRecipe] = None
 
     @model_validator(mode="after")
     def _band_is_resolvable_or_owed(self) -> "BandRef":
@@ -251,6 +417,16 @@ class BandRef(BaseModel):
             raise ValueError(
                 f"{self.family}: recipe builds {self.recipe.n_members} members but the "
                 f"band is {self.n_members_required}")
+        if self.recipe is not None and self.recipe.band_kind != self.family:
+            raise ValueError(
+                f"{self.family}: recipe's band_kind is {self.recipe.band_kind!r} — the "
+                "seed material would phase-separate the band from its own cell "
+                "(§4.1 keeps Rband* and gRband* distinct in name AND in seed)")
+        if (self.sigma_beside is not None
+                and self.sigma_beside.beside_band_kind != self.family):
+            raise ValueError(
+                f"{self.family}: Σ-beside declares itself beside "
+                f"{self.sigma_beside.beside_band_kind!r}")
         return self
 
     @property
@@ -676,24 +852,166 @@ def random_band_member(recipe: RandomBandRecipe, index: int) -> np.ndarray:
 
     M25: the seed is a sha256 digest of a NAMED material string, never `hash()` and
     never an unseeded default RNG, so the band is re-derivable years later from the
-    stamp alone.
+    stamp alone. The material is the RULED template (pre-statement §2) built through
+    `RandomBandRecipe.seed_material`, so the string in the stamp and the string that
+    seeded the draw are the same string by construction.
     """
-    assert_construction_admissible("random_band", key=f"{recipe.owner}/member{index}")
+    assert_construction_admissible("random_band",
+                                   key=f"{recipe.node_key}/member{index}")
+    if recipe.recipe_of_record != BAND_RECIPE_OF_RECORD:      # pragma: no cover
+        raise ConstructionRefused(
+            f"{recipe.node_key}: band recipe {recipe.recipe_of_record!r} is not the "
+            f"recipe of record {BAND_RECIPE_OF_RECORD!r} — REFUSED")
     if not 1 <= index <= recipe.n_members:
         raise ValueError(
             f"band member index {index} out of range 1..{recipe.n_members}")
-    material = RANDOM_BAND_SEED_TEMPLATE.format(
-        basis_sha=recipe.basis_sha, owner=recipe.owner, site=recipe.site,
-        family="band", index=index)
-    rng = np.random.default_rng(seed_int(material))
+    rng = np.random.default_rng(seed_int(recipe.seed_material(index)))
     return unit(rng.standard_normal(recipe.dim))
 
 
 def build_random_band(recipe: RandomBandRecipe, family: Literal["Rband", "gRband"]
                       ) -> dict[str, np.ndarray]:
-    """The whole band, keyed `{family}{i}` in member order (§4.1's naming)."""
+    """The whole band, keyed `{family}{i}` in member order (§4.1's naming).
+
+    `family` must be the recipe's own `band_kind`: the key prefix and the seed material
+    are two views of the same fact, and letting them disagree would bank a `gRband`
+    keyed file whose members were drawn in the `Rband` phase.
+    """
+    if family != recipe.band_kind:
+        raise ConstructionRefused(
+            f"{recipe.node_key}: asked for a {family} band from a "
+            f"{recipe.band_kind} recipe — the key prefix and the seed material must "
+            "name the same band (§4.1)")
     return {f"{family}{i}": random_band_member(recipe, i)
             for i in range(1, recipe.n_members + 1)}
+
+
+def assert_sigma_beside_designated(recipe: SigmaBandRecipe) -> tuple[str, str, int, str]:
+    """O-2's guard: the Σ-beside exists on TWO named cells and nowhere else.
+
+    Returns the designated tuple on success. Raises `ConstructionRefused` both when the
+    designation is unknown and when it is known but describes a different cell — the
+    second is the one that matters, because a copied spec with an edited node key is
+    exactly how a "beside" quietly becomes a third arm of the experiment.
+    """
+    want = SIGMA_BESIDE_DESIGNATIONS.get(recipe.designation)
+    if want is None:
+        raise ConstructionRefused(
+            f"Σ-beside designation {recipe.designation!r} is not one of the two Luxia "
+            f"designated (O-2): {sorted(SIGMA_BESIDE_DESIGNATIONS)}. The Σ band is a "
+            "BESIDE on two cells, not an instrument of the column.")
+    got = (recipe.node_key, recipe.arm, recipe.site, recipe.beside_band_kind)
+    if got != want:
+        raise ConstructionRefused(
+            f"Σ-beside {recipe.designation!r} is designated for {want} but this recipe "
+            f"describes {got} — REFUSED (O-2 designates CELLS, not recipes)")
+    return want
+
+
+def _sigma_half(sigma_npz: Path, dim: int, *, apply_ridge: bool,
+                key: str = "") -> tuple[np.ndarray, dict]:
+    """Σ^{1/2} from a banked `sigma_L*.npz`, plus the facts its stamp must carry.
+
+    The banked convention is `np.linalg.eigh`'s: `evals` ASCENDING, `evecs` in COLUMNS,
+    and the relative ridge stored BESIDE the spectrum rather than folded into it
+    (`build_entropy_gradient.py`). Both are re-asserted here rather than assumed,
+    because a transposed `evecs` would still produce a plausible-looking band.
+    """
+    if not sigma_npz.exists():
+        raise ConstructionRefused(
+            f"{key or 'Σ-beside'}: no banked covariance at {sigma_npz} — the Σ-beside "
+            "names its estimator or it does not build")
+    try:
+        with np.load(sigma_npz) as z:
+            missing = {"evals", "evecs"} - set(z.files)
+            if missing:
+                raise ConstructionRefused(
+                    f"{key or 'Σ-beside'}: {sigma_npz} lacks {sorted(missing)} "
+                    f"(keys: {sorted(z.files)})")
+            evals = np.asarray(z["evals"], dtype=np.float64).reshape(-1)
+            evecs = np.asarray(z["evecs"], dtype=np.float64)
+            ridge = float(np.asarray(z["ridge"])) if "ridge" in z.files else 0.0
+            n_positions = (int(np.asarray(z["n_positions"]))
+                           if "n_positions" in z.files else None)
+    except (OSError, ValueError, EOFError) as exc:
+        raise ConstructionRefused(
+            f"{key or 'Σ-beside'}: {sigma_npz} is not a readable npz "
+            f"({type(exc).__name__}: {exc})") from exc
+    if evecs.shape != (dim, dim) or evals.shape != (dim,):
+        raise DimensionMismatch(
+            f"{key or 'Σ-beside'}: banked Σ is {evecs.shape}/{evals.shape}, the space "
+            f"is dim {dim}")
+    if not np.all(np.diff(evals) >= -1e-9):
+        raise ConstructionRefused(
+            f"{key or 'Σ-beside'}: banked eigenvalues are not ascending — this is not "
+            "the builder's eigh convention and the square root would be built on a "
+            "misread spectrum")
+    floor = ridge if apply_ridge else 0.0
+    lam = np.clip(evals, 0.0, None) + floor
+    half = (evecs * np.sqrt(lam)) @ evecs.T
+    facts = {
+        "sigma_npz": str(sigma_npz),
+        "sigma_sha256": sha256_file(sigma_npz),
+        "banked_ridge": ridge,
+        "ridge_applied": bool(apply_ridge),
+        "n_positions": n_positions,
+        "eigenvalue_convention": "ascending, eigenvectors in COLUMNS (np.linalg.eigh)",
+        "n_negative_eigenvalues_clipped": int(np.sum(evals < 0.0)),
+        "top_eigenvalue": float(evals[-1]),
+        "median_eigenvalue": float(np.median(evals)),
+    }
+    return half, facts
+
+
+def sigma_band_member(recipe: SigmaBandRecipe, index: int, *,
+                      sigma_half: Optional[np.ndarray] = None) -> np.ndarray:
+    """One Σ-beside member: unit(Σ^{1/2} g), g the SAME kind of seeded unit Gaussian."""
+    assert_construction_admissible("random_band",
+                                   key=f"{recipe.node_key}/Σmember{index}")
+    assert_sigma_beside_designated(recipe)
+    if not 1 <= index <= recipe.n_members:
+        raise ValueError(
+            f"Σ band member index {index} out of range 1..{recipe.n_members}")
+    half = (sigma_half if sigma_half is not None else
+            _sigma_half(recipe.sigma_npz, recipe.dim,
+                        apply_ridge=recipe.apply_banked_ridge,
+                        key=recipe.designation)[0])
+    rng = np.random.default_rng(seed_int(recipe.seed_material(index)))
+    return unit(half @ rng.standard_normal(recipe.dim))
+
+
+def build_sigma_band(recipe: SigmaBandRecipe) -> tuple[dict[str, np.ndarray], dict]:
+    """The whole Σ-beside, keyed `SigmaBand{i}`, plus the estimator facts for the stamp.
+
+    The square root is computed ONCE for the band (it is the expensive step and it is
+    identical across members), and the per-member randomness still comes from each
+    member's own digest — so a partial rebuild of member 2 is in phase with 1 and 3.
+    """
+    assert_sigma_beside_designated(recipe)
+    half, facts = _sigma_half(recipe.sigma_npz, recipe.dim,
+                              apply_ridge=recipe.apply_banked_ridge,
+                              key=recipe.designation)
+    if recipe.sigma_sha256 is not None and facts["sigma_sha256"] != recipe.sigma_sha256:
+        raise ArtifactShaMismatch(
+            f"Σ-beside {recipe.designation}: {recipe.sigma_npz} sha "
+            f"{facts['sigma_sha256'][:12]}… != expected {recipe.sigma_sha256[:12]}… "
+            "(M4 — a sha mismatch on a number-bearing artifact is a HALT)")
+    band = {f"{SIGMA_BAND_KIND}{i}": sigma_band_member(recipe, i, sigma_half=half)
+            for i in range(1, recipe.n_members + 1)}
+    facts.update({
+        "recipe_of_record": recipe.recipe_of_record,
+        "designation": recipe.designation,
+        "beside_band_kind": recipe.beside_band_kind,
+        "estimator": recipe.sigma_estimator,
+        "estimator_provenance": recipe.sigma_provenance,
+        "seed_material_template": RANDOM_BAND_SEED_TEMPLATE,
+        "seed_material_template_digest": RANDOM_BAND_SEED_TEMPLATE_DIGEST,
+        "seed_materials": [recipe.seed_material(i)
+                           for i in range(1, recipe.n_members + 1)],
+        "GRADE": "BESIDE ONLY — never the null of record, never an input to any gate",
+        "thread_config": thread_config_stamp(),
+    })
+    return band, facts
 
 
 # ---------------------------------------------------------------- the census (§4.3)
@@ -807,22 +1125,28 @@ def _band_row(name: str, role: CensusRole, band: BandRef, *, cells_at_risk: int,
             sha256=rows[0].sha256, cells_at_risk=0 if not blocking else cells_at_risk,
             ready=not blocking, blocking_reason="; ".join(b for b in blocking if b) or None)
     if band.recipe is not None:
+        basis_ok = band.recipe.corpus_sha == corpus_sha_of_record
         return ArtifactRow(
-            name=name, role=role, path=None, present=False, cells_at_risk=cells_at_risk,
-            ready=False, constructible=True,
-            blocking_reason=f"no banked members; CONSTRUCTIBLE from the named recipe "
-                            f"({band.recipe.n_members} members at dim "
-                            f"{band.recipe.dim}, basis "
-                            f"{band.recipe.basis_sha[:12]}…) — pass --construct-bands "
-                            "to build it, which is a bank-content act and not the "
-                            "default")
+            name=name, role=role, path=None, present=False,
+            cells_at_risk=0 if basis_ok else cells_at_risk,
+            ready=False, constructible=basis_ok,
+            blocking_reason=(
+                f"no banked members; CONSTRUCTIBLE from the RULED recipe "
+                f"({band.recipe.recipe_of_record}: {band.recipe.n_members} members at "
+                f"dim {band.recipe.dim}, basis {band.recipe.corpus_sha[:12]}…, "
+                f"band_kind {band.recipe.band_kind}) — pass --construct-bands to build "
+                "it, which is a bank-content act and not the default"
+                if basis_ok else
+                f"recipe is anchored to basis {band.recipe.corpus_sha[:12]}…, not the "
+                f"basis of record {corpus_sha_of_record[:12]}… — a cross-basis band is "
+                "REFUSED, never silently reused (§9 item 2)"))
     return ArtifactRow(
         name=name, role=role, path=None, present=False, cells_at_risk=cells_at_risk,
         ready=False,
         blocking_reason=f"no banked {band.family} members and no construction recipe. "
-                        "The v2.1 random bands have never been built for any node "
-                        "(the v1 load_axes banks were the precedent and have no v2.1 "
-                        "equivalent) — this is the OWED object, reported, not "
+                        "The random bands have never been built for any node as files "
+                        "(the v1 load_axes banks were the precedent and have no "
+                        "successor) — this is the OWED object, reported, not "
                         "improvised.")
 
 
@@ -1149,6 +1473,11 @@ def build_banks(spec: BankSpec, *, construct_bands: bool = False,
     vectors: dict[str, np.ndarray] = {}
     magnitudes: dict[str, float] = {}
     constructions: dict[str, str] = {}
+    #: the exact seed material behind every CONSTRUCTED band member, so the stamp
+    #: carries the string the draw was seeded from rather than a template to re-render.
+    band_seed_materials: dict[str, str] = {}
+    #: the Σ-beside's estimator facts, per half, when one was designated and built.
+    sigma_facts: dict[str, dict] = {}
 
     # --- §4's native half -----------------------------------------------------
     if spec.include_calibration:
@@ -1167,12 +1496,24 @@ def build_banks(spec: BankSpec, *, construct_bands: bool = False,
                 vectors[f"Rband{i}"] = unit(v).astype(np.float32)
                 constructions[f"Rband{i}"] = f"identity (banked {m.key}, unit)"
         elif band.recipe is not None and construct_bands:
+            if band.recipe.corpus_sha != spec.corpus_sha_of_record:
+                raise ConstructionRefused(
+                    f"native band recipe is anchored to {band.recipe.corpus_sha[:12]}… "
+                    f"but this bank's basis of record is "
+                    f"{spec.corpus_sha_of_record[:12]}… — a cross-basis band is refused")
             for key, v in build_random_band(band.recipe, "Rband").items():
                 if v.size != lever.size:
                     raise DimensionMismatch(
                         f"{key}: recipe dim {v.size} != lever dim {lever.size}")
                 vectors[key] = v.astype(np.float32)
                 constructions[key] = RANDOM_BAND_CONSTRUCTION
+                band_seed_materials[key] = band.recipe.seed_material(
+                    int(key.removeprefix("Rband")))
+        if band.sigma_beside is not None and construct_bands:
+            sband_vectors, sigma_facts["native"] = build_sigma_band(band.sigma_beside)
+            for key, v in sband_vectors.items():
+                vectors[key] = v.astype(np.float32)
+                constructions[key] = SIGMA_BAND_CONSTRUCTION
 
     # --- §5's transported half ------------------------------------------------
     tm_stamp: Optional[dict] = None
@@ -1208,13 +1549,42 @@ def build_banks(spec: BankSpec, *, construct_bands: bool = False,
                 magnitudes[key] = round(magi, 6)
                 constructions[key] = constructions[gkey]
         elif sband.recipe is not None and construct_bands:
-            for i, (_, v) in enumerate(
-                    sorted(build_random_band(sband.recipe, "Rband").items()), start=1):
+            if sband.recipe.corpus_sha != spec.corpus_sha_of_record:
+                raise ConstructionRefused(
+                    f"transported band recipe is anchored to "
+                    f"{sband.recipe.corpus_sha[:12]}… but this bank's basis of record "
+                    f"is {spec.corpus_sha_of_record[:12]}… — refused")
+            # The members are drawn in the SOURCE's space (§5.1: the control travels
+            # the same road as the signal) and keyed `gRband*` on arrival; the seed
+            # material names the CELL, which is why the recipe carries both.
+            built = build_random_band(sband.recipe, "gRband")
+            for i in range(1, sband.recipe.n_members + 1):
                 key = f"{spec.transported_prefix}Rband{i}"
+                v = built[f"gRband{i}"]
+                if v.size != src.size:
+                    raise DimensionMismatch(
+                        f"{key}: recipe draws at dim {v.size} but the SOURCE vector is "
+                        f"{src.size} — a transported band must start in the source's "
+                        "space")
                 gvi, magi = transport_vector(carry, v, key=key)
                 vectors[key] = gvi.astype(np.float32)
                 magnitudes[key] = round(magi, 6)
                 constructions[key] = ("random_band (source-side, constructed) then "
+                                      + constructions[gkey])
+                band_seed_materials[key] = sband.recipe.seed_material(i)
+        if sband.sigma_beside is not None and construct_bands:
+            sig_vectors, sigma_facts["transported"] = build_sigma_band(
+                sband.sigma_beside)
+            for key, v in sig_vectors.items():
+                if v.size != src.size:
+                    raise DimensionMismatch(
+                        f"{key}: Σ-beside drawn at dim {v.size}, source vector is "
+                        f"{src.size} — the Σ-beside for a TRANSPORTED cell is drawn "
+                        "in the source's space and carried through the same map")
+                gvi, magi = transport_vector(carry, v, key=key)
+                vectors[key] = gvi.astype(np.float32)
+                magnitudes[key] = round(magi, 6)
+                constructions[key] = (SIGMA_BAND_CONSTRUCTION + " then "
                                       + constructions[gkey])
         if spec.include_naive:
             nkey = f"{NAIVE_KEY_PREFIX}_entropy_gradient"
@@ -1263,7 +1633,9 @@ def build_banks(spec: BankSpec, *, construct_bands: bool = False,
                        constructions=constructions, transport_map=tm_stamp,
                        naive_row=naive_row, site_cross_check=cross,
                        prompt_pool_sha256=pool_sha,
-                       battery_item_set_sha256=BATTERY_ITEM_SET_SHA256)
+                       battery_item_set_sha256=BATTERY_ITEM_SET_SHA256,
+                       band_seed_materials=band_seed_materials,
+                       sigma_beside=sigma_facts)
 
     doc = CellsDocument(
         node_key=spec.node_key, arm=spec.arm, site=spec.site,
@@ -1357,7 +1729,9 @@ def bank_stamp(spec: BankSpec, *, cells: Sequence[StagedCell],
                constructions: dict[str, str], transport_map: Optional[dict],
                naive_row: Optional[dict], site_cross_check: dict,
                prompt_pool_sha256: Optional[str],
-               battery_item_set_sha256: str) -> dict:
+               battery_item_set_sha256: str,
+               band_seed_materials: Optional[dict[str, str]] = None,
+               sigma_beside: Optional[dict[str, dict]] = None) -> dict:
     """The staging half of §2.8's custody, as one document.
 
     Everything here is a fact this module established from disk or constructed itself.
@@ -1422,9 +1796,28 @@ def bank_stamp(spec: BankSpec, *, cells: Sequence[StagedCell],
                      "does the SITE actuate",
             "gRband": "the SOURCE's randoms through the SAME map — §5's control: does "
                       "the TRANSPORT carry",
+            "SigmaBand": "the Σ-shaped BESIDE on the two designated cells (O-2) — "
+                         "never the null of record, never inside a gate",
             "why_distinct": "conflating them is the fastest way to make a null "
-                            "uninterpretable (§4.1)",
+                            "uninterpretable (§4.1); `band_kind` in the seed material "
+                            "keeps all three phase-separate",
         },
+        "band_recipe": {
+            "recipe_of_record": BAND_RECIPE_OF_RECORD,
+            "ruling": "Luxia 2026-08-04 (session 12) — ISOTROPIC + Σ BESIDE; "
+                      "PRESTATEMENT-behavioral-harness-ceremony-2026-08-04.md §2",
+            "seed_material_template": RANDOM_BAND_SEED_TEMPLATE,
+            "seed_material_template_digest": RANDOM_BAND_SEED_TEMPLATE_DIGEST,
+            "seed_derivation": "seed_int = int.from_bytes(sha256(material)[:8], 'big') "
+                               "(brief §2.3's scheme, M25-safe)",
+            "construction": RANDOM_BAND_CONSTRUCTION,
+            "n_members": N_BAND_MEMBERS,
+            "constructed_member_seed_materials": band_seed_materials or None,
+            "note": "an EMPTY constructed-member map means this bank consumed BANKED "
+                    "members, not constructed ones — the two are different provenances "
+                    "and the stamp says which",
+        },
+        "sigma_beside": sigma_beside or None,
         "lesion_recipe_law": "§5.4: asserted at CONSTRUCTION — the admissible set is "
                              "closed (transport, coordinate_identify, random_band, "
                              "identity) and every forbidden name is refused",
@@ -1459,14 +1852,27 @@ def example_spec() -> dict:
             "provenance": "the node's own FD-gated entropy-gradient vector"},
         "native_band": {
             "family": "Rband", "members": [],
-            "recipe": {"owner": "<TARGET-NODE-KEY>", "site": 0, "dim": 0,
-                       "n_members": N_BAND_MEMBERS,
-                       "basis_sha": "<THE BASIS OF RECORD>"}},
+            "recipe": {"recipe_of_record": BAND_RECIPE_OF_RECORD,
+                       "corpus_sha": "<THE BASIS OF RECORD>",
+                       "node_key": "<TARGET-NODE-KEY>", "arm": "native", "site": 0,
+                       "band_kind": "Rband", "vector_key": "entropy_gradient",
+                       "draw_space_key": "<TARGET-NODE-KEY>", "dim": 0,
+                       "n_members": N_BAND_MEMBERS}},
         "source_vector": {
             "key": "entropy_gradient", "npz": "<PATH>/entropy_gradient_<hub>_L<site>.npz",
             "fd_gate": "<PATH>/..._fd_gate.json",
             "build_stamp": "<PATH>/..._stamps.json"},
-        "source_band": {"family": "gRband", "members": []},
+        "source_band": {
+            "family": "gRband", "members": [],
+            "recipe": {"recipe_of_record": BAND_RECIPE_OF_RECORD,
+                       "corpus_sha": "<THE BASIS OF RECORD>",
+                       "node_key": "<TARGET-NODE-KEY>", "arm": "native", "site": 0,
+                       "band_kind": "gRband", "vector_key": "gentropy_gradient",
+                       "draw_space_key": "<SOURCE-NODE-KEY>", "dim": 0,
+                       "n_members": N_BAND_MEMBERS},
+            "sigma_beside": "<null, or a SigmaBandRecipe on ONE of the two O-2 "
+                            "designated cells: " + ", ".join(
+                                sorted(SIGMA_BESIDE_DESIGNATIONS)) + ">"},
         "transport_map": {"fit": "<PATH>/fit_<src>__<tgt>_<arm>_proc_k128.npz",
                           "family": "proc_k128", "arm": "native", "direction": "fwd",
                           "corpus_vintage": "<THE BASIS OF RECORD>"},
@@ -1569,29 +1975,208 @@ def selftest() -> int:                                   # noqa: C901 — a chec
               _raises(lambda: unit(np.zeros(4)), ConstructionRefused)
               and _raises(lambda: unit(np.array([np.nan, 1.0])), ConstructionRefused))
 
-        # ---- 2. the random band recipe (M25-safe, reproducible) ---------------
-        print("== selftest 2: the constructed random band (M25) ==")
-        recipe = RandomBandRecipe(owner="toy-node", site=7, dim=d_tgt, basis_sha=basis)
+        # ---- 2. the RULED random band recipe (M25-safe, reproducible) ---------
+        print("== selftest 2: the constructed random band — the RULED recipe (M25) ==")
+        recipe = RandomBandRecipe(
+            corpus_sha=basis, node_key="toy-node", arm="native", site=7,
+            band_kind="Rband", vector_key="entropy_gradient",
+            draw_space_key="toy-node", dim=d_tgt)
         band1 = build_random_band(recipe, "Rband")
         band2 = build_random_band(recipe, "Rband")
         check("a band is 3 members keyed Rband1..3 (§4.1's naming)",
               sorted(band1) == ["Rband1", "Rband2", "Rband3"])
-        check("the band is bitwise reproducible from the recipe alone",
-              all(np.array_equal(band1[k], band2[k]) for k in band1))
+        check("the band is bitwise reproducible from the recipe alone (BUILD-TWICE)",
+              all(band1[k].tobytes() == band2[k].tobytes() for k in band1),
+              "byte equality, not allclose — the recipe is the artifact")
+        check("the seed material is the RULED template, verbatim",
+              recipe.seed_material(1)
+              == f"{basis}|toy-node|native|L7|Rband|entropy_gradient|member01"
+              and RANDOM_BAND_SEED_TEMPLATE
+              == "{corpus_sha}|{node_key}|{arm}|L{site}|{band_kind}|{vector_key}"
+                 "|member{m:02d}",
+              RANDOM_BAND_SEED_TEMPLATE_DIGEST[:12] + "…")
         check("members are distinct directions, not one vector three times",
               len({v.tobytes() for v in band1.values()}) == 3)
         check("every member is UNIT (the hook re-normalizes; orientation is the object)",
               all(abs(float(np.linalg.norm(v)) - 1.0) < 1e-12 for v in band1.values()))
         other = build_random_band(
-            recipe.model_copy(update={"basis_sha": other_basis}), "Rband")
+            recipe.model_copy(update={"corpus_sha": other_basis}), "Rband")
         check("a DIFFERENT basis gives a different band (no silent cross-basis reuse)",
               not any(np.array_equal(band1[k], other[k]) for k in band1))
-        check("gRband naming is the transported family, same recipe machinery",
-              sorted(build_random_band(recipe, "gRband")) == ["gRband1", "gRband2",
-                                                              "gRband3"])
+        grecipe = recipe.model_copy(update={"band_kind": "gRband",
+                                            "draw_space_key": "toy-source",
+                                            "vector_key": "gentropy_gradient"})
+        gband = build_random_band(grecipe, "gRband")
+        check("gRband is the transported family AND a different phase of the seed",
+              sorted(gband) == ["gRband1", "gRband2", "gRband3"]
+              and not any(np.array_equal(gband[f"gRband{i}"], band1[f"Rband{i}"])
+                          for i in (1, 2, 3)),
+              "`band_kind` in the seed material keeps native and transported bands "
+              "phase-separate (§4.1)")
+        check("every seed-material field moves the band (arm, site, vector_key)",
+              all(not np.array_equal(
+                  build_random_band(recipe.model_copy(update=u), "Rband")["Rband1"],
+                  band1["Rband1"])
+                  for u in ({"arm": "raw"}, {"site": 8},
+                            {"vector_key": "other_object"},
+                            {"node_key": "toy-other", "draw_space_key": "toy-other"})))
+        # DESCRIPTIVE, never a gate: the 3 members' mutual geometry. In d=10 a
+        # random pair is nowhere near orthogonal, so this is a reported statistic,
+        # not an assertion — the assertion is only that it is finite and in range.
+        mem = [band1[f"Rband{i}"] for i in (1, 2, 3)]
+        cosines = [abs(float(mem[a] @ mem[b])) for a, b in ((0, 1), (0, 2), (1, 2))]
+        check("member orthogonality statistics are finite and in [0,1] (DESCRIPTIVE)",
+              all(np.isfinite(c) and 0.0 <= c <= 1.0 for c in cosines),
+              f"|cos| pairwise at d={d_tgt}: "
+              + ", ".join(f"{c:.4f}" for c in cosines)
+              + f"; max {max(cosines):.4f} (E|cos| ~ sqrt(2/(pi*d)) = "
+                f"{np.sqrt(2 / (np.pi * d_tgt)):.4f}) — reported, never a gate")
+        big = RandomBandRecipe(
+            corpus_sha=basis, node_key="toy-node", arm="native", site=7,
+            band_kind="Rband", vector_key="entropy_gradient",
+            draw_space_key="toy-node", dim=2048)
+        bigband = build_random_band(big, "Rband")
+        bigcos = [abs(float(bigband[f"Rband{a}"] @ bigband[f"Rband{b}"]))
+                  for a, b in ((1, 2), (1, 3), (2, 3))]
+        check("at a REAL residual dimension the members are near-orthogonal "
+              "(DESCRIPTIVE)",
+              all(np.isfinite(c) for c in bigcos),
+              f"d=2048 |cos|: " + ", ".join(f"{c:.5f}" for c in bigcos)
+              + f"; E|cos| ~ {np.sqrt(2 / (np.pi * 2048)):.5f}")
         check("an out-of-range member index is refused",
               _raises(lambda: random_band_member(recipe, 0), ValueError)
               and _raises(lambda: random_band_member(recipe, 4), ValueError))
+
+        # ---- 2b. the refusal that lifts for EXACTLY this recipe ---------------
+        print("== selftest 2b: the refusal lifts for ONE recipe and no other ==")
+        check("a recipe string that is not the recipe of record is REFUSED",
+              _raises(lambda: RandomBandRecipe(
+                  recipe_of_record="anisotropic-something/2026-08-05",
+                  corpus_sha=basis, node_key="toy-node", arm="native", site=7,
+                  band_kind="Rband", vector_key="v", draw_space_key="toy-node",
+                  dim=4), ValueError),
+              f"only {BAND_RECIPE_OF_RECORD!r} builds")
+        check("an edited CONSTRUCTION string is refused even under the ruled name",
+              _raises(lambda: RandomBandRecipe(
+                  corpus_sha=basis, node_key="toy-node", arm="native", site=7,
+                  band_kind="Rband", vector_key="v", draw_space_key="toy-node",
+                  dim=4, construction="unit(uniform draw)"), ValueError))
+        check("a band asked for under the WRONG family prefix is refused",
+              _raises(lambda: build_random_band(recipe, "gRband"),
+                      ConstructionRefused))
+        check("an Rband recipe drawing in someone else's space is refused",
+              _raises(lambda: RandomBandRecipe(
+                  corpus_sha=basis, node_key="toy-node", arm="native", site=7,
+                  band_kind="Rband", vector_key="v", draw_space_key="toy-source",
+                  dim=4), ValueError))
+        check("a gRband recipe drawing in the TARGET's space is refused (§5.1)",
+              _raises(lambda: RandomBandRecipe(
+                  corpus_sha=basis, node_key="toy-node", arm="native", site=7,
+                  band_kind="gRband", vector_key="v", draw_space_key="toy-node",
+                  dim=4), ValueError))
+        check("a BandRef whose family and recipe band_kind disagree is refused",
+              _raises(lambda: BandRef(family="gRband", recipe=recipe), ValueError))
+        check("--build with NO recipe and no banked members still refuses (BY DESIGN)",
+              _raises(lambda: build_banks(BankSpec(
+                  node_key="toy-node", arm="native", site=7, corpus_manifest=None,
+                  include_transported=False, include_naive=False,
+                  native_vector=None), construct_bands=True, write=False),
+                  CensusNotReady),
+              "the lifted refusal is recipe-shaped, not flag-shaped")
+
+        # ---- 2c. the Σ-BESIDE: two designated cells and nowhere else ----------
+        print("== selftest 2c: the Σ-beside is a BESIDE on two designated cells ==")
+        d_sig = 16
+        rng_sig = np.random.default_rng(2026)
+        A = rng_sig.standard_normal((d_sig, d_sig))
+        Sig = A @ A.T + np.eye(d_sig)
+        ev, evec = np.linalg.eigh(Sig)
+        sigma_npz = root / "sigma_toy.npz"
+        np.savez(sigma_npz, evals=ev, evecs=evec,
+                 mean=np.zeros(d_sig), ridge=np.float64(1e-3 * float(ev.mean())),
+                 n_positions=np.int64(1234))
+        node_d, arm_d, site_d, kind_d = SIGMA_BESIDE_DESIGNATIONS[
+            "3b-certification-calibration"]
+
+        def _sigma_recipe(**over: Any) -> SigmaBandRecipe:
+            base = dict(
+                designation="3b-certification-calibration", corpus_sha=basis,
+                node_key=node_d, arm=arm_d, site=site_d, beside_band_kind=kind_d,
+                vector_key="entropy_gradient", dim=d_sig, sigma_npz=sigma_npz,
+                sigma_estimator="token-level residual covariance (selftest toy)",
+                sigma_provenance="selftest synthetic SPD matrix")
+            base.update(over)
+            return SigmaBandRecipe(**base)
+
+        sig_band, sig_facts = build_sigma_band(_sigma_recipe())
+        sig_band2, _ = build_sigma_band(_sigma_recipe())
+        check("the Σ band is 3 members keyed SigmaBand1..3, never Rband/gRband",
+              sorted(sig_band) == ["SigmaBand1", "SigmaBand2", "SigmaBand3"])
+        check("the Σ band is bitwise reproducible (BUILD-TWICE)",
+              all(sig_band[k].tobytes() == sig_band2[k].tobytes() for k in sig_band))
+        check("Σ members are UNIT after the Σ^{1/2} shaping",
+              all(abs(float(np.linalg.norm(v)) - 1.0) < 1e-12
+                  for v in sig_band.values()))
+        iso_same_cell = build_random_band(RandomBandRecipe(
+            corpus_sha=basis, node_key=node_d, arm=arm_d, site=site_d,
+            band_kind=kind_d, vector_key="entropy_gradient",
+            draw_space_key=node_d, dim=d_sig), kind_d)
+        check("the Σ band is a DIFFERENT draw from the isotropic band of the same cell",
+              not any(np.array_equal(sig_band[f"SigmaBand{i}"],
+                                     iso_same_cell[f"{kind_d}{i}"])
+                      for i in (1, 2, 3)),
+              "band_kind=SigmaBand phase-separates it")
+        # the whole point of Σ-shaping: members should lean toward the top
+        # eigendirection relative to isotropic draws. DESCRIPTIVE.
+        top = evec[:, -1]
+        lean_sigma = float(np.mean([abs(float(v @ top)) for v in sig_band.values()]))
+        lean_iso = float(np.mean([abs(float(v @ top))
+                                  for v in iso_same_cell.values()]))
+        check("Σ shaping is visible against isotropic on the top eigendirection "
+              "(DESCRIPTIVE)",
+              np.isfinite(lean_sigma) and np.isfinite(lean_iso),
+              f"mean |cos| with the top eigenvector: Σ {lean_sigma:.4f} vs isotropic "
+              f"{lean_iso:.4f} (d={d_sig}) — reported, never a gate")
+        check("the Σ stamp NAMES its estimator, its provenance and its grade",
+              sig_facts["estimator"].startswith("token-level residual covariance")
+              and sig_facts["GRADE"].startswith("BESIDE ONLY")
+              and sig_facts["banked_ridge"] > 0.0
+              and sig_facts["ridge_applied"] is True
+              and "thread_config" in sig_facts)
+        check("a NON-DESIGNATED cell is REFUSED for the Σ-beside (O-2)",
+              _raises(lambda: build_sigma_band(_sigma_recipe(node_key="some-other-node")),
+                      ConstructionRefused)
+              and _raises(lambda: build_sigma_band(_sigma_recipe(site=site_d + 1)),
+                          ConstructionRefused)
+              and _raises(lambda: build_sigma_band(_sigma_recipe(arm="raw")),
+                          ConstructionRefused)
+              and _raises(lambda: build_sigma_band(
+                  _sigma_recipe(beside_band_kind="gRband")), ConstructionRefused),
+              "the designation is a CELL, not a recipe: node, arm, site and family all "
+              "have to match")
+        check("an unknown designation is REFUSED by name",
+              _raises(lambda: build_sigma_band(
+                  _sigma_recipe(designation="a-third-cell")), ConstructionRefused),
+              f"designated: {sorted(SIGMA_BESIDE_DESIGNATIONS)}")
+        check("a Σ recipe string that is not the ruled one is refused",
+              _raises(lambda: _sigma_recipe(recipe_of_record="whitened/2026"),
+                      ValueError))
+        check("a sha mismatch on the banked Σ is a HALT (M4)",
+              _raises(lambda: build_sigma_band(_sigma_recipe(sigma_sha256="0" * 64)),
+                      ArtifactShaMismatch))
+        check("a Σ npz with a DESCENDING spectrum is refused, not silently misread",
+              _raises(lambda: build_sigma_band(_sigma_recipe(
+                  sigma_npz=_write_npz(root / "sigma_desc.npz",
+                                       evals=ev[::-1].copy(), evecs=evec,
+                                       ridge=np.float64(1e-3)))),
+                      ConstructionRefused))
+        check("a Σ npz at the wrong dimension is a named DimensionMismatch",
+              _raises(lambda: build_sigma_band(_sigma_recipe(dim=d_sig + 1)),
+                      DimensionMismatch))
+        check("an absent Σ npz is a named refusal",
+              _raises(lambda: build_sigma_band(
+                  _sigma_recipe(sigma_npz=root / "no_such_sigma.npz")),
+                  ConstructionRefused))
 
         # ---- 3. coordinate identification (ruling 5's naive null) -------------
         print("== selftest 3: the naive transplant's coordinate identification ==")
@@ -1662,15 +2247,36 @@ def selftest() -> int:                                   # noqa: C901 — a chec
               planned_cell_count(spec) == N_FULL_COLUMN_CELLS == 51,
               f"{planned_cell_count(spec)} cells")
         # a band the spec authorizes CONSTRUCTING is a third state
+        native_recipe = RandomBandRecipe(
+            corpus_sha=corpus_sha, node_key="toy-node", arm="native", site=7,
+            band_kind="Rband", vector_key="entropy_gradient",
+            draw_space_key="toy-node", dim=d_tgt)
+        source_recipe = RandomBandRecipe(
+            corpus_sha=corpus_sha, node_key="toy-node", arm="native", site=7,
+            band_kind="gRband", vector_key="gentropy_gradient",
+            draw_space_key="toy-hub", dim=d_src)
         spec_c = spec.model_copy(update={
-            "native_band": BandRef(family="Rband", recipe=RandomBandRecipe(
-                owner="toy-node", site=7, dim=d_tgt, basis_sha=corpus_sha)),
-            "source_band": BandRef(family="gRband", recipe=RandomBandRecipe(
-                owner="toy-hub", site=3, dim=d_src, basis_sha=corpus_sha))})
+            "native_band": BandRef(family="Rband", recipe=native_recipe),
+            "source_band": BandRef(family="gRband", recipe=source_recipe)})
         cen_c = census(spec_c)
         check("a CONSTRUCTIBLE band is a third census state, still not READY",
               not cen_c.ready and all(r.constructible for r in cen_c.owed),
               "CONSTRUCTIBLE")
+        check("a recipe anchored to ANOTHER basis is NOT constructible — it blocks",
+              not any(r.constructible for r in census(spec.model_copy(update={
+                  "native_band": BandRef(family="Rband", recipe=native_recipe
+                                         .model_copy(update={"corpus_sha":
+                                                             other_basis}))})).owed
+                      if r.role == "native_band"),
+              "a cross-basis band is refused at the census, before any build")
+        built_c, doc_c = build_banks(spec_c, construct_bands=True, write=False)
+        keys_c = {c.spec.vector_key for c in doc_c.cells}
+        check("--construct-bands + the ruled recipe BUILDS the column the refusal "
+              "used to block (42/51 cells)",
+              built_c.n_cells == N_FULL_COLUMN_CELLS
+              and {"Rband1", "Rband2", "Rband3"} <= keys_c
+              and {"gRband1", "gRband2", "gRband3"} <= keys_c,
+              f"{built_c.n_cells} cells, {built_c.n_vectors} vectors")
         # sha and vintage failures
         bad_sha = spec.model_copy(update={
             "native_vector": native.model_copy(update={"sha256": "0" * 64})})
@@ -1976,6 +2582,12 @@ def _shortfall_probe() -> None:
                             include_transported=False, include_naive=False))
     finally:
         N_CALIBRATION_BAND_CELLS = original
+
+
+def _write_npz(path: Path, **arrays: Any) -> Path:
+    """Selftest scaffolding: a toy npz written where a builder would write one."""
+    np.savez(path, **arrays)
+    return path
 
 
 def _npz_keys(path: Path) -> set:
