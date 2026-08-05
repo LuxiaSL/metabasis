@@ -223,7 +223,116 @@ class DimensionMismatch(BankStagingError):
     """A vector does not fit the space it is being carried into or out of."""
 
 
+# --- HALT C (Luxia's ruling 1, 2026-08-05): the site guard's robustness-site role ---
+class SiteRoleRefused(SiteNotOfRecord):
+    """A DECLARED site role does not license the site being staged.
+
+    The parent class is `SiteNotOfRecord` on purpose: every caller that already
+    treats an off-record site as a HALT keeps treating these as HALTs, and the
+    subclasses only make the REASON machine-readable.
+    """
+
+
+class RobustnessSiteNotRegistered(SiteRoleRefused):
+    """`site_role="robustness_site"` was declared for a site no registry carries.
+
+    §4.2's remedy (i) re-calibrates at the node's REGISTERED robustness site — a
+    registered site, never a new one. A spec that could nominate any site by
+    writing a role string would be site-fishing with an extra field.
+    """
+
+
+class RobustnessSiteOffGrid(SiteRoleRefused):
+    """The declared robustness site is not on the node's fixed fit grid (`SITES`).
+
+    Separate from `RobustnessSiteNotRegistered` because the remedies differ: this
+    one is a registry disagreement (`ROBUSTNESS_SITES` vs `SITES`) and is a desk
+    HALT, not a spec typo.
+    """
+
+
+# --- HALT D (Luxia's ruling 2, 2026-08-05): the vector-class contract -------------
+class VectorClassContractError(SpecError):
+    """The vector-class declaration and the object it describes disagree.
+
+    ROOT CAUSE THIS EXISTS FOR, in one sentence (the pilot HALT's own): a CLASS
+    column has TWO BASES — the GENERATION basis (the corpus manifest, which is
+    what the prompts and the generations are of) and the VECTOR basis (the RULED
+    CONTRAST SET the class object was built from) — and the harness was written
+    when every object was an entropy-gradient vector, i.e. when the two bases
+    coincided. Naming both is the fix; conflating them is the defect.
+    """
+
+
+class FDGateWaiverRefused(VectorClassContractError):
+    """`fd_gate_not_applicable` was claimed by an object that must still be gated.
+
+    The FD gate is the entropy-gradient object's OWN acceptance test (§9 item 3:
+    present, FD-gated and FD-PASS at the basis of record). A CAA/PCA class object
+    has no FD-gate analogue — its builder's stamp says so in as many words — but
+    an EGV that waived the gate would be an ungated lever wearing a new field.
+    """
+
+
+class VectorBasisMissing(VectorClassContractError):
+    """A class vector did not name the RULED contrast-set basis it was built from."""
+
+
+class VectorBasisConflated(VectorClassContractError):
+    """One basis was written where the other belongs — the two-bases defect itself."""
+
+
 # ---------------------------------------------------------------- spec types
+#: HALT C: the two site ROLES §4.2 distinguishes. `site_of_record` is the ruled site
+#: a column normally fires at; `robustness_site` is remedy (i)'s REGISTERED second
+#: site (gemma3-27b L41, llama-3.1-70b-instruct L43 — the only two in the campaign).
+#: A role is DECLARED in the spec or it does not exist: `None` means "no role was
+#: declared", which is the default and refuses exactly as this module always did.
+SiteRole = Literal["site_of_record", "robustness_site"]
+
+#: HALT D: the vector CLASS a reference declares. `entropy_gradient` is the campaign's
+#: object of record and the default, so a spec written before this ruling means
+#: exactly what it meant before. The other two are the class-pilot's constructions
+#: (`build_contrast_vectors`: text-contrast CAA of record + the repeng-PCA method row).
+VectorClass = Literal["entropy_gradient", "caa", "repeng_pca"]
+#: The one class whose acceptance test IS the FD gate. Everything keyed off this name
+#: rather than off `!= "caa"`, so a third class added later inherits the class rules.
+EGV_VECTOR_CLASS: str = "entropy_gradient"
+CLASS_VECTOR_CLASSES: tuple[str, ...] = ("caa", "repeng_pca")
+
+#: The two BASES a behavioral cell stands on, as a closed vocabulary. `corpus-manifest`
+#: is the GENERATION basis (the corpus the prompts and generations are of);
+#: `contrast-set` is the VECTOR basis of a class object (the RULED pinned set
+#: `build_contrast_vectors` refuses to build without). Naming both is the whole fix.
+VectorBasisKind = Literal["corpus-manifest", "contrast-set"]
+class VectorBasis(BaseModel):
+    """WHICH basis an object stands on, with the KIND named beside the sha.
+
+    HALT D's fix in one type. Before this, a stamp carried a bare
+    `corpus_manifest_sha256` for everything, so a CAA object could only be stamped by
+    writing the corpus sha into a field that means "the basis this object was built
+    from" — false provenance — or by leaving a hole. A basis is now a (kind, sha256)
+    pair, and the kind is a closed vocabulary, so the GENERATION basis and the VECTOR
+    basis can sit in one stamp without either being readable as the other.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kind: VectorBasisKind
+    sha256: str = Field(min_length=64, max_length=64)
+    #: the pin/ruling this basis is of record under, quoted rather than implied — a
+    #: contrast set is admissible only because its sha is RULED in a pin file
+    #: (`build_contrast_vectors.assert_contrast_set_pinned`), and the stamp should
+    #: say which ruling, not just which bytes.
+    provenance: str = ""
+
+    @field_validator("sha256")
+    @classmethod
+    def _is_hex(cls, v: str) -> str:
+        int(v, 16)              # raises ValueError on a non-hex digest (M40)
+        return v
+
+
 class VectorRef(BaseModel):
     """One banked vector: where it lives, which key inside it, and its gates."""
 
@@ -248,10 +357,81 @@ class VectorRef(BaseModel):
         default=None, ge=1,
         description="thread count of record for `sha256`; None = pre-ruling")
 
+    #: HALT D. WHAT KIND OF OBJECT THIS IS. Defaulted to the campaign's object of
+    #: record, so every spec written before the 2026-08-05 ruling means exactly what
+    #: it meant before and its census/stamp bytes do not move.
+    vector_class: VectorClass = EGV_VECTOR_CLASS  # type: ignore[assignment]
+    #: HALT D. The FD gate DOES NOT APPLY to this object — admissible for a CLASS
+    #: vector ONLY. `build_contrast_vectors`'s own stamp is the authority for the
+    #: claim ("no FD-gate analogue exists for a CAA object — build acceptance is
+    #: stamp completeness + the pair-count assertion + the anchor cosines"), and an
+    #: EGV that set this would be an ungated lever, which `FDGateWaiverRefused`
+    #: refuses at spec load time rather than at fire time.
+    fd_gate_not_applicable: bool = False
+    #: HALT D. The basis THIS OBJECT was built from, named. Required for a class
+    #: vector (its basis is the RULED contrast set, never the corpus manifest) and
+    #: refused for an EGV, whose basis is the corpus and is already carried by the
+    #: vintage chain — writing it twice under two names is how the two bases blur.
+    vector_basis: Optional[VectorBasis] = None
+
+    @property
+    def is_class_vector(self) -> bool:
+        """True for a CAA/PCA class object — the two-bases case, in one predicate."""
+        return self.vector_class != EGV_VECTOR_CLASS
+
     @model_validator(mode="after")
     def _sha_is_a_sha(self) -> "VectorRef":
         if self.sha256 is not None and len(self.sha256) != 64:
             raise ValueError(f"{self.key}: sha256 must be 64 hex chars")
+        return self
+
+    @model_validator(mode="after")
+    def _class_contract(self) -> "VectorRef":
+        """HALT D's contract: the class, the gate waiver and the basis agree, or HALT.
+
+        Four refusals, each with its own class because each has its own remedy:
+        an EGV waiving its gate (`FDGateWaiverRefused`), a class vector that both
+        waives the gate and names one (`FDGateWaiverRefused` — a waiver and a claim
+        are not compatible), a class vector with no ruled basis
+        (`VectorBasisMissing`), and either kind of basis written under the other's
+        name (`VectorBasisConflated`).
+        """
+        if self.fd_gate_not_applicable and not self.is_class_vector:
+            raise FDGateWaiverRefused(
+                f"{self.key}: vector_class={self.vector_class!r} claims "
+                "fd_gate_not_applicable. The FD gate is the entropy-gradient "
+                "object's OWN acceptance test (§9 item 3: present, FD-gated and "
+                "FD-PASS at the basis of record) — waiving it would bank an "
+                "UNGATED lever. The waiver is admissible for a class object "
+                f"({', '.join(CLASS_VECTOR_CLASSES)}) and for nothing else.")
+        if self.fd_gate_not_applicable and self.fd_gate is not None:
+            raise FDGateWaiverRefused(
+                f"{self.key}: fd_gate_not_applicable is set AND an fd_gate file is "
+                f"named ({self.fd_gate}). A waiver and a claim cannot both be true: "
+                "either the object has a gate (drop the waiver and the census will "
+                "read it) or it does not (drop the path).")
+        if self.is_class_vector and self.vector_basis is None:
+            raise VectorBasisMissing(
+                f"{self.key}: vector_class={self.vector_class!r} names no "
+                "`vector_basis`. A class object's basis is the RULED CONTRAST SET "
+                "it was built from (build_contrast_vectors refuses to build from a "
+                "set whose sha256 is not RULED in a pin file); writing the corpus "
+                "sha instead would be false provenance, and writing nothing would "
+                "be a hole. Both are refused here (§9 item 2).")
+        if self.is_class_vector and self.vector_basis.kind != "contrast-set":
+            raise VectorBasisConflated(
+                f"{self.key}: a class object's vector_basis.kind is "
+                f"{self.vector_basis.kind!r}. The VECTOR basis of a class object is "
+                "the contrast set; the corpus manifest is the GENERATION basis and "
+                "rides its own field. Conflating them is the defect this field "
+                "exists to make impossible.")
+        if not self.is_class_vector and self.vector_basis is not None:
+            raise VectorBasisConflated(
+                f"{self.key}: an entropy-gradient object declared a vector_basis "
+                f"({self.vector_basis.kind}). An EGV's basis IS the corpus manifest "
+                "and is already carried by the vintage chain and the stamp's "
+                "corpus_manifest_sha256 — a second name for the same basis is how "
+                "the two bases blur.")
         return self
 
 
@@ -533,6 +713,16 @@ class BankSpec(BaseModel):
     node_key: str = Field(min_length=1, description="the TARGET node")
     arm: Literal["native", "raw"]
     site: int = Field(ge=0, description="the target's site of record")
+    #: HALT C (Luxia's ruling, 2026-08-05). The ROLE `site` is being staged in.
+    #: `None` — the default and every pre-ruling spec — declares no role and is
+    #: refused exactly as this module always refused: any site ≠ SITE_OF_RECORD
+    #: HALTs. `"robustness_site"` is §4.2's frozen remedy (i) and admits ONLY the
+    #: node's REGISTERED robustness site (gemma3-27b L41, llama-3.1-70b L43), and
+    #: only when that site is also on the fixed fit grid. The role is a WRITTEN
+    #: declaration in the spec because that is what makes it not site-fishing:
+    #: `actuation_calibration.assert_no_site_fishing` already implements exactly
+    #: this admissibility, and the staging guard was the one layer that lacked it.
+    site_role: Optional[SiteRole] = None
     #: the SOURCE of the transported half (the hub, under ruling 6's slate).
     source_key: Optional[str] = None
     source_site: Optional[int] = None
@@ -666,6 +856,14 @@ class ArtifactRow(BaseModel):
     #: `blocking_reason`: a reader scanning rows can test it.
     thread_count_mismatch: Optional[str] = None
     constructible: bool = False
+    #: HALT D. Populated ONLY for a CLASS object (None on every entropy-gradient row,
+    #: which is every row of every column banked to date). `corpus_vintage` above is
+    #: the GENERATION basis and stays exactly what it was; `vector_basis` is the
+    #: VECTOR basis, declared and re-read from the object's own build stamp. Two
+    #: fields because they are two facts — that is the whole HALT-D fix.
+    vector_class: Optional[str] = None
+    fd_gate_not_applicable: Optional[bool] = None
+    vector_basis: Optional[dict] = None
 
 
 class BankCensus(BaseModel):
@@ -745,6 +943,30 @@ class StagedCell(BaseModel):
     vector_sha256: Optional[str] = None
     fd_gate: Optional[dict] = None
     build_stamp: Optional[dict] = None
+    #: HALT D. The class of the object THIS cell rides, carried per cell because a
+    #: cell rides exactly one vector — the same place `fd_gate`/`build_stamp` already
+    #: live. Defaulted to the object of record, so an EGV column's document means
+    #: exactly what it meant before the ruling.
+    vector_class: VectorClass = EGV_VECTOR_CLASS  # type: ignore[assignment]
+    #: HALT D. The VECTOR basis for a class cell (kind `contrast-set`), None for an
+    #: EGV cell whose basis is the generation basis and is carried by the vintage
+    #: chain. The engine stamps BOTH bases, each under its own name, and refuses a
+    #: class cell that arrives without this.
+    vector_basis: Optional[VectorBasis] = None
+
+    @model_validator(mode="after")
+    def _class_cell_names_its_basis(self) -> "StagedCell":
+        if self.vector_class != EGV_VECTOR_CLASS and self.vector_basis is None:
+            raise VectorBasisMissing(
+                f"{self.spec.cell_id}: vector_class={self.vector_class!r} with no "
+                "`vector_basis` — a class cell's VECTOR basis is the ruled contrast "
+                "set and the engine will refuse to stamp it (§9 item 2).")
+        if self.vector_class == EGV_VECTOR_CLASS and self.vector_basis is not None:
+            raise VectorBasisConflated(
+                f"{self.spec.cell_id}: an entropy-gradient cell carries a "
+                f"vector_basis ({self.vector_basis.kind}); the EGV's basis is the "
+                "GENERATION basis and has exactly one name.")
+        return self
 
 
 class CellsDocument(BaseModel):
@@ -761,6 +983,11 @@ class CellsDocument(BaseModel):
     node_key: str
     arm: Literal["native", "raw"]
     site: int
+    #: HALT C. The role the column's site was staged in, carried into the job so the
+    #: engine's own re-derived cross-check asks the SAME question the staging module
+    #: answered (§4.3 forbids trusting a snapshot; it does not forbid carrying the
+    #: declaration). None = no role declared = the pre-ruling behaviour.
+    site_role: Optional[SiteRole] = None
     source_key: Optional[str] = None
     pair: Optional[str] = None
     corpus_manifest_sha256: str
@@ -1210,21 +1437,56 @@ def _vector_row(name: str, role: CensusRole, ref: Optional[VectorRef], *,
     fd_passed = None if fd is None else bool(
         fd.get("PASSES_FD_GATE", fd.get("PASSES", False)))
     stamp = _read_json(ref.build_stamp, what=f"{name} build stamp")
-    vintage = None if stamp is None else stamp.get("corpus_manifest_sha256")
     reasons = []
-    if require_fd_gate and fd_passed is not True:
+
+    # HALT D, part (a): the FD gate is REQUIRED unless the object's own class says it
+    # has no analogue, and only a CLASS object may say that (`VectorRef` refuses the
+    # claim from an EGV at construction). So an entropy-gradient vector still hits the
+    # exact same requirement it hit before the ruling — including a class-pilot column
+    # that forgets to declare its class.
+    waived = ref.fd_gate_not_applicable
+    if require_fd_gate and not waived and fd_passed is not True:
         reasons.append("FD gate absent or not PASSED (§9 item 3)")
-    if vintage is None:
-        reasons.append("build stamp carries no corpus vintage (§9 item 2: a hole is a "
-                       "hole, not an agreement)")
-    elif vintage != corpus_sha_of_record:
-        reasons.append(f"built at basis {vintage[:12]}…, not the basis of record "
-                       f"{corpus_sha_of_record[:12]}… (§9 item 2)")
+
+    # HALT D, the two bases. An EGV's basis IS the corpus manifest, and the check is
+    # unchanged. A CLASS object's basis is the RULED CONTRAST SET, and its builder
+    # stamps that sha under `set.sha256` — it carries no corpus vintage at all,
+    # because a CAA vector is not "of" a corpus. Checking it against the corpus sha is
+    # the two-bases defect; checking it against the DECLARED ruled set sha is the fix.
+    vector_basis: Optional[dict] = None
+    if ref.is_class_vector:
+        declared = ref.vector_basis          # required by VectorRef's own validator
+        built_from = None if stamp is None else (stamp.get("set") or {}).get("sha256")
+        vector_basis = {"kind": declared.kind, "declared_sha256": declared.sha256,
+                        "build_stamp_sha256": built_from,
+                        "provenance": declared.provenance or None}
+        vintage = None
+        if built_from is None:
+            reasons.append(
+                "class vector's build stamp names no contrast set (`set.sha256`) — "
+                "the VECTOR basis is a hole, and a hole is not an agreement "
+                "(§9 item 2)")
+        elif built_from != declared.sha256:
+            reasons.append(
+                f"class vector built from contrast set {built_from[:12]}…, not the "
+                f"RULED set {declared.sha256[:12]}… the spec declares (§9 item 2: "
+                "MIXED basis)")
+    else:
+        vintage = None if stamp is None else stamp.get("corpus_manifest_sha256")
+        if vintage is None:
+            reasons.append("build stamp carries no corpus vintage (§9 item 2: a hole "
+                           "is a hole, not an agreement)")
+        elif vintage != corpus_sha_of_record:
+            reasons.append(f"built at basis {vintage[:12]}…, not the basis of record "
+                           f"{corpus_sha_of_record[:12]}… (§9 item 2)")
     return ArtifactRow(
         name=name, role=role, path=str(ref.npz), present=True, sha256=sha,
         expected_sha256=ref.sha256, sha_verified=verified, corpus_vintage=vintage,
         fd_gate_passed=fd_passed, cells_at_risk=0 if not reasons else cells_at_risk,
-        ready=not reasons, blocking_reason="; ".join(reasons) or None)
+        ready=not reasons, blocking_reason="; ".join(reasons) or None,
+        vector_class=(ref.vector_class if ref.is_class_vector else None),
+        fd_gate_not_applicable=(True if waived else None),
+        vector_basis=vector_basis)
 
 
 def _band_row(name: str, role: CensusRole, band: BandRef, *, cells_at_risk: int,
@@ -1490,6 +1752,25 @@ def _sigma_beside_cells(recipe: SigmaBandRecipe, site: int, *, kind: CellKind,
     return out
 
 
+def _class_of(ref: Optional[VectorRef]) -> dict:
+    """HALT D: the class declaration one HALF of a column inherits, as kwargs.
+
+    A cell rides exactly one object, and which object it is follows from the half it
+    belongs to: the calibration half rides the node's OWN vector, the transported and
+    naive halves ride the SOURCE's. The half's band members and its Σ-beside inherit
+    the same declaration on purpose — they are the controls FOR that object, they
+    carry the same vector custody in the stamp, and a class column has no FD gate
+    anywhere in it, so a band cell left at the default would demand a gate that does
+    not exist while sitting beside a signal cell that is allowed none.
+
+    An absent ref (a calibration-only column has no source vector) is the object of
+    record's default, which is what every pre-ruling column carries.
+    """
+    if ref is None or not ref.is_class_vector:
+        return {}
+    return {"vector_class": ref.vector_class, "vector_basis": ref.vector_basis}
+
+
 def plan_cells(spec: BankSpec, *, vector_npz: Optional[str] = None,
                transport_map_stamp: Optional[dict] = None,
                naive_row: Optional[dict] = None,
@@ -1508,7 +1789,11 @@ def plan_cells(spec: BankSpec, *, vector_npz: Optional[str] = None,
     """
     norm = provisional_norm if provisional_norm and provisional_norm > 0 else 1.0
     n = spec.n_per_cell
-    cells: list[StagedCell] = [StagedCell(spec=baseline_cell(spec.site, n=n))]
+    # HALT D: each half's class declaration, resolved once from the spec's own refs.
+    cal_class = _class_of(spec.native_vector)
+    src_class = _class_of(spec.source_vector)
+    cells: list[StagedCell] = [StagedCell(spec=baseline_cell(spec.site, n=n),
+                                          **cal_class)]
 
     if spec.include_calibration:
         lever_key = spec.native_vector.key if spec.native_vector else "entropy_gradient"
@@ -1521,7 +1806,7 @@ def plan_cells(spec: BankSpec, *, vector_npz: Optional[str] = None,
                                   band_family=None, provenance=lever_prov,
                                   npz=vector_npz, n=n, norm=norm):
             cells.append(StagedCell(spec=c, provisional_alpha=a,
-                                    vector_sha256=vector_sha256))
+                                    vector_sha256=vector_sha256, **cal_class))
         for i in range(1, N_BAND_MEMBERS + 1):
             key = f"Rband{i}"
             prov = (f"{spec.node_key} OWN native matched-norm random band member {key} "
@@ -1531,7 +1816,7 @@ def plan_cells(spec: BankSpec, *, vector_npz: Optional[str] = None,
                                       band_family="Rband", provenance=prov,
                                       npz=vector_npz, n=n, norm=norm):
                 cells.append(StagedCell(spec=c, provisional_alpha=a,
-                                        vector_sha256=vector_sha256))
+                                        vector_sha256=vector_sha256, **cal_class))
         if spec.native_band.sigma_beside is not None:
             sig = spec.native_band.sigma_beside
             sprov = (f"Σ-BESIDE ({sig.designation}) — {spec.node_key}'s own site "
@@ -1543,7 +1828,7 @@ def plan_cells(spec: BankSpec, *, vector_npz: Optional[str] = None,
                                             provenance=sprov, npz=vector_npz, n=n,
                                             norm=norm):
                 cells.append(StagedCell(spec=c, provisional_alpha=a,
-                                        vector_sha256=vector_sha256))
+                                        vector_sha256=vector_sha256, **cal_class))
 
     if spec.include_transported:
         src = spec.source_key or "source"
@@ -1559,7 +1844,8 @@ def plan_cells(spec: BankSpec, *, vector_npz: Optional[str] = None,
                                   n=n, norm=norm):
             cells.append(StagedCell(spec=c, provisional_alpha=a,
                                     transport_map=transport_map_stamp,
-                                    naive_row=naive_row, vector_sha256=vector_sha256))
+                                    naive_row=naive_row, vector_sha256=vector_sha256,
+                                    **src_class))
         for i in range(1, N_BAND_MEMBERS + 1):
             key = f"{spec.transported_prefix}Rband{i}"
             bprov = (f"{src} banked random-band member {i} through the SAME {fam} map "
@@ -1572,7 +1858,7 @@ def plan_cells(spec: BankSpec, *, vector_npz: Optional[str] = None,
                 cells.append(StagedCell(spec=c, provisional_alpha=a,
                                         transport_map=transport_map_stamp,
                                         naive_row=naive_row,
-                                        vector_sha256=vector_sha256))
+                                        vector_sha256=vector_sha256, **src_class))
         if spec.source_band.sigma_beside is not None:
             sig = spec.source_band.sigma_beside
             sprov = (f"Σ-BESIDE ({sig.designation}) — {src}'s site covariance, drawn "
@@ -1587,7 +1873,7 @@ def plan_cells(spec: BankSpec, *, vector_npz: Optional[str] = None,
                 cells.append(StagedCell(spec=c, provisional_alpha=a,
                                         transport_map=transport_map_stamp,
                                         naive_row=naive_row,
-                                        vector_sha256=vector_sha256))
+                                        vector_sha256=vector_sha256, **src_class))
 
     if spec.include_naive:
         key = f"{NAIVE_KEY_PREFIX}_entropy_gradient"
@@ -1605,7 +1891,7 @@ def plan_cells(spec: BankSpec, *, vector_npz: Optional[str] = None,
                                                       "applies to the naive null too"))
             cells.append(StagedCell(spec=cell, provisional_alpha=frac * norm,
                                     transport_map=None, naive_row=naive_row,
-                                    vector_sha256=vector_sha256))
+                                    vector_sha256=vector_sha256, **src_class))
 
     expected = planned_cell_count(spec)
     if len(cells) != expected:
@@ -1626,12 +1912,48 @@ def plan_cells(spec: BankSpec, *, vector_npz: Optional[str] = None,
 
 
 # ---------------------------------------------------------------- site cross-check
-def site_cross_check(node_key: str, site: int) -> dict:
+def _registered_robustness_site(node_key: str) -> Optional[int]:
+    """The node's REGISTERED robustness site, or None — read, never inferred.
+
+    Its own function so the refusal path can consult the registry without the
+    §4.2 module's import being load-bearing for an ordinary HALT message.
+    """
+    try:
+        from metabasis.scripts.actuation_calibration import ROBUSTNESS_SITES
+    except ImportError:                                       # pragma: no cover
+        return None
+    return dict(ROBUSTNESS_SITES).get(node_key)
+
+
+def site_cross_check(node_key: str, site: int, *,
+                     site_role: Optional[SiteRole] = None) -> dict:
     """§2.8's `SITES`/`SITE_OF_RECORD` cross-check, from the LIVE registries.
 
     Reports rather than raises for an unknown node (the registries do not carry every
     key), but RAISES when they carry the node and disagree with the site being staged:
     a retired site (gemma L36, 70B L17) must never resolve by default (§9 item 4).
+
+    HALT C (Luxia's ruling, 2026-08-05 morning). `site_role` is the DECLARED role the
+    site is being staged in, and it is the ONLY thing that can admit a site other than
+    the site of record:
+
+      * `None` — no role declared, the default, and what every spec written before the
+        ruling carries — behaves EXACTLY as this function always behaved, down to the
+        returned dict's keys: any site ≠ `SITE_OF_RECORD` HALTs. The ruling widened
+        what a spec may SAY, never what silence means.
+      * `"site_of_record"` — the same checks, said out loud. The only difference from
+        `None` is that the returned dict records the role.
+      * `"robustness_site"` — §4.2's frozen remedy (i). Admissible only when the node
+        has a REGISTERED robustness site, the staged site IS it, and it is on the
+        fixed fit grid. `actuation_calibration.assert_no_site_fishing` is then called
+        on the same (node, site) as the final word, so the two layers cannot drift:
+        that module already implemented this admissibility and this guard was the one
+        layer that lacked it, which is what blocked gemma3-27b's L41 column.
+
+    A declared role never LOOSENS the grid check and never invents a site: the role
+    selects which registry row is allowed to license the site, and every row comes
+    from the campaign's registries, never from behavioral evidence (§4.2's closing
+    prohibition).
     """
     try:
         from metabasis.scripts.fit_transport_maps import SITES
@@ -1642,10 +1964,68 @@ def site_cross_check(node_key: str, site: int) -> dict:
     grid = tuple(dict(SITES).get(node_key, ()))
     ruled = dict(SITE_OF_RECORD).get(node_key)
     out = {"SITES": list(grid) or None, "SITE_OF_RECORD": ruled, "staged_site": site}
+    # A role appears in the record ONLY when one was declared. An undeclared role is
+    # not "site_of_record" written in invisible ink — it is silence, and the stamp of
+    # a column staged before the ruling must not grow a key it never carried.
+    if site_role is not None:
+        out["site_role"] = site_role
+
+    if site_role == "robustness_site":
+        try:
+            from metabasis.scripts.actuation_calibration import (
+                ROBUSTNESS_SITES, assert_no_site_fishing)
+        except ImportError as exc:                            # pragma: no cover
+            raise RobustnessSiteNotRegistered(
+                f"{node_key}: a robustness-site column cannot be staged without the "
+                f"§4.2 registry ({exc}) — the role is admitted by a REGISTERED row "
+                "or not at all") from exc
+        registered = dict(ROBUSTNESS_SITES).get(node_key)
+        if registered is None:
+            raise RobustnessSiteNotRegistered(
+                f"{node_key}: site_role='robustness_site' declared for L{site}, but "
+                f"this node has NO registered robustness site (registered: "
+                f"{sorted(dict(ROBUSTNESS_SITES))}). §4.2's remedy (i) re-calibrates "
+                "at a REGISTERED site — a role string cannot register one.")
+        if site != registered:
+            raise RobustnessSiteNotRegistered(
+                f"{node_key}: site_role='robustness_site' declared for L{site}, but "
+                f"the REGISTERED robustness site is L{registered}. Sites come from "
+                "curves and Luxia's rulings, never from a spec field (§4.2).")
+        if grid and site not in grid:
+            raise RobustnessSiteOffGrid(
+                f"{node_key}: robustness site L{site} is not on the fixed fit grid "
+                f"{grid} — the two registries disagree, which is a desk HALT rather "
+                "than a preference (§9 item 4).")
+        # The final word is the module that already implements this admissibility,
+        # called on the same (node, site) — so a future change to §4.2's rule lands
+        # in ONE place and this guard cannot silently diverge from it.
+        assert_no_site_fishing(
+            node_key, site,
+            evidence=f"spec declares site_role='robustness_site' at L{site}; "
+                     f"admitted by the REGISTERED robustness-site row, never by any "
+                     f"behavioral reading")
+        out["robustness_site_registered"] = registered
+        out["site_role_rule"] = (
+            "§4.2 remedy (i): a REGISTERED robustness site, cross-checked against "
+            "actuation_calibration.ROBUSTNESS_SITES ∧ fit_transport_maps.SITES and "
+            "admitted by assert_no_site_fishing")
+        out["agrees"] = True
+        return out
+
     if ruled is not None and site != ruled:
+        # The remedy pointer is appended for EXACTLY one case — an undeclared column
+        # standing on the node's own REGISTERED robustness site, i.e. the enactor who
+        # forgot the declaration — so the refusal text every other caller sees
+        # (including every column ever banked) is byte-identical to the pre-ruling
+        # engine's. A hint is worth a HALT round-trip; a moved message is not.
+        hint = ""
+        if site_role is None and _registered_robustness_site(node_key) == site:
+            hint = (" If this is §4.2's remedy (i), the spec must SAY so: declare "
+                    "site_role='robustness_site' and the REGISTERED robustness site "
+                    "is admitted (Luxia's ruling, 2026-08-05). Silence is refused.")
         raise SiteNotOfRecord(
             f"{node_key}: staging cells at L{site} but SITE_OF_RECORD is L{ruled} "
-            "(§9 item 4). A retired site must never resolve by default.")
+            "(§9 item 4). A retired site must never resolve by default." + hint)
     if grid and site not in grid:
         raise SiteNotOfRecord(
             f"{node_key}: L{site} is not on the fixed fit grid {grid} — that is a fiat "
@@ -1694,7 +2074,7 @@ def build_banks(spec: BankSpec, *, construct_bands: bool = False,
             f"{spec.node_key}: {len(unresolved)} owed artifact(s) — refusing to build "
             f"a column whose objects do not exist.\n{cen.as_table()}")
 
-    cross = site_cross_check(spec.node_key, spec.site)
+    cross = site_cross_check(spec.node_key, spec.site, site_role=spec.site_role)
     vectors: dict[str, np.ndarray] = {}
     magnitudes: dict[str, float] = {}
     constructions: dict[str, str] = {}
@@ -1930,6 +2310,7 @@ def build_banks(spec: BankSpec, *, construct_bands: bool = False,
 
     doc = CellsDocument(
         node_key=spec.node_key, arm=spec.arm, site=spec.site,
+        site_role=spec.site_role,
         source_key=spec.source_key, pair=spec.pair,
         corpus_manifest_sha256=(vintage_chain["corpus_manifest"]
                                 or spec.corpus_sha_of_record),
@@ -2033,7 +2414,7 @@ def bank_stamp(spec: BankSpec, *, cells: Sequence[StagedCell],
                     what="native FD gate")
     build = _read_json(spec.native_vector.build_stamp if spec.native_vector else None,
                        what="native build stamp")
-    return {
+    stamp = {
         "grade": GRADE_LINE,
         "label": spec.label or None,
         "builder": "build_behavioral_banks.py",
@@ -2142,6 +2523,39 @@ def bank_stamp(spec: BankSpec, *, cells: Sequence[StagedCell],
         "stamp_field_partition": {"staged_here": list(STAGED_STAMP_FIELDS),
                                   "filled_in_job": list(IN_JOB_STAMP_FIELDS)},
     }
+    # HALT D. THE TWO BASES, BOTH NAMED — and written ONLY when the column actually
+    # carries a class object, so an entropy-gradient column's stamp is byte-identical
+    # to the pre-ruling engine's (the flag-absent condition of the re-freeze).
+    class_refs = [(half, ref) for half, ref in
+                  (("native_vector", spec.native_vector),
+                   ("source_vector", spec.source_vector))
+                  if ref is not None and ref.is_class_vector]
+    if class_refs:
+        stamp["vector_class"] = {half: ref.vector_class for half, ref in class_refs}
+        stamp["vector_basis"] = {
+            half: {**ref.vector_basis.model_dump(), "vector_key": ref.key}
+            for half, ref in class_refs}
+        stamp["generation_basis"] = {
+            "kind": "corpus-manifest",
+            "sha256": stamp["corpus_manifest_sha256"] or spec.corpus_sha_of_record,
+            "provenance": "the corpus manifest the PROMPTS and GENERATIONS are of "
+                          "(§2.8's corpus_manifest_sha256) — unchanged by the class "
+                          "ruling and never the class object's basis"}
+        stamp["two_bases_note"] = (
+            "HALT D (Luxia's ruling, 2026-08-05): a CLASS column stands on TWO bases "
+            "— the GENERATION basis (the corpus manifest) and the VECTOR basis (the "
+            "RULED contrast set the class object was built from). Both are named "
+            "here, each under its own key. Writing the corpus sha as the vector's "
+            "vintage would be false provenance; writing nothing would be a hole.")
+        stamp["fd_gate_not_applicable"] = {
+            half: bool(ref.fd_gate_not_applicable) for half, ref in class_refs}
+        stamp["fd_gate_not_applicable_note"] = (
+            "no FD-gate analogue exists for a class object — its builder's own stamp "
+            "says so (build_contrast_vectors: 'build acceptance is stamp "
+            "completeness + the pair-count assertion + the anchor cosines'). An "
+            "ENTROPY-GRADIENT object may never make this claim: `VectorRef` refuses "
+            "it at spec load and the census still demands the gate.")
+    return stamp
 
 
 # ---------------------------------------------------------------- example spec
@@ -2151,11 +2565,29 @@ def example_spec() -> dict:
     Emitted rather than documented so the shape cannot drift from the model, and
     deliberately full of obvious placeholders: a spec that ran as-is would be a bank
     built from nothing.
+
+    A CLASS column's vector ref (HALT D) is the same object with three fields moved::
+
+        "source_vector": {"key": "caa_formality_L26", "npz": "<PATH>/caa_….npz",
+                          "build_stamp": "<PATH>/caa_…_stamps.json",
+                          "vector_class": "caa",
+                          "fd_gate": null, "fd_gate_not_applicable": true,
+                          "vector_basis": {"kind": "contrast-set",
+                                           "sha256": "<THE RULED SET SHA, 64 hex>",
+                                           "provenance": "<the pin row that rules it>"}}
+
+    — no `fd_gate` (a CAA object has no analogue), the waiver said out loud, and the
+    RULED contrast set named as the VECTOR basis. The corpus manifest above stays the
+    GENERATION basis; the two never share a field.
     """
     return {
         "node_key": "<TARGET-NODE-KEY>",
         "arm": "native",
         "site": 0,
+        # HALT C: omit (or null) for an ordinary column at its site of record;
+        # "robustness_site" for §4.2's remedy (i) at the node's REGISTERED
+        # robustness site, which is the ONLY thing that admits a second site.
+        "site_role": None,
         "source_key": "<SOURCE-NODE-KEY (the hub, under ruling 6)>",
         "source_site": 0,
         "pair": "<source>-><target>",
@@ -2178,7 +2610,14 @@ def example_spec() -> dict:
         "source_vector": {
             "key": "entropy_gradient", "npz": "<PATH>/entropy_gradient_<hub>_L<site>.npz",
             "fd_gate": "<PATH>/..._fd_gate.json",
-            "build_stamp": "<PATH>/..._stamps.json"},
+            "build_stamp": "<PATH>/..._stamps.json",
+            # HALT D: omit for the entropy-gradient object of record. A CLASS object
+            # ("caa" / "repeng_pca") declares its class, waives the FD gate it has no
+            # analogue for, and NAMES the ruled contrast set it was built from — the
+            # VECTOR basis, which is never the corpus manifest.
+            "vector_class": EGV_VECTOR_CLASS,
+            "fd_gate_not_applicable": False,
+            "vector_basis": None},
         "source_band": {
             "family": "gRband", "members": [],
             "recipe": {"recipe_of_record": BAND_RECIPE_OF_RECORD,
@@ -3020,6 +3459,269 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                               SiteNotOfRecord),
                       "a retired site must never resolve by default")
 
+        # ---- 10b. HALT C: the robustness-site role (RULED 2026-08-05) ----------
+        print("== selftest 10b: HALT C — robustness_site admissibility ==")
+        try:
+            from metabasis.scripts.actuation_calibration import (
+                ROBUSTNESS_SITES as _ROB, assert_no_site_fishing as _fishing)
+            from metabasis.scripts.fit_transport_maps import SITES as _SITES2
+            halt_c_ok = True
+        except ImportError as exc:                                # pragma: no cover
+            halt_c_ok = False
+            skip("HALT C's robustness-site admissibility",
+                 f"the §4.2 registry is unimportable ({exc})")
+        if halt_c_ok:
+            rob_node, rob_site = "gemma3-27b", _ROB["gemma3-27b"]
+            grid = tuple(dict(_SITES2).get(rob_node, ()))
+            # (1) TODAY'S REFUSAL, UNCHANGED. No role declared → exactly the
+            # pre-ruling behaviour, which is what blocked gemma L41's column.
+            check("(HALT C) with NO site_role, the registered robustness site is "
+                  "STILL refused — the ruling widened what a spec may SAY, never "
+                  "what silence means",
+                  _raises(lambda: site_cross_check(rob_node, rob_site),
+                          SiteNotOfRecord),
+                  f"{rob_node} L{rob_site}, undeclared")
+            check("(HALT C) …and the refusal is the SAME class the guard always "
+                  "raised, so every caller that treated it as a HALT still does",
+                  type(_msg_exc(lambda: site_cross_check(rob_node, rob_site)))
+                  is SiteNotOfRecord)
+            # (2) DECLARED → ADMITTED, for the REGISTERED site only.
+            rob_out = site_cross_check(rob_node, rob_site,
+                                       site_role="robustness_site")
+            check("(HALT C) with site_role='robustness_site' DECLARED, the "
+                  "REGISTERED robustness site is admitted (§4.2's frozen remedy (i))",
+                  rob_out["agrees"] is True
+                  and rob_out["site_role"] == "robustness_site"
+                  and rob_out["robustness_site_registered"] == rob_site,
+                  f"{rob_node} L{rob_site}; SITE_OF_RECORD stays "
+                  f"L{rob_out['SITE_OF_RECORD']}")
+            check("(HALT C) the admitted row still names BOTH registries, so the "
+                  "stamp says which site of record it stands beside",
+                  rob_out["SITES"] == list(grid)
+                  and rob_out["SITE_OF_RECORD"] != rob_site
+                  and rob_site in rob_out["SITES"])
+            # (3) THE ADMISSIBILITY IS THE §4.2 MODULE'S, not a second reading.
+            check("(HALT C) the guard admits EXACTLY what assert_no_site_fishing "
+                  "admits — the same (node, site) passes there too",
+                  _ok(lambda: _fishing(rob_node, rob_site,
+                                       evidence="the registered robustness site")))
+            # (4) A SITE OUTSIDE THE REGISTRY REFUSES EVEN WITH THE ROLE.
+            off_grid = max(grid or (0,)) + 11
+            check("(HALT C) a site OUTSIDE the node's SITES grid is refused even "
+                  "WITH site_role — a role string cannot register a site",
+                  _raises(lambda: site_cross_check(rob_node, off_grid,
+                                                   site_role="robustness_site"),
+                          RobustnessSiteNotRegistered),
+                  f"L{off_grid} ∉ {grid}")
+            check("(HALT C) a RETIRED site (gemma L36) is refused with the role too",
+                  _raises(lambda: site_cross_check(rob_node, 36,
+                                                   site_role="robustness_site"),
+                          RobustnessSiteNotRegistered))
+            check("(HALT C) the node's own SITE OF RECORD is refused under the "
+                  "ROBUSTNESS role — a mislabelled site is not a licensed one",
+                  _raises(lambda: site_cross_check(rob_node,
+                                                   int(rob_out["SITE_OF_RECORD"]),
+                                                   site_role="robustness_site"),
+                          RobustnessSiteNotRegistered))
+            check("(HALT C) a node with NO registered robustness site cannot "
+                  "declare one (the role is admitted by a REGISTERED row or not "
+                  "at all)",
+                  _raises(lambda: site_cross_check("qwen2.5-3b-instruct", 26,
+                                                   site_role="robustness_site"),
+                          RobustnessSiteNotRegistered))
+            check("(HALT C) every robustness refusal is still a SiteNotOfRecord "
+                  "(§9 item 4) — the subclasses name the reason, not a new state",
+                  issubclass(RobustnessSiteNotRegistered, SiteNotOfRecord)
+                  and issubclass(RobustnessSiteOffGrid, SiteNotOfRecord)
+                  and issubclass(SiteRoleRefused, SiteNotOfRecord))
+            # (5) THE FLAG-ABSENT PATH IS BYTE-IDENTICAL.
+            plain = site_cross_check(rob_node, int(rob_out["SITE_OF_RECORD"]))
+            check("(HALT C) the UNDECLARED cross-check dict carries NO site_role "
+                  "key at all — a column staged before the ruling cannot grow a "
+                  "key it never had",
+                  set(plain) == {"SITES", "SITE_OF_RECORD", "staged_site", "agrees"},
+                  str(sorted(plain)))
+            declared = site_cross_check(rob_node, int(rob_out["SITE_OF_RECORD"]),
+                                        site_role="site_of_record")
+            check("(HALT C) declaring the ORDINARY role changes nothing but the "
+                  "record of the declaration",
+                  {k: v for k, v in declared.items() if k != "site_role"} == plain
+                  and declared["site_role"] == "site_of_record")
+            # (6) THE ROLE FLOWS INTO THE STAMP AND THE ENGINE'S DOCUMENT.
+            rob_spec = spec.model_copy(update={
+                "node_key": rob_node, "site": rob_site,
+                "site_role": "robustness_site",
+                "include_transported": False, "include_naive": False,
+                "native_band": BandRef(family="Rband", members=(
+                    native.model_copy(update={"key": f"Rband{i}"})
+                    for i in (1, 2, 3)))})
+            rob_stamp = bank_stamp(
+                rob_spec, cells=plan_cells(rob_spec), vectors={}, magnitudes={},
+                constructions={}, transport_map=None, naive_row=None,
+                site_cross_check=site_cross_check(rob_node, rob_site,
+                                                  site_role="robustness_site"),
+                prompt_pool_sha256=None, battery_item_set_sha256="a" * 64)
+            check("(HALT C) the declared role rides the BANK STAMP's site_cross_check "
+                  "block, which is the §2.8 field the cell stamp carries",
+                  rob_stamp["site_cross_check"]["site_role"] == "robustness_site"
+                  and rob_stamp["site"] == rob_site)
+
+        # ---- 11. HALT D: the vector-class contract (RULED 2026-08-05) ----------
+        print("== selftest 11: HALT D — the vector-class contract, two bases ==")
+        set_sha = "1a" * 32
+        (root / "classvec").mkdir(exist_ok=True)
+        class_npz = _toy_class_vector_npz(root / "classvec", "caa_formality_L7",
+                                          d_tgt, seed=11, set_sha256=set_sha)
+        basis = VectorBasis(kind="contrast-set", sha256=set_sha,
+                            provenance="pin row: RULED contrast set (selftest)")
+        class_ref = VectorRef(key="caa_formality_L7", npz=class_npz,
+                              sha256=sha256_file(class_npz),
+                              build_stamp=class_npz.with_name(
+                                  "caa_formality_L7_stamps.json"),
+                              vector_class="caa", fd_gate_not_applicable=True,
+                              vector_basis=basis,
+                              provenance="text-contrast CAA of record (selftest)")
+        check("(HALT D) an EGV that claims fd_gate_not_applicable is REFUSED — the "
+              "FD gate is the entropy-gradient object's OWN acceptance test",
+              _raises(lambda: VectorRef.model_validate(
+                  {**native.model_dump(), "fd_gate_not_applicable": True}),
+                  FDGateWaiverRefused),
+              "the real banked lever's own fields, one flag flipped")
+        check("(HALT D) …by direct construction too (the path a spec file takes)",
+              _raises(lambda: VectorRef(key="entropy_gradient", npz=class_npz,
+                                        fd_gate_not_applicable=True),
+                      FDGateWaiverRefused))
+        check("(HALT D) a class vector that BOTH waives the gate and names one is "
+              "refused — a waiver and a claim cannot both be true",
+              _raises(lambda: VectorRef(
+                  key="caa_x", npz=class_npz, vector_class="caa",
+                  fd_gate_not_applicable=True, vector_basis=basis,
+                  fd_gate=class_npz), FDGateWaiverRefused))
+        check("(HALT D) a class vector with NO vector_basis is refused (its basis "
+              "is the RULED contrast set; a hole is a hole)",
+              _raises(lambda: VectorRef(key="caa_x", npz=class_npz,
+                                        vector_class="caa",
+                                        fd_gate_not_applicable=True),
+                      VectorBasisMissing))
+        check("(HALT D) a class vector whose basis KIND is the corpus manifest is "
+              "refused — that is the conflation itself",
+              _raises(lambda: VectorRef(
+                  key="caa_x", npz=class_npz, vector_class="caa",
+                  fd_gate_not_applicable=True,
+                  vector_basis=VectorBasis(kind="corpus-manifest",
+                                           sha256=corpus_sha)),
+                  VectorBasisConflated))
+        check("(HALT D) an EGV that names a vector_basis is refused — the EGV's "
+              "basis IS the corpus manifest and has exactly one name",
+              _raises(lambda: VectorRef(key="entropy_gradient", npz=class_npz,
+                                        vector_basis=basis),
+                      VectorBasisConflated))
+        # the census: (a) the waiver is HONOURED for a class object…
+        class_spec = spec.model_copy(update={
+            "native_vector": class_ref, "include_transported": False,
+            "include_naive": False})
+        class_row = [r for r in census(class_spec).rows
+                     if r.role == "native_vector"][0]
+        check("(HALT D)(a) the census HONOURS fd_gate_not_applicable: a class "
+              "vector with no FD gate is READY and its row says why",
+              class_row.ready and class_row.fd_gate_passed is None
+              and class_row.fd_gate_not_applicable is True
+              and class_row.vector_class == "caa",
+              class_row.blocking_reason or "no blocking reason")
+        check("(HALT D)(a) the class row reads its VECTOR basis from the object's "
+              "own build stamp and checks it against the RULED sha — the corpus "
+              "vintage field stays EMPTY rather than borrowing the corpus sha",
+              class_row.vector_basis["build_stamp_sha256"] == set_sha
+              and class_row.vector_basis["declared_sha256"] == set_sha
+              and class_row.corpus_vintage is None)
+        wrong_set = _toy_class_vector_npz(root / "classvec", "caa_wrong", d_tgt,
+                                          seed=12, set_sha256="2b" * 32)
+        wrong_ref = class_ref.model_copy(update={
+            "key": "caa_wrong", "npz": wrong_set, "sha256": sha256_file(wrong_set),
+            "build_stamp": wrong_set.with_name("caa_wrong_stamps.json")})
+        wrong_row = [r for r in census(class_spec.model_copy(update={
+            "native_vector": wrong_ref})).rows if r.role == "native_vector"][0]
+        check("(HALT D)(a) a class vector built from ANOTHER contrast set blocks "
+              "(§9 item 2 applies to the VECTOR basis exactly as to the corpus)",
+              not wrong_row.ready
+              and "RULED set" in (wrong_row.blocking_reason or ""),
+              (wrong_row.blocking_reason or "")[:80])
+        # …(b) and the EGV's refusal SURVIVES, which is the point of the ruling.
+        (root / "egv_nogate").mkdir(exist_ok=True)
+        egv_nofd = _toy_vector_npz(root / "egv_nogate", "entropy_gradient", d_tgt,
+                                   seed=13, vintage=corpus_sha, fd_pass=False)
+        egv_row = [r for r in census(class_spec.model_copy(update={
+            "native_vector": egv_nofd})).rows if r.role == "native_vector"][0]
+        check("(HALT D)(a) an ENTROPY-GRADIENT object still REQUIRES its FD gate — "
+              "the refusal the ruling had to survive, proven on the census",
+              not egv_row.ready
+              and "FD gate" in (egv_row.blocking_reason or "")
+              and egv_row.fd_gate_not_applicable is None
+              and egv_row.vector_class is None)
+        no_gate_class = class_ref.model_copy(update={"fd_gate_not_applicable": False})
+        undeclared_row = [r for r in census(class_spec.model_copy(update={
+            "native_vector": no_gate_class})).rows if r.role == "native_vector"][0]
+        check("(HALT D)(a) a class vector that does NOT waive the gate is held to "
+              "it — claiming a gate you do not have is refused, not excused",
+              not undeclared_row.ready
+              and "FD gate" in (undeclared_row.blocking_reason or ""))
+        # the staged document + bank stamp carry both bases, and only when class
+        class_cells = plan_cells(class_spec)
+        check("(HALT D)(b) every planned cell of a class column carries the class "
+              "declaration and its VECTOR basis (the band members too — they are "
+              "the controls FOR that object and share its custody)",
+              all(c.vector_class == "caa"
+                  and c.vector_basis is not None
+                  and c.vector_basis.kind == "contrast-set" for c in class_cells),
+              f"{len(class_cells)} cells")
+        class_stamp = bank_stamp(
+            class_spec, cells=class_cells, vectors={}, magnitudes={},
+            constructions={}, transport_map=None, naive_row=None,
+            site_cross_check={"agrees": True}, prompt_pool_sha256=None,
+            battery_item_set_sha256="a" * 64)
+        egv_stamp = bank_stamp(
+            class_spec.model_copy(update={"native_vector": native}),
+            cells=plan_cells(class_spec.model_copy(update={
+                "native_vector": native})), vectors={}, magnitudes={},
+            constructions={}, transport_map=None, naive_row=None,
+            site_cross_check={"agrees": True}, prompt_pool_sha256=None,
+            battery_item_set_sha256="a" * 64)
+        check("(HALT D)(b) the class bank stamp names BOTH bases, each under its "
+              "own key, and never one as the other",
+              class_stamp["vector_basis"]["native_vector"]["kind"] == "contrast-set"
+              and class_stamp["vector_basis"]["native_vector"]["sha256"] == set_sha
+              and class_stamp["generation_basis"]["kind"] == "corpus-manifest"
+              and class_stamp["generation_basis"]["sha256"] == corpus_sha
+              and set_sha != corpus_sha,
+              "contrast set ≠ corpus manifest, and the stamp says which is which")
+        check("(HALT D)(b) the class stamp records the FD-gate waiver and quotes "
+              "the builder's own reason for it",
+              class_stamp["fd_gate_not_applicable"]["native_vector"] is True
+              and "no FD-gate analogue" in class_stamp["fd_gate_not_applicable_note"])
+        _class_only = {"vector_class", "vector_basis", "generation_basis",
+                       "two_bases_note", "fd_gate_not_applicable",
+                       "fd_gate_not_applicable_note"}
+        check("(HALT D)(b) an ENTROPY-GRADIENT column's bank stamp grows NONE of "
+              "the class keys — the flag-absent path, structurally proven",
+              set(egv_stamp) & _class_only == set()
+              and set(class_stamp) - set(egv_stamp) == _class_only,
+              f"class-only keys: {sorted(_class_only)}")
+        check("(HALT D)(b) …and the two stamps agree on EVERY other key, so the "
+              "declaration adds and never moves",
+              all(json.dumps(egv_stamp[k], sort_keys=True, default=str)
+                  == json.dumps(class_stamp[k], sort_keys=True, default=str)
+                  for k in set(egv_stamp) & set(class_stamp)
+                  if k not in ("vector_fd_gate", "vector_build_stamp")),
+              "vector_fd_gate/vector_build_stamp differ BY CONSTRUCTION (the class "
+              "object has no gate) and are the fields the ruling is about")
+        check("(HALT D) a StagedCell that declares a class without a basis is "
+              "refused before it can reach the engine",
+              _raises(lambda: StagedCell(spec=class_cells[0].spec,
+                                         vector_class="caa"), VectorBasisMissing)
+              and _raises(lambda: StagedCell(spec=class_cells[0].spec,
+                                             vector_basis=basis),
+                          VectorBasisConflated))
+
     failures = [c for c in checks if not c[1]]
     print(f"\nselftest: {len(failures)} failure(s)")
     for name, _, detail in failures:
@@ -3046,6 +3748,37 @@ def _shortfall_probe() -> None:
                             include_transported=False, include_naive=False))
     finally:
         N_CALIBRATION_BAND_CELLS = original
+
+
+def _toy_class_vector_npz(dirpath: Path, key: str, dim: int, *, seed: int,
+                          set_sha256: str) -> Path:
+    """A synthetic CLASS vector + the build stamp `build_contrast_vectors` writes.
+
+    The stamp shape is that module's own: the contrast set's sha lives under
+    `set.sha256` and there is NO `corpus_manifest_sha256` anywhere, because a CAA
+    object is not "of" a corpus. That absence is precisely what made the census
+    block every class column before HALT D was ruled, so the fixture reproduces it
+    rather than papering over it. No FD-gate sidecar is written either — a class
+    object has no analogue to write one from.
+    """
+    rng = np.random.default_rng(seed)
+    npz = dirpath / f"{key}.npz"
+    np.savez(npz, **{key: rng.standard_normal(dim).astype(np.float32)})
+    (dirpath / f"{key}_stamps.json").write_text(json.dumps({
+        "construction": "caa", "axis": "selftest-axis",
+        "set": {"set_id": "selftest-set", "sha256": set_sha256, "n_pairs": 4},
+        "what_this_is_not": ["no FD-gate analogue exists for a CAA object"],
+    }))
+    return npz
+
+
+def _msg_exc(fn: Callable[[], Any]) -> Optional[BaseException]:
+    """The exception `fn` raised, for a check that asserts its exact class."""
+    try:
+        fn()
+    except BaseException as exc:                       # noqa: BLE001 — that is the point
+        return exc
+    return None
 
 
 def _write_npz(path: Path, **arrays: Any) -> Path:

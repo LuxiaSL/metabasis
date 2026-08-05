@@ -382,6 +382,31 @@ class StampIncompleteError(BehavioralHarnessError):
     """
 
 
+class VectorClassContractError(BehavioralHarnessError):
+    """HALT D (Luxia's ruling 2, 2026-08-05): the vector-class declaration is unsound.
+
+    The class-pilot HALT's root cause in one sentence: a CLASS column has TWO BASES —
+    the GENERATION basis (the corpus manifest the prompts and generations are of) and
+    the VECTOR basis (the RULED contrast set the class object was built from) — and
+    the harness was written when every object was an entropy-gradient vector, i.e.
+    when the two coincided. The engine now stamps both, each under its own key, and
+    refuses every way of blurring them.
+    """
+
+
+class VectorBasisMissing(VectorClassContractError):
+    """A class cell reached the stamp without naming its RULED contrast-set basis."""
+
+
+class VectorClassMisdeclared(VectorClassContractError):
+    """An entropy-gradient cell claimed a class object's privileges, or vice versa.
+
+    Its own class because the remedy is the opposite of `VectorBasisMissing`'s: this
+    one is a MISLABEL (an EGV waiving the FD gate it must pass, or an EGV carrying a
+    contrast-set basis), and the fix is the declaration, not the artifact.
+    """
+
+
 class ExpectedNShortfall(BehavioralHarnessError):
     """§9 item 10 / §7: a cell or column is short of its expected N.
 
@@ -2472,9 +2497,34 @@ NULLABLE_FIELDS_BY_KIND: dict[str, frozenset[str]] = {
     "naive": NAIVE_NULLABLE_FIELDS,
 }
 
+#: HALT D, RULED (Luxia, 2026-08-05 morning, session 12) — option A, bundled:
+#: "`vector_class` declaration: fd_gate_not_applicable honoured by census AND stamp
+#: nullable table (EGV objects still REQUIRE their gate, selftest-proven);
+#: class-vintage = the ruled contrast-set sha, each stamp naming its basis."
+#:
+#: WHY exactly one field: a CAA/PCA class object has no finite-difference gate
+#: analogue — `build_contrast_vectors`'s own stamp says so ("no FD-gate analogue
+#: exists for a CAA object — build acceptance is stamp completeness + the pair-count
+#: assertion + the anchor cosines"). Every OTHER §2.8 field means the same thing for
+#: a class cell as for an EGV cell and stays required. The widening is keyed on the
+#: VECTOR CLASS, not on the cell kind, because the two are orthogonal: a class column
+#: has calibration, band and transported cells like any other.
+CLASS_VECTOR_NULLABLE_FIELDS: frozenset[str] = frozenset({"vector_fd_gate"})
+#: The vector class of record — the campaign's entropy-gradient object. A stamp that
+#: does not say otherwise IS this, which is why every column banked before the ruling
+#: keeps its exact meaning (and its exact bytes).
+EGV_VECTOR_CLASS = "entropy_gradient"
+#: The closed vocabulary. `build_behavioral_banks.VectorClass` is the typed twin; the
+#: two are aligned BY NAME (that module imports this one, so importing it back would
+#: be a cycle) and this sentence is the record of it.
+VECTOR_CLASSES: tuple[str, ...] = ("entropy_gradient", "caa", "repeng_pca")
+#: The kinds a basis may be. `corpus-manifest` is the GENERATION basis (every cell
+#: has one); `contrast-set` is a class object's VECTOR basis.
+VECTOR_BASIS_KINDS: tuple[str, ...] = ("corpus-manifest", "contrast-set")
 
-def assert_stamp_complete(stamp: dict, *, cell_kind: Optional[CellKind] = None
-                          ) -> None:
+
+def assert_stamp_complete(stamp: dict, *, cell_kind: Optional[CellKind] = None,
+                          vector_class: Optional[str] = None) -> None:
     """§2.8 as a checklist assertion; §9 item 9 as its HALT.
 
     Two ways to fail, kept apart in the message because they demand different
@@ -2485,10 +2535,27 @@ def assert_stamp_complete(stamp: dict, *, cell_kind: Optional[CellKind] = None
     A null is legitimate only for a (kind, field) pair named in
     `NULLABLE_FIELDS_BY_KIND` — the calibration half's six (no pair, so no map and no
     naive row) and, since B-2 was ruled 2026-08-05, a `naive` cell's four
-    `transport_map_*` fields and NOTHING else. A MISSING field is refused for every
-    kind: `nullable` widens what may be null, never what may be absent.
+    `transport_map_*` fields and NOTHING else — or for a (class, field) pair named in
+    `CLASS_VECTOR_NULLABLE_FIELDS`, which since HALT D was ruled the same day is
+    `vector_fd_gate` on a CLASS cell and nothing else. A MISSING field is refused for
+    every kind and every class: `nullable` widens what may be null, never what may be
+    absent.
+
+    `vector_class` is read from the argument when given and from the stamp's own
+    declaration otherwise, so a stamp that travelled to disk and back is checked as
+    the thing it says it is. An unrecognized class is refused rather than defaulted —
+    a typo that silently fell back to the object of record would demand the FD gate of
+    a CAA object (a HALT nobody could act on) or, worse, waive it for an EGV.
     """
+    declared = vector_class or stamp.get("vector_class") or EGV_VECTOR_CLASS
+    if declared not in VECTOR_CLASSES:
+        raise VectorClassMisdeclared(
+            f"vector_class={declared!r} is not one of {list(VECTOR_CLASSES)}. The "
+            "class vocabulary is closed (HALT D); an unrecognized class is refused "
+            "rather than defaulted to the object of record.")
     nullable = NULLABLE_FIELDS_BY_KIND.get(cell_kind or "", frozenset())
+    if declared != EGV_VECTOR_CLASS:
+        nullable = nullable | CLASS_VECTOR_NULLABLE_FIELDS
     missing = [f for f in STAMP_REQUIRED_FIELDS if f not in stamp]
     null = [f for f in STAMP_REQUIRED_FIELDS
             if f in stamp and stamp[f] in (None, "", [], {})
@@ -2504,6 +2571,67 @@ def assert_stamp_complete(stamp: dict, *, cell_kind: Optional[CellKind] = None
             f"§9 item 9: cuda_visible_devices is {cvd!r}. M10: a SCHEDULER job "
             "carries a card index and a ROGUE carries the sentinel — this is the "
             "field that caught the rogue run, so it can never be absent.")
+    assert_vector_class_contract(stamp, vector_class=declared)
+
+
+def assert_vector_class_contract(stamp: dict, *, vector_class: str) -> None:
+    """HALT D's stamp contract: BOTH bases named, and neither readable as the other.
+
+    Four refusals, in the order a mistake is most likely to be made:
+
+      1. a CLASS cell with no `vector_basis` — the hole the pilot HALTed on;
+      2. a CLASS cell whose vector basis is not a `contrast-set` — the conflation
+         itself (writing the corpus sha as the class object's vintage);
+      3. a CLASS cell that does not also name its GENERATION basis — the mirror
+         mistake: a stamp that names only the contrast set cannot say which corpus
+         its generations came from;
+      4. an ENTROPY-GRADIENT cell carrying either key — an EGV's basis is the corpus
+         manifest, already stamped under `corpus_manifest_sha256`, and a second name
+         for it is exactly how the two bases blurred in the first place.
+
+    Called from `assert_stamp_complete`, so it holds wherever a stamp is checked —
+    at build time, on a stamp read back from disk, and in the desk's own checker.
+    """
+    basis = stamp.get("vector_basis")
+    generation = stamp.get("generation_basis")
+    if vector_class == EGV_VECTOR_CLASS:
+        offending = [k for k in ("vector_basis", "generation_basis") if stamp.get(k)]
+        if offending:
+            raise VectorClassMisdeclared(
+                f"an entropy-gradient cell's stamp carries {offending}. The EGV's "
+                "basis IS the corpus manifest and is stamped once, under "
+                "`corpus_manifest_sha256`; a second name for the same basis is the "
+                "two-bases defect (HALT D). Declare `vector_class` if this is a "
+                "class object.")
+        if stamp.get("fd_gate_not_applicable"):
+            classes = ", ".join(c for c in VECTOR_CLASSES if c != EGV_VECTOR_CLASS)
+            raise VectorClassMisdeclared(
+                "an entropy-gradient cell's stamp claims fd_gate_not_applicable. "
+                "The FD gate is the EGV's OWN acceptance test (§9 item 3) and only "
+                f"a class object ({classes}) may say it has no analogue.")
+        return
+    if not isinstance(basis, dict) or not basis.get("sha256"):
+        raise VectorBasisMissing(
+            f"vector_class={vector_class!r} but the stamp names no `vector_basis` "
+            "with a sha256. A class object's VECTOR basis is the RULED CONTRAST SET "
+            "it was built from — the sha `build_contrast_vectors` refuses to build "
+            "without — and a stamp that omits it makes the object unauditable "
+            "(§9 item 2: a hole is a hole, not an agreement).")
+    if basis.get("kind") != "contrast-set":
+        raise VectorClassMisdeclared(
+            f"vector_class={vector_class!r} with vector_basis.kind="
+            f"{basis.get('kind')!r}. A class object's vector basis is the "
+            "contrast set; `corpus-manifest` is the GENERATION basis and rides "
+            "`generation_basis`. The two are never the same field (HALT D).")
+    if not isinstance(generation, dict) or not generation.get("sha256"):
+        raise VectorBasisMissing(
+            f"vector_class={vector_class!r} names its contrast set but no "
+            "`generation_basis`. Both bases are named or neither is trustworthy: "
+            "the generations are still OF a corpus even when the vector is not.")
+    if generation.get("kind") != "corpus-manifest":
+        raise VectorClassMisdeclared(
+            f"generation_basis.kind={generation.get('kind')!r} — the basis the "
+            "PROMPTS and GENERATIONS stand on is the corpus manifest, always.")
 
 
 def build_stamp(*, cell: CellSpec, alpha: float, layout: CanonicalLayout,
@@ -2517,12 +2645,22 @@ def build_stamp(*, cell: CellSpec, alpha: float, layout: CanonicalLayout,
                 per_cell_seed_roots: dict[str, str],
                 scheduler_card_index: Optional[str] = None,
                 sampler_kernel: SamplerKernel = SAMPLER_KERNEL_OF_RECORD,
+                vector_class: str = EGV_VECTOR_CLASS,
+                vector_basis: Optional[dict] = None,
+                site_role: Optional[str] = None,
                 extra: Optional[dict] = None) -> dict:
     """§2.8's per-cell custody stamp, built so the checklist cannot be half-met.
 
     Every §2.8 field is written here explicitly — nothing is `.get`-defaulted into
     existence — and `assert_stamp_complete` runs before the stamp is returned, so a
     caller can never receive a stamp that would fail the desk's own checker.
+
+    HALT C and HALT D add three keys, and all three are written ONLY when the caller
+    declares them. `site_role` appears when the column was staged in a declared role
+    (§4.2's remedy (i)); `vector_class`/`vector_basis`/`generation_basis` appear when
+    the cell rides a CLASS object. An entropy-gradient cell staged at its site of
+    record therefore produces the byte-identical stamp it produced before both
+    rulings — the flag-absent condition, in the one function that writes stamps.
     """
     tmap = transport_map or {}
     stamp = {
@@ -2603,9 +2741,30 @@ def build_stamp(*, cell: CellSpec, alpha: float, layout: CanonicalLayout,
             "shared residual coordinate frame; a hit on this pair is not evidence "
             "of transport beyond frame-sharing; excluded from mechanism aggregates, "
             "retained in scored aggregates.")
+    # HALT C: the DECLARED site role, on the cell stamp as well as inside the
+    # cross-check block, so a reader with one cell's stamp can tell a robustness-site
+    # column from a site-of-record one without re-deriving anything.
+    if site_role is not None:
+        stamp["site_role"] = site_role
+    # HALT D: the two bases, both named, only on a class cell.
+    if vector_class != EGV_VECTOR_CLASS:
+        stamp["vector_class"] = vector_class
+        stamp["vector_basis"] = vector_basis
+        stamp["generation_basis"] = {
+            "kind": "corpus-manifest", "sha256": corpus_sha,
+            "provenance": "the corpus manifest the PROMPTS and GENERATIONS are of "
+                          "(§2.8's corpus_manifest_sha256) — the GENERATION basis, "
+                          "never the class object's"}
+        stamp["two_bases_note"] = (
+            "HALT D (Luxia's ruling, 2026-08-05): this cell stands on TWO bases. The "
+            "GENERATION basis is the corpus manifest above; the VECTOR basis is the "
+            "RULED contrast set the class object was built from. Both are named; "
+            "neither is readable as the other. `vector_fd_gate` is null BY RULING "
+            "for a class object (no FD-gate analogue exists) and stays REQUIRED for "
+            "an entropy-gradient object.")
     if extra:
         stamp.update(extra)
-    assert_stamp_complete(stamp, cell_kind=cell.kind)
+    assert_stamp_complete(stamp, cell_kind=cell.kind, vector_class=vector_class)
     return stamp
 
 
@@ -3053,7 +3212,8 @@ def trunk_stamp(runtime: NodeRuntime) -> dict:
     return trunk
 
 
-def site_cross_check(node_key: str, site: int) -> dict:
+def site_cross_check(node_key: str, site: int, *,
+                     site_role: Optional[str] = None) -> dict:
     """§2.8's `SITES` ∧ `SITE_OF_RECORD` cross-check, re-derived at run time.
 
     Delegates to the staging module so the two halves of the campaign cannot disagree
@@ -3061,9 +3221,15 @@ def site_cross_check(node_key: str, site: int) -> dict:
     staging module imports THIS one (the engine owns the primitives, the staging module
     owns the composition), and because §4.3 forbids trusting a module-level snapshot of
     registries that change nightly.
+
+    HALT C: `site_role` is the DECLARATION the staged document carries, passed through
+    unchanged. The engine re-derives the ANSWER from the live registries — it does not
+    trust the staging module's answer — but the QUESTION ("in what role is this site
+    being used?") is the spec's to ask, and a job that dropped it would re-HALT on
+    the very column staging just admitted.
     """
     from metabasis.scripts.build_behavioral_banks import site_cross_check as _cross
-    return _cross(node_key, site)
+    return _cross(node_key, site, site_role=site_role)
 
 
 def order_cells(cells: Sequence[CellSpec]) -> list[CellSpec]:
@@ -3300,7 +3466,12 @@ def run_column(runtime: NodeRuntime, *, doc: Any, pool: PromptPool,
         expected=corpus_sha_of_record) if any(
             v is not None for v in doc.vintage_links()) else assert_corpus_vintage(
                 doc.corpus_manifest_sha256, expected=corpus_sha_of_record)
-    cross = site_cross_check(node_key, site)
+    # HALT C: the role is the document's DECLARATION; the answer is re-derived here
+    # from the live registries either way. `getattr` because a document written by an
+    # older staging module carries no such field, and its absence means exactly what
+    # it meant then — no role declared.
+    site_role = getattr(doc, "site_role", None)
+    cross = site_cross_check(node_key, site, site_role=site_role)
     if pool.sha256 and doc.prompt_pool_sha256 and pool.sha256 != doc.prompt_pool_sha256:
         raise ArtifactShaMismatch(
             f"prompt pool sha {pool.sha256[:12]}… does not match the staged document's "
@@ -3390,6 +3561,12 @@ def run_column(runtime: NodeRuntime, *, doc: Any, pool: PromptPool,
                         "OWED state (§10), never a silent absence."},
             per_cell_seed_roots={spec.cell_id: seed_roots[spec.cell_id]},
             scheduler_card_index=scheduler_card_index,
+            # HALT C / HALT D: the declarations this cell was staged with. Both
+            # default to the pre-ruling meaning when the document carries neither.
+            site_role=site_role,
+            vector_class=(getattr(staged, "vector_class", None)
+                          or EGV_VECTOR_CLASS) if staged else EGV_VECTOR_CLASS,
+            vector_basis=_vector_basis_dump(staged),
             extra={"label": doc.label or None,
                    "battery_injection_span": BATTERY_INJECTION_SPAN,
                    "entropy_digest_order": ENTROPY_DIGEST_ORDER})
@@ -3468,6 +3645,21 @@ def run_column(runtime: NodeRuntime, *, doc: Any, pool: PromptPool,
     if write and work_root is not None:
         result = _write_column(result, raw=raw, work_root=Path(work_root))
     return result
+
+
+def _vector_basis_dump(staged: Optional[Any]) -> Optional[dict]:
+    """A staged cell's VECTOR basis as a plain dict, or None.
+
+    `getattr` + `model_dump` rather than an import: the staging module imports this
+    one, and the engine only ever needs the SHAPE of the declaration. A document
+    written before HALT D carries no such attribute and yields None, which is the
+    entropy-gradient case and stamps nothing.
+    """
+    basis = getattr(staged, "vector_basis", None) if staged else None
+    if basis is None:
+        return None
+    dump = getattr(basis, "model_dump", None)
+    return dump() if callable(dump) else dict(basis)
 
 
 def _staged_cell(doc: Any, cell_id: str) -> Optional[Any]:
@@ -3912,7 +4104,8 @@ def preflight_report(doc: Any, pool: PromptPool, *,
     links = [v for v in doc.vintage_links() if v is not None]
     report["corpus_manifest_sha256"] = assert_corpus_vintage(
         *(links or [doc.corpus_manifest_sha256]), expected=corpus_sha_of_record)
-    report["site_cross_check"] = site_cross_check(doc.node_key, doc.site)
+    report["site_cross_check"] = site_cross_check(
+        doc.node_key, doc.site, site_role=getattr(doc, "site_role", None))
     selection, strata, digest = select_replay_cells(
         specs, doc.node_key, report["corpus_manifest_sha256"])
     _mapping = replay_gate_role_mapping(specs)
@@ -5150,6 +5343,145 @@ def selftest() -> int:                                   # noqa: C901 — a chec
               actuation_calibration={"job_id": "selftest", "verdict": "PASS"},
               per_cell_seed_roots=roots)),
           "transport_map=None + a banked naive row")
+    # ---- 8c. HALT D: the vector-class stamp contract (RULED 2026-08-05) --------
+    print("== selftest 8c: HALT D's vector-class stamp contract (two bases) ==")
+    _set_sha = "3c" * 32
+    _basis = {"kind": "contrast-set", "sha256": _set_sha,
+              "provenance": "pin row: RULED contrast set (selftest)"}
+    class_stamp = dict(
+        stamp, vector_fd_gate=None, vector_class="caa", vector_basis=_basis,
+        generation_basis={"kind": "corpus-manifest", "sha256": corpus})
+    check("(HALT D) `vector_fd_gate` is nullable for a CLASS cell — no FD-gate "
+          "analogue exists for a CAA object, and its builder's stamp says so",
+          _ok(lambda: assert_stamp_complete(class_stamp, cell_kind="transported",
+                                            vector_class="caa")),
+          "the ONE field the ruling makes nullable")
+    check("(HALT D) the class nullable set is EXACTLY {vector_fd_gate} and it is a "
+          "§2.8 required field (a widening, never a removal)",
+          CLASS_VECTOR_NULLABLE_FIELDS == frozenset({"vector_fd_gate"})
+          and "vector_fd_gate" in STAMP_REQUIRED_FIELDS,
+          str(sorted(CLASS_VECTOR_NULLABLE_FIELDS)))
+    check("(HALT D) an EGV cell with a null vector_fd_gate STILL HALTs — on every "
+          "kind, including the kinds that have their own nullable sets. This is "
+          "the refusal the ruling had to survive",
+          all(_raises(lambda k=k: assert_stamp_complete(
+              dict(stamp, vector_fd_gate=None), cell_kind=k), StampIncompleteError)
+              for k in ("transported", "transported_band", "calibration",
+                        "calibration_band", "baseline", "naive", "bridge", None)))
+    check("(HALT D) …and the same stamp DECLARED entropy_gradient explicitly HALTs "
+          "too — the default is a value, not a gap in the check",
+          _raises(lambda: assert_stamp_complete(
+              dict(stamp, vector_fd_gate=None, vector_class="entropy_gradient"),
+              cell_kind="calibration", vector_class="entropy_gradient"),
+              StampIncompleteError))
+    check("(HALT D) an ENTROPY-GRADIENT cell that claims fd_gate_not_applicable is "
+          "REFUSED at the stamp (the mirror of the census's refusal)",
+          _raises(lambda: assert_stamp_complete(
+              dict(stamp, fd_gate_not_applicable=True), cell_kind="calibration"),
+              VectorClassMisdeclared))
+    check("(HALT D) an EGV cell carrying a vector_basis or a generation_basis is "
+          "REFUSED — the EGV's basis is the corpus manifest and has ONE name",
+          _raises(lambda: assert_stamp_complete(
+              dict(stamp, vector_basis=_basis), cell_kind="calibration"),
+              VectorClassMisdeclared)
+          and _raises(lambda: assert_stamp_complete(
+              dict(stamp, generation_basis={"kind": "corpus-manifest",
+                                            "sha256": corpus}),
+              cell_kind="calibration"), VectorClassMisdeclared))
+    check("(HALT D) a CLASS cell with no vector_basis is REFUSED — the hole the "
+          "class pilot HALTed on, now a named exception",
+          _raises(lambda: assert_stamp_complete(
+              {k: v for k, v in class_stamp.items() if k != "vector_basis"},
+              cell_kind="transported", vector_class="caa"), VectorBasisMissing))
+    check("(HALT D) a CLASS cell whose vector_basis is the CORPUS manifest is "
+          "REFUSED — writing the corpus sha as the class object's vintage is the "
+          "false provenance the ruling exists to stop",
+          _raises(lambda: assert_stamp_complete(
+              dict(class_stamp, vector_basis={"kind": "corpus-manifest",
+                                              "sha256": corpus}),
+              cell_kind="transported", vector_class="caa"), VectorClassMisdeclared))
+    check("(HALT D) a CLASS cell that names its contrast set but NOT its generation "
+          "basis is REFUSED — both bases or neither is trustworthy",
+          _raises(lambda: assert_stamp_complete(
+              {k: v for k, v in class_stamp.items() if k != "generation_basis"},
+              cell_kind="transported", vector_class="caa"), VectorBasisMissing))
+    check("(HALT D) an UNRECOGNIZED class is refused, never defaulted to the "
+          "object of record (a typo must not waive a gate)",
+          _raises(lambda: assert_stamp_complete(stamp, cell_kind="calibration",
+                                                vector_class="caa_v2"),
+                  VectorClassMisdeclared))
+    check("(HALT D) the class read from the STAMP is honoured when no argument is "
+          "given, so a stamp that went to disk and back checks as itself",
+          _ok(lambda: assert_stamp_complete(class_stamp, cell_kind="transported")))
+    check("(HALT D) a class cell null on any OTHER required field still HALTs — "
+          "the widening is one field, not a class-wide exemption",
+          all(_raises(lambda f=f: assert_stamp_complete(
+              dict(class_stamp, **{f: None}), cell_kind="transported",
+              vector_class="caa"), StampIncompleteError)
+              for f in ("model_config_sha256", "vector_npz_sha256",
+                        "vector_build_stamp", "replay_gate_digests",
+                        "battery_item_set_sha256", "corpus_manifest_sha256")))
+    _built_class = build_stamp(
+        cell=laddered[-1][0], alpha=laddered[-1][1],
+        layout=freeze_layout(80, dtype="bfloat16", headroom_note="selftest"),
+        pool=pool, norms=nc, corpus_sha=corpus, node_key=node, arm=arm,
+        site_cross_check={"SITES": [site], "SITE_OF_RECORD": site, "agrees": True},
+        model_config_sha256="c" * 64, vector_npz_sha256="d" * 64,
+        vector_fd_gate=None, vector_build_stamp={"builder": "selftest"},
+        transport_map={"fit_sha256": "e" * 64, "family": "proc_k128", "arm": arm,
+                       "corpus_vintage": corpus},
+        naive_row={"pair": "hub->target", "verdict": "CLEAR"},
+        trunk={"transformers": "5.3.0"},
+        replay_gate_digests={"token_ids": "d" * 64, "entropy": "e" * 64},
+        battery_item_set_sha256="f" * 64,
+        actuation_calibration={"job_id": "selftest", "verdict": "PASS"},
+        per_cell_seed_roots=roots, vector_class="caa", vector_basis=_basis)
+    check("(HALT D) `build_stamp` builds a CLASS cell end to end with a null FD "
+          "gate and BOTH bases named",
+          _built_class["vector_class"] == "caa"
+          and _built_class["vector_basis"]["sha256"] == _set_sha
+          and _built_class["generation_basis"]["sha256"] == corpus
+          and _built_class["generation_basis"]["kind"] == "corpus-manifest"
+          and _built_class["vector_fd_gate"] is None
+          and _set_sha != corpus,
+          "vector basis = the ruled contrast set; generation basis = the corpus")
+    check("(HALT D) …and refuses a class cell whose basis never arrived, rather "
+          "than stamping a hole",
+          _raises(lambda: build_stamp(
+              cell=laddered[-1][0], alpha=laddered[-1][1],
+              layout=freeze_layout(80, dtype="bfloat16"), pool=pool, norms=nc,
+              corpus_sha=corpus, node_key=node, arm=arm,
+              site_cross_check={"agrees": True}, model_config_sha256="c" * 64,
+              vector_npz_sha256="d" * 64, vector_fd_gate=None,
+              vector_build_stamp={"builder": "selftest"},
+              transport_map={"fit_sha256": "e" * 64, "family": "proc_k128",
+                             "arm": arm, "corpus_vintage": corpus},
+              naive_row={"pair": "hub->target", "verdict": "CLEAR"},
+              trunk={"transformers": "5.3.0"},
+              replay_gate_digests={"token_ids": "d" * 64, "entropy": "e" * 64},
+              battery_item_set_sha256="f" * 64,
+              actuation_calibration={"verdict": "PASS"},
+              per_cell_seed_roots=roots, vector_class="caa"),
+              VectorBasisMissing),
+          "every other §2.8 field present — the ONLY hole is the vector basis")
+    _egv_keys = set(_toy_stamp(cell=laddered[-1][0], alpha=laddered[-1][1],
+                               layout=freeze_layout(80, dtype="bfloat16",
+                                                    headroom_note="selftest"),
+                               pool=pool, norms=nc, corpus=corpus, node=node,
+                               arm=arm, roots=roots))
+    check("(HALT D) the class keys are the ONLY keys a class stamp adds — an EGV "
+          "stamp built by the same function grows none of them",
+          set(_built_class) - _egv_keys == {"vector_class", "vector_basis",
+                                            "generation_basis", "two_bases_note"}
+          and _egv_keys - set(_built_class) == set(),
+          str(sorted(set(_built_class) - _egv_keys)))
+    check("(HALT D) every class HALT is a BehavioralHarnessError, so the CLI's "
+          "existing HALT path reports it and exits 2",
+          all(issubclass(c, BehavioralHarnessError) for c in (
+              VectorClassContractError, VectorBasisMissing, VectorClassMisdeclared))
+          and issubclass(VectorBasisMissing, VectorClassContractError)
+          and issubclass(VectorClassMisdeclared, VectorClassContractError))
+
     os.environ["CUDA_VISIBLE_DEVICES"] = ""
     check("an unset CVD is a HALT (M10: the field that caught the rogue run)",
           _raises(lambda: assert_stamp_complete(
@@ -5921,6 +6253,141 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                for c in _gate_owed["cells"]]
               == [(c["cell_id"], c["token_id_sha256"], c["entropy_array_sha256"])
                   for c in _gate_flag["cells"]])
+
+        # ---- 16c. HALT C + HALT D end to end, through the CLI (B-1 style) -----
+        print("== selftest 16c: HALT C/D through the CLI — only the named keys move ==")
+        from metabasis.scripts.build_behavioral_banks import VectorBasis
+        _cset = "4d" * 32
+        _cls_basis = VectorBasis(kind="contrast-set", sha256=_cset,
+                                 provenance="pin row: RULED set (selftest)")
+        class_doc = cli_doc.model_copy(update={
+            "cells": tuple(c.model_copy(update={
+                "vector_class": "caa", "vector_basis": _cls_basis, "fd_gate": None})
+                for c in cli_doc.cells),
+            "bank_stamp": {k: v for k, v in cli_doc.bank_stamp.items()
+                           if k != "vector_fd_gate"}})
+        class_cells_path = cli / "cells_class.json"
+        class_cells_path.write_text(class_doc.model_dump_json(indent=1))
+        role_doc = cli_doc.model_copy(update={"site_role": "site_of_record"})
+        role_cells_path = cli / "cells_role.json"
+        role_cells_path.write_text(role_doc.model_dump_json(indent=1))
+        os.environ["CUDA_VISIBLE_DEVICES"] = "3"
+
+        def _fire_doc(work: Path, cells_json: Path) -> int:
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = main(["--run", "--model-path", "<STUB>", "--work-root",
+                           str(work), "--cells-json", str(cells_json),
+                           "--prompt-pool", str(pool_path), "--arm", cal_arm,
+                           "--site", str(cal_site), "--node-key", cal_node,
+                           "--no-characterize"])
+            return rc
+
+        globals()["load_model_and_tokenizer"] = (
+            lambda *a, **k: (None, None, "bfloat16"))
+        globals()["load_vectors"] = lambda *a, **k: {}
+        globals()["HFNodeRuntime"] = (
+            lambda *a, **k: _StubRuntime(filed_pool, cli_tok, cal_arm, cal_site))
+        try:
+            rc_class = _fire_doc(cli / "klass", class_cells_path)
+            rc_role = _fire_doc(cli / "role", role_cells_path)
+        finally:
+            globals().update(_saved_globals)
+            if _saved_cvd is None:
+                os.environ.pop("CUDA_VISIBLE_DEVICES", None)
+            else:
+                os.environ["CUDA_VISIBLE_DEVICES"] = _saved_cvd
+        klass, roled = _banked(cli / "klass"), _banked(cli / "role")
+        check("(16c) a CLASS column fires end to end through the CLI (rc 0), every "
+              "cell stamped, none of them FD-gated",
+              rc_class == 0 and len(klass) == len(owed) == 7
+              and all(s["vector_fd_gate"] is None for s in klass.values()))
+        _cls_deltas = {cid: sorted(
+            k for k in set(owed[cid]) | set(klass[cid])
+            if json.dumps(owed[cid].get(k), sort_keys=True)
+            != json.dumps(klass[cid].get(k), sort_keys=True)) for cid in owed}
+        _named = ["generation_basis", "two_bases_note", "vector_basis",
+                  "vector_class", "vector_fd_gate"]
+        check("(16c) the ONLY stamp keys that move on a class column are the four "
+              "NAMED new keys plus the one field the ruling makes nullable "
+              "(structural diff over every cell)",
+              all(d == _named for d in _cls_deltas.values()),
+              f"deltas: {sorted({tuple(v) for v in _cls_deltas.values()})}")
+        check("(16c) both bases are stamped on every class cell, and the VECTOR "
+              "basis is NOT the corpus manifest",
+              all(s["vector_basis"]["sha256"] == _cset
+                  and s["vector_basis"]["kind"] == "contrast-set"
+                  and s["generation_basis"]["sha256"] == s["corpus_manifest_sha256"]
+                  and s["vector_basis"]["sha256"] != s["corpus_manifest_sha256"]
+                  for s in klass.values()),
+              f"contrast set {_cset[:12]}… ≠ corpus {CORPUS_SHA_V21[:12]}…")
+        check("(16c) every class stamp passes the §2.8 checklist AS a class stamp, "
+              "and the same stamp read as an EGV would HALT",
+              all(_ok(lambda s=s: assert_stamp_complete(s, cell_kind=s["cell_kind"]))
+                  for s in klass.values())
+              and all(_raises(lambda s=s: assert_stamp_complete(
+                  {k: v for k, v in s.items() if k != "vector_class"},
+                  cell_kind=s["cell_kind"], vector_class=EGV_VECTOR_CLASS),
+                  BehavioralHarnessError) for s in klass.values()))
+        _gate_class = json.loads((cli / "klass" / "column_result.json").read_text())
+        check("(16c) the §2.7 gate selection, strata and digests are UNMOVED by the "
+              "class declaration — it is custody, never a dose",
+              _gate_class["replay_gate"] == _gate_owed["replay_gate"]
+              and [(c["cell_id"], c["token_id_sha256"], c["entropy_array_sha256"])
+                   for c in _gate_class["cells"]]
+              == [(c["cell_id"], c["token_id_sha256"], c["entropy_array_sha256"])
+                  for c in _gate_owed["cells"]],
+              "same tokens, same entropies, same three gate cells")
+        _role_deltas = {cid: sorted(
+            k for k in set(owed[cid]) | set(roled[cid])
+            if json.dumps(owed[cid].get(k), sort_keys=True)
+            != json.dumps(roled[cid].get(k), sort_keys=True)) for cid in owed}
+        check("(16c) a DECLARED site role moves exactly two keys: the cell stamp's "
+              "own `site_role` and the role recorded inside `site_cross_check`",
+              rc_role == 0
+              and all(d == ["site_cross_check", "site_role"]
+                      for d in _role_deltas.values())
+              and all(s["site_role"] == "site_of_record"
+                      and s["site_cross_check"]["site_role"] == "site_of_record"
+                      for s in roled.values()),
+              f"deltas: {sorted({tuple(v) for v in _role_deltas.values()})}")
+        check("(16c) …and the UNDECLARED column's stamps carry NEITHER key — the "
+              "flag-absent path, proven on a fired column",
+              all("site_role" not in s and "site_role" not in s["site_cross_check"]
+                  for s in owed.values()))
+        # HALT C at the ENGINE's own re-derivation. The engine never trusts the
+        # staging module's answer — it re-asks the live registries in-job — so a
+        # robustness-site column that staging admitted would HALT node-side unless
+        # this path admits it too. That is the failure mode the ruling is about.
+        try:
+            from metabasis.scripts.actuation_calibration import ROBUSTNESS_SITES
+            # The refusal is raised by the STAGING module, which imports
+            # `metabasis.scripts.run_behavioral_cells` — a different class object
+            # from this file's when it runs as `__main__` (the same two-copies fact
+            # `StagedCell._accept_a_cellspec_from_either_import_path` documents). The
+            # check asserts the class the caller would actually catch, not this
+            # process's homonym.
+            from metabasis.scripts.run_behavioral_cells import (
+                SiteNotOfRecord as _SNOR)
+            _rob_ok = True
+        except ImportError as exc:                            # pragma: no cover
+            _rob_ok = False
+            skip("HALT C at the engine's in-job cross-check",
+                 f"the §4.2 registry is unimportable ({exc})")
+        if _rob_ok:
+            _rn, _rs = "gemma3-27b", ROBUSTNESS_SITES["gemma3-27b"]
+            check("(16c) the ENGINE's in-job cross-check admits the REGISTERED "
+                  "robustness site when the document declares the role, and still "
+                  "refuses it when the document does not",
+                  site_cross_check(_rn, _rs, site_role="robustness_site")["agrees"]
+                  is True
+                  and _raises(lambda: site_cross_check(_rn, _rs), _SNOR),
+                  f"{_rn} L{_rs} — §4.2's frozen remedy (i), in-job")
+            check("(16c) …and a site the registries do not carry is refused in-job "
+                  "even WITH the role (no fiat site reaches a forward pass)",
+                  _raises(lambda: site_cross_check(_rn, _rs + 7,
+                                                   site_role="robustness_site"),
+                          _SNOR))
 
     failures = [c for c in checks if not c[1]]
     print(f"\nselftest: {len(failures)} failure(s)")
