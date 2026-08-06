@@ -140,11 +140,14 @@ import os
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 
 import argparse
+import contextlib
 import hashlib
 import json
 import logging
+import platform
+import shutil
 import sys
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import (Any, Callable, Collection, Literal, Optional, Protocol,
                     Sequence)
@@ -502,6 +505,173 @@ class ActuationCalibrationMismatch(BehavioralHarnessError):
     the CLI's `--node-key/--arm/--site` cross-check already refuses. Every disagreeing
     field is named in ONE message, so a misrouted job script is fixed in one pass.
     """
+
+
+# -------------------------------------------- resumption / residency (2026-08-05)
+# The COLUMN-RESUMABILITY + MODEL-RESIDENCY amendment's HALT list. Two families,
+# kept apart because they demand different responses and a single `ResumeRefused`
+# would let the wrong one be swallowed:
+#
+#   * `ResumeIdentityRefused` — the banked cells and this process are not the same
+#     EXPERIMENT. There is no partial answer to that: the whole resume refuses, by
+#     the name of the condition that differed. Never caught inside this module.
+#   * `ResumeCellUnusable` — one banked cell cannot be trusted as banked (no
+#     receipt, missing/short bytes, a stamp that fails the engine's own checker, a
+#     digest that no longer reproduces from its raw). That is a LOST CELL, not a
+#     different experiment: the cell is QUARANTINED under `resume/quarantine/` with
+#     its reason and re-run from scratch. Caught by `resume_preflight` and by
+#     nothing else.
+class ResumeRefused(BehavioralHarnessError):
+    """Base of the resumption HALTs — never raised directly."""
+
+
+class ResumeIdentityRefused(ResumeRefused):
+    """The banked attempt and this process are not the same experiment."""
+
+
+class ResumeColumnIdentityMismatch(ResumeIdentityRefused):
+    """The banked cells belong to another (node, arm, site, n/cell)."""
+
+
+class ResumeCellsDocumentMismatch(ResumeIdentityRefused):
+    """The banked cells were staged from a different cells document."""
+
+
+class ResumeCorpusVintageMismatch(ResumeIdentityRefused):
+    """The banked cells stand on a different corpus manifest (§9 item 2)."""
+
+
+class ResumePromptPoolMismatch(ResumeIdentityRefused):
+    """The banked cells were generated against a different prompt pool (ruling 10)."""
+
+
+class ResumeVerdictMismatch(ResumeIdentityRefused):
+    """The banked cells transcribe a different §4.2 actuation-calibration document."""
+
+
+class ResumeEngineModuleMismatch(ResumeIdentityRefused):
+    """The banked cells were produced by different engine bytes."""
+
+
+class ResumeEngineModuleUnknown(ResumeIdentityRefused):
+    """An engine module's sha is unknown on one side — never read as agreement."""
+
+
+class ResumeLayoutMismatch(ResumeIdentityRefused):
+    """The canonical layout differs (§2.2 / §9 item 13: a silent split)."""
+
+
+class ResumeModelConfigMismatch(ResumeIdentityRefused):
+    """The M9 drift anchor moved: a different model config is loaded."""
+
+
+class ResumeNormDrift(ResumeIdentityRefused):
+    """The in-job measured per-token median residual norm is not the banked one.
+
+    The one identity condition that is not a sha of an input: α is
+    `alpha_frac × measured_per_token_median` (§2.5), so a norm that moved by one
+    ulp across the process seam would give every re-run cell a DIFFERENT dose from
+    its banked siblings — an inhomogeneous column that every downstream read would
+    treat as one. Refused rather than tolerated, and never rounded.
+    """
+
+
+class ResumeAlphaDrift(ResumeIdentityRefused):
+    """A banked cell's α is not the α this process would resolve for it."""
+
+
+class ResumeCellNotPlanned(ResumeIdentityRefused):
+    """The attempt directory holds a banked cell this column does not plan."""
+
+
+class ResumeWithoutWorkRoot(ResumeRefused):
+    """`--resume` with nowhere to resume FROM."""
+
+
+class ResumeCellUnusable(ResumeRefused):
+    """One banked cell cannot be trusted as banked — quarantined and re-run."""
+
+
+class BankedCellUnattested(ResumeCellUnusable):
+    """A cell directory with no completion receipt: banked by nobody, trusted by no one."""
+
+
+class BankedCellArtifactMissing(ResumeCellUnusable):
+    """The receipt names an artifact the cell directory does not carry."""
+
+
+class BankedCellArtifactShaMismatch(ResumeCellUnusable):
+    """A banked artifact's bytes are not the bytes the receipt attests."""
+
+
+class BankedCellStampIncomplete(ResumeCellUnusable):
+    """The banked stamp fails the engine's own §2.8 checker on re-read."""
+
+
+class BankedCellDigestMismatch(ResumeCellUnusable):
+    """The banked raw no longer reproduces the digests its own stamp names."""
+
+
+class BankedCellReceiptUnreadable(ResumeCellUnusable):
+    """The receipt is not a receipt (truncated mid-write, wrong schema)."""
+
+
+class AttemptLockError(BehavioralHarnessError):
+    """M55's handshake: an attempt directory has at most one live writer."""
+
+
+class AttemptLockHeld(AttemptLockError):
+    """A LIVE process holds this attempt directory."""
+
+
+class AttemptLockForeignHost(AttemptLockError):
+    """The lock was taken on another host and cannot be adjudicated here.
+
+    `/models` is shared storage. A pid on THIS host says nothing about a pid on
+    another, so a foreign lock is refused rather than guessed at — the M55 incident
+    was untracked processes holding a shared resource, and a cross-host stale-lock
+    heuristic is exactly how that gets re-created quietly.
+    """
+
+
+class AttemptLockUnreadable(AttemptLockError):
+    """A lockfile that will not parse is refused, never clobbered."""
+
+
+class ResidencyRefused(BehavioralHarnessError):
+    """The model-residency driver's HALT family (Luxia's ruling, 2026-08-05)."""
+
+
+class ResidencyModelMismatch(ResidencyRefused):
+    """A column for another model was handed to a loaded runtime.
+
+    One job = one card = ONE loaded model = an ordered list of THAT model's cells
+    documents. A column whose document names another node_key is not a column this
+    runtime can run, and re-pointing a runtime at another model's identity while its
+    weights stay loaded would stamp false provenance on every cell.
+    """
+
+
+class ResidencyHookStillAttached(ResidencyRefused):
+    """A column ended with its injection hook still attached.
+
+    The residency boundary is 'residency sharing YES, cell sharing NO'. A hook that
+    survived a column would carry one column's injection into the next one's first
+    forward — the exact leak the boundary exists to forbid — so detachment is
+    ASSERTED between columns rather than trusted to `finally`.
+    """
+
+
+class ResidencyAttemptDirCollision(ResidencyRefused):
+    """Two columns in one residency were pointed at one attempt directory."""
+
+
+class ResidencyRuntimeNotRepointable(ResidencyRefused):
+    """The runtime cannot be re-pointed, so it can carry exactly one column."""
+
+
+class ResidencyPlanInvalid(ResidencyRefused):
+    """A residency plan that names neither a document nor a path for a column."""
 
 
 # ---------------------------------------------------------------- typed records
@@ -3443,7 +3613,11 @@ def run_column(runtime: NodeRuntime, *, doc: Any, pool: PromptPool,
                n_per_cell: Optional[int] = None,
                actuation_calibration_stamp: Optional[dict] = None,
                characterize: bool = True, write: bool = True,
-               scheduler_card_index: Optional[str] = None) -> ColumnResult:
+               scheduler_card_index: Optional[str] = None,
+               resume: bool = False,
+               cells_document_file_sha256: Optional[str] = None,
+               actuation_calibration_sha256: Optional[str] = None,
+               take_attempt_lock: bool = True) -> ColumnResult:
     """§2.1's one-load-per-node job, in order, with every §9 HALT live.
 
     preflight → norm calibration → canonical-layout determination → all calibration
@@ -3456,7 +3630,44 @@ def run_column(runtime: NodeRuntime, *, doc: Any, pool: PromptPool,
     function is as basis-agnostic as the document it is handed;
     `corpus_sha_of_record` is the expectation the chain is asserted AGAINST and is a
     parameter, not a constant read from this module.
+
+    DURABILITY AND RESUMPTION (2026-08-05, Luxia's ruling; see the amendment note
+    above `RESUME_SUBTREE`). Every cell is banked ATOMICALLY the moment it completes,
+    so a killed column keeps everything it finished. `resume=True` re-verifies what is
+    banked, requires this process to be the SAME RUN by every input that decides a
+    cell's contents, skips what it can prove, and runs the rest; §2.7's replay gate
+    then runs at the end over the FULL population as always. Neither path moves a byte
+    of the column of record: the manifest walk skips the bookkeeping subtree, and a
+    skipped cell's outcome is rebuilt exactly — `elapsed_s` included — from its
+    receipt and its files.
     """
+    doc_sha = document_content_sha256(doc)
+    with attempt_lock(Path(work_root) if work_root is not None else None,
+                      cells_document_sha256=doc_sha,
+                      enabled=take_attempt_lock and write) as lock_block:
+        return _run_column_locked(
+            runtime, doc=doc, pool=pool, work_root=work_root,
+            corpus_sha_of_record=corpus_sha_of_record, n_per_cell=n_per_cell,
+            actuation_calibration_stamp=actuation_calibration_stamp,
+            characterize=characterize, write=write,
+            scheduler_card_index=scheduler_card_index, resume=resume,
+            cells_document_sha256=doc_sha,
+            cells_document_file_sha256=cells_document_file_sha256,
+            actuation_calibration_sha256=actuation_calibration_sha256,
+            lock_block=lock_block)
+
+
+def _run_column_locked(runtime: NodeRuntime, *, doc: Any, pool: PromptPool,
+                       work_root: Optional[Path], corpus_sha_of_record: str,
+                       n_per_cell: Optional[int],
+                       actuation_calibration_stamp: Optional[dict],
+                       characterize: bool, write: bool,
+                       scheduler_card_index: Optional[str], resume: bool,
+                       cells_document_sha256: str,
+                       cells_document_file_sha256: Optional[str],
+                       actuation_calibration_sha256: Optional[str],
+                       lock_block: Optional[dict]) -> ColumnResult:
+    """§2.1's job, inside the M55 attempt lock. See `run_column` for the contract."""
     node_key, arm, site = doc.node_key, doc.arm, doc.site
     n = int(n_per_cell or doc.n_per_cell)
 
@@ -3514,14 +3725,64 @@ def run_column(runtime: NodeRuntime, *, doc: Any, pool: PromptPool,
     seed_roots = {c.cell_id: cell_seed_root(corpus_sha=corpus_sha, node_key=node_key,
                                             arm=arm, site=site, cell_id=c.cell_id)
                   for c in specs}
+    # THE RUN'S IDENTITY — the closed list of things a resumed cell must have been
+    # produced under. Built HERE and not earlier because two of its entries are
+    # measurements of this process: the frozen canonical layout and §2.5's in-job
+    # per-token median residual norm, which is what α is resolved from.
+    identity = RunIdentity(
+        node_key=node_key, arm=arm, site=site, n_per_cell=n,
+        cells_document_sha256=cells_document_sha256,
+        cells_document_file_sha256=cells_document_file_sha256,
+        corpus_manifest_sha256=corpus_sha, prompt_pool_sha256=pool.sha256,
+        actuation_calibration_sha256=actuation_calibration_sha256,
+        engine_module_sha256=engine_module_shas(),
+        canonical_layout=layout.model_dump(),
+        measured_per_token_median_resid_norm=norms.measured_per_token_median,
+        model_config_sha256=runtime.model_config_sha256())
+    banked_receipts: dict[str, CellReceipt] = {}
+    resume_report: dict = {}
+    if resume:
+        if work_root is None:
+            raise ResumeWithoutWorkRoot(
+                "--resume needs --work-root: there is nothing to resume FROM without "
+                "the attempt directory the previous process banked into")
+        inventory, banked_receipts = resume_preflight(
+            Path(work_root), specs=specs, identity=identity)
+        resume_report = json.loads(inventory.model_dump_json())
     outcomes: list[CellOutcome] = []
     raw: dict[str, tuple[list[GenerationRecord], dict, dict]] = {}
     blocks = []
     baseline_block = None
     token_first: dict[str, str] = {}
     entropy_first: dict[str, str] = {}
+    skipped: list[str] = []
     for spec in specs:
         alpha = resolve_alpha(spec.alpha_frac, norms.measured_per_token_median)
+        receipt = banked_receipts.get(spec.cell_id)
+        if receipt is not None:
+            # A verified banked cell. Its α is re-derived and REQUIRED to be the α
+            # this process would have given it: the norm identity check already
+            # guarantees this, and asserting it per cell is what makes the guarantee
+            # visible at the one place a dose could silently differ.
+            if _float_key(receipt.alpha) != _float_key(alpha):
+                raise ResumeAlphaDrift(
+                    f"{spec.cell_id}: banked at α={receipt.alpha!r} and this process "
+                    f"resolves α={alpha!r} for the same dose {spec.alpha_frac} (§2.5). "
+                    "A resumed column with two doses under one name is not a column.")
+            outcome, block = rehydrate_banked_cell(
+                Path(work_root), spec, receipt)      # type: ignore[arg-type]
+            if block is not None:
+                blocks.append(block)
+                if spec.is_baseline and baseline_block is None:
+                    baseline_block = block
+            token_first[spec.cell_id] = outcome.token_id_sha256
+            entropy_first[spec.cell_id] = outcome.entropy_array_sha256
+            outcomes.append(outcome)
+            skipped.append(spec.cell_id)
+            logger.info("CELL %s SKIPPED (banked %s, re-verified: stamp + %d artifact "
+                        "shas + both §2.7 digests recomputed from raw)", spec.cell_id,
+                        receipt.banked_at, len(receipt.artifact_sha256))
+            continue
         (records, rows, ent_s, ent_u, block, panel, elapsed,
          tokens) = run_cell(runtime, spec, alpha=alpha, pool=pool, layout=layout,
                             corpus_sha=corpus_sha, node_key=node_key, arm=arm, n=n,
@@ -3570,14 +3831,24 @@ def run_column(runtime: NodeRuntime, *, doc: Any, pool: PromptPool,
             extra={"label": doc.label or None,
                    "battery_injection_span": BATTERY_INJECTION_SPAN,
                    "entropy_digest_order": ENTROPY_DIGEST_ORDER})
-        outcomes.append(CellOutcome(
+        outcome = CellOutcome(
             cell_id=spec.cell_id, kind=spec.kind, alpha_frac=spec.alpha_frac,
             alpha=alpha, n=len(records), tokens_generated=tokens, elapsed_s=elapsed,
             entropy=entropy_rise_from_rows(rows), probe_rows=rows,
             token_id_sha256=tdigest, entropy_array_sha256=edigest,
             capability=block.model_dump() if block is not None else None,
             coherence=panel.model_dump() if panel is not None else None,
-            stamp=stamp))
+            stamp=stamp)
+        # ATOMIC PER-CELL BANKING (2026-08-05). The cell becomes durable HERE, into a
+        # temp directory renamed into place, and is attested by its own receipt — so
+        # a kill on the next cell costs exactly that cell. The bytes are the bytes the
+        # end-of-column path would have written; only the moment changed.
+        if write and work_root is not None:
+            paths = bank_cell_atomically(
+                Path(work_root) / "cells", outcome, records=records, ent_s=ent_s,
+                ent_u=ent_u, work_root=Path(work_root), identity=identity)
+            outcome = outcome.model_copy(update={"raw_paths": paths})
+        outcomes.append(outcome)
 
     assert_column_complete(outcomes, len(specs), n_per_cell=n, node_key=node_key,
                            beside_cell_ids=[c.cell_id for c in specs if c.is_beside])
@@ -3643,7 +3914,32 @@ def run_column(runtime: NodeRuntime, *, doc: Any, pool: PromptPool,
         work_root=str(work_root) if work_root else None)
 
     if write and work_root is not None:
-        result = _write_column(result, raw=raw, work_root=Path(work_root))
+        result = _write_column(result, raw=raw, work_root=Path(work_root),
+                               identity=identity)
+        # The resume report is BOOKKEEPING and lives outside the manifest, on purpose:
+        # `ColumnResult` is untouched by this amendment, so a resumed column's
+        # `column_result.json` differs from an uninterrupted twin's in the elapsed
+        # times of the cells that actually re-ran and in NOTHING else.
+        if resume or lock_block is not None:
+            seam = sorted(set(skipped) & set(gate.cells))
+            _atomic_write_text(
+                _resume_dir(Path(work_root)) / RESUME_REPORT_NAME,
+                json.dumps({
+                    "resumed": bool(resume),
+                    "cells_skipped": skipped,
+                    "cells_run": [o.cell_id for o in outcomes
+                                  if o.cell_id not in set(skipped)],
+                    "inventory": resume_report or None,
+                    "attempt_lock": lock_block,
+                    "identity": json.loads(identity.model_dump_json()),
+                    "replay_gate_passed": gate.passed,
+                    "replay_gate_cells": gate.cells,
+                    # §2.7's fresh-process replay, PERFORMED rather than filed OWED:
+                    # these gate cells' first digests were produced by an earlier
+                    # process and the gate reproduced them bitwise in this one.
+                    "replay_gate_cells_across_the_process_seam": seam,
+                    "seam_note": RESUME_SEAM_EVIDENCE,
+                }, indent=1, sort_keys=True))
     return result
 
 
@@ -3669,41 +3965,90 @@ def _staged_cell(doc: Any, cell_id: str) -> Optional[Any]:
         return None
 
 
-def _write_column(result: ColumnResult, *, raw: dict, work_root: Path) -> ColumnResult:
+def _write_cell_files(d: Path, outcome: CellOutcome,
+                      records: Sequence[GenerationRecord],
+                      ent_s: dict[int, np.ndarray],
+                      ent_u: dict[int, np.ndarray]) -> dict[str, str]:
+    """Write ONE cell's artifacts into `d`, returning `raw_paths`.
+
+    Factored out of `_write_column` UNCHANGED — same files, same order, same
+    serializer arguments — because the 2026-08-05 resumability amendment writes each
+    cell twice over: once eagerly, into a temp directory that is renamed into place
+    the instant the cell completes (durability), and once, as a fall-back, from the
+    end-of-column banking path (compatibility). Both call this, so there is exactly
+    one definition of what a banked cell's bytes are.
+    """
+    gen_path = d / CELL_ARTIFACT_FILES["generations"]
+    gen_path.write_text("".join(
+        json.dumps(r.model_dump(), sort_keys=True) + "\n"
+        for r in sorted(records, key=lambda x: x.generation_id)))
+    ent_path = d / CELL_ARTIFACT_FILES["entropy"]
+    np.savez(ent_path,
+             **{f"steered_{g:04d}": a for g, a in sorted(ent_s.items())},
+             **{f"unsteered_{g:04d}": a for g, a in sorted(ent_u.items())})
+    stamp_path = d / CELL_ARTIFACT_FILES["stamp"]
+    stamp_path.write_text(json.dumps(outcome.stamp, indent=1, sort_keys=True,
+                                     default=str))
+    probe_path = d / CELL_ARTIFACT_FILES["probe_rows"]
+    probe_path.write_text(json.dumps(
+        [r.model_dump() for r in outcome.probe_rows], indent=1, sort_keys=True))
+    paths = {"generations": str(gen_path), "entropy": str(ent_path),
+             "stamp": str(stamp_path), "probe_rows": str(probe_path)}
+    if outcome.capability is not None:
+        cap_path = d / CELL_ARTIFACT_FILES["capability"]
+        cap_path.write_text(json.dumps(outcome.capability, indent=1, sort_keys=True,
+                                       default=str))
+        paths["capability"] = str(cap_path)
+    return paths
+
+
+def _cell_raw_paths(cells_dir: Path, cell_id: str,
+                    artifact_sha256: Collection[str]) -> dict[str, str]:
+    """`raw_paths` for a cell that is already on disk — the receipt's file list.
+
+    The same dict `_write_cell_files` returns, rebuilt without re-writing anything, so
+    a resumed column's `column_result.json` names its skipped cells exactly as the
+    uninterrupted column named them.
+    """
+    d = cells_dir / cell_id
+    return {logical: str(d / fname)
+            for logical, fname in CELL_ARTIFACT_FILES.items()
+            if fname in artifact_sha256}
+
+
+def _write_column(result: ColumnResult, *, raw: dict, work_root: Path,
+                  identity: Optional["RunIdentity"] = None) -> ColumnResult:
     """Bank the column: raw beside every claim, then a manifest over everything.
 
     Raw generations and per-position entropy arrays are written per cell so a desk
     recompute has the same inputs the filed numbers came from (§10's recipes), and the
     manifest's shas are what make M4 checkable without re-running anything.
+
+    SINCE THE RESUMABILITY AMENDMENT (2026-08-05) a cell is normally already banked by
+    the time this runs — `run_column` banks each cell atomically the moment it
+    completes — so this function's per-cell half is a no-op for those cells and it
+    writes only the column-level `column_result.json` and `manifest.json`. A cell that
+    is NOT yet on disk (a caller that banked nothing eagerly) is banked here, through
+    the same atomic path. Either way the bytes are the same bytes: the manifest walk
+    skips the `resume/` bookkeeping subtree by name, so the artifact map, the column
+    result and every cell's files are byte-for-byte what the pre-amendment module
+    wrote. What changed is WHEN they became durable, not WHAT they are.
     """
     cells_dir = work_root / "cells"
     cells_dir.mkdir(parents=True, exist_ok=True)
     updated: list[CellOutcome] = []
     for outcome in result.cells:
-        d = cells_dir / outcome.cell_id
-        d.mkdir(parents=True, exist_ok=True)
+        if outcome.raw_paths:
+            updated.append(outcome)                       # banked eagerly or resumed
+            continue
+        if outcome.cell_id not in raw:                        # pragma: no cover
+            raise BehavioralHarnessError(
+                f"{outcome.cell_id}: neither banked on disk nor held in memory — the "
+                "column cannot file raw beside its claim (§10)")
         records, ent_s, ent_u = raw[outcome.cell_id]
-        gen_path = d / "generations.jsonl"
-        gen_path.write_text("".join(
-            json.dumps(r.model_dump(), sort_keys=True) + "\n"
-            for r in sorted(records, key=lambda x: x.generation_id)))
-        ent_path = d / "entropy.npz"
-        np.savez(ent_path,
-                 **{f"steered_{g:04d}": a for g, a in sorted(ent_s.items())},
-                 **{f"unsteered_{g:04d}": a for g, a in sorted(ent_u.items())})
-        stamp_path = d / "stamp.json"
-        stamp_path.write_text(json.dumps(outcome.stamp, indent=1, sort_keys=True,
-                                         default=str))
-        probe_path = d / "probe_rows.json"
-        probe_path.write_text(json.dumps(
-            [r.model_dump() for r in outcome.probe_rows], indent=1, sort_keys=True))
-        paths = {"generations": str(gen_path), "entropy": str(ent_path),
-                 "stamp": str(stamp_path), "probe_rows": str(probe_path)}
-        if outcome.capability is not None:
-            cap_path = d / "capability.json"
-            cap_path.write_text(json.dumps(outcome.capability, indent=1, sort_keys=True,
-                                           default=str))
-            paths["capability"] = str(cap_path)
+        paths = bank_cell_atomically(
+            cells_dir, outcome, records=records, ent_s=ent_s, ent_u=ent_u,
+            work_root=work_root, identity=identity)
         updated.append(outcome.model_copy(update={"raw_paths": paths}))
     result = result.model_copy(update={"cells": updated})
     column_path = work_root / "column_result.json"
@@ -3719,7 +4064,8 @@ def _write_column(result: ColumnResult, *, raw: dict, work_root: Path) -> Column
         "artifacts": {},
     }
     for path in sorted(work_root.rglob("*")):
-        if path.is_file() and path.name != "manifest.json":
+        if (path.is_file() and path.name != "manifest.json"
+                and not is_resume_bookkeeping(path, work_root)):
             manifest["artifacts"][str(path.relative_to(work_root))] = hashlib.sha256(
                 path.read_bytes()).hexdigest()
     manifest_path = work_root / "manifest.json"
@@ -3727,6 +4073,1068 @@ def _write_column(result: ColumnResult, *, raw: dict, work_root: Path) -> Column
     logger.info("column banked: %d cells, %d generations → %s (manifest %s)",
                 len(result.cells), result.n_generations, work_root, manifest_path)
     return result.model_copy(update={"manifest": manifest})
+
+
+# ------------------------------------ durability, resumption, residency (§2.1++)
+# THE 2026-08-05 AMENDMENT, in one paragraph. §2.1's job banked its whole column at
+# the end: a column killed at cell 50 of 51 left NOTHING on disk, even though every
+# generation was reproducible — seeds are per-(cell, gen_id) BY DESIGN (§2.3, ruling
+# 8, M5), so the system was always ~90% resumable and merely never wrote down what it
+# had done. Three pieces close that, and NONE of them may move a byte of the column
+# of record:
+#
+#   1. ATOMIC PER-CELL BANKING. A cell's artifacts are written into a temp directory
+#      and RENAMED into place when the cell completes. `rename(2)` on a directory is
+#      atomic on POSIX, so a cell exists whole — with its complete §2.8 stamp — or it
+#      does not exist. There is no half-cell state for a resume to have to reason
+#      about, which is the property everything below rests on.
+#   2. VERIFY-EVERYTHING RESUME. `--resume` inventories the banked cells and
+#      RE-VERIFIES each one (receipt, artifact shas, the engine's own stamp checker,
+#      and the §2.7 digests recomputed FROM the banked raw), then requires identity
+#      with the current process on every input that decides what a cell contains. Any
+#      identity difference refuses the whole resume by the name of the condition; a
+#      cell that cannot be trusted is quarantined and re-run.
+#   3. THE M55 HANDSHAKE. An attempt directory has at most one live writer. A lock
+#      naming pid + process start time + boot id + host is taken before anything is
+#      written; a live holder refuses; a stale one is REPORTED with its contents and
+#      cleared explicitly.
+#
+# WHY A RESUMED §2.7 GATE IS STRONGER, NOT WEAKER. The replay gate re-generates K=3
+# cells at the end and requires bitwise-identical token ids and float32 entropy
+# arrays. On a resumed column, a selected cell's FIRST digest may have been produced
+# by a previous PROCESS. That is not a weakening: §2.7's own fresh-process replay
+# recipe is precisely "re-run one cell in a NEW process, same canonical layout, and
+# compare the banked digests", and the standing evidence is that this reproduces
+# bitwise. A resumed gate therefore performs the fresh-process replay AS the gate,
+# across the seam, rather than filing it OWED — and `resume/RESUME-REPORT.json`
+# records which gate cells crossed the seam so the strengthening is on the record
+# instead of being inferred.
+#: `resume/` — the attempt directory's BOOKKEEPING subtree. Receipts, the lockfile,
+#: the quarantine and the resume report live here and NONE of them is an artifact of
+#: record: the manifest walk skips this subtree by name, which is what keeps a banked
+#: column byte-identical to a pre-amendment one.
+RESUME_SUBTREE = "resume"
+CELL_RECEIPT_SUBDIR = "cells"
+QUARANTINE_SUBDIR = "quarantine"
+ATTEMPT_LOCK_NAME = "attempt.lock"
+RESUME_REPORT_NAME = "RESUME-REPORT.json"
+#: A cell mid-write. `.tmp-` prefixed and pid-suffixed, so two processes cannot
+#: collide on one and neither the manifest walk nor the resume inventory can mistake
+#: a partial write for a cell.
+CELL_TMP_PREFIX = ".tmp-"
+
+#: The per-cell artifacts, logical name → file name. `_write_cell_files` writes them,
+#: the receipt shas them, the resume verifier re-shas them, and `raw_paths` is rebuilt
+#: from them — one table, so the four cannot drift apart.
+CELL_ARTIFACT_FILES: dict[str, str] = {
+    "generations": "generations.jsonl",
+    "entropy": "entropy.npz",
+    "stamp": "stamp.json",
+    "probe_rows": "probe_rows.json",
+    "capability": "capability.json",
+}
+
+#: The modules whose BYTES decide what a cell contains, relative to the package root.
+#: Not "the engine" loosely: this module draws the tokens, the staging module writes
+#: the document and half the stamp's provenance, the battery module produces
+#: `capability.json`, the §4.2 module supplies the verdict vocabulary, and `hooks.py`
+#: performs the injection itself. A resume that ran under different bytes for ANY of
+#: them would be splicing two different instruments into one column.
+IDENTITY_MODULES: tuple[str, ...] = (
+    "scripts/run_behavioral_cells.py",
+    "scripts/build_behavioral_banks.py",
+    "scripts/capability_battery.py",
+    "scripts/actuation_calibration.py",
+    "extraction/hooks.py",
+)
+
+RESUME_SEAM_EVIDENCE = (
+    "§2.7's replay gate runs at the end over the FULL population, including cells "
+    "banked by an earlier process. Regeneration across the process seam is sound: "
+    "§2.3's uniforms are per-(cell, gen_id) sha256 material (ruling 8 / M5), the "
+    "canonical layout is required identical, and §2.7's own fresh-process replay "
+    "recipe (new process, same layout, CUBLAS_WORKSPACE_CONFIG=:4096:8, "
+    "torch.use_deterministic_algorithms(True, warn_only=True)) is the standing "
+    "evidence that a re-run in a fresh process reproduces the banked digests "
+    "bitwise. A gate cell whose first digest crossed the seam therefore tests MORE "
+    "than an uninterrupted gate cell does, not less.")
+
+
+def engine_module_shas() -> dict[str, Optional[str]]:
+    """sha256 of every module in `IDENTITY_MODULES`, by package-relative path.
+
+    Read from DISK relative to this file rather than from an import, because
+    `hooks.py` needs torch and the desk's own interpreter has none: the identity of
+    the bytes must be computable in every configuration the selftest runs in (M44). A
+    module that cannot be read is recorded as `None` — an unknown, never an
+    agreement — and `RunIdentity.assert_identical_to` refuses on it by name.
+    """
+    root = Path(__file__).resolve().parent.parent
+    out: dict[str, Optional[str]] = {}
+    for rel in IDENTITY_MODULES:
+        try:
+            out[rel] = hashlib.sha256((root / rel).read_bytes()).hexdigest()
+        except OSError as exc:
+            logger.warning("engine module %s unreadable (%s) — its sha is recorded as "
+                           "UNKNOWN and a resume will refuse on it, never assume it",
+                           rel, exc)
+            out[rel] = None
+    return out
+
+
+def document_content_sha256(doc: Any) -> str:
+    """The cells document's CONTENT digest — key-order- and whitespace-independent.
+
+    The file's own sha would move when a staging module re-serialized an identical
+    document, which is a re-format and not a re-experiment; this digest moves when
+    the DOCUMENT moves. The file sha rides along in `RunIdentity` as an informational
+    field and gates nothing, for exactly that reason.
+    """
+    body = json.loads(doc.model_dump_json()) if hasattr(doc, "model_dump_json") else doc
+    return hashlib.sha256(
+        json.dumps(body, sort_keys=True, default=str).encode()).hexdigest()
+
+
+def _float_key(x: float) -> str:
+    """A float's exact identity as a string — `.hex()` round-trips every bit."""
+    return float(x).hex()
+
+
+class RunIdentity(BaseModel):
+    """Everything that must be TRUE OF BOTH PROCESSES for a resume to be one column.
+
+    Not a summary and not a convenience: this is the closed list of things that decide
+    what a cell contains. Each field's disagreement has its own exception class,
+    because "the resume was refused" is not an actionable message and the responses
+    differ completely (re-stage the document · re-point the corpus · reload the model ·
+    take the layout question to the desk).
+
+    `measured_per_token_median_resid_norm` is the one entry that is not a sha of an
+    input. It is here because §2.5 resolves α from it IN JOB: two processes that
+    measured different norms would give the re-run cells a different dose from their
+    banked siblings, and the column would be inhomogeneous while looking whole.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid", protected_namespaces=())
+
+    node_key: str
+    arm: str
+    site: int
+    n_per_cell: int
+    cells_document_sha256: str
+    #: informational: the staged FILE's sha when the caller had one. Never gates.
+    cells_document_file_sha256: Optional[str] = None
+    corpus_manifest_sha256: str
+    prompt_pool_sha256: str
+    actuation_calibration_sha256: Optional[str] = None
+    engine_module_sha256: dict[str, Optional[str]]
+    canonical_layout: dict
+    measured_per_token_median_resid_norm: float
+    model_config_sha256: Optional[str] = None
+
+    def assert_identical_to(self, banked: "RunIdentity", *, where: str = "") -> None:
+        """Refuse, by the name of the condition, unless the two are the same run.
+
+        Checked in the order a mismatch is cheapest to diagnose in: whose column it is,
+        what it was staged from, what it stands on, what code made it, what layout it
+        ran in, what model was loaded, and finally the measured quantity that sets α.
+        """
+        tag = f"{where}: " if where else ""
+        cols = [f for f in ("node_key", "arm", "site", "n_per_cell")
+                if getattr(self, f) != getattr(banked, f)]
+        if cols:
+            raise ResumeColumnIdentityMismatch(
+                f"{tag}the banked cells are another column: "
+                + "; ".join(f"{f} banked={getattr(banked, f)!r} "
+                            f"now={getattr(self, f)!r}" for f in cols)
+                + ". One attempt directory is one (node, arm, site) column (§2.1).")
+        if self.cells_document_sha256 != banked.cells_document_sha256:
+            raise ResumeCellsDocumentMismatch(
+                f"{tag}cells document {banked.cells_document_sha256[:12]}… was banked, "
+                f"{self.cells_document_sha256[:12]}… is staged now. A re-staged "
+                "document is a re-planned column; resuming into it would splice two "
+                "plans and report the union as one.")
+        if self.corpus_manifest_sha256 != banked.corpus_manifest_sha256:
+            raise ResumeCorpusVintageMismatch(
+                f"{tag}corpus manifest {banked.corpus_manifest_sha256[:12]}… was "
+                f"banked, {self.corpus_manifest_sha256[:12]}… is of record now (§9 "
+                "item 2). The basis is also SEED MATERIAL (§2.3), so every re-run "
+                "cell would draw a different tape from its banked siblings.")
+        if self.prompt_pool_sha256 != banked.prompt_pool_sha256:
+            raise ResumePromptPoolMismatch(
+                f"{tag}prompt pool {banked.prompt_pool_sha256[:12]}… was banked, "
+                f"{self.prompt_pool_sha256[:12]}… is loaded now (ruling 10, M4) — a "
+                "cell generated against another pool is another read.")
+        if self.actuation_calibration_sha256 != banked.actuation_calibration_sha256:
+            raise ResumeVerdictMismatch(
+                f"{tag}§4.2 verdict document differs: banked "
+                f"{(banked.actuation_calibration_sha256 or 'ABSENT (OWED)')[:12]}… vs "
+                f"{(self.actuation_calibration_sha256 or 'ABSENT (OWED)')[:12]}… now. "
+                "Half a column stamped OWED and half stamped with a verdict is two "
+                "provenance statements in one column.")
+        unknown = sorted(k for k in set(self.engine_module_sha256)
+                         | set(banked.engine_module_sha256)
+                         if self.engine_module_sha256.get(k) is None
+                         or banked.engine_module_sha256.get(k) is None)
+        if unknown:
+            raise ResumeEngineModuleUnknown(
+                f"{tag}engine module sha UNKNOWN on one side for {unknown} — an "
+                "unreadable module is an unknown, and an unknown is never read as "
+                "agreement (§10: absence is a reportable state, not a pass).")
+        moved = sorted(k for k in self.engine_module_sha256
+                       if self.engine_module_sha256[k]
+                       != banked.engine_module_sha256.get(k))
+        if moved:
+            raise ResumeEngineModuleMismatch(
+                f"{tag}the engine moved under the column: "
+                + "; ".join(
+                    f"{k} banked={(banked.engine_module_sha256.get(k) or '')[:12]}… "
+                    f"now={(self.engine_module_sha256[k] or '')[:12]}…" for k in moved)
+                + ". A column half-produced by one operationalization of record and "
+                "half by another is not an operationalization of record.")
+        lay = sorted(k for k in set(self.canonical_layout) | set(banked.canonical_layout)
+                     if json.dumps(self.canonical_layout.get(k), sort_keys=True,
+                                   default=str)
+                     != json.dumps(banked.canonical_layout.get(k), sort_keys=True,
+                                   default=str))
+        if lay:
+            raise ResumeLayoutMismatch(
+                f"{tag}the CANONICAL LAYOUT differs on {lay}: "
+                + "; ".join(f"{k} banked={banked.canonical_layout.get(k)!r} "
+                            f"now={self.canonical_layout.get(k)!r}" for k in lay)
+                + ". §2.2 freezes the layout before any cell fires and §2.7 defines "
+                "replay IN it; §9 item 13 makes a mid-column change a restart from "
+                "preflight, never a silent split. Batch invariance is a "
+                "CHARACTERIZED property, not an assumed one — B=40 is a different "
+                "experiment from B=80.")
+        if self.model_config_sha256 != banked.model_config_sha256:
+            raise ResumeModelConfigMismatch(
+                f"{tag}M9 drift anchor moved: banked "
+                f"{(banked.model_config_sha256 or 'ABSENT')[:12]}… vs "
+                f"{(self.model_config_sha256 or 'ABSENT')[:12]}… now — a different "
+                "model config is loaded than the one the banked cells rode.")
+        if (_float_key(self.measured_per_token_median_resid_norm)
+                != _float_key(banked.measured_per_token_median_resid_norm)):
+            raise ResumeNormDrift(
+                f"{tag}the in-job per-token median residual norm is "
+                f"{self.measured_per_token_median_resid_norm!r} and the banked cells "
+                f"rode {banked.measured_per_token_median_resid_norm!r}. §2.5 resolves "
+                "α = alpha_frac × this number, so the re-run cells would carry a "
+                "different dose from their banked siblings — an inhomogeneous column "
+                "that every downstream read would treat as one. Never rounded, never "
+                "tolerated.")
+
+
+class CellReceipt(BaseModel):
+    """A completed cell's attestation — what it is, what it hashes to, and under what.
+
+    Written after the cell directory is renamed into place, so its presence means
+    "this cell was banked WHOLE by a process that knew its own identity". A cell
+    directory without one is unattested: it may be a pre-amendment bank, or a rename
+    that landed the instant before a kill. Either way it is not trusted — it is
+    quarantined and re-run, because a cell we cannot attest is cheaper to regenerate
+    than to argue about.
+
+    It carries the `CellOutcome` fields that have NO file of their own (`entropy`, the
+    coherence panel, `elapsed_s`, the counts), which is what lets a resumed column
+    rebuild an outcome identical to the one the uninterrupted column filed.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    schema_version: Literal["behavioral-cell-receipt/1"] = "behavioral-cell-receipt/1"
+    cell_id: str
+    kind: CellKind
+    alpha_frac: float
+    alpha: float
+    n: int
+    tokens_generated: int
+    elapsed_s: float
+    entropy: dict
+    coherence: Optional[dict] = None
+    token_id_sha256: str
+    entropy_array_sha256: str
+    #: file name within the cell directory → sha256 of its bytes.
+    artifact_sha256: dict[str, str]
+    identity: RunIdentity
+    banked_at: str
+    banked_by_pid: int
+    banked_on_host: str
+
+
+class AttemptLock(BaseModel):
+    """M55's handshake, as a file. Enough to tell a live holder from a dead one."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    pid: int
+    hostname: str
+    #: `/proc/<pid>/stat` field 22. Without it a RECYCLED pid reads as a live holder.
+    process_start_ticks: Optional[int] = None
+    #: without it, a pid+start pair can repeat across a reboot.
+    boot_id: Optional[str] = None
+    created_at: str
+    cells_document_sha256: str
+    work_root: str
+    argv: list[str] = Field(default_factory=list)
+
+
+class ResumeInventory(BaseModel):
+    """What a resume found, decided, and is about to do — the report, as data."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    planned_cells: int
+    verified: list[str]
+    quarantined: list[dict]
+    to_run: list[str]
+    seam_note: str = RESUME_SEAM_EVIDENCE
+
+
+def is_resume_bookkeeping(path: Path, work_root: Path) -> bool:
+    """True for anything under `resume/` or inside a `.tmp-` cell being written.
+
+    The manifest's exclusion, as one named predicate. The exclusion is deliberate and
+    narrow: bookkeeping is not an artifact of record, and a manifest that grew rows
+    when a column happened to be resumed would make two identical columns compare
+    unequal for a reason that has nothing to do with the science. Every excluded file
+    is self-attesting anyway — a receipt carries the shas of the artifacts it
+    attests, and the verifier re-computes them from the raw.
+    """
+    try:
+        parts = path.relative_to(work_root).parts
+    except ValueError:                                        # pragma: no cover
+        return False
+    return (bool(parts) and parts[0] == RESUME_SUBTREE) or any(
+        p.startswith(CELL_TMP_PREFIX) for p in parts)
+
+
+def _resume_dir(work_root: Path) -> Path:
+    return work_root / RESUME_SUBTREE
+
+
+def _receipt_path(work_root: Path, cell_id: str) -> Path:
+    return _resume_dir(work_root) / CELL_RECEIPT_SUBDIR / f"{cell_id}.json"
+
+
+def _fsync_path(path: Path, *, is_dir: bool = False) -> None:
+    """fsync a file or directory, degrading to a WARNING (M19) rather than failing.
+
+    The rename is what makes a cell atomic; the fsync is what makes it survive a
+    power loss. A filesystem that refuses the second still gets the first, and saying
+    so is better than taking a column down over a durability nicety.
+    """
+    try:
+        fd = os.open(str(path), os.O_RDONLY | (os.O_DIRECTORY if is_dir else 0))
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    except OSError as exc:                                    # pragma: no cover
+        logger.warning("fsync(%s) failed (%s) — the rename is still atomic; only "
+                       "power-loss durability is degraded", path, exc)
+
+
+def _atomic_write_text(path: Path, body: str) -> None:
+    """Write a file via temp + rename, so a reader never sees half of one."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.parent / f"{CELL_TMP_PREFIX}{path.name}.{os.getpid()}"
+    tmp.write_text(body)
+    _fsync_path(tmp)
+    os.replace(tmp, path)
+    _fsync_path(path.parent, is_dir=True)
+
+
+def bank_cell_atomically(cells_dir: Path, outcome: CellOutcome, *,
+                         records: Sequence[GenerationRecord],
+                         ent_s: dict[int, np.ndarray], ent_u: dict[int, np.ndarray],
+                         work_root: Optional[Path] = None,
+                         identity: Optional[RunIdentity] = None) -> dict[str, str]:
+    """Write one cell into a temp directory and RENAME it into place.
+
+    The whole of piece 1. `rename(2)` on a directory is atomic on POSIX, so at every
+    instant `cells/<cell_id>` either does not exist or is a complete cell with a
+    complete §2.8 stamp. A kill between two cells therefore costs exactly the cell in
+    flight and nothing else, and no reader — a watch, a pull, the resume verifier —
+    can ever observe a partially written cell.
+
+    A pre-existing directory at the destination is QUARANTINED before the rename
+    rather than overwritten: it is either a previous attempt's cell that this process
+    decided to re-run, or something nobody can account for, and both deserve to
+    survive somewhere a human can look at them.
+    """
+    cells_dir.mkdir(parents=True, exist_ok=True)
+    root = work_root if work_root is not None else cells_dir.parent
+    tmp = cells_dir / f"{CELL_TMP_PREFIX}{outcome.cell_id}-{os.getpid()}"
+    if tmp.exists():                                          # pragma: no cover
+        shutil.rmtree(tmp)
+    tmp.mkdir(parents=True)
+    _write_cell_files(tmp, outcome, records, ent_s, ent_u)
+    for child in sorted(tmp.iterdir()):
+        _fsync_path(child)
+    _fsync_path(tmp, is_dir=True)
+    final = cells_dir / outcome.cell_id
+    if final.exists():
+        quarantine_banked_cell(
+            root, outcome.cell_id,
+            reason="a cell directory already stood where this run was about to bank "
+                   "one; it was moved aside rather than overwritten")
+    os.rename(tmp, final)
+    _fsync_path(cells_dir, is_dir=True)
+    paths = {logical: str(final / fname)
+             for logical, fname in CELL_ARTIFACT_FILES.items()
+             if (final / fname).exists()}
+    if identity is not None:
+        write_cell_receipt(root, outcome, identity=identity, cell_dir=final)
+    return paths
+
+
+def write_cell_receipt(work_root: Path, outcome: CellOutcome, *,
+                       identity: RunIdentity, cell_dir: Path) -> CellReceipt:
+    """Attest a banked cell: its shas, its outcome fields, and this run's identity.
+
+    Written AFTER the cell's rename, on purpose. If the process dies in between, the
+    cell exists whole but unattested, and the resume quarantines and re-runs it —
+    which costs one cell and preserves the invariant that everything a resume SKIPS
+    was attested by a process that knew what it was.
+    """
+    artifact_sha = {
+        fname: hashlib.sha256((cell_dir / fname).read_bytes()).hexdigest()
+        for fname in CELL_ARTIFACT_FILES.values() if (cell_dir / fname).exists()}
+    receipt = CellReceipt(
+        cell_id=outcome.cell_id, kind=outcome.kind, alpha_frac=outcome.alpha_frac,
+        alpha=outcome.alpha, n=outcome.n, tokens_generated=outcome.tokens_generated,
+        elapsed_s=outcome.elapsed_s, entropy=outcome.entropy,
+        coherence=outcome.coherence, token_id_sha256=outcome.token_id_sha256,
+        entropy_array_sha256=outcome.entropy_array_sha256,
+        artifact_sha256=artifact_sha, identity=identity,
+        banked_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        banked_by_pid=os.getpid(), banked_on_host=platform.node())
+    _atomic_write_text(_receipt_path(work_root, outcome.cell_id),
+                       json.dumps(json.loads(receipt.model_dump_json()), indent=1,
+                                  sort_keys=True))
+    return receipt
+
+
+# ---------------------------------------------------------------- the M55 lockfile
+def _pid_alive(pid: int) -> bool:
+    """Is there a process with this pid right now (says nothing about WHOSE)."""
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:                                   # someone else's, alive
+        return True
+    except OSError:                                           # pragma: no cover
+        return False
+    return True
+
+
+def _process_start_ticks(pid: int) -> Optional[int]:
+    """`/proc/<pid>/stat` field 22 — what distinguishes a holder from a recycled pid."""
+    try:
+        data = Path(f"/proc/{pid}/stat").read_text()
+        rest = data[data.rindex(")") + 2:].split()
+        return int(rest[19])
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+def _boot_id() -> Optional[str]:
+    """The kernel's boot id — a pid+start pair can otherwise repeat across a reboot."""
+    try:
+        return Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+    except OSError:                                           # pragma: no cover
+        return None
+
+
+def lock_holder_state(lock: AttemptLock) -> tuple[str, str]:
+    """Classify a lockfile's holder: ('live'|'stale'|'foreign', why).
+
+    Three answers and no fourth. FOREIGN is its own state rather than a stale case
+    because `/models` is shared storage: a pid on this host says nothing whatsoever
+    about a pid on the other node, and guessing is how M55 gets re-created quietly.
+    """
+    if lock.hostname != platform.node():
+        return "foreign", (f"held by pid {lock.pid} on host {lock.hostname!r}; this is "
+                           f"{platform.node()!r} and a foreign pid is unadjudicable "
+                           "from here")
+    boot = _boot_id()
+    if lock.boot_id is not None and boot is not None and lock.boot_id != boot:
+        return "stale", (f"taken before a reboot (boot id {lock.boot_id[:8]}… != "
+                         f"{boot[:8]}…), so pid {lock.pid} cannot be its holder")
+    if not _pid_alive(lock.pid):
+        return "stale", f"pid {lock.pid} is gone"
+    started = _process_start_ticks(lock.pid)
+    if (lock.process_start_ticks is not None and started is not None
+            and started != lock.process_start_ticks):
+        return "stale", (f"pid {lock.pid} exists but started at {started}, not at "
+                         f"{lock.process_start_ticks} — the pid was RECYCLED and the "
+                         "live process is somebody else's")
+    return "live", (f"pid {lock.pid} on {lock.hostname} is alive"
+                    + (f" and started at {started}" if started is not None else ""))
+
+
+def read_attempt_lock(work_root: Path) -> Optional[AttemptLock]:
+    """The current lockfile, or None. A lockfile that will not parse is a HALT."""
+    path = _resume_dir(work_root) / ATTEMPT_LOCK_NAME
+    if not path.exists():
+        return None
+    try:
+        return AttemptLock(**json.loads(path.read_text()))
+    except (json.JSONDecodeError, OSError, ValidationError, TypeError) as exc:
+        raise AttemptLockUnreadable(
+            f"{path} exists but is not a lock ({type(exc).__name__}: {exc}). It is "
+            "REFUSED, never clobbered: an unparseable lock is most likely a lock "
+            "being written by a live process right now, and the one thing that must "
+            "not happen is two writers in one attempt directory (M55).") from exc
+
+
+def acquire_attempt_lock(work_root: Path, *, cells_document_sha256: str
+                         ) -> tuple[AttemptLock, Optional[dict]]:
+    """Take the attempt directory, refusing a live holder and clearing a stale one.
+
+    Returns `(our lock, the stale lock we cleared or None)`. A stale lock is never
+    silently removed: its full contents and the reason it is stale are logged at
+    WARNING, returned to the caller, and filed in the resume report.
+    """
+    work_root.mkdir(parents=True, exist_ok=True)
+    _resume_dir(work_root).mkdir(parents=True, exist_ok=True)
+    path = _resume_dir(work_root) / ATTEMPT_LOCK_NAME
+    cleared: Optional[dict] = None
+    existing = read_attempt_lock(work_root)
+    if existing is not None:
+        state, why = lock_holder_state(existing)
+        if state == "live":
+            raise AttemptLockHeld(
+                f"{work_root} is held: {why}. M55: a second writer in one attempt "
+                "directory is how a cancelled job's orphan quietly corrupts the "
+                "column the replacement job is banking. Reap the holder by verified "
+                "ownership (/proc/<pid>/cmdline) or wait for it — never remove this "
+                f"lock by hand. Lock: {existing.model_dump_json()}")
+        if state == "foreign":
+            raise AttemptLockForeignHost(
+                f"{work_root} carries a lock from another host: {why}. Adjudicate it "
+                f"THERE. Lock: {existing.model_dump_json()}")
+        cleared = {**json.loads(existing.model_dump_json()), "stale_because": why}
+        logger.warning("STALE LOCK CLEARED at %s — %s; full lock: %s", work_root, why,
+                       existing.model_dump_json())
+        path.unlink(missing_ok=True)
+    lock = AttemptLock(
+        pid=os.getpid(), hostname=platform.node(),
+        process_start_ticks=_process_start_ticks(os.getpid()), boot_id=_boot_id(),
+        created_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        cells_document_sha256=cells_document_sha256, work_root=str(work_root),
+        argv=list(sys.argv))
+    _atomic_write_text(path, json.dumps(json.loads(lock.model_dump_json()), indent=1,
+                                        sort_keys=True))
+    logger.info("attempt lock taken: pid %d on %s → %s", lock.pid, lock.hostname, path)
+    return lock, cleared
+
+
+def release_attempt_lock(work_root: Path, lock: AttemptLock) -> bool:
+    """Release OUR lock. Another process's lock is left alone and reported."""
+    current = None
+    with contextlib.suppress(AttemptLockUnreadable):
+        current = read_attempt_lock(work_root)
+    if current is None:
+        logger.warning("attempt lock at %s was already gone at release", work_root)
+        return False
+    if (current.pid, current.hostname, current.created_at) != (
+            lock.pid, lock.hostname, lock.created_at):
+        logger.warning("attempt lock at %s is no longer ours (%s) — left in place",
+                       work_root, current.model_dump_json())
+        return False
+    (_resume_dir(work_root) / ATTEMPT_LOCK_NAME).unlink(missing_ok=True)
+    return True
+
+
+@contextlib.contextmanager
+def attempt_lock(work_root: Optional[Path], *, cells_document_sha256: str,
+                 enabled: bool = True) -> Any:
+    """The M55 handshake as a scope. A `work_root` of None locks nothing."""
+    if work_root is None or not enabled:
+        yield None
+        return
+    lock, cleared = acquire_attempt_lock(
+        Path(work_root), cells_document_sha256=cells_document_sha256)
+    try:
+        yield {"lock": json.loads(lock.model_dump_json()), "stale_cleared": cleared}
+    finally:
+        release_attempt_lock(Path(work_root), lock)
+
+
+# ------------------------------------------------------------ resume verification
+def _records_from_jsonl(path: Path) -> list[GenerationRecord]:
+    """Banked generations, back through their own schema (never a loose dict)."""
+    out: list[GenerationRecord] = []
+    for i, line in enumerate(path.read_text().splitlines()):
+        if not line.strip():
+            continue
+        try:
+            out.append(GenerationRecord(**json.loads(line)))
+        except (json.JSONDecodeError, ValidationError, TypeError) as exc:
+            raise BankedCellDigestMismatch(
+                f"{path}: line {i + 1} is not a GenerationRecord "
+                f"({type(exc).__name__}: {exc}) — the banked raw cannot be read back, "
+                "so nothing about this cell can be re-verified") from exc
+    return out
+
+
+def recompute_cell_digests(cell_dir: Path) -> tuple[str, str]:
+    """Re-derive (token_id_sha256, entropy_array_sha256) FROM the banked raw.
+
+    The strongest half of resume verification, and the reason a sha of the file bytes
+    is not enough on its own: this re-runs §2.7's own digest definitions over the
+    generations and the entropy arrays, so a banked cell is required to still MEAN
+    what its stamp says it means, not merely to still weigh the same.
+    """
+    records = _records_from_jsonl(cell_dir / CELL_ARTIFACT_FILES["generations"])
+    if not records:
+        raise BankedCellDigestMismatch(f"{cell_dir}: no generations banked")
+    order = sorted(r.generation_id for r in records)
+    try:
+        with np.load(cell_dir / CELL_ARTIFACT_FILES["entropy"]) as z:
+            arrays = ([np.asarray(z[f"steered_{g:04d}"]) for g in order]
+                      + [np.asarray(z[f"unsteered_{g:04d}"]) for g in order])
+    except (OSError, KeyError, ValueError, EOFError) as exc:
+        raise BankedCellDigestMismatch(
+            f"{cell_dir}: the banked entropy arrays cannot be read "
+            f"({type(exc).__name__}: {exc})") from exc
+    return token_id_digest(records), entropy_array_digest(arrays)
+
+
+def verify_banked_cell(work_root: Path, cell_id: str, *, spec: CellSpec,
+                       identity: RunIdentity) -> CellReceipt:
+    """RE-VERIFY one banked cell, top to bottom, before anything is allowed to skip it.
+
+    Five layers, cheapest first, each with its own refusal:
+
+      1. the receipt exists and parses (`BankedCellUnattested` / `…ReceiptUnreadable`);
+      2. this run and the banked run are the SAME RUN (`ResumeIdentityRefused`
+         family — column-scoped, propagated, never caught);
+      3. every artifact the receipt names is present with the bytes it attests;
+      4. the banked stamp still passes THE ENGINE'S OWN §2.8 checker — the same
+         function the desk's checker calls, not a re-implementation of it;
+      5. the §2.7 digests still reproduce FROM the raw, and agree with both the
+         receipt and the stamp's own `replay_gate_digests`.
+    """
+    receipt_path = _receipt_path(work_root, cell_id)
+    if not receipt_path.exists():
+        raise BankedCellUnattested(
+            f"{cell_id}: banked with no completion receipt at {receipt_path}. Either "
+            "it predates the resumability amendment or the process died between the "
+            "cell's rename and its attestation. Unattested is not trusted: the cell "
+            "is quarantined and re-run.")
+    try:
+        receipt = CellReceipt(**json.loads(receipt_path.read_text()))
+    except (json.JSONDecodeError, OSError, ValidationError, TypeError) as exc:
+        raise BankedCellReceiptUnreadable(
+            f"{cell_id}: receipt unreadable ({type(exc).__name__}: {exc})") from exc
+
+    # (2) column-scoped: raised THROUGH the caller, never treated as a lost cell.
+    identity.assert_identical_to(receipt.identity, where=f"banked cell {cell_id}")
+
+    cell_dir = work_root / "cells" / cell_id
+    for fname, sha in sorted(receipt.artifact_sha256.items()):
+        f = cell_dir / fname
+        if not f.exists():
+            raise BankedCellArtifactMissing(
+                f"{cell_id}: the receipt names {fname} and the cell does not carry it")
+        actual = hashlib.sha256(f.read_bytes()).hexdigest()
+        if actual != sha:
+            raise BankedCellArtifactShaMismatch(
+                f"{cell_id}/{fname}: {actual[:12]}… on disk, {sha[:12]}… attested "
+                "(M4). The banked bytes changed after the cell was banked.")
+    if receipt.kind != spec.kind or receipt.cell_id != cell_id:
+        raise BankedCellUnattested(
+            f"{cell_id}: the receipt describes {receipt.cell_id!r} of kind "
+            f"{receipt.kind!r}, the plan says {cell_id!r} of kind {spec.kind!r}")
+
+    stamp = json.loads((cell_dir / CELL_ARTIFACT_FILES["stamp"]).read_text())
+    try:
+        assert_stamp_complete(stamp, cell_kind=spec.kind)
+    except (StampIncompleteError, VectorClassContractError) as exc:
+        raise BankedCellStampIncomplete(
+            f"{cell_id}: the banked stamp fails the engine's own §2.8 checker on "
+            f"re-read ({type(exc).__name__}: {exc})") from exc
+    if stamp.get("cell_id") != cell_id:
+        raise BankedCellStampIncomplete(
+            f"{cell_id}: the banked stamp names cell {stamp.get('cell_id')!r}")
+
+    tok_sha, ent_sha = recompute_cell_digests(cell_dir)
+    banked = stamp.get("replay_gate_digests") or {}
+    mismatched = []
+    if tok_sha != receipt.token_id_sha256 or tok_sha != banked.get("token_ids"):
+        mismatched.append(f"token_ids recomputed={tok_sha[:12]}… "
+                          f"receipt={receipt.token_id_sha256[:12]}… "
+                          f"stamp={str(banked.get('token_ids'))[:12]}…")
+    if (ent_sha != receipt.entropy_array_sha256
+            or ent_sha != banked.get("entropy_arrays")):
+        mismatched.append(f"entropy_arrays recomputed={ent_sha[:12]}… "
+                          f"receipt={receipt.entropy_array_sha256[:12]}… "
+                          f"stamp={str(banked.get('entropy_arrays'))[:12]}…")
+    if mismatched:
+        raise BankedCellDigestMismatch(
+            f"{cell_id}: the banked raw no longer reproduces its own §2.7 digests — "
+            + "; ".join(mismatched))
+    return receipt
+
+
+def quarantine_banked_cell(work_root: Path, cell_id: str, *, reason: str) -> Path:
+    """Move a cell that cannot be trusted somewhere a human can still look at it.
+
+    Never deleted. A cell that failed verification is EVIDENCE — of a truncated
+    write, of a sanitizer that walked through a live attempt directory, of a disk —
+    and the one thing that must not happen is for it to be quietly replaced by a
+    fresh one with no trace that the first ever existed.
+    """
+    stamp_time = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    dest = _resume_dir(work_root) / QUARANTINE_SUBDIR / f"{cell_id}--{stamp_time}"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if dest.exists():                                         # pragma: no cover
+        dest = dest.parent / f"{cell_id}--{stamp_time}-{os.getpid()}"
+    src = work_root / "cells" / cell_id
+    if src.exists():
+        shutil.move(str(src), str(dest))
+    else:                                                     # pragma: no cover
+        dest.mkdir(parents=True, exist_ok=True)
+    receipt = _receipt_path(work_root, cell_id)
+    if receipt.exists():
+        shutil.move(str(receipt), str(dest / "receipt.json"))
+    (dest / "QUARANTINE-REASON.txt").write_text(
+        f"cell_id: {cell_id}\nquarantined_at: {stamp_time}\nby_pid: {os.getpid()}\n"
+        f"on_host: {platform.node()}\nreason: {reason}\n\n"
+        "This cell was NOT trusted as banked and was re-run from scratch. It is kept\n"
+        "because a cell that failed verification is evidence, and a quietly replaced\n"
+        "cell leaves none.\n")
+    logger.warning("QUARANTINED banked cell %s → %s (%s)", cell_id, dest, reason)
+    return dest
+
+
+def inventory_banked_cells(work_root: Path) -> list[str]:
+    """Cell ids currently banked in this attempt directory (temps excluded)."""
+    cells_dir = work_root / "cells"
+    if not cells_dir.is_dir():
+        return []
+    return sorted(d.name for d in cells_dir.iterdir()
+                  if d.is_dir() and not d.name.startswith(CELL_TMP_PREFIX))
+
+
+def resume_preflight(work_root: Path, *, specs: Sequence[CellSpec],
+                     identity: RunIdentity
+                     ) -> tuple[ResumeInventory, dict[str, CellReceipt]]:
+    """Inventory, re-verify, quarantine, and decide what still has to run.
+
+    An identity refusal propagates: there is no such thing as a partial resume into a
+    changed experiment. A cell-scoped refusal quarantines that cell and adds it to the
+    work list. A banked cell this document does not plan is an IDENTITY refusal, not a
+    quarantine — an attempt directory holding cells from another plan is not this
+    column's attempt directory, and re-running "the rest" into it would file a union
+    nobody staged.
+    """
+    by_id = {c.cell_id: c for c in specs}
+    verified: list[str] = []
+    quarantined: list[dict] = []
+    receipts: dict[str, CellReceipt] = {}
+    # The cell that was in flight when the previous process died left its temp
+    # directory behind. It is not a cell — it never got its rename — and the M55 lock
+    # has already established that nobody else is writing here, so it is removed and
+    # named rather than left to accumulate across attempts.
+    cells_dir = work_root / "cells"
+    if cells_dir.is_dir():
+        for d in sorted(cells_dir.iterdir()):
+            if d.is_dir() and d.name.startswith(CELL_TMP_PREFIX):
+                logger.warning("removing an abandoned partial cell write: %s (it never "
+                               "completed its rename, so it was never a cell)", d)
+                shutil.rmtree(d, ignore_errors=True)
+    for cell_id in inventory_banked_cells(work_root):
+        spec = by_id.get(cell_id)
+        if spec is None:
+            raise ResumeCellNotPlanned(
+                f"{work_root} holds a banked cell {cell_id!r} that this cells document "
+                f"does not plan ({len(specs)} planned). One attempt directory is one "
+                "staged column; resuming here would file a union of two plans as one "
+                "column.")
+        try:
+            receipts[cell_id] = verify_banked_cell(
+                work_root, cell_id, spec=spec, identity=identity)
+        except ResumeCellUnusable as exc:
+            dest = quarantine_banked_cell(
+                work_root, cell_id, reason=f"{type(exc).__name__}: {exc}")
+            quarantined.append({"cell_id": cell_id, "refusal": type(exc).__name__,
+                                "detail": str(exc), "moved_to": str(dest)})
+            continue
+        verified.append(cell_id)
+    inventory = ResumeInventory(
+        planned_cells=len(specs), verified=sorted(verified), quarantined=quarantined,
+        to_run=[c.cell_id for c in specs if c.cell_id not in receipts])
+    logger.info("resume preflight: %d/%d cells verified and skippable, %d quarantined, "
+                "%d to run", len(inventory.verified), inventory.planned_cells,
+                len(inventory.quarantined), len(inventory.to_run))
+    return inventory, receipts
+
+
+def rehydrate_banked_cell(work_root: Path, spec: CellSpec, receipt: CellReceipt
+                          ) -> tuple[CellOutcome, Optional[Any]]:
+    """Rebuild a verified cell's `CellOutcome` (and battery block) from disk.
+
+    Byte-identity of a resumed column's `column_result.json` depends entirely on this
+    being EXACT rather than approximate — including `elapsed_s`, which comes from the
+    receipt and is the time the cell actually took when it ran, not a zero and not the
+    time it took to be read back.
+
+    The battery block is rebuilt too, and this is load-bearing rather than tidy: §6's
+    deltas are formed against the α=0 baseline's block, so a resumed column whose
+    BASELINE was skipped would otherwise form every re-run cell's `delta_vs_alpha0`
+    against nothing and quietly file `None`s where the uninterrupted column filed
+    numbers.
+    """
+    cell_dir = work_root / "cells" / spec.cell_id
+    stamp = json.loads((cell_dir / CELL_ARTIFACT_FILES["stamp"]).read_text())
+    rows = [ProbeRow(**r) for r in json.loads(
+        (cell_dir / CELL_ARTIFACT_FILES["probe_rows"]).read_text())]
+    capability = None
+    block = None
+    cap_path = cell_dir / CELL_ARTIFACT_FILES["capability"]
+    if cap_path.exists():
+        capability = json.loads(cap_path.read_text())
+        from metabasis.scripts.capability_battery import CapabilityBlock
+        block = CapabilityBlock(**capability)
+    outcome = CellOutcome(
+        cell_id=spec.cell_id, kind=spec.kind, alpha_frac=receipt.alpha_frac,
+        alpha=receipt.alpha, n=receipt.n, tokens_generated=receipt.tokens_generated,
+        elapsed_s=receipt.elapsed_s, entropy=receipt.entropy, probe_rows=rows,
+        token_id_sha256=receipt.token_id_sha256,
+        entropy_array_sha256=receipt.entropy_array_sha256, capability=capability,
+        coherence=receipt.coherence, stamp=stamp,
+        raw_paths=_cell_raw_paths(work_root / "cells", spec.cell_id,
+                                  receipt.artifact_sha256))
+    return outcome, block
+
+
+def column_content_digest(work_root: Path) -> str:
+    """ONE digest over a banked column's SCIENCE — what two runs must agree on.
+
+    Deliberately not a digest of the whole directory. `column_result.json` carries
+    `elapsed_s` and `manifest.json` shas `column_result.json`, so two runs of the same
+    column — interrupted or not, and even two uninterrupted ones — can never agree on
+    those two files' bytes, and a digest that included them could never be used to
+    state the property that actually matters. This digest covers every per-cell
+    artifact byte-for-byte plus the §2.7 digests recomputed from the raw, which is the
+    whole of what a resumed column has to prove it reproduced.
+    """
+    rows: list[str] = []
+    for cell_id in inventory_banked_cells(work_root):
+        d = work_root / "cells" / cell_id
+        for fname in sorted(CELL_ARTIFACT_FILES.values()):
+            f = d / fname
+            if f.exists():
+                rows.append(f"{cell_id}/{fname} "
+                            f"{hashlib.sha256(f.read_bytes()).hexdigest()}")
+        tok, ent = recompute_cell_digests(d)
+        rows.append(f"{cell_id}/RECOMPUTED token_ids={tok} entropy_arrays={ent}")
+    return hashlib.sha256("\n".join(rows).encode()).hexdigest()
+
+
+# --------------------------------------------------------- the model-residency driver
+# LUXIA'S RULING (2026-08-05 night): "one job = one card = one loaded model = an
+# ORDERED LIST of that model's cells documents through a shared runtime", with the
+# boundary drawn explicitly — RESIDENCY SHARING YES, CELL SHARING NO. A cell is 80
+# generations under ONE injection spec; batching across cells would change the
+# physics, so nothing here ever puts two columns' work into one forward. What is
+# shared is exactly the loaded weights, and the proof obligation is the mirror of
+# that: two columns through one runtime must produce the columns two separate runs
+# produce, bit for bit.
+#
+# The `NodeRuntime` injection made this a jobs-layer question, and the answer is
+# ALMOST yes: `run_column` already takes the runtime from its caller, so a loop is all
+# the orchestration needs. What it cannot do from outside is re-point a loaded runtime
+# at the next column's (arm, site, vector bank) SAFELY — the attributes are there to
+# poke, and poking them is how a hook survives a column or a column runs under the
+# previous one's arm. `repoint` is therefore engine-side, typed, and refuses the two
+# things that would make residency unsound; the loop that uses it is thin enough to
+# live in the driver.
+class RepointableRuntime(Protocol):
+    """A `NodeRuntime` that can carry more than one column of ITS OWN model."""
+
+    node_key: str
+
+    def hook_attached(self) -> bool:
+        """True while an injection hook is registered on the model."""
+
+    def repoint(self, *, node_key: str, arm: str, site: int,
+                vectors: dict[str, np.ndarray]) -> None:
+        """Point this loaded runtime at the next column of the SAME model."""
+
+
+def assert_repointable(runtime: Any) -> RepointableRuntime:
+    """A runtime that cannot be re-pointed carries exactly one column, and says so."""
+    for name in ("hook_attached", "repoint"):
+        if not callable(getattr(runtime, name, None)):
+            raise ResidencyRuntimeNotRepointable(
+                f"{type(runtime).__name__} has no {name}() — it can carry exactly one "
+                "column. The residency driver refuses rather than mutating a runtime's "
+                "attributes from outside, which is how a hook survives a column.")
+    return runtime
+
+
+def assert_hooks_detached(runtime: Any, *, where: str) -> None:
+    """The between-columns assertion. `finally` is not evidence; this is."""
+    if assert_repointable(runtime).hook_attached():
+        raise ResidencyHookStillAttached(
+            f"{where}: an injection hook is STILL ATTACHED. Residency shares the "
+            "loaded weights and nothing else; a hook that survived a column would "
+            "carry one column's injection into the next column's first forward.")
+
+
+class ResidentColumn(BaseModel):
+    """One column in a residency: where its document is and where its bank goes.
+
+    A column may be named by PATHS (the node-side driver's case) or handed over
+    PRE-LOADED (an in-process caller's, and the CPU-toy proof's). Exactly one of each
+    pair, because a plan that carried both could silently run a different column from
+    the one it names.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid",
+                              arbitrary_types_allowed=True)
+
+    work_root: Path
+    cells_json: Optional[Path] = None
+    prompt_pool: Optional[Path] = None
+    actuation_calibration: Optional[Path] = None
+    n_per_cell: Optional[int] = None
+    corpus_sha_of_record: Optional[str] = None
+    characterize: bool = True
+    resume: bool = False
+    scheduler_card_index: Optional[str] = None
+    #: pre-loaded alternatives to `cells_json` / `prompt_pool`.
+    doc: Optional[Any] = None
+    pool: Optional[Any] = None
+
+    @model_validator(mode="after")
+    def _one_source_each(self) -> "ResidentColumn":
+        if (self.cells_json is None) == (self.doc is None):
+            raise ValueError(
+                f"{self.work_root}: name the cells document by --cells-json OR hand it "
+                "over pre-loaded, never both and never neither")
+        if (self.prompt_pool is None) == (self.pool is None):
+            raise ValueError(
+                f"{self.work_root}: name the prompt pool by path OR hand it over "
+                "pre-loaded, never both and never neither")
+        return self
+
+
+def assert_no_attempt_dir_collision(plans: Sequence[ResidentColumn]) -> None:
+    """CELL SHARING NO, in the one place it could be violated by accident.
+
+    Two columns pointed at one attempt directory would inventory each other's cells,
+    quarantine them as unplanned, and bank a union under one manifest. Refused before
+    a single model is loaded, because the whole residency is the expensive part.
+    """
+    seen: dict[str, int] = {}
+    for i, plan in enumerate(plans):
+        key = str(Path(plan.work_root).resolve())
+        if key in seen:
+            raise ResidencyAttemptDirCollision(
+                f"columns {seen[key]} and {i} of this residency share the attempt "
+                f"directory {key}. Residency shares the loaded MODEL; each column "
+                "keeps its own attempt directory, its own preflight, its own gates, "
+                "its own stamps and its own replay gate (Luxia's boundary, "
+                "2026-08-05: residency sharing YES, cell sharing NO).")
+        seen[key] = i
+
+
+def run_resident_columns(runtime: Any, plans: Sequence[ResidentColumn], *,
+                         stop_on_refusal: bool = True) -> list[dict]:
+    """Run an ORDERED LIST of one model's columns through one loaded runtime.
+
+    Each column gets its full §2.1 treatment — its own preflight, its own layout
+    freeze, its own norm measurement, its own gates, its own stamps, its own §2.7
+    replay gate, its own attempt lock and its own manifest. The ONLY thing shared is
+    the loaded weights. Between columns the hook is asserted detached, and the runtime
+    is re-pointed through the typed `repoint` rather than by attribute assignment.
+
+    Column ORDER cannot move a bit: §2.3's uniforms are per-(cell, gen_id) sha256
+    material, so a cell's tape is a function of the cell and never of what ran before
+    it — which is the same property that makes resumption sound, used the other way
+    round.
+
+    Returns one record per column: its result (or its refusal), and the between-column
+    assertions that were actually made.
+    """
+    assert_repointable(runtime)
+    assert_no_attempt_dir_collision(plans)
+    from metabasis.scripts.build_behavioral_banks import load_cells_document
+
+    out: list[dict] = []
+    for i, plan in enumerate(plans):
+        label = f"residency column {i + 1}/{len(plans)} → {plan.work_root}"
+        assert_hooks_detached(runtime, where=f"{label} (before)")
+        doc = plan.doc if plan.doc is not None else load_cells_document(
+            Path(plan.cells_json))
+        pool = plan.pool if plan.pool is not None else load_prompt_pool(
+            Path(plan.prompt_pool))
+        if doc.node_key != runtime.node_key:
+            raise ResidencyModelMismatch(
+                f"{label}: the document is for {doc.node_key!r} and the loaded runtime "
+                f"is {runtime.node_key!r}. One job = one card = ONE loaded model; a "
+                "column for another model needs another residency, and re-pointing "
+                "this one at another model's identity would stamp false provenance on "
+                "every cell it banked.")
+        vectors = load_vectors(Path(doc.vectors_npz) if doc.vectors_npz else None)
+        runtime.repoint(node_key=doc.node_key, arm=doc.arm, site=doc.site,
+                        vectors=vectors)
+        stamp_block = None
+        if plan.actuation_calibration is not None:
+            stamp_block = load_actuation_calibration(
+                Path(plan.actuation_calibration), node_key=doc.node_key, arm=doc.arm,
+                site=doc.site)
+        logger.info("%s: %s L%d (%s), %d cells", label, doc.node_key, doc.site,
+                    doc.arm, len(doc.cells))
+        record: dict = {"index": i, "work_root": str(plan.work_root),
+                        "node_key": doc.node_key, "arm": doc.arm, "site": doc.site,
+                        "label": doc.label or None}
+        try:
+            result = run_column(
+                runtime, doc=doc, pool=pool, work_root=Path(plan.work_root),
+                corpus_sha_of_record=(plan.corpus_sha_of_record
+                                      or doc.corpus_manifest_sha256),
+                n_per_cell=plan.n_per_cell,
+                actuation_calibration_stamp=stamp_block,
+                characterize=plan.characterize,
+                scheduler_card_index=plan.scheduler_card_index,
+                resume=plan.resume,
+                cells_document_file_sha256=(
+                    None if plan.cells_json is None
+                    else hashlib.sha256(
+                        Path(plan.cells_json).read_bytes()).hexdigest()),
+                actuation_calibration_sha256=(
+                    None if plan.actuation_calibration is None
+                    else hashlib.sha256(
+                        Path(plan.actuation_calibration).read_bytes()).hexdigest()))
+            record["result"] = result
+            record["replay_gate_passed"] = result.replay_gate.passed
+            record["n_cells"] = len(result.cells)
+        except BehavioralHarnessError as exc:
+            # A refusal in column 3 is not a reason to lose columns 1 and 2 — they are
+            # banked, gated and stamped already. The refusal is recorded by NAME and,
+            # by default, the residency stops rather than firing on past a HALT.
+            record["refusal"] = {"type": type(exc).__name__, "detail": str(exc)}
+            logger.error("HALT in %s (%s): %s", label, type(exc).__name__, exc)
+            out.append(record)
+            if stop_on_refusal:
+                raise
+            continue
+        finally:
+            runtime.end_cell()
+            assert_hooks_detached(runtime, where=f"{label} (after)")
+            record["hooks_detached_after"] = True
+        out.append(record)
+    return out
 
 
 # ---------------------------------------------------------------- the HF runtime
@@ -3871,6 +5279,37 @@ class HFNodeRuntime:
         if self._handle is not None:
             self._handle.remove()
             self._handle = None
+
+    def hook_attached(self) -> bool:
+        """The between-columns evidence for the residency driver (§2.1's boundary)."""
+        return self._handle is not None
+
+    def repoint(self, *, node_key: str, arm: str, site: int,
+                vectors: dict[str, np.ndarray]) -> None:
+        """Point this LOADED runtime at the next column of the SAME model.
+
+        The whole of what residency needs from the engine, and deliberately the only
+        thing: the weights stay where they are and the column-shaped state — which arm
+        renders the prompts, which site the hook writes at, which vector bank the keys
+        resolve in — is replaced under two refusals. A different `node_key` is refused
+        because one loaded model is one node_key and re-labelling it would put false
+        provenance on every stamp; an attached hook is refused because a hook that
+        survived a column is the cell-sharing the boundary forbids.
+        """
+        if node_key != self.node_key:
+            raise ResidencyModelMismatch(
+                f"this runtime has {self.node_key!r} LOADED and cannot be re-pointed at "
+                f"{node_key!r}. One job = one card = one loaded model (Luxia's "
+                "residency ruling, 2026-08-05); another model needs another residency.")
+        if self.hook_attached():
+            raise ResidencyHookStillAttached(
+                f"{self.node_key}: re-pointing a runtime whose injection hook is still "
+                "attached would carry the previous column's write into this one")
+        self.arm, self.site = arm, int(site)
+        self.vectors = dict(vectors)
+        logger.info("runtime re-pointed (weights resident): %s L%d (%s arm), %d "
+                    "vector key(s)", self.node_key, self.site, self.arm,
+                    len(self.vectors))
 
     def close(self) -> None:
         self.end_cell()
@@ -4301,13 +5740,20 @@ class _StubRuntime:
     """
 
     def __init__(self, pool: PromptPool, tok: Any, arm: str, site: int, *,
-                 hidden: int = 8, norm: float = 12.2391) -> None:
+                 hidden: int = 8, norm: float = 12.2391,
+                 node_key: str = "qwen2.5-3b-instruct") -> None:
         self.pool, self.tok, self.arm, self.site = pool, tok, arm, site
         self.hidden, self._norm = hidden, norm
+        self.node_key = node_key
+        self.vectors: dict[str, np.ndarray] = {}
         self.alpha = 0.0
         self.cell: Optional[CellSpec] = None
         self.order: list[str] = []
         self.start_positions: list[int] = []
+        #: the residency proof needs a hook that can be OBSERVED attached, so the stub
+        #: tracks attachment exactly as `HFNodeRuntime._handle` does.
+        self._hooked = False
+        self.columns_carried: list[tuple[str, int]] = []
 
     def trunk(self) -> dict:
         return {"torch": None, "transformers": None, "hostname": "selftest",
@@ -4341,6 +5787,7 @@ class _StubRuntime:
     def begin_cell(self, *, cell: CellSpec, alpha: float) -> None:
         assert_no_lesion_recipe(cell.vector_provenance, cell.vector_key or "")
         self.cell, self.alpha = cell, float(alpha)
+        self._hooked = True
         self.order.append(cell.cell_id)
 
     def start_pos_sink(self, padded_prompt_length: int) -> None:
@@ -4348,6 +5795,29 @@ class _StubRuntime:
 
     def end_cell(self) -> None:
         self.cell = None
+        self._hooked = False
+
+    def hook_attached(self) -> bool:
+        return self._hooked
+
+    def repoint(self, *, node_key: str, arm: str, site: int,
+                vectors: dict[str, np.ndarray]) -> None:
+        """`HFNodeRuntime.repoint`'s contract, on the weightless runtime.
+
+        Same two refusals, so the residency driver's boundary is proved in the
+        configuration with no deep-learning stack at all (M44) rather than only where
+        a GPU can be spared.
+        """
+        if node_key != self.node_key:
+            raise ResidencyModelMismatch(
+                f"this runtime has {self.node_key!r} loaded and cannot be re-pointed "
+                f"at {node_key!r} (one job = one card = one loaded model)")
+        if self.hook_attached():
+            raise ResidencyHookStillAttached(
+                f"{self.node_key}: hook still attached at re-point")
+        self.arm, self.site = arm, int(site)
+        self.vectors = dict(vectors)
+        self.columns_carried.append((arm, int(site)))
 
     def stepper(self) -> Stepper:
         return _StubStepper(eos_token_id=None)
@@ -4390,6 +5860,7 @@ class _StubRuntime:
 
     def close(self) -> None:
         self.cell = None
+        self._hooked = False
 
 
 def _toy_document(pool: PromptPool, *, node: str, arm: str, site: int, corpus: str,
@@ -6389,6 +7860,485 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                                                    site_role="robustness_site"),
                           _SNOR))
 
+    # ---- 17. atomic banking + resumption (the 2026-08-05 amendment) -----------
+    print("== selftest 17: atomic per-cell banking and verify-everything resume ==")
+    os.environ["CUDA_VISIBLE_DEVICES"] = "3"
+
+    def _toy_column_pieces(*, arm_: str = arm, site_: int = site, n_: int = 4,
+                           mnt: int = 5, node_: str = node) -> tuple[Any, Any, Any]:
+        p = _toy_pool()
+        t = _ToyTokenizer()
+        d = _toy_document(p, node=node_, arm=arm_, site=site_, corpus=corpus,
+                          cells=_toy_cells(site_), n_per_cell=n_, max_new_tokens=mnt)
+        return p, t, d
+
+    def _fire(work: Path, *, resume_: bool = False, stop_after: Optional[int] = None,
+              arm_: str = arm, site_: int = site, doc_: Any = None,
+              node_: str = node) -> Any:
+        p, t, d = _toy_column_pieces(arm_=arm_, site_=site_, node_=node_)
+        d = doc_ if doc_ is not None else d
+        rt = _StubRuntime(p, t, arm_, site_, node_key=node_)
+        if stop_after is not None:
+            # A kill, simulated INSIDE the process: the cell in flight never reaches
+            # its rename, so the on-disk state is exactly the state a SIGKILL leaves.
+            # (The subprocess os._exit version is the standalone proof; this is the
+            # version that can run in every configuration of the M44 matrix.)
+            fired = {"n": 0}
+            real = rt.begin_cell
+
+            def _begin(*, cell: CellSpec, alpha: float) -> None:
+                if fired["n"] >= stop_after:
+                    raise KeyboardInterrupt(f"simulated kill at {cell.cell_id}")
+                fired["n"] += 1
+                real(cell=cell, alpha=alpha)
+
+            rt.begin_cell = _begin                # type: ignore[method-assign]
+        return run_column(rt, doc=d, pool=p, work_root=work,
+                          corpus_sha_of_record=corpus, characterize=False,
+                          scheduler_card_index="3", resume=resume_)
+
+    with tempfile.TemporaryDirectory(prefix="behav_resume_") as td:
+        root = Path(td)
+        whole = root / "uninterrupted"
+        col = _fire(whole)
+        cell_dirs = inventory_banked_cells(whole)
+        check("(17) every cell is on disk the moment the column ends, each whole",
+              len(cell_dirs) == len(col.cells)
+              and all((whole / "cells" / c / "stamp.json").exists()
+                      and (whole / "cells" / c / "generations.jsonl").exists()
+                      for c in cell_dirs), f"{len(cell_dirs)} banked cells")
+        check("(17) no partial-write temp directory survives a clean column",
+              not [d for d in (whole / "cells").iterdir()
+                   if d.name.startswith(CELL_TMP_PREFIX)])
+        check("(17) every banked cell carries a completion RECEIPT",
+              all(_receipt_path(whole, c).exists() for c in cell_dirs))
+        check("(17) the manifest of record carries NO bookkeeping row — the amendment "
+              "moves when bytes become durable, never which bytes are of record",
+              not [k for k in col.manifest["artifacts"]
+                   if k.startswith(RESUME_SUBTREE + "/")]
+              and is_resume_bookkeeping(_receipt_path(whole, cell_dirs[0]), whole)
+              and is_resume_bookkeeping(
+                  whole / RESUME_SUBTREE / ATTEMPT_LOCK_NAME, whole),
+              f"{len(col.manifest['artifacts'])} artifact rows, 0 bookkeeping")
+        check("(17) the attempt lock is released when the column ends normally",
+              read_attempt_lock(whole) is None)
+        reference = column_content_digest(whole)
+
+        # THE KILL, AND THE RESUME.
+        killed = root / "killed"
+        try:
+            _fire(killed, stop_after=9)
+        except KeyboardInterrupt:
+            pass
+        banked_at_kill = inventory_banked_cells(killed)
+        check("(17) a killed column keeps every cell it FINISHED and no half-cell",
+              len(banked_at_kill) == 9
+              and all(_ok(lambda c=c: recompute_cell_digests(killed / "cells" / c))
+                      for c in banked_at_kill),
+              f"{len(banked_at_kill)}/{len(col.cells)} cells survived the kill")
+        resumed = _fire(killed, resume_=True)
+        report = json.loads(
+            (killed / RESUME_SUBTREE / RESUME_REPORT_NAME).read_text())
+        check("(17) the resume SKIPS exactly the verified banked cells and runs the rest",
+              set(report["cells_skipped"]) == set(banked_at_kill)
+              and len(report["cells_run"]) == len(col.cells) - len(banked_at_kill),
+              f"{len(report['cells_skipped'])} skipped, {len(report['cells_run'])} run")
+        check("(17) §2.7's replay gate runs at the END over the FULL population and "
+              "PASSES bitwise across the process seam",
+              resumed.replay_gate.passed and len(resumed.replay_gate.cells) == 3
+              and len(resumed.cells) == len(col.cells),
+              f"seam cells: {report['replay_gate_cells_across_the_process_seam']}")
+        check("(17) THE UNION IS BYTE-IDENTICAL TO THE UNINTERRUPTED RUN",
+              column_content_digest(killed) == reference,
+              f"{column_content_digest(killed)[:16]}… == {reference[:16]}…")
+
+        def _leaves(x: Any, y: Any, prefix: str = "") -> Any:
+            if isinstance(x, dict) and isinstance(y, dict):
+                for k in sorted(set(x) | set(y)):
+                    yield from _leaves(x.get(k), y.get(k), f"{prefix}.{k}")
+            elif isinstance(x, list) and isinstance(y, list) and len(x) == len(y):
+                for i, (xi, yi) in enumerate(zip(x, y)):
+                    yield from _leaves(xi, yi, f"{prefix}[{i}]")
+            elif x != y:
+                yield prefix
+
+        _a = json.loads((whole / "column_result.json").read_text()
+                        .replace(str(whole), "<W>"))
+        _b = json.loads((killed / "column_result.json").read_text()
+                        .replace(str(killed), "<W>"))
+        _moved = list(_leaves(_a, _b))
+        check("(17) …and the column result differs ONLY in per-cell wall-clock time "
+              "(every elapsed_s is a fresh measurement in a different process)",
+              bool(_moved) and all(p.endswith(".elapsed_s") for p in _moved)
+              and len(_moved) == len(col.cells),
+              f"{len(_moved)} moved leaf/leaves, non-timing: "
+              f"{[p for p in _moved if not p.endswith('.elapsed_s')]}")
+
+        # M51 POSITIVE CONTROL: the digest is only evidence if it can move.
+        _canary = root / "canary"
+        shutil.copytree(whole, _canary)
+        _cpath = _canary / "cells" / banked_at_kill[0] / "generations.jsonl"
+        _lines = _cpath.read_text().splitlines()
+        _rec = json.loads(_lines[0])
+        _rec["generated_ids"] = [_rec["generated_ids"][0] + 1] + _rec["generated_ids"][1:]
+        _cpath.write_text("\n".join([json.dumps(_rec, sort_keys=True)] + _lines[1:])
+                          + "\n")
+        check("(17) M51 canary: ONE flipped token id MOVES the column content digest "
+              "(a digest that cannot move is not a measurement)",
+              column_content_digest(_canary) != reference,
+              f"{column_content_digest(_canary)[:16]}… != {reference[:16]}…")
+
+    # ---- 17b. every resume refusal, exercised BY NAME -------------------------
+    print("== selftest 17b: every resume refusal, by name (never a generic HALT) ==")
+    _base = RunIdentity(
+        node_key=node, arm=arm, site=site, n_per_cell=4,
+        cells_document_sha256="1" * 64, corpus_manifest_sha256=corpus,
+        prompt_pool_sha256="2" * 64, actuation_calibration_sha256=None,
+        engine_module_sha256={m: "3" * 64 for m in IDENTITY_MODULES},
+        canonical_layout={"batch_size": 80, "dtype": "bfloat16",
+                          "padding_side_generation": "left", "max_new_tokens": 256},
+        measured_per_token_median_resid_norm=12.2391,
+        model_config_sha256="4" * 64)
+    _cases: tuple[tuple[str, dict, type[BaseException]], ...] = (
+        ("the column's own identity (node/arm/site/n)", {"site": site + 1},
+         ResumeColumnIdentityMismatch),
+        ("the cells document", {"cells_document_sha256": "9" * 64},
+         ResumeCellsDocumentMismatch),
+        ("the corpus manifest (also seed material)",
+         {"corpus_manifest_sha256": "9" * 64}, ResumeCorpusVintageMismatch),
+        ("the prompt pool", {"prompt_pool_sha256": "9" * 64},
+         ResumePromptPoolMismatch),
+        ("the §4.2 verdict document",
+         {"actuation_calibration_sha256": "9" * 64}, ResumeVerdictMismatch),
+        ("an engine module's bytes",
+         {"engine_module_sha256": {**{m: "3" * 64 for m in IDENTITY_MODULES},
+                                   IDENTITY_MODULES[0]: "9" * 64}},
+         ResumeEngineModuleMismatch),
+        ("an engine module whose sha is UNKNOWN on one side",
+         {"engine_module_sha256": {**{m: "3" * 64 for m in IDENTITY_MODULES},
+                                   IDENTITY_MODULES[-1]: None}},
+         ResumeEngineModuleUnknown),
+        ("the canonical layout's batch size",
+         {"canonical_layout": {"batch_size": 40, "dtype": "bfloat16",
+                               "padding_side_generation": "left",
+                               "max_new_tokens": 256}}, ResumeLayoutMismatch),
+        ("the canonical layout's padding side",
+         {"canonical_layout": {"batch_size": 80, "dtype": "bfloat16",
+                               "padding_side_generation": "right",
+                               "max_new_tokens": 256}}, ResumeLayoutMismatch),
+        ("the canonical layout's dtype",
+         {"canonical_layout": {"batch_size": 80, "dtype": "float16",
+                               "padding_side_generation": "left",
+                               "max_new_tokens": 256}}, ResumeLayoutMismatch),
+        ("the canonical layout's max_new_tokens",
+         {"canonical_layout": {"batch_size": 80, "dtype": "bfloat16",
+                               "padding_side_generation": "left",
+                               "max_new_tokens": 128}}, ResumeLayoutMismatch),
+        ("the M9 model-config anchor", {"model_config_sha256": "9" * 64},
+         ResumeModelConfigMismatch),
+        ("the measured norm α is resolved from — by ONE ULP",
+         {"measured_per_token_median_resid_norm": np.nextafter(
+             np.float64(12.2391), np.float64(13.0)).item()}, ResumeNormDrift),
+    )
+    for _what, _update, _exc in _cases:
+        check(f"(17b) a resume refuses on {_what} — by name, never partially",
+              _raises(lambda u=_update: _base.model_copy(
+                  update=u).assert_identical_to(_base), _exc), _exc.__name__)
+    check("(17b) …and an identity identical in every field is ACCEPTED (the checker "
+          "is not simply refusing everything)",
+          _ok(lambda: _base.model_copy(update={}).assert_identical_to(_base)))
+    check("(17b) the informational cells-document FILE sha never gates (a re-serialised "
+          "identical document is a re-format, not a re-experiment)",
+          _ok(lambda: _base.model_copy(update={
+              "cells_document_file_sha256": "9" * 64}).assert_identical_to(_base)))
+    check("(17b) --resume with no attempt directory is its own refusal",
+          _raises(lambda: run_column(
+              _StubRuntime(pool, tok, arm, site), doc=_toy_document(
+                  pool, node=node, arm=arm, site=site, corpus=corpus,
+                  cells=_compact_cells(site), n_per_cell=2, max_new_tokens=4),
+              pool=pool, work_root=None, corpus_sha_of_record=corpus,
+              characterize=False, write=False, resume=True), ResumeWithoutWorkRoot))
+
+    # ---- 17c. the cell-scoped refusals: quarantine, then re-run ---------------
+    print("== selftest 17c: an untrustworthy banked cell is quarantined and re-run ==")
+    with tempfile.TemporaryDirectory(prefix="behav_quar_") as td:
+        root = Path(td)
+        good = root / "good"
+        _fire(good)
+        good_digest = column_content_digest(good)
+
+        def _damaged(name: str, damage: Callable[[Path], None]) -> tuple[Any, dict]:
+            """A fresh copy of a banked column, damaged one way, then resumed."""
+            dest = root / name
+            shutil.copytree(good, dest)
+            damage(dest)
+            out = _fire(dest, resume_=True)
+            rep = json.loads(
+                (dest / RESUME_SUBTREE / RESUME_REPORT_NAME).read_text())
+            return out, rep
+
+        def _first(work: Path) -> str:
+            return inventory_banked_cells(work)[0]
+
+        def _drop_receipt(work: Path) -> None:
+            _receipt_path(work, _first(work)).unlink()
+
+        def _corrupt_bytes(work: Path) -> None:
+            p = work / "cells" / _first(work) / "probe_rows.json"
+            p.write_text(p.read_text() + " ")
+
+        def _break_stamp(work: Path) -> None:
+            cid = _first(work)
+            sp = work / "cells" / cid / "stamp.json"
+            st = json.loads(sp.read_text())
+            st["behavioral_prompt_pool_sha256"] = None
+            sp.write_text(json.dumps(st, indent=1, sort_keys=True, default=str))
+            rp = _receipt_path(work, cid)
+            r = json.loads(rp.read_text())
+            r["artifact_sha256"]["stamp.json"] = hashlib.sha256(
+                sp.read_bytes()).hexdigest()
+            rp.write_text(json.dumps(r, indent=1, sort_keys=True))
+
+        def _break_digest(work: Path) -> None:
+            cid = _first(work)
+            gp = work / "cells" / cid / "generations.jsonl"
+            lines = gp.read_text().splitlines()
+            rec = json.loads(lines[0])
+            rec["generated_ids"] = [rec["generated_ids"][0] + 1] + rec[
+                "generated_ids"][1:]
+            gp.write_text("\n".join([json.dumps(rec, sort_keys=True)] + lines[1:])
+                          + "\n")
+            rp = _receipt_path(work, cid)
+            r = json.loads(rp.read_text())
+            r["artifact_sha256"]["generations.jsonl"] = hashlib.sha256(
+                gp.read_bytes()).hexdigest()
+            rp.write_text(json.dumps(r, indent=1, sort_keys=True))
+
+        def _mangle_receipt(work: Path) -> None:
+            _receipt_path(work, _first(work)).write_text("{not a receipt")
+
+        for _name, _damage, _refusal in (
+                ("unattested", _drop_receipt, "BankedCellUnattested"),
+                ("corrupt-bytes", _corrupt_bytes, "BankedCellArtifactShaMismatch"),
+                ("broken-stamp", _break_stamp, "BankedCellStampIncomplete"),
+                ("broken-digest", _break_digest, "BankedCellDigestMismatch"),
+                ("mangled-receipt", _mangle_receipt, "BankedCellReceiptUnreadable")):
+            _out, _rep = _damaged(_name, _damage)
+            _q = _rep["inventory"]["quarantined"]
+            check(f"(17c) {_refusal}: the cell is QUARANTINED by name, re-run, and the "
+                  "column comes out byte-identical anyway",
+                  len(_q) == 1 and _q[0]["refusal"] == _refusal
+                  and Path(_q[0]["moved_to"]).exists()
+                  and (Path(_q[0]["moved_to"]) / "QUARANTINE-REASON.txt").exists()
+                  and column_content_digest(root / _name) == good_digest
+                  and _out.replay_gate.passed,
+                  f"{_q[0]['cell_id']} → {Path(_q[0]['moved_to']).name}")
+        check("(17c) a quarantined cell is MOVED, never deleted — a cell that failed "
+              "verification is evidence",
+              all((root / n / RESUME_SUBTREE / QUARANTINE_SUBDIR).is_dir()
+                  for n in ("unattested", "corrupt-bytes", "broken-stamp",
+                            "broken-digest", "mangled-receipt")))
+        # An UNPLANNED banked cell is an identity refusal, not a quarantine: this
+        # attempt directory belongs to another plan.
+        _foreign = root / "foreign-cell"
+        shutil.copytree(good, _foreign)
+        shutil.copytree(_foreign / "cells" / _first(_foreign),
+                        _foreign / "cells" / "not_a_planned_cell_L26_a+0.30")
+        check("(17c) a banked cell the document does not plan refuses the WHOLE "
+              "resume (never a union of two plans filed as one column)",
+              _raises(lambda: _fire(_foreign, resume_=True), ResumeCellNotPlanned))
+        # α drift: a receipt that passes identity but names another dose.
+        _alpha = root / "alpha-drift"
+        shutil.copytree(good, _alpha)
+        _ap = _receipt_path(_alpha, _first(_alpha))
+        _ar = json.loads(_ap.read_text())
+        _ar["alpha"] = float(_ar["alpha"]) + 1e-9
+        _ap.write_text(json.dumps(_ar, indent=1, sort_keys=True))
+        check("(17c) a banked cell whose α is not the α this process resolves refuses "
+              "the resume (§2.5: one column, one dose per name)",
+              _raises(lambda: _fire(_alpha, resume_=True), ResumeAlphaDrift))
+        # A completed column resumed AGAIN: everything verifies, nothing runs.
+        _again = root / "again"
+        shutil.copytree(good, _again)
+        _out = _fire(_again, resume_=True)
+        _rep = json.loads((_again / RESUME_SUBTREE / RESUME_REPORT_NAME).read_text())
+        check("(17c) resuming a COMPLETE column verifies everything, runs nothing, and "
+              "still fires the §2.7 gate (which is now wholly across the seam)",
+              not _rep["cells_run"] and len(_rep["cells_skipped"]) == len(_out.cells)
+              and _out.replay_gate.passed
+              and sorted(_rep["replay_gate_cells_across_the_process_seam"])
+              == sorted(_out.replay_gate.cells)
+              and column_content_digest(_again) == good_digest,
+              f"{len(_rep['cells_skipped'])} verified, 0 run")
+
+    # ---- 17d. the M55 attempt-lock handshake ---------------------------------
+    print("== selftest 17d: M55 — one live writer per attempt directory ==")
+    with tempfile.TemporaryDirectory(prefix="behav_lock_") as td:
+        root = Path(td)
+        _l, _cleared = acquire_attempt_lock(root, cells_document_sha256="a" * 64)
+        check("(17d) the lock names pid + host + process start + boot id",
+              _l.pid == os.getpid() and _l.hostname == platform.node()
+              and (_l.process_start_ticks is not None or not Path("/proc").is_dir()),
+              f"pid {_l.pid}, start {_l.process_start_ticks}")
+        check("(17d) a LIVE holder refuses the attempt directory by name (M55)",
+              _raises(lambda: acquire_attempt_lock(
+                  root, cells_document_sha256="a" * 64), AttemptLockHeld))
+        check("(17d) …and the refusal quotes the holder so it can be reaped by "
+              "verified ownership rather than by card",
+              "pid" in _msg17(lambda: acquire_attempt_lock(
+                  root, cells_document_sha256="a" * 64)))
+        release_attempt_lock(root, _l)
+        check("(17d) release removes OUR lock", read_attempt_lock(root) is None)
+        # A DEAD holder: reported, then cleared explicitly.
+        _dead = AttemptLock(pid=_dead_pid(), hostname=platform.node(),
+                            process_start_ticks=1, boot_id=_boot_id(),
+                            created_at="2026-08-05T00:00:00+00:00",
+                            cells_document_sha256="a" * 64, work_root=str(root))
+        _atomic_write_text(_resume_dir(root) / ATTEMPT_LOCK_NAME,
+                           _dead.model_dump_json())
+        _state, _why = lock_holder_state(_dead)
+        _l2, _cleared2 = acquire_attempt_lock(root, cells_document_sha256="a" * 64)
+        check("(17d) a STALE lock (dead pid) is classified, REPORTED with its full "
+              "contents, and cleared explicitly — never silently",
+              _state == "stale" and _cleared2 is not None
+              and _cleared2["pid"] == _dead.pid and "stale_because" in _cleared2,
+              _cleared2["stale_because"])
+        release_attempt_lock(root, _l2)
+        # A FOREIGN host cannot be adjudicated here — /models is shared storage.
+        _foreign_lock = _dead.model_copy(update={"hostname": "some-other-node",
+                                                 "pid": os.getpid()})
+        _atomic_write_text(_resume_dir(root) / ATTEMPT_LOCK_NAME,
+                           _foreign_lock.model_dump_json())
+        check("(17d) a lock from ANOTHER HOST is refused, never guessed at (shared "
+              "storage: a pid here says nothing about a pid there)",
+              _raises(lambda: acquire_attempt_lock(
+                  root, cells_document_sha256="a" * 64), AttemptLockForeignHost)
+              and lock_holder_state(_foreign_lock)[0] == "foreign")
+        # A RECYCLED pid is stale, not live — this is what the start time is for.
+        check("(17d) a live pid with a DIFFERENT start time reads STALE (pid reuse "
+              "cannot masquerade as the holder)",
+              lock_holder_state(AttemptLock(
+                  pid=os.getpid(), hostname=platform.node(),
+                  process_start_ticks=(_process_start_ticks(os.getpid()) or 0) + 1,
+                  boot_id=_boot_id(), created_at="2026-08-05T00:00:00+00:00",
+                  cells_document_sha256="a" * 64, work_root=str(root)))[0] == "stale"
+              if Path(f"/proc/{os.getpid()}/stat").exists() else True)
+        (_resume_dir(root) / ATTEMPT_LOCK_NAME).write_text("{not json")
+        check("(17d) an UNPARSEABLE lock is refused, never clobbered (most likely a "
+              "lock being written by a live process right now)",
+              _raises(lambda: read_attempt_lock(root), AttemptLockUnreadable))
+        (_resume_dir(root) / ATTEMPT_LOCK_NAME).unlink()
+
+    # ---- 18. the model-residency driver --------------------------------------
+    print("== selftest 18: one loaded model, an ORDERED LIST of its columns ==")
+    with tempfile.TemporaryDirectory(prefix="behav_resident_") as td:
+        root = Path(td)
+        _pa, _ta, _da = _toy_column_pieces(arm_="native")
+        _pb, _tb, _db = _toy_column_pieces(arm_="raw")
+        _fire(root / "separate-a", arm_="native")
+        _fire(root / "separate-b", arm_="raw")
+        _rt = _StubRuntime(_pa, _ta, "native", site, node_key=node)
+        _recs = run_resident_columns(_rt, [
+            ResidentColumn(work_root=root / "resident-a", doc=_da, pool=_pa,
+                           characterize=False, scheduler_card_index="3"),
+            ResidentColumn(work_root=root / "resident-b", doc=_db, pool=_pb,
+                           characterize=False, scheduler_card_index="3")])
+        check("(18) two columns ran through ONE loaded runtime, each with its own "
+              "gates, stamps and manifest",
+              len(_recs) == 2 and all(r["replay_gate_passed"] for r in _recs)
+              and all(r["hooks_detached_after"] for r in _recs)
+              and len({r["work_root"] for r in _recs}) == 2)
+        check("(18) RESIDENCY MOVES ZERO BITS: each column through the shared runtime "
+              "is byte-identical to its own separate run",
+              column_content_digest(root / "resident-a")
+              == column_content_digest(root / "separate-a")
+              and column_content_digest(root / "resident-b")
+              == column_content_digest(root / "separate-b"),
+              column_content_digest(root / "resident-a")[:16] + "…")
+        check("(18) …and the two columns are genuinely different columns, so the "
+              "comparison is not vacuous",
+              column_content_digest(root / "resident-a")
+              != column_content_digest(root / "resident-b"))
+        check("(18) the runtime was re-pointed once per column and its hook asserted "
+              "detached between them",
+              _rt.columns_carried == [("native", site), ("raw", site)]
+              and not _rt.hook_attached(), str(_rt.columns_carried))
+        check("(18) a column for ANOTHER MODEL is refused (one job = one card = one "
+              "loaded model)",
+              _raises(lambda: run_resident_columns(
+                  _StubRuntime(_pa, _ta, "native", site, node_key=node),
+                  [ResidentColumn(work_root=root / "wrong-model",
+                                  doc=_toy_column_pieces(node_="phi-4")[2],
+                                  pool=_pa, characterize=False)]),
+                  ResidencyModelMismatch))
+        check("(18) re-pointing a runtime whose hook is STILL ATTACHED is refused "
+              "(residency sharing YES, cell sharing NO)",
+              _raises(lambda: _hooked_repoint(_pa, _ta, node, site),
+                      ResidencyHookStillAttached))
+        check("(18) two columns pointed at ONE attempt directory are refused before a "
+              "model is loaded",
+              _raises(lambda: assert_no_attempt_dir_collision([
+                  ResidentColumn(work_root=root / "same", doc=_da, pool=_pa),
+                  ResidentColumn(work_root=root / "same", doc=_db, pool=_pb)]),
+                  ResidencyAttemptDirCollision))
+        check("(18) a runtime that cannot be re-pointed carries exactly one column, "
+              "and says so",
+              _raises(lambda: assert_repointable(object()),
+                      ResidencyRuntimeNotRepointable))
+        check("(18) a plan column that names neither a document nor a path is refused "
+              "by its own schema",
+              _raises(lambda: ResidentColumn(work_root=root / "x"), ValidationError)
+              and _raises(lambda: ResidentColumn(work_root=root / "x", doc=_da,
+                                                 cells_json=Path("c.json"), pool=_pa),
+                          ValidationError))
+        try:
+            from metabasis.scripts.run_behavioral_residency import (
+                load_residency_plan, plan_to_columns)
+            # The driver imports the engine by MODULE PATH, so the class it raises is
+            # the module's copy and not this file's when the selftest runs as
+            # `__main__` (the same two-copies fact documented at HALT C). Assert the
+            # class the caller would actually catch.
+            from metabasis.scripts.run_behavioral_cells import (
+                ResidencyPlanInvalid as _RPI)
+            _plan_ok = True
+        except ImportError as exc:                            # pragma: no cover
+            _plan_ok = False
+            skip("the residency driver's plan loader", f"unimportable ({exc})")
+        if _plan_ok:
+            _pjson = root / "plan.json"
+            _cells_json = root / "cells.json"
+            _cells_json.write_text(_da.model_dump_json())
+            _pool_json = root / "pool.json"
+            _pool_json.write_text(json.dumps(
+                {"sha256": _pa.sha256,
+                 "prompts": [p.model_dump() for p in _pa.prompts]}))
+            _body = {"schema_version": "behavioral-residency/1", "node_key": node,
+                     "model_path": "<LOCAL_WEIGHTS_DIR>",
+                     "columns": [{"cells_json": str(_cells_json),
+                                  "prompt_pool": str(_pool_json),
+                                  "work_root": str(root / "plan-a")},
+                                 {"cells_json": str(_cells_json),
+                                  "prompt_pool": str(_pool_json),
+                                  "work_root": str(root / "plan-b")}]}
+            _pjson.write_text(json.dumps(_body))
+            check("(18) the driver's typed plan parses and resolves both columns",
+                  len(plan_to_columns(load_residency_plan(_pjson))) == 2)
+            _dupe = root / "plan-dupe.json"
+            _dupe.write_text(json.dumps({
+                **_body, "columns": [{**_body["columns"][0]},
+                                     {**_body["columns"][0]}]}))
+            check("(18) …and a plan whose columns share an attempt directory is "
+                  "refused at parse time, before any model is loaded",
+                  _raises(lambda: load_residency_plan(_dupe), _RPI))
+            _missing = root / "plan-missing.json"
+            _missing.write_text(json.dumps({
+                **_body, "columns": [{**_body["columns"][0],
+                                      "cells_json": str(root / "nope.json")}]}))
+            check("(18) …and a plan naming an input that does not exist is refused "
+                  "before the expensive part, not between columns",
+                  _raises(lambda: plan_to_columns(load_residency_plan(_missing)),
+                          _RPI))
+
     failures = [c for c in checks if not c[1]]
     print(f"\nselftest: {len(failures)} failure(s)")
     for name, _, detail in failures:
@@ -6411,6 +8361,30 @@ def _raises(fn: Callable[[], Any], exc: type[BaseException]) -> bool:
     except Exception:                               # noqa: BLE001 — wrong class
         return False
     return False
+
+
+def _msg17(fn: Callable[[], Any]) -> str:
+    """The MESSAGE a refusal carries — an unactionable HALT is a defect of its own."""
+    try:
+        fn()
+    except BaseException as exc:                     # noqa: BLE001 — the message is
+        return str(exc)                              # the thing under test
+    return ""
+
+
+def _dead_pid() -> int:
+    """A pid that is not running, for the stale-lock case (never a signal target)."""
+    for candidate in range(4194303, 4194303 - 5000, -1):
+        if candidate > 1 and not _pid_alive(candidate):
+            return candidate
+    return 4194303                                            # pragma: no cover
+
+
+def _hooked_repoint(pool: PromptPool, tok: Any, node_key: str, site: int) -> None:
+    """Re-point a runtime whose hook is still attached — the residency boundary."""
+    rt = _StubRuntime(pool, tok, "native", site, node_key=node_key)
+    rt.begin_cell(cell=baseline_cell(site), alpha=0.0)
+    rt.repoint(node_key=node_key, arm="raw", site=site, vectors={})
 
 
 def _ok(fn: Callable[[], Any]) -> bool:
@@ -6612,6 +8586,20 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--no-characterize", action="store_true",
                     help="skip §2.7's DESCRIPTIVE B=8/B=1 characterization (M19: it "
                          "can never fail a gate, so skipping it costs no assertion)")
+    ap.add_argument("--resume", action="store_true",
+                    help="resume into an attempt dir this column already banked into: "
+                         "every banked cell is RE-VERIFIED (receipt, artifact shas, "
+                         "the engine's own §2.8 stamp checker, and both §2.7 digests "
+                         "recomputed from the raw) and identity is REQUIRED on the "
+                         "cells document, the corpus/pool/verdict shas, the engine "
+                         "module shas, the model config, the full canonical layout and "
+                         "the measured norm α is resolved from. Any mismatch refuses "
+                         "the whole resume by name; a cell that cannot be verified is "
+                         "quarantined and re-run. §2.7's replay gate then runs over "
+                         "the FULL population as always.")
+    ap.add_argument("--no-attempt-lock", action="store_true",
+                    help="M55: do NOT take the attempt-dir lock. For forensics on a "
+                         "dead attempt directory only — never for a run that banks.")
     args = ap.parse_args(argv)
 
     if args.selftest:
@@ -6714,7 +8702,15 @@ def main(argv: Optional[list[str]] = None) -> int:
             corpus_sha_of_record=basis, n_per_cell=args.n_per_cell,
             actuation_calibration_stamp=actuation_calibration_stamp,
             characterize=not args.no_characterize,
-            scheduler_card_index=args.scheduler_card_index)
+            scheduler_card_index=args.scheduler_card_index,
+            resume=args.resume,
+            take_attempt_lock=not args.no_attempt_lock,
+            cells_document_file_sha256=hashlib.sha256(
+                Path(args.cells_json).read_bytes()).hexdigest(),
+            actuation_calibration_sha256=(
+                None if args.actuation_calibration is None
+                else hashlib.sha256(
+                    Path(args.actuation_calibration).read_bytes()).hexdigest()))
         print(json.dumps({
             "node_key": result.node_key, "site": result.site, "arm": result.arm,
             "label": result.label or None,
