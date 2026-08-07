@@ -35,9 +35,34 @@ from metabasis.l4_blind.draw import DrawnPairs
 from metabasis.l4_blind.models import BlindDeck, BlindPair
 from metabasis.l4_blind.taxonomy import AXIS_TRAIT, sha256_file
 
-#: A generation whose decoded text is shorter than this is not judgeable as
-#: a 2AFC panel; the deck build HALTs rather than showing Luxia a stub.
-MIN_WORDS: Final[int] = 5
+#: A panel shorter than this is a stub, not an utterance; the deck build
+#: HALTs rather than showing Luxia a fragment.
+#:
+#: The floor is in CHARACTERS, not words, and that is deliberate. An
+#: earlier draft used `len(text.split()) >= 5` and HALTed the whole build
+#: on a dsv2-lite panel of "2 words" that was in fact 431 characters of
+#: fluent English with the spaces missing (see SPACE_DEGENERATE_RATIO).
+#: Word count is not a measure of length on a column that emits
+#: space-less token runs; characters are.
+MIN_CHARS: Final[int] = 80
+
+#: Below this ratio of spaces to characters, a panel's words are running
+#: together. Normal columns sit at ~0.135–0.150; the affected dsv2-lite
+#: generations sit at ~0.000, with nothing in between — a per-generation
+#: switch, not a gradient.
+#:
+#: This is REPORTED, never repaired. The L3 judge reads exactly these
+#: bytes under the same frozen decode, so "fixing" the text here would
+#: make the L4/L3 agreement number compare two different corpora — the one
+#: thing the gold exists to prevent. The desk rules on whether these pairs
+#: stay in the deck.
+SPACE_DEGENERATE_RATIO: Final[float] = 0.08
+
+#: Below this, a panel is unusually short beside its ~2000-character
+#: neighbours. Reported beside the degeneracy flag as a length-bleed cue
+#: (the pre-statement already pre-stated a positive length bleed on the
+#: language and formality axes).
+SHORT_PANEL_CHARS: Final[int] = 400
 
 
 class BankRow(BaseModel):
@@ -102,7 +127,9 @@ def scan_self_identification(pairs: list[BlindPair]) -> list[dict[str, object]]:
 # ── deck build ───────────────────────────────────────────────────────────
 
 
-def build_deck(drawn: DrawnPairs, bank_path: Path) -> tuple[BlindDeck, list[dict[str, object]]]:
+def build_deck(
+    drawn: DrawnPairs, bank_path: Path
+) -> tuple[BlindDeck, list[dict[str, object]], list[dict[str, object]]]:
     """Join the sealed draw to the bank and emit the blind deck.
 
     This is the one function that touches both sides. Its output carries
@@ -116,6 +143,7 @@ def build_deck(drawn: DrawnPairs, bank_path: Path) -> tuple[BlindDeck, list[dict
 
     pairs: list[BlindPair] = []
     missing: list[str] = []
+    flagged: list[dict[str, object]] = []
     for p in sorted(drawn.pairs, key=lambda x: x.ordinal_global):
         kd = bank_key(p.column, p.side, p.dose_cell_id, p.generation_id)
         kb = bank_key(p.column, p.side, p.baseline_cell_id, p.generation_id)
@@ -127,10 +155,25 @@ def build_deck(drawn: DrawnPairs, bank_path: Path) -> tuple[BlindDeck, list[dict
         if td is None or tb is None:
             continue
         for label, t in ((kd, td), (kb, tb)):
-            if len(t.split()) < MIN_WORDS:
+            if len(t) < MIN_CHARS:
                 raise ValueError(
-                    f"{label} decoded to {len(t.split())} words (< {MIN_WORDS}); "
+                    f"{label} decoded to {len(t)} characters (< {MIN_CHARS}); "
                     f"a stub panel is unjudgeable — the desk must rule on this pair"
+                )
+            ratio = t.count(" ") / len(t)
+            if ratio < SPACE_DEGENERATE_RATIO or len(t) < SHORT_PANEL_CHARS:
+                flagged.append(
+                    {
+                        "pair_id": p.pair_id,
+                        "type_key": p.type_key,
+                        "set_label": p.set_label,
+                        "slot": "text_1" if (label == kd) == p.dose_first else "text_2",
+                        "chars": len(t),
+                        "space_ratio": round(ratio, 5),
+                        "space_degenerate": ratio < SPACE_DEGENERATE_RATIO,
+                        "short": len(t) < SHORT_PANEL_CHARS,
+                        "coordinates_SEALED": label,
+                    }
                 )
         t1, t2 = (td, tb) if p.dose_first else (tb, td)
         pairs.append(
@@ -166,7 +209,7 @@ def build_deck(drawn: DrawnPairs, bank_path: Path) -> tuple[BlindDeck, list[dict
         set_totals=totals,
         pairs=pairs,
     )
-    return deck, scan_self_identification(pairs)
+    return deck, scan_self_identification(pairs), flagged
 
 
 def sha256_json(obj: object) -> str:

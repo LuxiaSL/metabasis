@@ -58,6 +58,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from metabasis.l4_blind import GRADE, STATUS, TOOL_VERSION
 from metabasis.l4_blind.models import Dose, PairCoord, CellTypeSpec, PassCell
 from metabasis.l4_blind.taxonomy import (
+    EXCLUDED_TYPES,
     AXIS_TRAIT,
     GENERATIONS_PER_CELL,
     PAIRS_PER_TYPE,
@@ -104,6 +105,15 @@ class DrawnPairs(BaseModel):
     taxonomy_rule: str = TAXONOMY_RULE
     taxonomy_alternatives: list[str] = Field(default_factory=lambda: list(TAXONOMY_ALTERNATIVES))
     pairs_per_type: int = PAIRS_PER_TYPE
+    excluded_types: dict[str, str] = Field(default_factory=lambda: dict(EXCLUDED_TYPES))
+    exclusion_independence: str = (
+        "Exclusions are applied to the POPULATION before any seeded step, and "
+        "every seeded material is keyed on a type's own type_key (plus the two "
+        "input shas) — never on the roster or its length. Dropping a type "
+        "therefore cannot re-draw a surviving one; only the opaque Set letters "
+        "re-pack and ordinal_global renumbers, both of which are presentation. "
+        "Asserted by selftest against a draw taken with the exclusion lifted."
+    )
     inputs: TaxonomyInputs
     types: list[CellTypeSpec]
     pairs: list[PairCoord]
@@ -149,7 +159,7 @@ def _prompt_index(path: Path) -> dict[int, str]:
     return out
 
 
-def freeze_draw(inputs: TaxonomyInputs) -> DrawnPairs:
+def freeze_draw(inputs: TaxonomyInputs, *, apply_exclusions: bool = True) -> DrawnPairs:
     """Build the frozen draw. Pure function of the two input shas.
 
     Every assertion in here is a HALT, not a warning: a draw that quietly
@@ -159,7 +169,7 @@ def freeze_draw(inputs: TaxonomyInputs) -> DrawnPairs:
     root = f"{DRAW_RECIPE}|{inputs.desk_score_sha256}|{inputs.ingredients_sha256}"
     repo = Path(inputs.repo_root)
 
-    population = load_pass_population(inputs)
+    population = load_pass_population(inputs, apply_exclusions=apply_exclusions)
     by_type = group_by_type(population)
     labels = _set_labels(list(by_type), root)
 
@@ -308,6 +318,7 @@ def freeze_draw(inputs: TaxonomyInputs) -> DrawnPairs:
 
     return DrawnPairs(
         root_material=root,
+        excluded_types=dict(EXCLUDED_TYPES) if apply_exclusions else {},
         inputs=inputs,
         types=specs,
         pairs=final,

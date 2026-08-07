@@ -176,9 +176,50 @@ def cmd_build_deck(args: argparse.Namespace) -> int:
             f"HALT: no text bank at {bank}. The decode job owes "
             f"{DECK_REQUEST_NAME}'s rows; nothing desk-side carries decoded text."
         )
-    deck, selfid = build_deck(drawn, bank)
+    deck, selfid, flagged = build_deck(drawn, bank)
     deck_path = out / DECK_NAME
     sha = write_json(deck_path, deck.model_dump(mode="json"))
+    if flagged:
+        pairs_hit = sorted({str(f["pair_id"]) for f in flagged})
+        write_json(
+            out / "FLAG-panel-degeneracy-2026-08-07.json",
+            {
+                "STATUS": STATUS,
+                "grade": GRADE,
+                "what_this_is": (
+                    "Panels that are space-degenerate (words running together) "
+                    "or unusually short. REPORTED, NEVER REPAIRED: the L3 judge "
+                    "reads exactly these bytes under the same frozen decode, so "
+                    "repairing them here would make the L4/L3 agreement number "
+                    "compare two different corpora. The desk rules on whether "
+                    "these pairs stay in the deck."
+                ),
+                "mechanism": (
+                    "The affected generations are dsv2-lite only. Its checkpoint "
+                    "loads as a LlamaTokenizer whose decoder knows the "
+                    "SentencePiece space mark, and the generation stream mixes "
+                    "token pieces that carry no space mark at all with byte-BPE "
+                    "pieces that do. The byte-BPE run decodes correctly; the "
+                    "unmarked run concatenates. Confirmed on the node against "
+                    "the token pieces themselves (DECODE-DIAG.json), not inferred."
+                ),
+                "space_degenerate_ratio": 0.08,
+                "short_panel_chars": 400,
+                "normal_columns_space_ratio": "0.135-0.150 (median, all four other columns)",
+                "n_flagged_panels": len(flagged),
+                "n_pairs_touched": len(pairs_hit),
+                "n_pairs_in_deck": len(deck.pairs),
+                "pairs_touched": pairs_hit,
+                "panels": flagged,
+                "beyond_L4": (
+                    "This also bears on the CORRECTED L1 numbers for dsv2-lite: "
+                    "distinct-word ratio, 4-gram repetition and "
+                    "mean_generation_length_words are all computed over "
+                    "text.split(), which undercounts on a space-degenerate "
+                    "generation. Flagged for the desk; nothing is recomputed here."
+                ),
+            },
+        )
     if selfid:
         write_json(
             out / "FLAG-self-identification-2026-08-07.json",
@@ -198,6 +239,8 @@ def cmd_build_deck(args: argparse.Namespace) -> int:
     print(f"blind deck : {deck_path}  sha256={sha}")
     print(f"pairs      : {len(deck.pairs)}  sets: {deck.set_totals}")
     print(f"self-id flags: {len(selfid)}")
+    n_pairs_flagged = len({str(f["pair_id"]) for f in flagged})
+    print(f"degeneracy flags: {len(flagged)} panels across {n_pairs_flagged} pairs")
     return 0
 
 
@@ -260,6 +303,24 @@ def cmd_selftest(args: argparse.Namespace) -> int:
     return 0 if run_all(Path(args.repo), Path(args.out)) else 1
 
 
+def cmd_export_ids(args: argparse.Namespace) -> int:
+    from metabasis.l4_blind.draw import DrawnPairs
+    from metabasis.l4_blind.export import export_ids
+
+    out = Path(args.out)
+    map_path = Path(args.sealed_map or (out / SEALED_MAP_NAME))
+    drawn = DrawnPairs.model_validate_json(map_path.read_text())
+    summary = export_ids(drawn, Path(args.ids))
+    doc = out / "EXPORT-IDS-l4-microgold-2026-08-07.json"
+    write_json(doc, summary)
+    print(f"ids file : {summary['ids_file']}  sha256={summary['ids_file_sha256']}")
+    print(f"rows     : {summary['n_rows']} generations, {summary['n_tokens']} tokens, "
+          f"from {summary['n_source_files']} banked cells")
+    print(f"node keys: {summary['node_keys']}")
+    print(f"summary  : {doc}")
+    return 0
+
+
 def cmd_synthetic_bank(args: argparse.Namespace) -> int:
     from metabasis.l4_blind.draw import DrawnPairs
 
@@ -296,6 +357,11 @@ def main(argv: list[str] | None = None) -> int:
     sl.add_argument("--log", required=True)
     sl.add_argument("--session", default=None)
     sl.set_defaults(fn=cmd_seal)
+
+    ex = sub.add_parser("export-ids", help="export the token ids the node decode job needs")
+    ex.add_argument("--sealed-map", default=None)
+    ex.add_argument("--ids", required=True)
+    ex.set_defaults(fn=cmd_export_ids)
 
     sb = sub.add_parser("synthetic-bank", help="deterministic placeholder bank (selftests only)")
     sb.add_argument("--sealed-map", required=True)

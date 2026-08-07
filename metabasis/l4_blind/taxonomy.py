@@ -37,38 +37,52 @@ from pydantic import BaseModel, ConfigDict
 
 from metabasis.l4_blind.models import Axis, Dose, PassCell, Side
 
-# ── the proposal, in one sentence ────────────────────────────────────────
+# ── the taxonomy, as adjudicated ─────────────────────────────────────────
 
 TAXONOMY_RULE: Final[str] = (
-    "PROPOSED cell type = (axis × side), where axis ∈ {egv, formality, "
-    "language, refusal, sentiment} and side ∈ {native, transported}. The "
-    "detection-PASS population realises 9 of the 10 combinations — EGV has "
-    "no native type, because EGV native rows are the calibration half "
-    "(FLAG-D, 'native_calibration_half_BESIDE') and are never signal. Dose "
-    "SIGN (+0.30 / -0.30) is NOT a type; it is BALANCED WITHIN every type "
-    "(8 pairs each way) and recorded per pair, so the desk can slice by "
-    "sign post hoc without doubling the session. Model/column is NOT a "
-    "type; it is a stratification key inside the type, spread as evenly as "
-    "the seeded round-robin allows and recorded per pair."
+    "Cell type = (axis × side), where axis ∈ {formality, language, refusal, "
+    "sentiment} and side ∈ {native, transported} — 8 types, 16 pairs each, "
+    "128 pairs. ADJUDICATED by the desk 2026-08-07 on the enactor's "
+    "proposal, Luxia veto standing. Dose SIGN (+0.30 / -0.30) is NOT a "
+    "type; it is BALANCED WITHIN every type (8 pairs each way) and recorded "
+    "per pair, so the desk can slice by sign post hoc without doubling the "
+    "session. Model/column is NOT a type; it is a stratification key inside "
+    "the type, spread as evenly as the seeded round-robin allows and "
+    "recorded per pair. The proposal's ninth type, egv/transported, is "
+    "DROPPED — see EXCLUDED_TYPES."
 )
 
+#: Types present in the detection-PASS population that the desk has ruled
+#: OUT of the L4 deck. Each entry is a standing ruling, dated, with its
+#: reason — never a convenience filter.
+#:
+#: The exclusion is applied to the POPULATION, before any seeded step. It
+#: therefore cannot perturb a surviving type: every seeded material below
+#: is keyed on the type's own `type_key` (and the two input shas), never on
+#: the roster or its length. `selftest` proves this by drawing with and
+#: without the exclusion and requiring the survivors' pair lists to be
+#: byte-identical.
+EXCLUDED_TYPES: Final[dict[str, str]] = {
+    "egv/transported": (
+        "DROPPED by desk adjudication 2026-08-07 (standing ruling, Luxia "
+        "veto): EGV cells are L0/L2-only and carry no L3/L4 spend. L4 gold "
+        "exists to calibrate L3 per cell type, and L3 never reads an EGV "
+        "cell — a gold set for it would calibrate nothing. The EGV trait "
+        "wording is moot with it, as is the arm-mixing question the "
+        "proposal raised."
+    ),
+}
+
 TAXONOMY_ALTERNATIVES: Final[list[str]] = [
-    "COARSER — axis only (5 types, 80 pairs, ~40 min): rejected in the "
-    "proposal because it pools native with transported, and transported is "
-    "the claim while native is the equivalence-BESIDE; a per-type "
-    "agreement number that mixes them cannot support the O-5 bar for "
-    "either.",
-    "FINER — axis × side × dose-sign (18 types, 288 pairs, ~2.4 h): "
-    "scientifically the cleanest (a judge good at +0.30 and bad at -0.30 "
-    "would be caught), but it is a 2.4-hour blind sitting and O-5 fixes 16 "
-    "pairs per type, so the cost is real. The proposal keeps sign balanced "
-    "8/8 within each type as the affordable half of this.",
-    "SPLIT EGV BY ARM — the EGV type mixes arm='native' instruct columns "
-    "with arm='raw' base columns (llama-3.1-8b-base, pythia-6.9b, "
-    "qwen2.5-7b-base), which generate very differently. The proposal keeps "
-    "them one type and records `arm` per pair as a stratification key; the "
-    "desk may instead rule EGV into two types (egv/transported/native-arm "
-    "and egv/transported/raw-arm), which adds 16 pairs.",
+    "COARSER — axis only (4 types, 64 pairs): rejected because it pools "
+    "native with transported, and transported is the claim while native is "
+    "the equivalence-BESIDE; a per-type agreement number that mixes them "
+    "cannot support the O-5 bar for either.",
+    "FINER — axis × side × dose-sign (16 types, 256 pairs): scientifically "
+    "the cleanest (a judge good at +0.30 and bad at -0.30 would be caught), "
+    "but O-5 fixes 16 pairs per type, so the cost is a doubled sitting. The "
+    "adjudicated taxonomy keeps sign balanced 8/8 within each type as the "
+    "affordable half of this.",
 ]
 
 #: The 2AFC trait each axis is judged on. PROPOSED — no desk artifact pins
@@ -81,6 +95,10 @@ TAXONOMY_ALTERNATIVES: Final[list[str]] = [
 #: substring (that is why sentiment is "positive in tone", not "positive in
 #: sentiment"). The leak selftest asserts this.
 AXIS_TRAIT: Final[dict[Axis, str]] = {
+    # MOOT while egv/transported is excluded (desk 2026-08-07) — kept so the
+    # table stays total over `Axis` and a lifted exclusion cannot KeyError
+    # its way into a session. It was never adjudicated; if the exclusion is
+    # ever lifted, this wording needs a ruling of its own.
     "egv": "unpredictable in its wording",
     "formality": "formal",
     "language": "French",
@@ -159,7 +177,9 @@ def type_key_of(axis: Axis, side: Side) -> str:
     return f"{axis}/{side}"
 
 
-def load_pass_population(inputs: TaxonomyInputs) -> list[PassCell]:
+def load_pass_population(
+    inputs: TaxonomyInputs, *, apply_exclusions: bool = True
+) -> list[PassCell]:
     """Every detection-PASS cell, resolved to banked coordinates.
 
     Raises on any cell whose banked directory, baseline, or generation count
@@ -236,6 +256,18 @@ def load_pass_population(inputs: TaxonomyInputs) -> list[PassCell]:
         )
     if not cells:
         raise ValueError("no PASS cells found — check the DESK-SCORE artifact")
+
+    if apply_exclusions:
+        unknown = set(EXCLUDED_TYPES) - {c.type_key for c in cells}
+        if unknown:
+            raise ValueError(
+                f"EXCLUDED_TYPES names {sorted(unknown)}, which the PASS "
+                f"population does not contain — a stale exclusion would "
+                f"silently protect nothing; the desk must reconcile it"
+            )
+        cells = [c for c in cells if c.type_key not in EXCLUDED_TYPES]
+        if not cells:
+            raise ValueError("every type was excluded — nothing left to judge")
     return cells
 
 
