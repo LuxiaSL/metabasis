@@ -49,6 +49,8 @@ INGREDIENTS_REL = "staging/reading-l2-arm8/L2-PROBE-INGREDIENTS-2026-08-06.json"
 DEFAULT_CUSTODY = "staging/l4-tool"
 
 SEALED_MAP_NAME = "SEALED-MAP-l4-microgold-2026-08-07.json"
+SEALED_MAP_V2_NAME = "SEALED-MAP-l4-microgold-v2-2026-08-07.json"
+DECK_V2_NAME = "BLIND-DECK-l4-microgold-v2-2026-08-07.json"
 DECK_REQUEST_NAME = "DECK-REQUEST-l4-microgold-2026-08-07.json"
 PROPOSAL_NAME = "TAXONOMY-PROPOSAL-l4-microgold-2026-08-07.json"
 DECK_NAME = "BLIND-DECK-l4-microgold-2026-08-07.json"
@@ -164,6 +166,91 @@ def cmd_freeze(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_freeze_v2(args: argparse.Namespace) -> int:
+    from metabasis.l4_blind.draw_v2 import freeze_draw_v2
+
+    repo, out = Path(args.repo), Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    drawn = freeze_draw_v2(_inputs(repo))
+    map_path = out / SEALED_MAP_V2_NAME
+    map_sha = write_json(map_path, drawn.model_dump(mode="json"))
+
+    import collections
+
+    by = collections.Counter((p.type_key, p.stratum) for p in drawn.pairs)
+    print(f"deck v2 frozen: {len(drawn.pairs)} blind pairs + "
+          f"{len(drawn.calibration)} revealed calibration pairs")
+    for k in sorted(by):
+        print(f"  {k[0]:<24}{k[1]:<16}{by[k]:>3}")
+    print(f"  strata totals: {dict(collections.Counter(p.stratum for p in drawn.pairs))}")
+    print(f"  space-degenerate in deck: "
+          f"{sum(1 for p in list(drawn.pairs) + list(drawn.calibration) if p.space_degenerate)}")
+    for sf in drawn.shortfalls:
+        print(f"  SHORTFALL: {sf}")
+    print(f"sealed map v2: {map_path}  sha256={map_sha}")
+    return 0
+
+
+def cmd_export_ids_v2(args: argparse.Namespace) -> int:
+    """The ids the v2 deck needs, and which of them the v1 bank already has."""
+    import json as _json
+
+    from metabasis.l4_blind.draw_v2 import DrawnV2
+
+    out = Path(args.out)
+    drawn = DrawnV2.model_validate_json(
+        Path(args.sealed_map or (out / SEALED_MAP_V2_NAME)).read_text())
+    repo = Path(args.repo)
+
+    have: set[tuple] = set()
+    if args.bank and Path(args.bank).is_file():
+        for line in Path(args.bank).read_text().splitlines():
+            if line.strip():
+                b = _json.loads(line)
+                have.add((b["column"], b["side"], b["cell_id"], b["generation_id"]))
+
+    need: list[dict] = []
+    seen: set[tuple] = set()
+    for p in list(drawn.calibration) + list(drawn.pairs):
+        for cell_id, role in ((p.dose_cell_id, "steered"), (p.baseline_cell_id, "baseline")):
+            k = (p.column, p.side, cell_id, p.generation_id)
+            if k in seen:
+                continue
+            seen.add(k)
+            need.append({"column": p.column, "side": p.side, "node_key": p.node_key,
+                         "cell_id": cell_id, "generation_id": p.generation_id,
+                         "prompt_id": p.prompt_id, "role": role,
+                         "already_banked": k in have})
+    missing = [r for r in need if not r["already_banked"]]
+
+    doc = out / "DECK-REQUEST-l4-microgold-v2-2026-08-07.json"
+    write_json(doc, {
+        "STATUS": STATUS, "grade": GRADE, "tool_version": TOOL_VERSION,
+        "what_this_is": ("The generations deck v2 needs decoded text for. "
+                         "`already_banked` marks the ones the v1 TEXT-BANK "
+                         "already carries."),
+        "decode_of_record": ("maybe_decode(tokenizer.decode(list(generated_ids), "
+                             "skip_special_tokens=True)) — the engine's coherence "
+                             "path; CORRECTED decode, mandatory for dsv2-lite"),
+        "n_needed": len(need), "n_already_banked": len(need) - len(missing),
+        "n_missing": len(missing),
+        "missing_by_column": {c: sum(1 for r in missing if r["column"] == c)
+                              for c in sorted({r["column"] for r in missing})},
+        "rows": need,
+    })
+    print(f"v2 needs {len(need)} generations; {len(need) - len(missing)} already banked, "
+          f"{len(missing)} MISSING")
+    print(f"deck request: {doc}")
+    if missing and args.ids:
+        from metabasis.l4_blind.export import export_ids_for
+
+        summary = export_ids_for(repo, drawn, missing, Path(args.ids))
+        write_json(out / "EXPORT-IDS-v2-2026-08-07.json", summary)
+        print(f"ids file : {summary['ids_file']}  sha256={summary['ids_file_sha256']}")
+        print(f"rows     : {summary['n_rows']} generations, {summary['n_tokens']} tokens")
+    return 0
+
+
 def cmd_build_deck(args: argparse.Namespace) -> int:
     from metabasis.l4_blind.draw import DrawnPairs
 
@@ -241,6 +328,25 @@ def cmd_build_deck(args: argparse.Namespace) -> int:
     print(f"self-id flags: {len(selfid)}")
     n_pairs_flagged = len({str(f["pair_id"]) for f in flagged})
     print(f"degeneracy flags: {len(flagged)} panels across {n_pairs_flagged} pairs")
+    return 0
+
+
+def cmd_build_deck_v2(args: argparse.Namespace) -> int:
+    from metabasis.l4_blind.bank import build_deck_v2
+    from metabasis.l4_blind.draw_v2 import DrawnV2
+
+    out = Path(args.out)
+    drawn = DrawnV2.model_validate_json(
+        Path(args.sealed_map or (out / SEALED_MAP_V2_NAME)).read_text())
+    bank = Path(args.bank)
+    if not bank.is_file():
+        raise SystemExit(f"HALT: no text bank at {bank}")
+    deck, selfid, flagged = build_deck_v2(drawn, bank)
+    deck_path = out / DECK_V2_NAME
+    sha = write_json(deck_path, deck.model_dump(mode="json"))
+    print(f"blind deck v2: {deck_path}  sha256={sha}")
+    print(f"pairs        : {len(deck.pairs)}  sets: {deck.set_totals}")
+    print(f"self-id flags: {len(selfid)}   degeneracy flags: {len(flagged)}")
     return 0
 
 
@@ -367,6 +473,19 @@ def main(argv: list[str] | None = None) -> int:
     sb.add_argument("--sealed-map", required=True)
     sb.add_argument("--bank", required=True)
     sb.set_defaults(fn=cmd_synthetic_bank)
+
+    sub.add_parser("freeze-v2", help="freeze the stratified v2 draw").set_defaults(fn=cmd_freeze_v2)
+
+    e2 = sub.add_parser("export-ids-v2", help="what text deck v2 still needs")
+    e2.add_argument("--sealed-map", default=None)
+    e2.add_argument("--bank", default=None)
+    e2.add_argument("--ids", default=None)
+    e2.set_defaults(fn=cmd_export_ids_v2)
+
+    b2 = sub.add_parser("build-deck-v2", help="v2 sealed map + bank -> blind deck")
+    b2.add_argument("--bank", required=True)
+    b2.add_argument("--sealed-map", default=None)
+    b2.set_defaults(fn=cmd_build_deck_v2)
 
     sub.add_parser("selftest", help="run the full battery").set_defaults(fn=cmd_selftest)
 

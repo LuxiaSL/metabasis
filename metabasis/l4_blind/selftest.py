@@ -23,6 +23,7 @@ Run: `python -m metabasis.l4_blind.cli selftest`
 from __future__ import annotations
 
 import inspect
+from collections import Counter
 import json
 import re
 import subprocess
@@ -425,6 +426,93 @@ def run_all(repo: Path, out_dir: Path) -> bool:
         finally:
             httpd.shutdown()
             httpd.server_close()
+
+    # ── deck v2: the measured-effect layer ──────────────────────────────
+    print("\n[deck v2 — stratification]")
+    from metabasis.l4_blind.draw_v2 import DrawnV2, TARGETS, freeze_draw_v2
+    from metabasis.l4_blind.strata import MODERATE_MIN, NULL_MAX, STRONG_MIN
+
+    v2a = freeze_draw_v2(inputs)
+    v2b = freeze_draw_v2(inputs)
+    ja = json.dumps(v2a.model_dump(mode="json"), sort_keys=True)
+    check(ja == json.dumps(v2b.model_dump(mode="json"), sort_keys=True),
+          "v2 draw determinism (twice in-process)",
+          f"{len(v2a.pairs)} blind + {len(v2a.calibration)} calibration")
+
+    cal_ids = {p.natural_id for p in v2a.calibration}
+    blind_ids = {p.natural_id for p in v2a.pairs}
+    check(not (cal_ids & blind_ids),
+          "no calibration generation reappears in the blind block",
+          f"overlap={sorted(cal_ids & blind_ids)}" if (cal_ids & blind_ids)
+          else f"{len(cal_ids)} revealed, {len(blind_ids)} blind, disjoint")
+
+    bad_st = sorted({p.stratum for p in v2a.pairs}
+                    - {"strong", "moderate", "expected_null"})
+    check(not bad_st, "every blind pair carries a real stratum", f"{bad_st}")
+
+    wrong = []
+    for p in v2a.pairs:
+        d = p.measured_delta
+        if d is None:
+            wrong.append(f"{p.natural_id}: no delta"); continue
+        by_construction = (p.axis == "language" and p.dose == "-0.30")
+        if p.stratum == "strong" and d < STRONG_MIN:
+            wrong.append(f"{p.natural_id}: strong but delta={d}")
+        if p.stratum == "moderate" and not (MODERATE_MIN <= d < STRONG_MIN):
+            wrong.append(f"{p.natural_id}: moderate but delta={d}")
+        if p.stratum == "expected_null" and d >= NULL_MAX and not by_construction:
+            wrong.append(f"{p.natural_id}: null but delta={d}")
+    check(not wrong, "every pair's stratum matches its measured delta",
+          "; ".join(wrong[:4]) if wrong else "all consistent with the thresholds")
+
+    # Calibration pairs carry stratum == "calibration" (they are anchors,
+    # not gold, and the unblinding step drops them on that field). What
+    # must hold is that each was DRAWN from the strong band.
+    check(all(p.stratum == "calibration" for p in v2a.calibration),
+          "calibration pairs are labelled as their own stratum",
+          "so unblinding can drop them before any agreement is computed")
+    check(all(p.measured_delta is not None and p.measured_delta >= STRONG_MIN
+              for p in v2a.calibration),
+          "every calibration exemplar was drawn from the strong band",
+          f"min delta={min(p.measured_delta for p in v2a.calibration):.3f} "
+          f"(threshold {STRONG_MIN})")
+    check(all(not p.space_degenerate for p in v2a.calibration),
+          "no calibration anchor is a space-degenerate panel")
+    check(all(p.revealed for p in v2a.calibration)
+          and not any(p.revealed for p in v2a.pairs),
+          "revealed is set on the calibration block and nowhere else")
+
+    over = [k for k, n in
+            Counter((p.type_key, p.stratum) for p in v2a.pairs).items()
+            if n > TARGETS[k[1]]]
+    check(not over, "no stratum exceeds its per-(axis,side) target", f"{over}")
+
+    nulls = [p for p in v2a.pairs if p.stratum == "expected_null"]
+    check(len(nulls) >= 12, "the catch-trial stratum is big enough to score",
+          f"{len(nulls)} catch trials of {len(v2a.pairs)} blind pairs")
+
+    for stratum in ("strong", "moderate", "expected_null"):
+        sub = [p for p in v2a.pairs if p.stratum == stratum]
+        by_ts = Counter((p.type_key, p.dose_first) for p in sub)
+        skew = [t for t in {k[0] for k in by_ts}
+                if abs(by_ts[(t, True)] - by_ts[(t, False)]) > 1]
+        check(not skew, f"order counterbalanced within {stratum}",
+              f"skewed: {skew}" if skew else f"{len(sub)} pairs, +/-1 of even")
+
+    print("\n[deck v2 — text availability]")
+    bankp = out_dir / "node-job" / "pulled" / "TEXT-BANK.jsonl"
+    if bankp.is_file():
+        have = set()
+        for line in bankp.read_text().splitlines():
+            if line.strip():
+                b = json.loads(line)
+                have.add((b["column"], b["side"], b["cell_id"], b["generation_id"]))
+        need = set()
+        for p in list(v2a.calibration) + list(v2a.pairs):
+            need.add((p.column, p.side, p.dose_cell_id, p.generation_id))
+            need.add((p.column, p.side, p.baseline_cell_id, p.generation_id))
+        check(True, "v2 text coverage against the v1 bank (informational)",
+              f"needs {len(need)}, banked {len(need & have)}, MISSING {len(need - have)}")
 
     # ── the REAL deck, if one has been built ────────────────────────────
     # The synthetic bank proves the tool cannot leak. Only the real deck

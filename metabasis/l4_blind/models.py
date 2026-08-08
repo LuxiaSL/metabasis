@@ -83,6 +83,22 @@ class PairCoord(Frozen):
     ordinal_in_type: int = Field(ge=0)
     ordinal_global: int = Field(ge=0)
 
+    # ── deck v2: the measured-effect layer ───────────────────────────
+    #: strong | moderate | expected_null | calibration.
+    #: `expected_null` pairs are CATCH TRIALS — scored later for
+    #: unsure-honesty, never for agreement. `calibration` pairs are
+    #: shown REVEALED and are never gold.
+    stratum: str = "unstratified"
+    #: The on-axis classifier delta, direction-corrected. None for v1.
+    measured_delta: float | None = None
+    s_dose: float | None = None
+    s_baseline: float | None = None
+    #: Either panel decoded without spaces (the dsv2 decode issue).
+    space_degenerate: bool = False
+    #: True for the revealed calibration block: the page NAMES the
+    #: steered panel for these, so they anchor rather than test.
+    revealed: bool = False
+
     #: The material the deterministic key-sort consumed for this pair, kept
     #: verbatim so the desk can re-derive the draw without reading code.
     natural_id: str
@@ -136,10 +152,19 @@ class BlindPair(Frozen):
     """
 
     pair_id: str = Field(pattern=r"^L4-[0-9a-f]{12}$")
-    set_label: str = Field(pattern=r"^Set [A-Z]$")
+    set_label: str = Field(pattern=r"^(Set [A-Z]|Calibration)$")
     trait: str
     text_1: str
     text_2: str
+
+    #: REVEALED pairs only (the calibration block). Names which panel was
+    #: steered, and by how much the on-axis score moved, so Luxia anchors
+    #: on what a real effect looks like before judging anything blind.
+    #: None on every blind pair — and the leak selftest asserts that the
+    #: blind pairs carry no such field in the rendered page.
+    revealed_steered: str | None = None
+    revealed_delta: float | None = None
+    revealed_direction: str | None = None
 
     @field_validator("text_1", "text_2")
     @classmethod

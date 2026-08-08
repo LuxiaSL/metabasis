@@ -292,3 +292,85 @@ def normalise_for_display(text: str) -> str:
     reads; this never touches them.
     """
     return "\n".join(_WS.sub(" ", ln).rstrip() for ln in text.splitlines()).strip()
+
+
+# ── deck v2: a revealed calibration block, then the blind block ──────────
+
+
+def build_deck_v2(drawn, bank_path: Path) -> tuple[BlindDeck, list, list]:
+    """Join the v2 sealed map to the bank.
+
+    The calibration pairs come FIRST and carry `revealed_steered`, so the
+    page can name which panel was steered and by how much. They are
+    anchors, never gold: `stratum == "calibration"` in the sealed map, and
+    the unblinding step must drop them before computing any agreement.
+    """
+    bank = load_bank(bank_path)
+    bank_sha = sha256_file(bank_path)
+    draw_sha = sha256_json(drawn.model_dump(mode="json"))
+
+    pairs: list[BlindPair] = []
+    missing: list[str] = []
+    flagged: list[dict[str, object]] = []
+
+    ordered = list(sorted(drawn.calibration, key=lambda x: x.ordinal_global)) + list(
+        sorted(drawn.pairs, key=lambda x: x.ordinal_global)
+    )
+    for p in ordered:
+        kd = bank_key(p.column, p.side, p.dose_cell_id, p.generation_id)
+        kb = bank_key(p.column, p.side, p.baseline_cell_id, p.generation_id)
+        td, tb = bank.get(kd), bank.get(kb)
+        if td is None:
+            missing.append(kd)
+        if tb is None:
+            missing.append(kb)
+        if td is None or tb is None:
+            continue
+        for label, t in ((kd, td), (kb, tb)):
+            if len(t) < MIN_CHARS:
+                raise ValueError(f"{label} decoded to {len(t)} chars (< {MIN_CHARS})")
+            ratio = t.count(" ") / len(t)
+            if ratio < SPACE_DEGENERATE_RATIO or len(t) < SHORT_PANEL_CHARS:
+                flagged.append({
+                    "pair_id": p.pair_id, "type_key": p.type_key,
+                    "stratum": p.stratum, "set_label": p.set_label,
+                    "chars": len(t), "space_ratio": round(ratio, 5),
+                    "space_degenerate": ratio < SPACE_DEGENERATE_RATIO,
+                    "short": len(t) < SHORT_PANEL_CHARS,
+                    "coordinates_SEALED": label,
+                })
+        t1, t2 = (td, tb) if p.dose_first else (tb, td)
+        rev = None
+        if p.revealed:
+            rev = "text_1" if p.dose_first else "text_2"
+        pairs.append(BlindPair(
+            pair_id=p.pair_id,
+            set_label="Calibration" if p.revealed else p.set_label,
+            trait=AXIS_TRAIT[p.axis], text_1=t1, text_2=t2,
+            revealed_steered=rev,
+            revealed_delta=(round(p.measured_delta, 3)
+                            if (p.revealed and p.measured_delta is not None) else None),
+            revealed_direction=("more" if (p.revealed and p.dose.startswith("+"))
+                                else "less" if p.revealed else None),
+        ))
+
+    if missing:
+        raise ValueError(
+            f"the text bank is missing {len(missing)} of the drawn generations; "
+            f"refusing to build a partial deck. First few:\n  - "
+            + "\n  - ".join(missing[:10])
+        )
+
+    totals: dict[str, int] = {}
+    for p in pairs:
+        totals[p.set_label] = totals.get(p.set_label, 0) + 1
+
+    deck = BlindDeck(
+        tool_version=TOOL_VERSION, grade=GRADE, status=STATUS,
+        draw_recipe=drawn.draw_recipe, draw_sha256=draw_sha,
+        sealed_map_sha256=draw_sha, bank_sha256=bank_sha,
+        set_labels=(["Calibration"] if "Calibration" in totals else [])
+        + sorted(k for k in totals if k != "Calibration"),
+        set_totals=totals, pairs=pairs,
+    )
+    return deck, scan_self_identification(pairs), flagged

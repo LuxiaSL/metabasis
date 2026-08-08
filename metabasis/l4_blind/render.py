@@ -68,6 +68,13 @@ header{flex:0 0 auto;border-bottom:1px solid var(--line);background:var(--panel)
 .bar .fill{height:100%;background:var(--accent);width:0;transition:width .18s ease}
 .bar.done .fill{background:var(--ok)}
 .bar:first-child .lab{color:var(--ink);font-weight:600}
+#reveal{flex:0 0 auto;display:none;margin:10px 16px 0;padding:10px 14px;border-radius:8px;
+  background:rgba(122,162,247,.10);border:1px solid rgba(122,162,247,.45);font-size:14.5px}
+#reveal.on{display:block}
+#reveal b{color:var(--accent)}
+#reveal .tag{font:11px/1 ui-monospace,Menlo,monospace;color:var(--dim);letter-spacing:.6px;
+  display:block;margin-bottom:5px}
+.panel.steered{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
 #qline{flex:0 0 auto;padding:12px 16px 6px;font-size:19px;font-weight:600}
 #qline .trait{color:var(--accent)}
 main{flex:1 1 auto;display:grid;grid-template-columns:1fr 1fr;gap:12px;
@@ -111,6 +118,7 @@ _JS = r"""
 const DECK = JSON.parse(document.getElementById('deck-data').textContent);
 const PAIRS = DECK.pairs, N = PAIRS.length;
 const IDX = new Map(PAIRS.map((p,i)=>[p.pair_id,i]));
+const NBLIND = PAIRS.filter(p=>!p.revealed_steered).length;
 const state = {i:0, verdicts:new Map(), notes:new Map(), shownAt:0, shownIso:null,
                times:[], saving:0, err:0};
 
@@ -123,7 +131,7 @@ function fmt(ms){const s=Math.round(ms/1000);return (s<60? s+'s' : Math.floor(s/
 function buildBars(){
   const wrap = $('#bars'); wrap.innerHTML='';
   const all = document.createElement('div'); all.className='bar'; all.id='bar-ALL';
-  all.innerHTML='<div class="lab"><span>ALL</span><span class="n"></span></div>'+
+  all.innerHTML='<div class="lab"><span>BLIND</span><span class="n"></span></div>'+
                 '<div class="track"><div class="fill"></div></div>';
   wrap.appendChild(all);
   for(const s of DECK.set_labels){
@@ -146,12 +154,17 @@ function paintBars(){
     el.querySelector('.n').textContent=n+'/'+t;
     el.querySelector('.fill').style.width=(t?100*n/t:0)+'%';
     el.classList.toggle('done', n>=t);};
-  setBar('bar-ALL', done, N);
-  for(const s of DECK.set_labels) setBar('bar-'+s.replace(/\s/g,'_'), per[s], DECK.set_totals[s]);
+  setBar('bar-ALL', done, NBLIND);
+  for(const s of DECK.set_labels){
+    if(s==='Calibration'){
+      const seen=PAIRS.filter((p,ix)=>p.set_label==='Calibration'&&ix<state.i).length;
+      setBar('bar-Calibration', seen, DECK.set_totals[s]);
+    } else setBar('bar-'+s.replace(/\s/g,'_'), per[s], DECK.set_totals[s]);
+  }
   const med = state.times.length ? [...state.times].sort((a,b)=>a-b)[Math.floor(state.times.length/2)] : 0;
   $('#pace').textContent = 'pace ' + (med? (med/1000).toFixed(1)+'s/pair' : '—') +
-                           '  ·  judged ' + done + '/' + N +
-                           '  ·  remaining ' + (med? fmt(med*(N-done)) : '—');
+                           '  ·  judged ' + done + '/' + NBLIND +
+                           '  ·  remaining ' + (med? fmt(med*(NBLIND-done)) : '—');
 }
 
 function render(){
@@ -162,13 +175,32 @@ function render(){
   q.innerHTML='Which text is more <span class="trait">'+p.trait+'</span>?';
   p1.textContent=p.text_1; p2.textContent=p.text_2;
   p1.scrollTop=0; p2.scrollTop=0;
+  const rv=$('#reveal');
+  if(p.revealed_steered){
+    const which = p.revealed_steered==='text_1' ? 'TEXT 1' : 'TEXT 2';
+    rv.className='on';
+    rv.innerHTML='<span class="tag">CALIBRATION — NOT SCORED. This is what a real effect looks like.</span>'+
+      '<b>'+which+'</b> is the steered generation; the other is the same prompt with no steering. '+
+      'The steering pushed it to be <b>'+p.revealed_direction+' '+p.trait+'</b> '+
+      '(on-axis score moved '+p.revealed_delta+' of a possible 1.00). '+
+      'Read both, then press <b>Enter</b>.';
+    $('#phase').textContent='calibration · steered side revealed';
+    $('#phase').style.borderColor='rgba(122,162,247,.55)';
+    $('#phase').style.color='var(--accent)';
+  } else {
+    rv.className='';
+    $('#phase').textContent='blind · sources sealed';
+    $('#phase').style.borderColor=''; $('#phase').style.color='';
+  }
   const v=state.verdicts.get(p.pair_id);
   $('#p1').classList.toggle('chosen', v==='text_1');
   $('#p2').classList.toggle('chosen', v==='text_2');
+  $('#p1').classList.toggle('steered', p.revealed_steered==='text_1');
+  $('#p2').classList.toggle('steered', p.revealed_steered==='text_2');
   h1.textContent='TEXT 1'+(v==='text_1'?'   ✓ chosen':'');
   h2.textContent='TEXT 2'+(v==='text_2'?'   ✓ chosen':'');
   const note=state.notes.get(p.pair_id)||'';
-  $('#pos').textContent=(state.i+1)+' / '+N+'  ·  '+p.set_label+
+  $('#pos').textContent=(state.i+1)+' / '+N+'  ·  '+(p.revealed_steered?'CALIBRATION':p.set_label)+
       (v? '  ·  recorded: '+(v==='unsure'?'UNSURE':v.replace('_',' ')) : '') +
       (note? '  ·  ✎ note' : '');
   state.shownAt=performance.now();
@@ -192,6 +224,7 @@ async function post(url,body){
 function record(choice){
   if(state.i>=N) return;
   const p=PAIRS[state.i];
+  if(p.revealed_steered){ return; }   // calibration: anchor, never gold
   const already=state.verdicts.has(p.pair_id);
   const dt=Math.max(0,Math.round(performance.now()-state.shownAt));
   if(!already) state.times.push(dt);
@@ -293,6 +326,9 @@ def render_page(deck: BlindDeck, session_id: str) -> str:
                 "trait": p.trait,
                 "text_1": normalise_for_display(p.text_1),
                 "text_2": normalise_for_display(p.text_2),
+                "revealed_steered": p.revealed_steered,
+                "revealed_delta": p.revealed_delta,
+                "revealed_direction": p.revealed_direction,
             }
             for p in deck.pairs
         ],
@@ -309,10 +345,11 @@ def render_page(deck: BlindDeck, session_id: str) -> str:
   <span class="pill" id="pos">—</span>
   <span class="pill" id="pace">pace —</span>
   <span class="spacer"></span>
-  <span class="badge">blind · sources sealed</span>
+  <span class="badge" id="phase">blind · sources sealed</span>
   <span class="pill" id="save">ready</span>
 </header>
 <div id="bars"></div>
+<div id="reveal"></div>
 <div id="qline">—</div>
 <main id="main">
   <section class="panel" id="p1"><h2 id="p1h">TEXT 1</h2><div class="body" id="p1b"></div></section>

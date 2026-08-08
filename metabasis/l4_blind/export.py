@@ -138,3 +138,66 @@ def export_ids(drawn: DrawnPairs, out_path: Path) -> dict[str, Any]:
             "it is MANDATORY for the dsv2-lite columns (Ġ-marker path)."
         ),
     }
+
+
+def export_ids_for(repo: Path, drawn, rows: list[dict], out_path: Path) -> dict[str, Any]:
+    """Export token ids for an explicit list of coordinate rows (deck v2)."""
+    roots: dict[tuple[str, str], str] = {}
+    from metabasis.l4_blind.taxonomy import load_pass_population
+
+    for c in load_pass_population(drawn.inputs):
+        roots[(c.column, c.side)] = c.results_root
+
+    cache: dict[Path, tuple[dict[int, dict], str]] = {}
+
+    def cell_rows(column: str, side: str, cell_id: str):
+        root = roots.get((column, side))
+        if root is None:
+            raise ValueError(f"no results root for {column}/{side}")
+        p = repo / root / cell_id / "generations.jsonl"
+        if p not in cache:
+            by_gen: dict[int, dict] = {}
+            with p.open("r", encoding="utf-8") as fh:
+                for line in fh:
+                    if line.strip():
+                        r = json.loads(line)
+                        by_gen[int(r["generation_id"])] = r
+            cache[p] = (by_gen, sha256_file(p))
+        return cache[p]
+
+    out: list[str] = []
+    n_tokens = 0
+    for req in rows:
+        by_gen, src_sha = cell_rows(req["column"], req["side"], req["cell_id"])
+        row = by_gen.get(int(req["generation_id"]))
+        if row is None:
+            raise ValueError(f"{req['column']}/{req['cell_id']} missing g={req['generation_id']}")
+        if str(row["prompt_id"]) != str(req["prompt_id"]):
+            raise ValueError(
+                f"{req['column']}/{req['cell_id']} g={req['generation_id']}: prompt "
+                f"{row['prompt_id']} != sealed map's {req['prompt_id']}"
+            )
+        ids = list(row["generated_ids"])
+        if not ids:
+            raise ValueError(f"{req['column']}/{req['cell_id']} g={req['generation_id']}: no ids")
+        n_tokens += len(ids)
+        out.append(json.dumps({
+            "column": req["column"], "side": req["side"], "node_key": req["node_key"],
+            "cell_id": req["cell_id"], "generation_id": int(req["generation_id"]),
+            "prompt_id": req["prompt_id"], "generated_ids": ids,
+            "finished_with_eos": bool(row.get("finished_with_eos", False)),
+            "source_generations_jsonl_sha256": src_sha,
+        }, ensure_ascii=False))
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text("\n".join(out) + "\n", encoding="utf-8")
+    return {
+        "STATUS": STATUS, "grade": GRADE, "tool_version": TOOL_VERSION,
+        "what_this_is": "Token ids for the generations deck v2 still needs text for.",
+        "ids_file": str(out_path), "ids_file_sha256": sha256_file(out_path),
+        "n_rows": len(out), "n_tokens": n_tokens, "n_source_files": len(cache),
+        "node_keys": sorted({str(r["node_key"]) for r in rows}),
+        "columns": sorted({str(r["column"]) for r in rows}),
+        "source_shas": {str(p): sha for p, (_, sha) in
+                        sorted(cache.items(), key=lambda kv: str(kv[0]))},
+    }
