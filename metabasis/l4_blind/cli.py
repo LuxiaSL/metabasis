@@ -51,6 +51,8 @@ DEFAULT_CUSTODY = "staging/l4-tool"
 SEALED_MAP_NAME = "SEALED-MAP-l4-microgold-2026-08-07.json"
 SEALED_MAP_V2_NAME = "SEALED-MAP-l4-microgold-v2-2026-08-07.json"
 DECK_V2_NAME = "BLIND-DECK-l4-microgold-v2-2026-08-07.json"
+SEALED_MAP_V21_NAME = "SEALED-MAP-l4-microgold-v2.1-2026-08-07.json"
+DECK_V21_NAME = "BLIND-DECK-l4-microgold-v2.1-2026-08-07.json"
 DECK_REQUEST_NAME = "DECK-REQUEST-l4-microgold-2026-08-07.json"
 PROPOSAL_NAME = "TAXONOMY-PROPOSAL-l4-microgold-2026-08-07.json"
 DECK_NAME = "BLIND-DECK-l4-microgold-2026-08-07.json"
@@ -188,6 +190,56 @@ def cmd_freeze_v2(args: argparse.Namespace) -> int:
     for sf in drawn.shortfalls:
         print(f"  SHORTFALL: {sf}")
     print(f"sealed map v2: {map_path}  sha256={map_sha}")
+    return 0
+
+
+def cmd_freeze_v21(args: argparse.Namespace) -> int:
+    """v2.1 — the same design over the WIDENED 20-column candidate pool."""
+    import collections
+
+    from metabasis.l4_blind.draw_v2 import freeze_draw_v2
+    from metabasis.l4_blind.strata import PER_GENERATION_ROWS_REL
+
+    repo, out = Path(args.repo), Path(args.out)
+    widened = repo / PER_GENERATION_ROWS_REL
+    if not widened.is_file():
+        raise SystemExit(
+            f"HALT: the widened per-generation source is not here:\n  {widened}\n"
+            f"       v2.1 is defined as the re-draw over the 20-column pool; "
+            f"without it this would silently re-freeze v2."
+        )
+    out.mkdir(parents=True, exist_ok=True)
+    drawn = freeze_draw_v2(_inputs(repo))
+    map_path = out / SEALED_MAP_V21_NAME
+    map_sha = write_json(map_path, drawn.model_dump(mode="json"))
+
+    allp = list(drawn.pairs)
+    by = collections.Counter((p.type_key, p.stratum) for p in allp)
+    print(f"deck v2.1 frozen: {len(allp)} blind + {len(drawn.calibration)} calibration")
+    for k in sorted(by):
+        print(f"  {k[0]:<24}{k[1]:<16}{by[k]:>3}")
+    print(f"  strata totals: {dict(collections.Counter(p.stratum for p in allp))}")
+
+    print("\n  dsv2 fraction per stratum (the widening is the point):")
+    for st in ("strong", "moderate", "expected_null"):
+        sub = [p for p in allp if p.stratum == st]
+        if not sub:
+            continue
+        d = sum(1 for p in sub if p.node_key == "dsv2-lite")
+        print(f"    {st:<16}{d:>3}/{len(sub):<4} = {d/len(sub):.2f}")
+    nodes = collections.Counter(p.node_key for p in allp)
+    print(f"  blind block node mix: {dict(sorted(nodes.items()))}")
+
+    cal_nodes = collections.Counter(p.node_key for p in drawn.calibration)
+    d = cal_nodes.get("dsv2-lite", 0)
+    print(f"\n  CALIBRATION node mix: {dict(sorted(cal_nodes.items()))}")
+    print(f"    dsv2 = {d}/{len(drawn.calibration)} = {d/max(1,len(drawn.calibration)):.2f} "
+          f"(target <= 1/3)")
+    print(f"  space-degenerate in deck: "
+          f"{sum(1 for p in allp + list(drawn.calibration) if p.space_degenerate)}")
+    for sf in drawn.shortfalls:
+        print(f"  SHORTFALL: {sf}")
+    print(f"\nsealed map v2.1: {map_path}  sha256={map_sha}")
     return 0
 
 
@@ -342,11 +394,29 @@ def cmd_build_deck_v2(args: argparse.Namespace) -> int:
     if not bank.is_file():
         raise SystemExit(f"HALT: no text bank at {bank}")
     deck, selfid, flagged = build_deck_v2(drawn, bank)
-    deck_path = out / DECK_V2_NAME
+    # name the deck after the map that sealed it, so a v2.1 map can never
+    # silently overwrite the v2 deck
+    src = Path(args.sealed_map or (out / SEALED_MAP_V2_NAME)).name
+    deck_path = out / (DECK_V21_NAME if "v2.1" in src else DECK_V2_NAME)
     sha = write_json(deck_path, deck.model_dump(mode="json"))
     print(f"blind deck v2: {deck_path}  sha256={sha}")
     print(f"pairs        : {len(deck.pairs)}  sets: {deck.set_totals}")
     print(f"self-id flags: {len(selfid)}   degeneracy flags: {len(flagged)}")
+    if selfid:
+        write_json(out / "FLAG-self-identification-v2.1-2026-08-07.json", {
+            "STATUS": STATUS, "grade": GRADE,
+            "what_this_is": ("Blind pairs whose TEXT contains a token that could "
+                             "name its own model. REPORTED, NEVER EDITED — L3 "
+                             "reads the same bytes."),
+            "n_hits": len(selfid), "hits": selfid})
+    if flagged:
+        write_json(out / "FLAG-panel-degeneracy-v2.1-2026-08-07.json", {
+            "STATUS": STATUS, "grade": GRADE,
+            "what_this_is": ("Panels that are space-degenerate or unusually "
+                             "short. Reported, never repaired."),
+            "n_flagged_panels": len(flagged),
+            "n_pairs_touched": len({str(f["pair_id"]) for f in flagged}),
+            "panels": flagged})
     return 0
 
 
@@ -475,6 +545,9 @@ def main(argv: list[str] | None = None) -> int:
     sb.set_defaults(fn=cmd_synthetic_bank)
 
     sub.add_parser("freeze-v2", help="freeze the stratified v2 draw").set_defaults(fn=cmd_freeze_v2)
+    sub.add_parser("freeze-v21",
+                   help="freeze v2.1 over the widened 20-column pool"
+                   ).set_defaults(fn=cmd_freeze_v21)
 
     e2 = sub.add_parser("export-ids-v2", help="what text deck v2 still needs")
     e2.add_argument("--sealed-map", default=None)

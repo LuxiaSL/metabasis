@@ -60,6 +60,45 @@ TARGETS: Final[dict[str, int]] = {"strong": 6, "moderate": 6, "expected_null": 4
 #: side, then the next best across both.
 CALIBRATION_PER_AXIS: Final[int] = 3
 
+#: Cross-node diversity in the calibration block (desk, 2026-08-07). The
+#: anchors are what Luxia learns "a real effect" from; if they all come
+#: from one node she learns that node's idiosyncrasies instead. Slots are
+#: filled preferring the least-represented node so far, and no single node
+#: may exceed this fraction of the block while alternatives exist.
+MAX_NODE_FRACTION: Final[float] = 1.0 / 3.0
+
+#: An anchor must first be VIVID. Diversity is taken where it is free and
+#: not where it costs the anchor its job.
+#:
+#: Measured, not assumed: on language and sentiment, four or five nodes
+#: reach delta >= 0.98, so spreading the anchors across nodes costs
+#: nothing. On formality only dsv2-lite clears 0.80 at all (0.929 native /
+#: 0.943 transported); the next best node manages 0.52-0.56. Anchoring
+#: formality on a 0.52 to avoid a second dsv2 exemplar would teach Luxia
+#: that "a real effect" is something barely visible — the exact failure v1
+#: already made once. So vividness outranks diversity, and diversity then
+#: decides among the vivid.
+CALIBRATION_VIVID_MIN: Final[float] = 0.80
+
+#: Columns barred from the ANCHOR pool (the blind block may still use
+#: them, flagged). Not a guess — a measured finding.
+#:
+#: dsv2-lite.formality's strong tail is systematically glued: of its
+#: banked panels, 13 are glued by the direct measure, and three
+#: successive re-freezes each drew another glued anchor from it. An
+#: anchor is the one panel Luxia is TOLD is steered, so a glued one
+#: teaches her that "less formal" looks like mangled text. Its blind
+#: pairs stay (with the flag); its anchors do not.
+#:
+#: Note for the desk, stated precisely because it would be easy to
+#: overread: gluing is NOT manufacturing the effects. Among dsv2
+#: formality pairs with banked text, 0.33 of the delta>=0.50 pairs carry
+#: a glued panel against 0.57 of the delta<0.50 pairs — if anything
+#: gluing is commoner where the measured effect is SMALL.
+CALIBRATION_EXCLUDED_COLUMNS: Final[frozenset[str]] = frozenset({
+    "dsv2-lite.formality",
+})
+
 STRATUM_ORDER: Final[tuple[str, ...]] = ("strong", "moderate", "expected_null")
 
 
@@ -157,6 +196,29 @@ def freeze_draw_v2(inputs: TaxonomyInputs) -> DrawnV2:
     # ── calibration: max-delta, non-degenerate, per (axis, side) ──────
     calibration: list[PairCoord] = []
     used: set[str] = set()
+    node_count: Counter = Counter()
+    n_slots = CALIBRATION_PER_AXIS * len(axes)
+    node_cap = max(1, int(n_slots * MAX_NODE_FRACTION + 1e-9))
+
+    def cal_rank(c: CandidatePair):
+        """Vivid first, then least-represented node, then biggest effect.
+
+        The ordering is deliberate and is the answer to a real tension:
+        an anchor that is not vivid does not anchor, and an anchor set
+        that is all one node teaches that node. Vividness is the harder
+        constraint, so it leads; diversity then decides among the vivid,
+        and the node cap only bites while an alternative exists.
+        """
+        vivid = c.delta >= CALIBRATION_VIVID_MIN
+        over = node_count[c.node_key] >= node_cap
+        return (
+            0 if vivid else 1,
+            1 if over else 0,
+            node_count[c.node_key],
+            -c.delta,
+            hashlib.sha256(f"{root}|caltie|{c.natural_id}".encode()).hexdigest(),
+        )
+
     for axis in axes:
         picks: list[CandidatePair] = []
         for side in sides:
@@ -164,30 +226,27 @@ def freeze_draw_v2(inputs: TaxonomyInputs) -> DrawnV2:
                 p for p in pool
                 if p.axis == axis and p.side == side
                 and p.stratum == "strong" and not p.space_degenerate
+                and p.column not in CALIBRATION_EXCLUDED_COLUMNS
+                and p.natural_id not in {x.natural_id for x in picks}
             ]
             if not cands:
                 continue
-            # highest delta first; sha key breaks exact ties (language
-            # saturates at .999, so ties are real and must not depend on
-            # file order).
-            cands = sorted(
-                cands,
-                key=lambda c: (-c.delta, hashlib.sha256(
-                    f"{root}|caltie|{c.natural_id}".encode()).hexdigest()),
-            )
-            picks.append(cands[0])
+            best = sorted(cands, key=cal_rank)[0]
+            picks.append(best)
+            node_count[best.node_key] += 1
         # fill to CALIBRATION_PER_AXIS with the next best across sides
-        rest = [
-            p for p in pool
-            if p.axis == axis and p.stratum == "strong" and not p.space_degenerate
-            and p.natural_id not in {x.natural_id for x in picks}
-        ]
-        rest = sorted(
-            rest,
-            key=lambda c: (-c.delta, hashlib.sha256(
-                f"{root}|caltie|{c.natural_id}".encode()).hexdigest()),
-        )
-        picks.extend(rest[: max(0, CALIBRATION_PER_AXIS - len(picks))])
+        while len(picks) < CALIBRATION_PER_AXIS:
+            rest = [
+                p for p in pool
+                if p.axis == axis and p.stratum == "strong" and not p.space_degenerate
+                and p.column not in CALIBRATION_EXCLUDED_COLUMNS
+                and p.natural_id not in {x.natural_id for x in picks}
+            ]
+            if not rest:
+                break
+            best = sorted(rest, key=cal_rank)[0]
+            picks.append(best)
+            node_count[best.node_key] += 1
         for i, c in enumerate(picks):
             used.add(c.natural_id)
             calibration.append(

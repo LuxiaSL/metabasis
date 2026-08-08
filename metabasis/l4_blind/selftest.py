@@ -519,19 +519,42 @@ def run_all(repo: Path, out_dir: Path) -> bool:
     # can prove the actual session is clean, because a generation may name
     # its own model in its own text — a content question, not a tool bug,
     # but one Luxia would see.
-    real_deck_path = out_dir / "BLIND-DECK-l4-microgold-2026-08-07.json"
+    real_deck_path = out_dir / "BLIND-DECK-l4-microgold-v2.1-2026-08-07.json"
+    if not real_deck_path.is_file():
+        real_deck_path = out_dir / "BLIND-DECK-l4-microgold-2026-08-07.json"
     if real_deck_path.is_file():
         print("\n[REAL deck]")
         from metabasis.l4_blind.models import BlindDeck
 
         real = BlindDeck.model_validate_json(real_deck_path.read_text())
-        check(len(real.pairs) == len(d1.pairs), "the real deck covers the frozen draw",
-              f"{len(real.pairs)} pairs")
+        v21_map = out_dir / "SEALED-MAP-l4-microgold-v2.1-2026-08-07.json"
+        if v21_map.is_file():
+            v21 = DrawnV2.model_validate_json(v21_map.read_text())
+            expect = len(v21.pairs) + len(v21.calibration)
+            check(len(real.pairs) == expect, "the real deck covers the frozen v2.1 draw",
+                  f"{len(real.pairs)} pairs = {len(v21.pairs)} blind + "
+                  f"{len(v21.calibration)} calibration")
+            cal = [p for p in real.pairs if p.revealed_steered]
+            check(len(cal) == len(v21.calibration),
+                  "the revealed calibration block survives into the real deck",
+                  f"{len(cal)} revealed")
+            check(all(p.set_label == "Calibration" for p in cal)
+                  and not any(p.set_label == "Calibration" and not p.revealed_steered
+                              for p in real.pairs),
+                  "revealed and Calibration-labelled coincide exactly")
+        else:
+            check(len(real.pairs) == len(d1.pairs), "the real deck covers the frozen draw",
+                  f"{len(real.pairs)} pairs")
         check(real.draw_sha256 == real.sealed_map_sha256,
               "the real deck names the sealed map that unblinds it",
               f"draw_sha256={real.draw_sha256[:16]}…")
-        check({p.pair_id for p in real.pairs} == {p.pair_id for p in d1.pairs},
-              "the real deck's pair ids are exactly the frozen draw's")
+        if not v21_map.is_file():
+            check({p.pair_id for p in real.pairs} == {p.pair_id for p in d1.pairs},
+                  "the real deck's pair ids are exactly the frozen draw's")
+        else:
+            want = {p.pair_id for p in v21.pairs} | {p.pair_id for p in v21.calibration}
+            check({p.pair_id for p in real.pairs} == want,
+                  "the real deck's pair ids are exactly the v2.1 draw's")
 
         real_html = render_page(real, "selftest-real")
         toks = leak_tokens(repo, inputs)
@@ -549,10 +572,21 @@ def run_all(repo: Path, out_dir: Path) -> bool:
                     text_hits[tok] = text_hits.get(tok, 0) + n
         check(True, "source tokens appearing INSIDE the generated text (informational)",
               f"{text_hits}" if text_hits else "none — no generation names a source")
+        from metabasis.l4_blind.bank import ACKNOWLEDGED_SELF_ID
+
         selfid_real = scan_self_identification(real.pairs)
-        check(not selfid_real,
-              "no generation self-identifies (vendor/family token in its own text)",
-              f"{len(selfid_real)} hits: {selfid_real[:5]}" if selfid_real else "clean")
+        unack = [h for h in selfid_real
+                 if str(h["pair_id"]) not in ACKNOWLEDGED_SELF_ID]
+        check(not unack,
+              "no UNACKNOWLEDGED generation self-identifies",
+              f"{len(unack)} new hits: {unack[:3]}" if unack else
+              f"{len(selfid_real)} hit(s), all acknowledged and reported: "
+              f"{sorted({str(h['pair_id']) for h in selfid_real})}")
+        stale = sorted(set(ACKNOWLEDGED_SELF_ID)
+                       - {str(h["pair_id"]) for h in selfid_real})
+        check(not stale,
+              "no stale self-id acknowledgement (each names a hit that still exists)",
+              f"stale: {stale}" if stale else "all acknowledgements live")
 
         empty = [p.pair_id for p in real.pairs if not p.text_1.strip() or not p.text_2.strip()]
         check(not empty, "no blank panel in the real deck")

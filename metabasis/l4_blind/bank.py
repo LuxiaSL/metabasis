@@ -46,10 +46,10 @@ from metabasis.l4_blind.taxonomy import AXIS_TRAIT, sha256_file
 #: space-less token runs; characters are.
 MIN_CHARS: Final[int] = 80
 
-#: Below this ratio of spaces to characters, a panel's words are running
-#: together. Normal columns sit at ~0.135–0.150; the affected dsv2-lite
-#: generations sit at ~0.000, with nothing in between — a per-generation
-#: switch, not a gradient.
+#: Below this ratio of WHITESPACE to characters, a panel's words are
+#: running together. Whitespace, not the space character: `str.split()`
+#: breaks on newlines too, so counting only " " marked a newline-separated
+#: list as degenerate when its words were perfectly separated.
 #:
 #: This is REPORTED, never repaired. The L3 judge reads exactly these
 #: bytes under the same frozen decode, so "fixing" the text here would
@@ -57,6 +57,16 @@ MIN_CHARS: Final[int] = 80
 #: thing the gold exists to prevent. The desk rules on whether these pairs
 #: stay in the deck.
 SPACE_DEGENERATE_RATIO: Final[float] = 0.08
+
+#: THE DIRECT MEASURE, used wherever the real text is in hand: the
+#: fraction of characters sitting inside whitespace-separated tokens
+#: longer than this. Glued text produces enormous "words"
+#: ("youmeanthowcantusllyteachsomeone" is one 32-character token); normal
+#: English does not. Unlike a whitespace ratio it is not fooled by glued
+#: lines that are newline-separated, and unlike chars/word it separates
+#: the 424 banked panels cleanly.
+GLUED_TOKEN_CHARS: Final[int] = 25
+GLUED_FRACTION_MAX: Final[float] = 0.10
 
 #: Below this, a panel is unusually short beside its ~2000-character
 #: neighbours. Reported beside the degeneracy flag as a length-bleed cue
@@ -112,15 +122,55 @@ SELF_ID_TOKENS: Final[tuple[str, ...]] = (
 )
 
 
+#: Self-identification hits the desk has SEEN and ruled on. A hit outside
+#: this set is an unacknowledged blind compromise and fails the selftest.
+#:
+#: L4-6082bb0de9b1 — one panel opens "As an AI developed by DeepSeek",
+#: which names its own node to any reader. The pair stays in the frozen
+#: draw (re-drawing on a text property would make the draw depend on the
+#: text, which it must not), and the recommendation to the desk is to
+#: EXCLUDE IT AT SCORING TIME: agreement is computed per stratum over the
+#: valid pairs, so dropping one needs no re-freeze and no new session.
+#: Empty in deck v2.1: the pair that opened "As an AI developed by
+#: DeepSeek" (L4-6082bb0de9b1, deck v2.1 draft) is no longer drawn — the
+#: glued-generation exclusions changed the pool under it. The mechanism
+#: stays because the next such panel must fail loudly rather than ship.
+ACKNOWLEDGED_SELF_ID: Final[dict[str, str]] = {}
+
+
+def glued_fraction(text: str) -> float:
+    """Fraction of characters inside tokens longer than GLUED_TOKEN_CHARS."""
+    if not text:
+        return 0.0
+    return sum(len(x) for x in text.split() if len(x) > GLUED_TOKEN_CHARS) / len(text)
+
+
 def scan_self_identification(pairs: list[BlindPair]) -> list[dict[str, object]]:
-    """Which blind pairs contain a token that could name their own model."""
+    """Which blind pairs contain a token that could name their own model.
+
+    Word-boundary matched. A bare substring search flagged a cosmology
+    passage listing "anthropics, metamathematics, astrochemistry" as
+    naming a vendor, which is the kind of false positive that trains a
+    reader to ignore the flag — and this flag has to stay worth reading,
+    because a genuine hit ("As an AI developed by DeepSeek") really does
+    partially unblind its pair.
+    """
     hits: list[dict[str, object]] = []
+    pats = [(t, re.compile(r"(?<![0-9a-z])" + re.escape(t) + r"(?![0-9a-z])"))
+            for t in SELF_ID_TOKENS]
     for p in pairs:
         for slot, text in (("text_1", p.text_1), ("text_2", p.text_2)):
             low = text.lower()
-            found = sorted({t for t in SELF_ID_TOKENS if t in low})
+            found = sorted({t for t, rx in pats if rx.search(low)})
             if found:
-                hits.append({"pair_id": p.pair_id, "slot": slot, "tokens": found})
+                excerpt = ""
+                for t, rx in pats:
+                    m = rx.search(low)
+                    if m:
+                        excerpt = text[max(0, m.start() - 80):m.start() + 80]
+                        break
+                hits.append({"pair_id": p.pair_id, "slot": slot,
+                             "tokens": found, "excerpt": excerpt})
     return hits
 
 
@@ -160,7 +210,7 @@ def build_deck(
                     f"{label} decoded to {len(t)} characters (< {MIN_CHARS}); "
                     f"a stub panel is unjudgeable — the desk must rule on this pair"
                 )
-            ratio = t.count(" ") / len(t)
+            ratio = sum(1 for ch in t if ch.isspace()) / len(t)
             if ratio < SPACE_DEGENERATE_RATIO or len(t) < SHORT_PANEL_CHARS:
                 flagged.append(
                     {
@@ -329,13 +379,25 @@ def build_deck_v2(drawn, bank_path: Path) -> tuple[BlindDeck, list, list]:
         for label, t in ((kd, td), (kb, tb)):
             if len(t) < MIN_CHARS:
                 raise ValueError(f"{label} decoded to {len(t)} chars (< {MIN_CHARS})")
-            ratio = t.count(" ") / len(t)
-            if ratio < SPACE_DEGENERATE_RATIO or len(t) < SHORT_PANEL_CHARS:
+            ratio = sum(1 for ch in t if ch.isspace()) / len(t)
+            glued = glued_fraction(t)
+            if p.revealed and glued > GLUED_FRACTION_MAX:
+                raise ValueError(
+                    f"{label} is a CALIBRATION anchor whose words run together "
+                    f"({glued:.1%} of its characters sit in tokens longer than "
+                    f"{GLUED_TOKEN_CHARS}). An anchor teaches Luxia what a real "
+                    f"effect looks like; a glued one teaches her the decode "
+                    f"artefact instead. Exclude this generation and re-freeze."
+                )
+            if (glued > GLUED_FRACTION_MAX or ratio < SPACE_DEGENERATE_RATIO
+                    or len(t) < SHORT_PANEL_CHARS):
                 flagged.append({
                     "pair_id": p.pair_id, "type_key": p.type_key,
                     "stratum": p.stratum, "set_label": p.set_label,
                     "chars": len(t), "space_ratio": round(ratio, 5),
                     "space_degenerate": ratio < SPACE_DEGENERATE_RATIO,
+                    "glued_fraction": round(glued, 4),
+                    "glued": glued > GLUED_FRACTION_MAX,
                     "short": len(t) < SHORT_PANEL_CHARS,
                     "coordinates_SEALED": label,
                 })
