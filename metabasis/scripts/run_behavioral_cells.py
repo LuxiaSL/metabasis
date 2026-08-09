@@ -130,6 +130,30 @@ or is not a §4.2 document at all, and transcribes it. WITHOUT the flag nothing 
 this module changes: the OWED default and its honest note stand, byte for byte. The
 verdict is never derived here — the desk scores, this module transcribes (C§8).
 
+THE MAPPING MODE (2026-08-08, Luxia's ratification of the desk's proposal on
+`PRESTATEMENT-moe-dose-window-mixtral-2026-08-08.md`). A dose-WINDOW mapping is not a
+science read: it asks where a model's response window ends, at doses the frozen ladder
+does not carry. `DOSE_LADDER` is untouched — every science cell validates against it
+exactly as before — and the mapping doses arrive instead on a SPEC DOCUMENT, admitted
+only when BOTH an explicit spec file AND the explicit `--mapping-mode` flag are given.
+Absent either, this module's behavior is unchanged in every byte.
+
+  * Mapping cells wear `kind="mapping"` and carry the spec's `MappingAuthorization`
+    (its id, its sha256, its dose tuple). A science cell carrying one is refused; a
+    mapping cell without one is refused; a mapping cell whose dose is ON the frozen
+    ladder is refused. That last refusal is the load-bearing one: mapping doses are
+    provably DISJOINT from `DOSE_LADDER`, so a mapping cell's rise cannot occupy a
+    dose any §4.2 arithmetic reads, and `actuation_calibration` refuses an off-ladder
+    dose key besides.
+  * A mapping column is PURE (`assert_mapping_column`): mapping cells never share a
+    column with science cells, so a §4.2-scorable column holds zero mapping cells by
+    construction rather than by care. §2.7's gate still fires, under a third role
+    mapping (`MAPPING_ONLY_ROLE_READING`) built exactly as B-1 built the second.
+  * A mapping cell LICENSES NOTHING and says so on its own stamp
+    (`mapping_mode.licenses_nothing`), and its `actuation_calibration` block is
+    replaced by a NON-VERDICT — any verdict handed to the run rides beside, quoted,
+    where nothing can read it as this cell's license.
+
     python -m metabasis.scripts.run_behavioral_cells --preflight ...   # M10: a
         first-class exit-early mode, never output truncation.
 """
@@ -168,6 +192,51 @@ BRIEF_SHA256 = "475bc2a8ce767f70890837129644917f17094734b70bb510524be4aa0ecdcea4
 #: everywhere (the §4.2 "4/6 doses" criterion counts against exactly this tuple).
 DOSE_LADDER: tuple[float, ...] = (-0.3, -0.1, -0.03, 0.03, 0.1, 0.3)
 BASELINE_DOSE = 0.0
+#: THE MAPPING MODE (Luxia's ratification, 2026-08-08). The one kind of cell whose dose
+#: does NOT come from `DOSE_LADDER`, admitted only through a spec document plus an
+#: explicit flag, and never able to license anything. See the module docstring.
+MAPPING_CELL_KIND = "mapping"
+#: Both are required. The spec is the CONTENT (which doses, whose ratification); the
+#: flag is the AUTHORIZATION (this operator, this invocation, meant it). Either alone
+#: leaves the engine byte-for-byte what it was — which is the property the re-freeze
+#: was ratified on, so the two are named as constants and quoted in every refusal.
+MAPPING_SPEC_FLAG = "--mapping-spec"
+MAPPING_MODE_FLAG = "--mapping-mode"
+MAPPING_SPEC_SCHEMA_VERSION = "behavioral-mapping-spec/1"
+#: What a mapping cell is FOR, and what it can never become — written onto every
+#: mapping cell's stamp so a reader holding one cell's stamp and nothing else still
+#: knows it is holding a measurement of an instrument's window, not a result.
+MAPPING_LICENSES_NOTHING = (
+    "MAPPING CELL — LICENSES NOTHING. This cell measures where a model's dose-response "
+    "window ends; it is not a §5 science cell. It can satisfy no §4.2 criterion, feed "
+    "no actuation verdict and license no transported-write cell at any site: its dose "
+    "is off the FROZEN ladder by construction (the ladder is untouched), it shares no "
+    "column with a science cell, and actuation_calibration refuses an off-ladder dose "
+    "key. Ratified by Luxia 2026-08-08 as a dated, spec-scoped engine deviation "
+    "(PRESTATEMENT-moe-dose-window-mixtral-2026-08-08.md, dated addendum); never a "
+    "silent replacement for the ladder and never retroactive.")
+#: The mapping mode's own §2.7 role mapping is an ENACTOR READING, recorded here the
+#: way B-1's was so the desk can rule differently without hunting for the assumption.
+#: A pure mapping column has no cell at |0.3| and no `calibration`-kind cell, so the
+#: two existing mappings cannot constitute the blocking gate and the column would HALT
+#: on `ExpectedNShortfall` after burning its whole budget. The roles map to the
+#: mapping column's OWN work-types on the same principle B-1 used: signal role = the
+#: mapping lever at the LARGEST mapped magnitude (the analogue of |0.3| — the edge the
+#: run exists to find) · band role = the column's own Rband · calibration role = the
+#: mapping lever at a SMALLER non-zero magnitude. Deterministic selection, bitwise
+#: replay and the blocking HALT are unchanged; K == 3 and `REPLAY_GATE_STRATA` are
+#: untouched; a science column can never reach this mapping (it has no mapping cell).
+#: The named alternative — leave the gate unfillable, so a mapping column cannot run
+#: at all — was NOT taken, because the ratified contract requires the mapping run to
+#: fire and an unrunnable mode is not a mode. DESK-OWED READING.
+MAPPING_ONLY_ROLE_READING = (
+    "enactor reading (delegated re-freeze, 2026-08-08), DESK-OWED: on a pure MAPPING "
+    "column the three frozen §2.7 roles map to the column's own work-types — signal "
+    "role = the mapping lever at the LARGEST mapped |dose| · band role = the column's "
+    "own Rband · calibration role = the mapping lever at a smaller non-zero |dose|. "
+    "Deterministic selection, bitwise replay and the blocking HALT are unchanged, and "
+    "a column that cannot fill a mapped role still raises ExpectedNShortfall — "
+    "incomplete, not exempt. A science column never reaches this mapping.")
 #: §4.2(a)/§5.5 read the ordering across the full SIGNED ladder, sign flipping
 #: through zero; §4.2(b)'s "both |0.3| doses" are these two.
 SCORING_DOSES: tuple[float, ...] = (-0.3, 0.3)
@@ -234,7 +303,13 @@ GRADE_LINE = "UNSTAMPED (C§8)"
 CVD_UNSET_SENTINEL = "(unset)"
 
 CellKind = Literal["baseline", "calibration", "calibration_band", "transported",
-                   "transported_band", "naive", "bridge", "judged"]
+                   "transported_band", "naive", "bridge", "judged", "mapping"]
+#: The kinds that are SCIENCE — everything a §4.2 verdict, a §5 row or a stamp that
+#: licenses anything may be built from. `mapping` is the complement, and the two are
+#: written as one partition so a kind added later must choose a side explicitly.
+SCIENCE_CELL_KINDS: tuple[str, ...] = ("baseline", "calibration", "calibration_band",
+                                       "transported", "transported_band", "naive",
+                                       "bridge", "judged")
 
 #: The band families that ARE the null of record — the two §4.1 keeps distinct, and the
 #: only two any gate population may contain.
@@ -270,6 +345,9 @@ REPLAY_GATE_STRATA: tuple[str, ...] = ("signal_at_0.3", "random_band", "calibrat
 #: raises `ExpectedNShortfall` — "incomplete, not exempt" is unchanged.
 REPLAY_ROLE_MAPPING_OF_RECORD = "of_record"
 REPLAY_ROLE_MAPPING_CALIBRATION_ONLY = "calibration_only"
+#: The mapping mode's third mapping (2026-08-08). See `MAPPING_ONLY_ROLE_READING` for
+#: what it maps and why it is an enactor reading rather than a ruling.
+REPLAY_ROLE_MAPPING_MAPPING_ONLY = "mapping_only"
 #: The dose magnitude the |0.3| signal role reads at (`SCORING_DOSES` as a magnitude).
 SCORING_DOSE_MAGNITUDE = 0.3
 #: The enactor's reading of "a small-dose cell", recorded so the desk can rule
@@ -408,6 +486,59 @@ class VectorClassMisdeclared(VectorClassContractError):
     one is a MISLABEL (an EGV waiving the FD gate it must pass, or an EGV carrying a
     contrast-set basis), and the fix is the declaration, not the artifact.
     """
+
+
+class MappingModeError(BehavioralHarnessError):
+    """The mapping mode's refusal family (2026-08-08, Luxia's ratified deviation).
+
+    Every member is a REFUSAL, never a warning: the mode's whole authorization rests
+    on mapping cells being unable to reach anything that licenses, and a mode that
+    warned and continued would be exactly the silent ladder replacement the
+    pre-statement forbids.
+    """
+
+
+class MappingAuthorizationMissing(MappingModeError):
+    """A `kind="mapping"` cell arrived without the spec authorization it must carry."""
+
+
+class MappingAuthorizationOnScienceCell(MappingModeError):
+    """A science cell carried a mapping authorization — the laundering direction."""
+
+
+class MappingDoseImpersonatesScience(MappingModeError):
+    """A mapping dose sits ON the frozen ladder (or is the baseline).
+
+    Refused because DISJOINTNESS is what makes mapping cells invisible to §4.2: a
+    mapping rise at a ladder dose could be read into `rises_by_dose` and satisfy a
+    criterion. A mapping run that genuinely needs a ladder dose already has one — the
+    banked science column measured it — and reusing that measurement is the
+    shared-baseline design the pre-statement already uses for α=0.
+    """
+
+
+class MappingDoseNotAuthorized(MappingModeError):
+    """A mapping cell's dose is not one the spec document authorizes."""
+
+
+class MappingCellsUnauthorized(MappingModeError):
+    """Mapping cells are staged but the run carries no spec + flag authorization."""
+
+
+class MappingModeNotEngaged(MappingModeError):
+    """Mapping mode was authorized on a column that holds no mapping cell."""
+
+
+class MappingAuthorizationMismatch(MappingModeError):
+    """A staged mapping cell names an authorization other than this run's."""
+
+
+class MappingColumnNotPure(MappingModeError):
+    """Mapping and science cells in one column — the mixture is refused by name."""
+
+
+class MappingSpecError(MappingModeError):
+    """The mapping spec document is unreadable, unrecognized or not for this column."""
 
 
 class ExpectedNShortfall(BehavioralHarnessError):
@@ -885,6 +1016,112 @@ class NormConventions(BaseModel):
     delta_fraction_vs_banked: Optional[float] = None
 
 
+class MappingAuthorization(BaseModel):
+    """What a mapping cell CARRIES: which spec authorized it, and at which doses.
+
+    The half of the mapping mode that travels with the cell. It is deliberately small
+    and fully comparable (`frozen`, so `==` is the whole identity test): the run loads
+    the spec document, derives the authorization from it, and every staged mapping
+    cell's carried copy must equal it exactly. A cells-json that invented doses cannot
+    pass, because it would have to invent a spec sha that the operator's file agrees
+    with; a spec file swapped for another cannot pass, because the cells declare the
+    one they were staged under. Neither key alone opens the door.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    experiment_id: str = Field(min_length=1)
+    spec_sha256: str = Field(min_length=64, max_length=64)
+    #: the spec's authorized doses, verbatim and in the spec's order.
+    doses: tuple[float, ...] = Field(min_length=1)
+    licenses: Literal["nothing"] = "nothing"
+
+    @model_validator(mode="after")
+    def _doses_are_off_the_frozen_ladder(self) -> "MappingAuthorization":
+        """The disjointness law, asserted on the AUTHORIZATION as well as the cell.
+
+        Checked in both places on purpose: here it refuses a spec that could never be
+        used honestly, and on `CellSpec` it refuses a cell that slipped past a spec.
+        A law that lives at one site is a law that a second construction path can
+        route around.
+        """
+        clash = sorted(d for d in self.doses
+                       if d in DOSE_LADDER or d == BASELINE_DOSE)
+        if clash:
+            raise MappingDoseImpersonatesScience(
+                f"mapping spec {self.experiment_id!r} authorizes dose(s) {clash}, "
+                f"which are on the FROZEN ladder {DOSE_LADDER} (or the α=0 baseline). "
+                "Mapping doses are DISJOINT from the ladder by construction — that "
+                "disjointness is what makes a mapping cell invisible to every §4.2 "
+                "path, and a mapping cell at a science dose would be a science cell "
+                "wearing another name. The ladder's own doses are already measured by "
+                "the banked column; reuse that measurement.")
+        if any(not np.isfinite(d) or d == 0.0 for d in self.doses):
+            raise MappingDoseNotAuthorized(
+                f"mapping spec {self.experiment_id!r}: every authorized dose must be "
+                f"finite and non-zero, got {list(self.doses)}. The α=0 read is the "
+                "BASELINE cell and is shared with the banked column (§5.1), never "
+                "re-spelled as a mapping dose.")
+        if len(set(self.doses)) != len(self.doses):
+            raise MappingDoseNotAuthorized(
+                f"mapping spec {self.experiment_id!r}: duplicate dose(s) in "
+                f"{list(self.doses)} — the authorized set is a SET, and a duplicate "
+                "would make the cell-id collision look like an accident.")
+        return self
+
+
+class MappingSpec(BaseModel):
+    """The mapping mode's SPEC DOCUMENT — the other half of the two-key admission.
+
+    Written by the desk, named on the CLI beside `--mapping-mode`, and validated to
+    name THIS column (node, arm, site) before a single mapping cell is admitted. It
+    carries its own ratification provenance because a dated engine deviation whose
+    document does not say who dated it is not a dated deviation.
+
+    The doses are the spec's, not this module's: the mixtral set is ±0.15/±0.20/±0.25
+    but the MECHANISM is spec-driven, so a second model's window is measured by
+    writing a second document rather than by editing an engine constant. `DOSE_LADDER`
+    stays where it is.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    schema_version: Literal["behavioral-mapping-spec/1"] = MAPPING_SPEC_SCHEMA_VERSION
+    experiment_id: str = Field(min_length=1)
+    node_key: str = Field(min_length=1)
+    arm: Literal["native", "raw"]
+    site: int = Field(ge=0)
+    doses: tuple[float, ...] = Field(min_length=1)
+    #: the pre-statement this mapping is pinned by, and the ratification that dated it.
+    prestatement_of_record: str = Field(min_length=1)
+    ratified_by: str = Field(min_length=1)
+    ledger_date: date
+    #: fixed by the contract; a spec that tried to say otherwise is refused by type.
+    licenses: Literal["nothing"] = "nothing"
+    note: str = ""
+
+    def authorization(self, *, spec_sha256: str) -> MappingAuthorization:
+        """The cell-carried half, derived from the document and its file digest."""
+        return MappingAuthorization(experiment_id=self.experiment_id,
+                                    spec_sha256=spec_sha256, doses=self.doses)
+
+    def assert_names_column(self, *, node_key: str, arm: str, site: int) -> None:
+        """Refuse a spec that authorizes a DIFFERENT column (§4.2's identity habit).
+
+        Modelled on `load_actuation_calibration`: a document that names another
+        (node, arm, site) is not a document about this run, and transcribing it would
+        be a false provenance statement rather than a missing one.
+        """
+        if (self.node_key, self.arm, int(self.site)) != (node_key, arm, int(site)):
+            raise MappingSpecError(
+                f"mapping spec {self.experiment_id!r} names "
+                f"{self.node_key} L{self.site} ({self.arm} arm); this column is "
+                f"{node_key} L{site} ({arm} arm). A spec for another column cannot "
+                "authorize this one — the doses are a property of THIS model's "
+                "response window (Luxia's ruling of record: 'every model has their "
+                "own specific sensitivity range').")
+
+
 class CellSpec(BaseModel):
     """One behavioral cell: 80 generations sharing ONE injection spec (§2.2)."""
 
@@ -909,6 +1146,20 @@ class CellSpec(BaseModel):
     vector_npz: Optional[str] = None
     vector_provenance: str = ""
     sampling: SamplingConfig = SAMPLING_OF_RECORD
+    #: THE MAPPING MODE's cell-carried key (2026-08-08). Present on a `mapping` cell
+    #: and refused on every other kind, so the two populations cannot be confused by
+    #: anything holding a spec. `None` — the default — is the science cell, whose
+    #: validation below is byte-for-byte what it was before this field existed.
+    mapping_authorization: Optional[MappingAuthorization] = None
+
+    @property
+    def is_mapping(self) -> bool:
+        """True iff this cell is a MAPPING cell — the one kind that licenses nothing.
+
+        A property rather than a `kind ==` comparison at each site, so every consumer
+        asks the question the same way and a grep for `is_mapping` finds all of them.
+        """
+        return self.kind == MAPPING_CELL_KIND
 
     @property
     def is_null(self) -> bool:
@@ -951,11 +1202,37 @@ class CellSpec(BaseModel):
             return self
         if self.vector_key is None:
             raise ValueError(f"{self.cell_id}: a non-baseline cell needs a vector_key")
-        if self.alpha_frac not in DOSE_LADDER:
-            raise ValueError(
-                f"{self.cell_id}: dose {self.alpha_frac} is not on the FROZEN ladder "
-                f"{DOSE_LADDER} (§2.5/§11: no extension, no interpolation, no "
-                "per-node tuning)")
+        if self.is_mapping:
+            # THE MAPPING BRANCH (2026-08-08). It replaces the ladder test for this
+            # kind and NOTHING else: the science branch below is the frozen one, and a
+            # cell that is not `kind="mapping"` never reaches this code.
+            if self.mapping_authorization is None:
+                raise MappingAuthorizationMissing(
+                    f"{self.cell_id}: kind={MAPPING_CELL_KIND!r} with no "
+                    "`mapping_authorization`. A mapping cell's dose is admissible "
+                    "ONLY as an authorization the spec document granted; a mapping "
+                    f"cell without one would be an off-ladder dose with no ratified "
+                    f"provenance ({MAPPING_SPEC_FLAG} + {MAPPING_MODE_FLAG}).")
+            if self.alpha_frac not in self.mapping_authorization.doses:
+                raise MappingDoseNotAuthorized(
+                    f"{self.cell_id}: dose {self.alpha_frac} is not authorized by "
+                    f"mapping spec {self.mapping_authorization.experiment_id!r} "
+                    f"(authorized: {list(self.mapping_authorization.doses)}). The "
+                    "spec is the only source of a mapping dose — the engine "
+                    "hardcodes none and interpolates none.")
+        else:
+            if self.mapping_authorization is not None:
+                raise MappingAuthorizationOnScienceCell(
+                    f"{self.cell_id}: a {self.kind!r} cell carries a "
+                    "`mapping_authorization`. Only a mapping cell may carry one — a "
+                    "science cell wearing a mapping key is the laundering direction "
+                    "this contract exists to close, and it is refused at "
+                    "construction rather than at a gate.")
+            if self.alpha_frac not in DOSE_LADDER:
+                raise ValueError(
+                    f"{self.cell_id}: dose {self.alpha_frac} is not on the FROZEN "
+                    f"ladder {DOSE_LADDER} (§2.5/§11: no extension, no interpolation, "
+                    "no per-node tuning)")
         expected = CELL_ID_TEMPLATE.format(
             vector_key=self.vector_key, site=self.site, frac=self.alpha_frac)
         if self.cell_id != expected:
@@ -1863,17 +2140,38 @@ def generate_cell(
 
 
 # ---------------------------------------------------------------- dose application
-def resolve_alpha(alpha_frac: float, per_token_median_resid_norm: float) -> float:
+def resolve_alpha(alpha_frac: float, per_token_median_resid_norm: float, *,
+                  cell: Optional["CellSpec"] = None) -> float:
     """§2.5: α = frac × (PER-TOKEN median residual norm at the target site).
 
     NOT the median-of-mean-state norm the collection stamps carry — the two differ
     (banked example, 3B L14: 12.2391 vs 12.1125) and rake M21b's silent-fallback
     finding says the resolution must be explicit, never inherited.
+
+    THE MAPPING MODE (2026-08-08). `cell` is the only way an off-ladder dose can be
+    resolved here, and it is honoured for a MAPPING cell and nothing else: the frozen
+    ladder check below is what every science cell still meets, including a science
+    cell passed through `cell`. Omitting the argument — which is what every existing
+    caller does — leaves this function's behavior byte-for-byte what it was, so the
+    α-provenance of §1 is unchanged for every banked cell.
     """
     if not np.isfinite(per_token_median_resid_norm) or per_token_median_resid_norm <= 0:
         raise ResidualNormDeltaError(
             f"per-token median residual norm must be finite and positive, got "
             f"{per_token_median_resid_norm!r} — refusing to resolve a dose against it")
+    if cell is not None and cell.is_mapping:
+        auth = cell.mapping_authorization
+        if auth is None:                                          # pragma: no cover
+            raise MappingAuthorizationMissing(
+                f"{cell.cell_id}: mapping cell with no authorization reached "
+                "α-resolution (CellSpec refuses this at construction; reaching here "
+                "means the type was bypassed)")
+        if alpha_frac != cell.alpha_frac or alpha_frac not in auth.doses:
+            raise MappingDoseNotAuthorized(
+                f"{cell.cell_id}: α-resolution asked for dose {alpha_frac}, which is "
+                f"not this cell's authorized dose {cell.alpha_frac} "
+                f"(spec {auth.experiment_id!r} authorizes {list(auth.doses)}).")
+        return float(alpha_frac) * float(per_token_median_resid_norm)
     if alpha_frac != BASELINE_DOSE and alpha_frac not in DOSE_LADDER:
         raise ValueError(
             f"dose {alpha_frac} is not on the FROZEN ladder {DOSE_LADDER} (§2.5)")
@@ -1905,6 +2203,169 @@ def apply_dose_ladder(vector_key: str, site: int, *,
             vector_provenance=vector_provenance, sampling=sampling)
         out.append((cell, resolve_alpha(frac, per_token_median_resid_norm)))
     return out
+
+
+def apply_mapping_ladder(vector_key: str, site: int, *,
+                         per_token_median_resid_norm: float,
+                         authorization: MappingAuthorization,
+                         band_family: Optional[str] = None,
+                         vector_npz: Optional[str] = None,
+                         vector_provenance: str = "",
+                         sampling: SamplingConfig = SAMPLING_OF_RECORD,
+                         n: int = N_PER_CELL) -> list[tuple[CellSpec, float]]:
+    """The SPEC's doses applied to one vector: one mapping cell per authorized dose.
+
+    `apply_dose_ladder`'s mapping-mode twin, and deliberately a separate function
+    rather than a parameter on it: the frozen ladder's applier must keep having
+    exactly one dose source, so that reading it answers "which doses can a science
+    cell take?" with no branch to follow. Everything else — the cell-id formatting,
+    the lesion-recipe law, the α arithmetic — is the same code path, because a mapping
+    cell is a differently-DOSED cell and not a differently-BUILT one.
+
+    Staging composes the mapping column's cells document from these; the engine's own
+    `--run` then re-checks every one of them against the spec file the operator names.
+    """
+    assert_no_lesion_recipe(vector_provenance, vector_key)
+    out = []
+    for frac in authorization.doses:
+        cell = CellSpec(
+            cell_id=CELL_ID_TEMPLATE.format(vector_key=vector_key, site=site,
+                                            frac=frac),
+            kind=MAPPING_CELL_KIND, vector_key=vector_key, site=site,
+            alpha_frac=frac, n=n, band_family=band_family, vector_npz=vector_npz,
+            vector_provenance=vector_provenance, sampling=sampling,
+            mapping_authorization=authorization)
+        out.append((cell, resolve_alpha(frac, per_token_median_resid_norm, cell=cell)))
+    return out
+
+
+def column_is_mapping(cells: Sequence[CellSpec]) -> bool:
+    """True iff this cell set is a MAPPING column (any mapping cell at all).
+
+    "Any" rather than "all" on purpose: purity is asserted by
+    `assert_mapping_column`, and a predicate that quietly answered False for a mixed
+    column would route the mixture down the science path — the one outcome the
+    contract forbids.
+    """
+    return any(c.is_mapping for c in cells)
+
+
+def assert_no_mapping_cells(cells: Sequence[CellSpec], *, where: str) -> None:
+    """Refuse a mapping cell in a population that must be science-only.
+
+    The structural expression of "mapping cells can never license anything", stated
+    from the consumer's side. Called wherever a population feeds a gate, a verdict or
+    a science stamp; the caller names ITSELF in `where`, so the refusal says which
+    door the cell was found at rather than only that it was found.
+    """
+    offenders = sorted(c.cell_id for c in cells if c.is_mapping)
+    if offenders:
+        raise MappingColumnNotPure(
+            f"MAPPING cell(s) {offenders} reached {where}. {MAPPING_LICENSES_NOTHING}")
+
+
+def assert_mapping_column(cells: Sequence[CellSpec], *,
+                          authorization: Optional[MappingAuthorization],
+                          node_key: str = "") -> bool:
+    """The mapping mode's admission gate, in one place. Returns: is this a mapping column?
+
+    Four refusals, each naming the key that is missing rather than "invalid input":
+
+      1. mapping cells with no run authorization — the cells-json alone is not a key;
+      2. an authorization with no mapping cells — the flags alone are not a key
+         either, and a run that thought it was mapping and was not is a run whose
+         operator and whose document disagree about what fired;
+      3. a cell whose carried authorization is not this run's — the two keys must be
+         the SAME key, which is what makes a swapped spec file unusable;
+      4. a column holding both mapping and science cells — refused so that "a
+         §4.2-scorable column contains zero mapping cells" is true by construction.
+
+    A column with neither mapping cells nor an authorization returns False having
+    asserted nothing, which is every column that ran before this ruling.
+    """
+    mapping = [c for c in cells if c.is_mapping]
+    science = [c for c in cells if not c.is_mapping]
+    who = node_key or "column"
+    if mapping and authorization is None:
+        raise MappingCellsUnauthorized(
+            f"{who}: {len(mapping)} MAPPING cell(s) staged (e.g. "
+            f"{mapping[0].cell_id}) but this run carries no mapping authorization. "
+            f"Mapping cells are admitted ONLY with BOTH {MAPPING_SPEC_FLAG} and "
+            f"{MAPPING_MODE_FLAG}; a cells document alone cannot authorize an "
+            "off-ladder dose.")
+    if authorization is not None and not mapping:
+        raise MappingModeNotEngaged(
+            f"{who}: mapping mode is authorized (spec "
+            f"{authorization.experiment_id!r}) but the column holds no mapping cell. "
+            "The flag is an assertion about what this run fires, not a mode switch "
+            "to leave on — a run whose operator and whose document disagree about "
+            "which experiment is firing stops here.")
+    if not mapping:
+        return False
+    # COMPARED BY VALUE, never by object identity. The engine is run as `__main__`
+    # while every importer sees `metabasis.scripts.run_behavioral_cells`, so a cell
+    # that travelled through the staging module carries an authorization compiled from
+    # the OTHER copy of this source — and pydantic's `==` compares classes first. The
+    # same rake `StagedCell._accept_a_cellspec_from_either_import_path` was written
+    # for; a dump comparison is the shape-level test the contract actually means.
+    want = authorization.model_dump()                    # type: ignore[union-attr]
+    wrong = sorted(c.cell_id for c in mapping
+                   if c.mapping_authorization is None
+                   or c.mapping_authorization.model_dump() != want)
+    if wrong:
+        raise MappingAuthorizationMismatch(
+            f"{who}: mapping cell(s) {wrong} carry an authorization that is not this "
+            f"run's (spec {authorization.experiment_id!r}, sha "  # type: ignore[union-attr]
+            f"{authorization.spec_sha256[:12]}…). The staged cells and the operator's "  # type: ignore[union-attr]
+            "spec file must be the SAME document, by id, by sha and by dose set.")
+    if science:
+        raise MappingColumnNotPure(
+            f"{who}: {len(mapping)} mapping cell(s) and {len(science)} science "
+            f"cell(s) in one column (e.g. {sorted(c.cell_id for c in science)[0]}). "
+            "A mapping column is PURE — that is what makes 'a §4.2-scorable column "
+            "holds zero mapping cells' true by construction instead of by care. "
+            "Stage the mapping run as its own column; its α=0 baseline is the banked "
+            "column's, by the shared-baseline design (§5.1).")
+    logger.info("MAPPING MODE engaged: %d cell(s) at doses %s under spec %s (%s)",
+                len(mapping), list(authorization.doses),  # type: ignore[union-attr]
+                authorization.experiment_id,  # type: ignore[union-attr]
+                MAPPING_LICENSES_NOTHING)
+    return True
+
+
+def load_mapping_spec(path: Path, *, node_key: str, arm: str, site: int
+                      ) -> tuple[MappingSpec, MappingAuthorization]:
+    """Read the spec document, refuse it by name, and derive this run's authorization.
+
+    Modelled on `load_actuation_calibration`: the schema version is checked before the
+    body (a silently-changed contract is a column built against terms nobody agreed
+    to), the document must NAME this column, and the file's own sha256 becomes half
+    the authorization — so the bytes the operator handed in are the bytes the staged
+    cells declared.
+    """
+    if not path.exists():
+        raise MappingSpecError(f"no mapping spec at {path} ({MAPPING_SPEC_FLAG})")
+    try:
+        body = json.loads(path.read_text())
+    except (json.JSONDecodeError, OSError) as exc:
+        raise MappingSpecError(
+            f"{path}: unreadable mapping spec ({type(exc).__name__}: {exc})") from exc
+    if not isinstance(body, dict):
+        raise MappingSpecError(f"{path}: a mapping spec is a JSON object")
+    version = body.get("schema_version")
+    if version != MAPPING_SPEC_SCHEMA_VERSION:
+        raise MappingSpecError(
+            f"{path}: mapping spec schema {version!r}, this engine speaks "
+            f"{MAPPING_SPEC_SCHEMA_VERSION!r} — refusing a contract nobody agreed to.")
+    try:
+        spec = MappingSpec(**body)
+    except MappingModeError:
+        raise
+    except (TypeError, ValueError) as exc:
+        raise MappingSpecError(f"{path}: {exc}") from exc
+    spec.assert_names_column(node_key=node_key, arm=arm, site=site)
+    return spec, spec.authorization(
+        spec_sha256=hashlib.sha256(path.read_bytes()).hexdigest())
 
 
 def baseline_cell(site: int, n: int = N_PER_CELL) -> CellSpec:
@@ -2131,11 +2592,23 @@ def characterize_probe_batch_invariance(
 
 
 # ---------------------------------------------------------------- replay gate (§2.7)
-def _stratum_of(cell: CellSpec, *, calibration_only: bool = False) -> Optional[str]:
+def _stratum_of(cell: CellSpec, *, calibration_only: bool = False,
+                mapping_only: bool = False,
+                mapping_signal_magnitude: Optional[float] = None) -> Optional[str]:
     # B4: a BESIDE cell holds NO stratum. Written as the first test rather than left
     # to fall through the family comparisons below, so that adding a stratum later
-    # cannot accidentally admit one. It is the first test under BOTH role mappings.
+    # cannot accidentally admit one. It is the first test under ALL role mappings.
     if cell.is_beside:
+        return None
+    # THE MAPPING MODE (2026-08-08), written as the SECOND test for the same reason.
+    # A mapping cell holds a stratum under the mapping-only mapping and under NO other
+    # — without this line a mapping Rband would fall through to the calibration-only
+    # band role below and enter a science column's gate population.
+    if mapping_only:
+        return (_stratum_of_mapping_only(
+            cell, signal_magnitude=mapping_signal_magnitude)
+            if mapping_signal_magnitude is not None else None)
+    if cell.is_mapping:
         return None
     if calibration_only:
         return _stratum_of_calibration_only(cell)
@@ -2166,12 +2639,50 @@ def _stratum_of_calibration_only(cell: CellSpec) -> Optional[str]:
     return None
 
 
-def _bucket_by_stratum(cells: Sequence[CellSpec], *, calibration_only: bool
-                       ) -> dict[str, list[str]]:
+def _stratum_of_mapping_only(cell: CellSpec, *, signal_magnitude: float
+                             ) -> Optional[str]:
+    """The MAPPING-ONLY role mapping (`MAPPING_ONLY_ROLE_READING`), for one cell.
+
+    Reached ONLY through `_stratum_of(..., mapping_only=True)`, which
+    `select_replay_cells` engages only for a column that HOLDS mapping cells — and
+    such a column is pure by `assert_mapping_column`, so no science cell can be
+    re-roled by this function and no science column can reach it.
+
+    `signal_magnitude` is the column's own largest mapped |dose| and is computed from
+    the cell SET (`mapping_signal_magnitude`), never from a constant: the mapping
+    mode's doses are the spec's, so the analogue of |0.3| is whatever the spec's edge
+    is. A cell that is neither the edge, a smaller lever nor the band holds no
+    stratum, exactly as under the other two mappings.
+    """
+    if cell.band_family == "Rband":               # band role: the column's OWN band
+        return "random_band"
+    if cell.is_mapping and cell.band_family is None:
+        if abs(cell.alpha_frac) == signal_magnitude:
+            return "signal_at_0.3"                # signal role: the mapped EDGE
+        if 0.0 < abs(cell.alpha_frac) < signal_magnitude:
+            return "calibration"                  # calibration role: a smaller lever
+    return None
+
+
+def mapping_signal_magnitude(cells: Sequence[CellSpec]) -> Optional[float]:
+    """The largest mapped |dose| among a column's non-band mapping levers, or None.
+
+    A function of the cell SET alone (like the §2.7 selection digest itself), so the
+    signal role is presence-independent of the order a cells-json listed them in.
+    """
+    magnitudes = [abs(c.alpha_frac) for c in cells
+                  if c.is_mapping and c.band_family is None]
+    return max(magnitudes) if magnitudes else None
+
+
+def _bucket_by_stratum(cells: Sequence[CellSpec], *, calibration_only: bool,
+                       mapping_only: bool = False) -> dict[str, list[str]]:
     """The per-stratum cell_id buckets under one role mapping (never sorted here)."""
+    signal = mapping_signal_magnitude(cells) if mapping_only else None
     buckets: dict[str, list[str]] = {s: [] for s in REPLAY_GATE_STRATA}
     for c in cells:
-        s = _stratum_of(c, calibration_only=calibration_only)
+        s = _stratum_of(c, calibration_only=calibration_only,
+                        mapping_only=mapping_only, mapping_signal_magnitude=signal)
         if s is not None:
             buckets[s].append(c.cell_id)
     return buckets
@@ -2191,7 +2702,16 @@ def replay_gate_role_mapping(cells: Sequence[CellSpec]) -> str:
     calibration-only mapping is unreachable for them by construction, not by care.
     A column that is short a stratum AND holds transported cells also keeps the
     mapping of record, so its shortfall still HALTs instead of being re-roled.
+
+    THE MAPPING MODE (2026-08-08) is tested FIRST and on presence alone. A mapping
+    column cannot constitute the gate under either science mapping (it has no cell at
+    |0.3| and no `calibration`-kind cell), so "prefer the mapping of record whenever
+    it can constitute the gate" would silently hand it a shortfall; and a science
+    column can never enter this branch, because a column holding one mapping cell is a
+    pure mapping column (`assert_mapping_column`).
     """
+    if column_is_mapping(cells):
+        return REPLAY_ROLE_MAPPING_MAPPING_ONLY
     of_record = _bucket_by_stratum(cells, calibration_only=False)
     if all(of_record[s] for s in REPLAY_GATE_STRATA):
         return REPLAY_ROLE_MAPPING_OF_RECORD
@@ -2220,8 +2740,15 @@ def select_replay_cells(cells: Sequence[CellSpec], node_key: str, corpus_sha: st
     digest = hashlib.sha256(f"{node_key}|{corpus_sha}".encode()).hexdigest()
     seed = int.from_bytes(bytes.fromhex(digest)[:8], "big")
     mapping = replay_gate_role_mapping(cells)
+    if mapping != REPLAY_ROLE_MAPPING_MAPPING_ONLY:
+        # The science columns' own guard, stated from the gate's side: under either
+        # science mapping this population must be mapping-free, and the assertion is
+        # here rather than implied so a future caller that assembles a population by
+        # hand cannot slip one in.
+        assert_no_mapping_cells(cells, where="the §2.7 replay-gate population")
     buckets = _bucket_by_stratum(
-        cells, calibration_only=(mapping == REPLAY_ROLE_MAPPING_CALIBRATION_ONLY))
+        cells, calibration_only=(mapping == REPLAY_ROLE_MAPPING_CALIBRATION_ONLY),
+        mapping_only=(mapping == REPLAY_ROLE_MAPPING_MAPPING_ONLY))
     beside_ids = {c.cell_id for c in cells if c.is_beside}
     leaked = sorted(beside_ids.intersection(
         cid for ids in buckets.values() for cid in ids))
@@ -2250,7 +2777,9 @@ def select_replay_cells(cells: Sequence[CellSpec], node_key: str, corpus_sha: st
             f"one of each is incomplete, not exempt. "
             f"[role mapping: {mapping}"
             + (f" — {CALIBRATION_ONLY_ROLE_READING}]"
-               if mapping == REPLAY_ROLE_MAPPING_CALIBRATION_ONLY else "]"))
+               if mapping == REPLAY_ROLE_MAPPING_CALIBRATION_ONLY
+               else f" — {MAPPING_ONLY_ROLE_READING}]"
+               if mapping == REPLAY_ROLE_MAPPING_MAPPING_ONLY else "]"))
     return [chosen[s] for s in REPLAY_GATE_STRATA], chosen, digest
 
 
@@ -2278,6 +2807,8 @@ def evaluate_replay_gate(*, selection: list[str], strata: dict[str, str],
                        f"{list(REPLAY_GATE_STRATA)}, chosen by the digest modulo "
                        "the stratum's cell_id-sorted size (§2.7)"
                        + ("" if role_mapping == REPLAY_ROLE_MAPPING_OF_RECORD
+                          else f" — ROLE MAPPING: {MAPPING_ONLY_ROLE_READING}"
+                          if role_mapping == REPLAY_ROLE_MAPPING_MAPPING_ONLY
                           else f" — ROLE MAPPING: {CALIBRATION_ONLY_ROLE_READING}"),
         role_mapping=role_mapping,
         cells=selection, strata=strata,
@@ -2657,6 +3188,14 @@ NAIVE_NULLABLE_FIELDS: frozenset[str] = frozenset({
     "transport_map_fit_sha256", "transport_map_family", "transport_map_arm",
     "transport_map_corpus_vintage",
 })
+#: THE MAPPING MODE (2026-08-08). A mapping cell is a NATIVE-lever cell at an
+#: off-ladder dose: it rides the node's own object at the node's own site, so it has
+#: no (source, target) pair and therefore no map and no naive-transplant row — the
+#: calibration case exactly. The widening is the calibration six and NOT one field
+#: more; in particular `vector_fd_gate`, `vector_npz_sha256` and every custody field
+#: stay REQUIRED, because a mapping cell measures a real instrument and an unauditable
+#: measurement of a window is worth no more than an unauditable science read.
+MAPPING_NULLABLE_FIELDS: frozenset[str] = CALIBRATION_NULLABLE_FIELDS
 #: The nullable-kind table, read by `assert_stamp_complete`. Every other kind gets the
 #: empty set — "null" stays a RULED state for named (kind, field) pairs and nothing
 #: else, which is the property the whole checklist rests on.
@@ -2665,6 +3204,7 @@ NULLABLE_FIELDS_BY_KIND: dict[str, frozenset[str]] = {
     "calibration_band": CALIBRATION_NULLABLE_FIELDS,
     "baseline": CALIBRATION_NULLABLE_FIELDS,
     "naive": NAIVE_NULLABLE_FIELDS,
+    MAPPING_CELL_KIND: MAPPING_NULLABLE_FIELDS,
 }
 
 #: HALT D, RULED (Luxia, 2026-08-05 morning, session 12) — option A, bundled:
@@ -2741,7 +3281,40 @@ def assert_stamp_complete(stamp: dict, *, cell_kind: Optional[CellKind] = None,
             f"§9 item 9: cuda_visible_devices is {cvd!r}. M10: a SCHEDULER job "
             "carries a card index and a ROGUE carries the sentinel — this is the "
             "field that caught the rogue run, so it can never be absent.")
+    assert_mapping_stamp_contract(stamp, cell_kind=cell_kind)
     assert_vector_class_contract(stamp, vector_class=declared)
+
+
+def assert_mapping_stamp_contract(stamp: dict, *, cell_kind: Optional[CellKind]
+                                  ) -> None:
+    """The mapping mode's stamp contract, in both directions (2026-08-08).
+
+    A MAPPING cell's stamp must carry `mapping_mode.licenses_nothing is True` — the
+    completeness checker is the one place every stamp passes, at build time and again
+    when read back from disk, so requiring it here is what makes "a mapping cell says
+    so on its own stamp" an assertion rather than a habit of `build_stamp`.
+
+    And the mirror: a stamp of any OTHER kind carrying a `mapping_mode` block is
+    refused, because a science cell that could wear the mapping badge could also be
+    quietly excused from a gate by a consumer that filters on it. `cell_kind=None` —
+    the desk's checker reading a stamp with no kind in hand — falls back to the
+    stamp's own `cell_kind`, so a stamp is checked as the thing it says it is.
+    """
+    kind = cell_kind or stamp.get("cell_kind")
+    block = stamp.get("mapping_mode")
+    if kind == MAPPING_CELL_KIND:
+        if not isinstance(block, dict) or block.get("licenses_nothing") is not True:
+            raise StampIncompleteError(
+                f"a {MAPPING_CELL_KIND!r} cell's stamp does not carry "
+                "`mapping_mode.licenses_nothing = True`. The badge is REQUIRED: it "
+                "is the only thing that travels with a cell file once it leaves its "
+                f"column. {MAPPING_LICENSES_NOTHING}")
+        return
+    if block is not None:
+        raise StampIncompleteError(
+            f"a {kind!r} cell's stamp carries a `mapping_mode` block. The badge "
+            "belongs to mapping cells and to nothing else — a science cell wearing "
+            "it could be excused from a gate by any consumer that reads it.")
 
 
 def assert_vector_class_contract(stamp: dict, *, vector_class: str) -> None:
@@ -2833,6 +3406,19 @@ def build_stamp(*, cell: CellSpec, alpha: float, layout: CanonicalLayout,
     rulings — the flag-absent condition, in the one function that writes stamps.
     """
     tmap = transport_map or {}
+    # THE MAPPING MODE (2026-08-08): a mapping cell's §4.2 slot is a NON-VERDICT.
+    # §4.2's closing line binds every §5 cell to name its site's calibration; a mapping
+    # cell is not a §5 cell, and a PASS transcribed onto it would be a licence sitting
+    # on a cell that licenses nothing. Whatever verdict the RUN carries is preserved —
+    # under `site_calibration_beside`, where it reads as a fact about the site rather
+    # than about this cell. Every other kind takes the caller's block unchanged, so no
+    # science stamp moves a byte.
+    if cell.is_mapping:
+        actuation_calibration = {
+            "verdict": "NOT_APPLICABLE_MAPPING",
+            "note": MAPPING_LICENSES_NOTHING,
+            "site_calibration_beside": actuation_calibration,
+        }
     stamp = {
         "grade": GRADE_LINE,
         "brief_of_record": BRIEF_OF_RECORD,
@@ -2916,6 +3502,22 @@ def build_stamp(*, cell: CellSpec, alpha: float, layout: CanonicalLayout,
     # column from a site-of-record one without re-deriving anything.
     if site_role is not None:
         stamp["site_role"] = site_role
+    # THE MAPPING MODE: the cell says what it is, on its own stamp, with the spec that
+    # authorized it named by id and by sha. A reader holding one cell's stamp and
+    # nothing else can tell a window measurement from a science read — which is the
+    # only defence that survives a file being copied out of its column.
+    if cell.is_mapping and cell.mapping_authorization is not None:
+        stamp["mapping_mode"] = {
+            "licenses_nothing": True,
+            "cell_kind": MAPPING_CELL_KIND,
+            "experiment_id": cell.mapping_authorization.experiment_id,
+            "mapping_spec_sha256": cell.mapping_authorization.spec_sha256,
+            "authorized_doses": list(cell.mapping_authorization.doses),
+            "frozen_dose_ladder": list(DOSE_LADDER),
+            "doses_disjoint_from_frozen_ladder": True,
+            "role_mapping_reading": MAPPING_ONLY_ROLE_READING,
+            "note": MAPPING_LICENSES_NOTHING,
+        }
     # HALT D: the two bases, both named, only on a class cell.
     if vector_class != EGV_VECTOR_CLASS:
         stamp["vector_class"] = vector_class
@@ -3210,9 +3812,12 @@ class HFStepper:
 #: is a GATE and not a warm-up: a node whose site fails it gets no transported-write
 #: cell there, and a column that fired the transported half first would have spent the
 #: budget before the gate could refuse it.
+#: `mapping` is last and alone, which costs nothing (a mapping column is pure, so it
+#: is the only rank present) and says the right thing if the ordering is ever read as
+#: a precedence: nothing science-bearing waits on a window measurement.
 CELL_KIND_ORDER: tuple[CellKind, ...] = (
     "baseline", "calibration", "calibration_band", "transported", "transported_band",
-    "naive", "bridge", "judged")
+    "naive", "bridge", "judged", "mapping")
 
 #: §2.7's descriptive batch-invariance sizes. Both are OFF the frozen ladder, on
 #: purpose — see `CanonicalLayout.characterization_only`.
@@ -3617,6 +4222,7 @@ def run_column(runtime: NodeRuntime, *, doc: Any, pool: PromptPool,
                resume: bool = False,
                cells_document_file_sha256: Optional[str] = None,
                actuation_calibration_sha256: Optional[str] = None,
+               mapping_authorization: Optional[MappingAuthorization] = None,
                take_attempt_lock: bool = True) -> ColumnResult:
     """§2.1's one-load-per-node job, in order, with every §9 HALT live.
 
@@ -3640,6 +4246,12 @@ def run_column(runtime: NodeRuntime, *, doc: Any, pool: PromptPool,
     of the column of record: the manifest walk skips the bookkeeping subtree, and a
     skipped cell's outcome is rebuilt exactly — `elapsed_s` included — from its
     receipt and its files.
+
+    THE MAPPING MODE (2026-08-08). `mapping_authorization` is the run's half of the
+    two-key admission and defaults to None, which is every column that ever ran: with
+    it None and no mapping cell staged, `assert_mapping_column` asserts nothing and
+    this job is byte-for-byte the job it was. With it set, the column must be a PURE
+    mapping column whose every cell names this exact spec.
     """
     doc_sha = document_content_sha256(doc)
     with attempt_lock(Path(work_root) if work_root is not None else None,
@@ -3654,6 +4266,7 @@ def run_column(runtime: NodeRuntime, *, doc: Any, pool: PromptPool,
             cells_document_sha256=doc_sha,
             cells_document_file_sha256=cells_document_file_sha256,
             actuation_calibration_sha256=actuation_calibration_sha256,
+            mapping_authorization=mapping_authorization,
             lock_block=lock_block)
 
 
@@ -3666,6 +4279,7 @@ def _run_column_locked(runtime: NodeRuntime, *, doc: Any, pool: PromptPool,
                        cells_document_sha256: str,
                        cells_document_file_sha256: Optional[str],
                        actuation_calibration_sha256: Optional[str],
+                       mapping_authorization: Optional[MappingAuthorization],
                        lock_block: Optional[dict]) -> ColumnResult:
     """§2.1's job, inside the M55 attempt lock. See `run_column` for the contract."""
     node_key, arm, site = doc.node_key, doc.arm, doc.site
@@ -3722,6 +4336,10 @@ def _run_column_locked(runtime: NodeRuntime, *, doc: Any, pool: PromptPool,
 
     # ---- the cells, in §2.1's order ------------------------------------------
     specs = order_cells(doc.cell_specs())
+    # THE MAPPING MODE's admission gate, BEFORE a cell fires and before the norm is
+    # spent: a run whose two keys disagree stops here, not after the budget.
+    is_mapping_column = assert_mapping_column(
+        specs, authorization=mapping_authorization, node_key=node_key)
     seed_roots = {c.cell_id: cell_seed_root(corpus_sha=corpus_sha, node_key=node_key,
                                             arm=arm, site=site, cell_id=c.cell_id)
                   for c in specs}
@@ -3757,7 +4375,8 @@ def _run_column_locked(runtime: NodeRuntime, *, doc: Any, pool: PromptPool,
     entropy_first: dict[str, str] = {}
     skipped: list[str] = []
     for spec in specs:
-        alpha = resolve_alpha(spec.alpha_frac, norms.measured_per_token_median)
+        alpha = resolve_alpha(spec.alpha_frac, norms.measured_per_token_median,
+                              cell=spec)
         receipt = banked_receipts.get(spec.cell_id)
         if receipt is not None:
             # A verified banked cell. Its α is re-derived and REQUIRED to be the α
@@ -3856,12 +4475,19 @@ def _run_column_locked(runtime: NodeRuntime, *, doc: Any, pool: PromptPool,
     # ---- the in-job replay gate (§2.7) ---------------------------------------
     selection, strata, digest = select_replay_cells(specs, node_key, corpus_sha)
     role_mapping = replay_gate_role_mapping(specs)
+    if is_mapping_column != (role_mapping == REPLAY_ROLE_MAPPING_MAPPING_ONLY):
+        raise MappingColumnNotPure(          # pragma: no cover — a wiring assertion
+            f"{node_key}: the admission gate calls this a "
+            f"{'mapping' if is_mapping_column else 'science'} column and §2.7's role "
+            f"mapping resolved to {role_mapping!r}. The two read the same cell set "
+            "and must agree; a disagreement means one of them saw a different set.")
     token_replay: dict[str, str] = {}
     entropy_replay: dict[str, str] = {}
     by_id = {c.cell_id: c for c in specs}
     for cell_id in selection:
         spec = by_id[cell_id]
-        alpha = resolve_alpha(spec.alpha_frac, norms.measured_per_token_median)
+        alpha = resolve_alpha(spec.alpha_frac, norms.measured_per_token_median,
+                              cell=spec)
         rrecords, _, rs, ru, *_ = run_cell(
             runtime, spec, alpha=alpha, pool=pool, layout=layout,
             corpus_sha=corpus_sha, node_key=node_key, arm=arm, n=n,
@@ -3882,7 +4508,7 @@ def _run_column_locked(runtime: NodeRuntime, *, doc: Any, pool: PromptPool,
         target = by_id[strata["signal_at_0.3"]]
         invariance = characterize_layout_invariance(
             runtime, target, alpha=resolve_alpha(
-                target.alpha_frac, norms.measured_per_token_median),
+                target.alpha_frac, norms.measured_per_token_median, cell=target),
             pool=pool, layout=layout, corpus_sha=corpus_sha, node_key=node_key,
             arm=arm, n=min(n, layout.batch_size))
 
@@ -5956,6 +6582,44 @@ def _calibration_only_cells(site: int = 26, *, with_beside: bool = True
     return cells
 
 
+#: The selftest's mapping spec — the mixtral SET, but reached the way any set is
+#: reached (a document), which is the whole point of the mechanism being spec-driven.
+_TOY_MAPPING_DOSES: tuple[float, ...] = (-0.25, -0.20, -0.15, 0.15, 0.20, 0.25)
+
+
+def _toy_mapping_spec_body(*, node: str, arm: str, site: int,
+                           doses: Sequence[float] = _TOY_MAPPING_DOSES) -> dict:
+    """A `MappingSpec` document body, as the desk would file it."""
+    return {"schema_version": MAPPING_SPEC_SCHEMA_VERSION,
+            "experiment_id": "selftest-dose-window",
+            "node_key": node, "arm": arm, "site": site, "doses": list(doses),
+            "prestatement_of_record":
+                "PRESTATEMENT-moe-dose-window-mixtral-2026-08-08.md",
+            "ratified_by": "SELFTEST (not a ruling)",
+            "ledger_date": "2026-08-08",
+            "note": "SELFTEST, NOT A READ"}
+
+
+def _mapping_cells(site: int, authorization: MappingAuthorization,
+                   *, lever: str = "entropy_gradient") -> list[CellSpec]:
+    """A miniature of the MAPPING column: the native lever + one Rband, spec doses.
+
+    The shape the ratified pre-statement describes — one lever cell and its band
+    members per mapped dose, no baseline (α=0 is the banked column's, by the
+    shared-baseline design) — which is exactly the column neither science role
+    mapping can constitute.
+    """
+    cells = []
+    for key, band in ((lever, None), ("Rband1", "Rband")):
+        for frac in authorization.doses:
+            cells.append(CellSpec(
+                cell_id=CELL_ID_TEMPLATE.format(vector_key=key, site=site, frac=frac),
+                kind=MAPPING_CELL_KIND, vector_key=key, site=site, alpha_frac=frac,
+                band_family=band, vector_provenance=f"toy::{key}",
+                mapping_authorization=authorization))
+    return cells
+
+
 def selftest() -> int:                                   # noqa: C901 — a checklist
     """CPU-only, data-independent verification of every load-bearing property."""
     import contextlib
@@ -6782,12 +7446,14 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                       StampIncompleteError)
           and _raises(lambda: assert_stamp_complete(naive_stamp, cell_kind=None),
                       StampIncompleteError))
-    check("(B-2) the nullable-kind table names exactly the ruled kinds, and the "
-          "calibration half's set is untouched by the ruling",
+    check("(B-2) the nullable-kind table names exactly the ruled kinds — B-2's four "
+          "plus the mapping mode's one (2026-08-08) — and the calibration half's set "
+          "is untouched by either ruling",
           set(NULLABLE_FIELDS_BY_KIND) == {"calibration", "calibration_band",
-                                           "baseline", "naive"}
+                                           "baseline", "naive", MAPPING_CELL_KIND}
           and NULLABLE_FIELDS_BY_KIND["calibration"] == CALIBRATION_NULLABLE_FIELDS
           and NULLABLE_FIELDS_BY_KIND["naive"] == NAIVE_NULLABLE_FIELDS
+          and NULLABLE_FIELDS_BY_KIND[MAPPING_CELL_KIND] == CALIBRATION_NULLABLE_FIELDS
           and NAIVE_NULLABLE_FIELDS < CALIBRATION_NULLABLE_FIELDS)
     check("(B-2) a naive cell's stamp BUILDS end-to-end through `build_stamp` with a "
           "banked gate row and no map (the path the column actually takes)",
@@ -8339,6 +9005,304 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                   _raises(lambda: plan_to_columns(load_residency_plan(_missing)),
                           _RPI))
 
+    # ---- 19. THE MAPPING MODE (2026-08-08, Luxia's ratified engine deviation) ----
+    print("== selftest 19: the mapping mode — two keys, no licence, ladder untouched ==")
+    check("(19) the FROZEN ladder is untouched, literally and by arity",
+          DOSE_LADDER == (-0.3, -0.1, -0.03, 0.03, 0.1, 0.3)
+          and len(DOSE_LADDER) == 6 and BASELINE_DOSE == 0.0,
+          f"{DOSE_LADDER}")
+    check("(19) a SCIENCE cell at a mapping dose is refused exactly as before, with "
+          "the frozen ladder's own message",
+          _raises(lambda: CellSpec(cell_id=f"entropy_gradient_L{site}_a+0.15",
+                                   kind="calibration", vector_key="entropy_gradient",
+                                   site=site, alpha_frac=0.15), ValueError)
+          and "not on the FROZEN ladder" in _msg17(
+              lambda: CellSpec(cell_id=f"entropy_gradient_L{site}_a+0.15",
+                               kind="calibration", vector_key="entropy_gradient",
+                               site=site, alpha_frac=0.15)))
+    _mspec = MappingSpec(**_toy_mapping_spec_body(node=node, arm=arm, site=site))
+    _mauth = _mspec.authorization(spec_sha256="9" * 64)
+    check("(19) the spec's doses are DISJOINT from the frozen ladder, and an "
+          "authorization that overlaps it is refused at construction — the property "
+          "every other invisibility claim rests on",
+          not (set(_mauth.doses) & set(DOSE_LADDER))
+          and _raises(lambda: MappingAuthorization(
+              experiment_id="x", spec_sha256="9" * 64, doses=(0.15, 0.3)),
+              MappingDoseImpersonatesScience)
+          and _raises(lambda: MappingAuthorization(
+              experiment_id="x", spec_sha256="9" * 64, doses=(0.15, 0.0)),
+              MappingDoseImpersonatesScience)
+          and _raises(lambda: MappingAuthorization(
+              experiment_id="x", spec_sha256="9" * 64,
+              doses=(0.15, float("nan"))), MappingDoseNotAuthorized)
+          and _raises(lambda: MappingAuthorization(
+              experiment_id="x", spec_sha256="9" * 64, doses=(0.15, 0.15)),
+              MappingDoseNotAuthorized))
+    _mcells = _mapping_cells(site, _mauth)
+    check("(19) a mapping cell takes the spec's dose, carries its authorization, and "
+          "formats its id under the banked template",
+          len(_mcells) == 2 * len(_TOY_MAPPING_DOSES)
+          and all(c.is_mapping and c.mapping_authorization == _mauth
+                  for c in _mcells)
+          and f"entropy_gradient_L{site}_a+0.15" in {c.cell_id for c in _mcells})
+    check("(19) a mapping cell with NO authorization is refused, and a SCIENCE cell "
+          "carrying one is refused — the two directions have their own exceptions",
+          _raises(lambda: CellSpec(cell_id=f"entropy_gradient_L{site}_a+0.15",
+                                   kind=MAPPING_CELL_KIND,
+                                   vector_key="entropy_gradient", site=site,
+                                   alpha_frac=0.15), MappingAuthorizationMissing)
+          and _raises(lambda: CellSpec(cell_id=f"entropy_gradient_L{site}_a+0.30",
+                                       kind="calibration",
+                                       vector_key="entropy_gradient", site=site,
+                                       alpha_frac=0.3,
+                                       mapping_authorization=_mauth),
+                      MappingAuthorizationOnScienceCell)
+          and _raises(lambda: CellSpec(cell_id=f"entropy_gradient_L{site}_a+0.05",
+                                       kind=MAPPING_CELL_KIND,
+                                       vector_key="entropy_gradient", site=site,
+                                       alpha_frac=0.05,
+                                       mapping_authorization=_mauth),
+                      MappingDoseNotAuthorized))
+    _norm = 12.2391
+    check("(19) `resolve_alpha` takes a mapping dose ONLY for a mapping cell — "
+          "flag-absent it is byte-for-byte the frozen function",
+          _raises(lambda: resolve_alpha(0.15, _norm), ValueError)
+          and _raises(lambda: resolve_alpha(
+              0.15, _norm, cell=CellSpec(
+                  cell_id=f"entropy_gradient_L{site}_a+0.30", kind="calibration",
+                  vector_key="entropy_gradient", site=site, alpha_frac=0.3)),
+              ValueError)
+          and resolve_alpha(0.15, _norm, cell=next(
+              c for c in _mcells if c.alpha_frac == 0.15)) == 0.15 * _norm
+          and resolve_alpha(0.3, _norm) == 0.3 * _norm)
+    check("(19) `apply_mapping_ladder` builds one cell per AUTHORIZED dose and no "
+          "more, with α resolved per cell",
+          [c.alpha_frac for c, _ in apply_mapping_ladder(
+              "entropy_gradient", site, per_token_median_resid_norm=_norm,
+              authorization=_mauth, vector_provenance="toy::entropy_gradient")]
+          == list(_mauth.doses)
+          and all(a == f * _norm for (c, a), f in zip(apply_mapping_ladder(
+              "entropy_gradient", site, per_token_median_resid_norm=_norm,
+              authorization=_mauth, vector_provenance="toy::entropy_gradient"),
+              _mauth.doses)))
+    # --- the two-key admission gate, each refusal by its own name -----------------
+    _sci_cells = _calibration_only_cells(site, with_beside=False)
+    check("(19) the two keys: mapping cells with no authorization are REFUSED, an "
+          "authorization with no mapping cells is REFUSED, a swapped spec is "
+          "REFUSED, and a mixed column is REFUSED",
+          _raises(lambda: assert_mapping_column(_mcells, authorization=None),
+                  MappingCellsUnauthorized)
+          and _raises(lambda: assert_mapping_column(_sci_cells,
+                                                    authorization=_mauth),
+                      MappingModeNotEngaged)
+          and _raises(lambda: assert_mapping_column(
+              _mcells, authorization=_mauth.model_copy(
+                  update={"spec_sha256": "8" * 64})),
+              MappingAuthorizationMismatch)
+          and _raises(lambda: assert_mapping_column(
+              list(_mcells) + list(_sci_cells), authorization=_mauth),
+              MappingColumnNotPure))
+    check("(19) …and the clean pair admits, while a column with neither key asserts "
+          "nothing at all (every column that ran before this ruling)",
+          assert_mapping_column(_mcells, authorization=_mauth) is True
+          and assert_mapping_column(_sci_cells, authorization=None) is False)
+    # --- §2.7: the third role mapping, and the two science ones unmoved -----------
+    _msel, _mstrata, _mdigest = select_replay_cells(_mcells, node, corpus)
+    check("(19) a PURE mapping column constitutes the blocking §2.7 gate under the "
+          "mapping-only role mapping: the EDGE dose is the signal role, a smaller "
+          "dose the calibration role, its own Rband the band role",
+          replay_gate_role_mapping(_mcells) == REPLAY_ROLE_MAPPING_MAPPING_ONLY
+          and sorted(_mstrata) == sorted(REPLAY_GATE_STRATA)
+          and mapping_signal_magnitude(_mcells) == 0.25
+          and abs(next(c for c in _mcells
+                       if c.cell_id == _mstrata["signal_at_0.3"]).alpha_frac) == 0.25
+          and 0.0 < abs(next(c for c in _mcells
+                             if c.cell_id
+                             == _mstrata["calibration"]).alpha_frac) < 0.25
+          and next(c for c in _mcells
+                   if c.cell_id == _mstrata["random_band"]).band_family == "Rband",
+          json.dumps(_mstrata))
+    check("(19) a mapping cell holds NO stratum under either science role mapping — "
+          "the mapping Rband cannot fill a calibration-only column's band role",
+          all(_stratum_of(c) is None for c in _mcells)
+          and all(_stratum_of(c, calibration_only=True) is None for c in _mcells)
+          and _bucket_by_stratum(_mcells, calibration_only=True)
+          == {s: [] for s in REPLAY_GATE_STRATA})
+    _sci_sel, _sci_strata, _sci_digest = select_replay_cells(_sci_cells, node, corpus)
+    check("(19) …and a SCIENCE column's role mapping, selection, strata and digest "
+          "are what they were before the mapping mode existed",
+          replay_gate_role_mapping(_sci_cells)
+          == REPLAY_ROLE_MAPPING_CALIBRATION_ONLY
+          and _sci_digest == hashlib.sha256(f"{node}|{corpus}".encode()).hexdigest()
+          and len(_sci_sel) == REPLAY_GATE_K,
+          json.dumps(_sci_strata))
+    check("(19) a mapping cell that reached a SCIENCE gate population is refused by "
+          "name (the mixed column can never be selected FROM)",
+          _raises(lambda: assert_no_mapping_cells(_mcells, where="a test"),
+                  MappingColumnNotPure)
+          and _ok(lambda: assert_no_mapping_cells(_sci_cells, where="a test")))
+    # --- the stamp: the badge, and the non-verdict --------------------------------
+    _mnorms = resolve_norms(site=site, measured=_norm,
+                            measured_provenance="selftest", banked_per_token=None)
+    _mstamp = build_stamp(
+        cell=_mcells[0], alpha=_mcells[0].alpha_frac * _norm,
+        layout=freeze_layout(80, dtype="bfloat16"), pool=pool, norms=_mnorms,
+        corpus_sha=corpus, node_key=node, arm=arm,
+        site_cross_check={"SITES": [site], "SITE_OF_RECORD": site, "agrees": True},
+        model_config_sha256="a" * 64, vector_npz_sha256="b" * 64,
+        vector_fd_gate={"PASSES": True, "best_median_rel_error": 0.01},
+        vector_build_stamp={"builder": "build_entropy_gradient.py"},
+        transport_map=None, naive_row=None,
+        trunk={"transformers": "5.3.0", "torch": "2.9.0", "hostname": "selftest"},
+        replay_gate_digests={"token_ids": "d" * 64, "entropy": "e" * 64},
+        battery_item_set_sha256="f" * 64,
+        # the WORST case for the contract: a PASS handed to a mapping cell.
+        actuation_calibration={"job_id": "j-1", "verdict": "PASS",
+                               "spearman_rho": 0.94, "outside_band_doses": "5/6",
+                               "coherence_at_scoring_dose": 0.62},
+        per_cell_seed_roots={_mcells[0].cell_id: "0" * 64})
+    check("(19) a mapping cell's stamp wears the badge and its §4.2 slot is a "
+          "NON-VERDICT, with the run's verdict preserved BESIDE it",
+          _mstamp["mapping_mode"]["licenses_nothing"] is True
+          and _mstamp["mapping_mode"]["mapping_spec_sha256"] == "9" * 64
+          and _mstamp["actuation_calibration"]["verdict"] == "NOT_APPLICABLE_MAPPING"
+          and _mstamp["actuation_calibration"]["site_calibration_beside"]["verdict"]
+          == "PASS"
+          and _mstamp["cell_kind"] == MAPPING_CELL_KIND,
+          _mstamp["actuation_calibration"]["verdict"])
+    check("(19) the badge is REQUIRED on a mapping stamp and REFUSED on every other "
+          "kind — checked wherever a stamp is checked, including off disk",
+          _raises(lambda: assert_stamp_complete(
+              {k: v for k, v in _mstamp.items() if k != "mapping_mode"},
+              cell_kind=MAPPING_CELL_KIND), StampIncompleteError)
+          and _raises(lambda: assert_stamp_complete(
+              dict(_mstamp, cell_kind="calibration"), cell_kind="calibration"),
+              StampIncompleteError)
+          and _ok(lambda: assert_stamp_complete(dict(_mstamp),
+                                                cell_kind=MAPPING_CELL_KIND))
+          and _raises(lambda: assert_mapping_stamp_contract(
+              {"cell_kind": "calibration", "mapping_mode": {"licenses_nothing": True}},
+              cell_kind=None), StampIncompleteError)
+          and _ok(lambda: assert_mapping_stamp_contract(dict(_mstamp),
+                                                        cell_kind=None)))
+    # --- §4.2 invisibility, from the scorer's side --------------------------------
+    try:
+        from metabasis.scripts.actuation_calibration import (
+            MappingCellInScoringPopulation as _MCISP,
+            OffLadderDoseInScoring as _OLDIS,
+            evaluate_actuation as _eval_act,
+            gate_transported_cells as _gate_tc)
+        _act_ok = True
+    except ImportError as exc:                                    # pragma: no cover
+        _act_ok = False
+        skip("(19) §4.2's own refusal of a mapping population", f"unimportable ({exc})")
+    if _act_ok:
+        _clean = {d: 0.1 * d for d in DOSE_LADDER}
+        _bands = {d: (-0.01, 0.01) for d in DOSE_LADDER}
+        _verdict = _eval_act(node_key=node, site=site, arm=arm,
+                             rises_by_dose=_clean, band_by_dose=_bands,
+                             coherence_at_scoring_dose=0.9)
+        check("(19) §4.2 refuses an OFF-LADDER dose key in either population — a "
+              "mapping rise is never in the room, not merely never counted",
+              _raises(lambda: _eval_act(
+                  node_key=node, site=site, arm=arm,
+                  rises_by_dose={**_clean, 0.15: 9.0}, band_by_dose=_bands,
+                  coherence_at_scoring_dose=0.9), _OLDIS)
+              and _raises(lambda: _eval_act(
+                  node_key=node, site=site, arm=arm, rises_by_dose=_clean,
+                  band_by_dose={**_bands, 0.15: (-0.01, 0.01)},
+                  coherence_at_scoring_dose=0.9), _OLDIS)
+              and _verdict.verdict in ("PASS", "DEGENERATE", "FAIL"))
+        check("(19) …and `gate_transported_cells` refuses a mapping cell in the "
+              "population it is handed, while the flag-absent call is unchanged",
+              _raises(lambda: _gate_tc(_verdict, population=_mcells), _MCISP)
+              and _ok(lambda: _gate_tc(_verdict))
+              == bool(_verdict.licenses_transported_cells))
+    # --- end to end: the mapping column RUNS, and the CLI needs both keys ----------
+    with tempfile.TemporaryDirectory(prefix="behav_mapping_") as td:
+        _mroot = Path(td)
+        _mspec_path = _mroot / "mapping-spec.json"
+        _mspec_path.write_text(json.dumps(
+            _toy_mapping_spec_body(node=node, arm=arm, site=site), indent=1))
+        _loaded_spec, _loaded_auth = load_mapping_spec(
+            _mspec_path, node_key=node, arm=arm, site=site)
+        check("(19) the spec loads, names this column, and its FILE sha becomes half "
+              "the authorization — a spec for another column is refused",
+              _loaded_auth.spec_sha256
+              == hashlib.sha256(_mspec_path.read_bytes()).hexdigest()
+              and _loaded_auth.doses == _TOY_MAPPING_DOSES
+              and _raises(lambda: load_mapping_spec(
+                  _mspec_path, node_key="another-node", arm=arm, site=site),
+                  MappingSpecError)
+              and _raises(lambda: load_mapping_spec(
+                  _mroot / "nope.json", node_key=node, arm=arm, site=site),
+                  MappingSpecError))
+        _mdoc = _toy_document(pool, node=node, arm=arm, site=site, corpus=corpus,
+                              cells=_mapping_cells(site, _loaded_auth),
+                              n_per_cell=4, max_new_tokens=5)
+        os.environ["CUDA_VISIBLE_DEVICES"] = "3"
+        _mcolumn = run_column(_StubRuntime(pool, tok, arm, site), doc=_mdoc, pool=pool,
+                              work_root=_mroot / "col",
+                              corpus_sha_of_record=corpus, characterize=False,
+                              scheduler_card_index="3",
+                              mapping_authorization=_loaded_auth)
+        check("(19) the whole §2.1 job runs a PURE mapping column end to end: every "
+              "cell fires, α is the spec dose × the measured norm, the blocking "
+              "§2.7 gate passes bitwise, and every stamp wears the badge",
+              len(_mcolumn.cells) == 2 * len(_TOY_MAPPING_DOSES)
+              and _mcolumn.replay_gate.passed
+              and _mcolumn.replay_gate.role_mapping
+              == REPLAY_ROLE_MAPPING_MAPPING_ONLY
+              and all(abs(c.alpha - c.alpha_frac * 12.2391) < 1e-12
+                      for c in _mcolumn.cells)
+              and all(c.stamp["mapping_mode"]["licenses_nothing"] is True
+                      for c in _mcolumn.cells)
+              and all(c.stamp["actuation_calibration"]["verdict"]
+                      == "NOT_APPLICABLE_MAPPING" for c in _mcolumn.cells),
+              f"{len(_mcolumn.cells)} cells, gate {_mcolumn.replay_gate.cells}")
+        check("(19) …and the same document run WITHOUT the authorization is refused "
+              "before a cell fires (the cells-json alone is not a key)",
+              _raises(lambda: run_column(
+                  _StubRuntime(pool, tok, arm, site), doc=_mdoc, pool=pool,
+                  work_root=_mroot / "col-unauth", corpus_sha_of_record=corpus,
+                  characterize=False, scheduler_card_index="3"),
+                  MappingCellsUnauthorized))
+        _mcells_json = _mroot / "mapping-cells.json"
+        _mcells_json.write_text(_mdoc.model_dump_json())
+        _sci_doc = _toy_document(pool, node=node, arm=arm, site=site, corpus=corpus,
+                                 cells=_toy_cells(site), n_per_cell=4,
+                                 max_new_tokens=5)
+        _sci_json = _mroot / "science-cells.json"
+        _sci_json.write_text(_sci_doc.model_dump_json())
+        _pool_json = _mroot / "pool.json"
+        _pool_json.write_text(json.dumps(
+            {"sha256": pool.sha256,
+             "prompts": [p.model_dump() for p in pool.prompts]}))
+
+        def _cli(*extra: str) -> int:
+            with contextlib.redirect_stdout(io.StringIO()):
+                return main(["--preflight", "--cells-json", str(_mcells_json),
+                             "--prompt-pool", str(_pool_json), *extra])
+
+        check("(19) THE CLI's two keys: the spec alone is refused, the flag alone is "
+              "refused, a flagless run of a mapping document is refused, and only "
+              "both together admit",
+              _cli("--mapping-spec", str(_mspec_path)) == 2
+              and _cli("--mapping-mode") == 2
+              and _cli() == 2
+              and _cli("--mapping-spec", str(_mspec_path), "--mapping-mode") == 0)
+        with contextlib.redirect_stdout(io.StringIO()):
+            _sci_flagged = main(["--preflight", "--cells-json", str(_sci_json),
+                                 "--prompt-pool", str(_pool_json),
+                                 "--mapping-spec", str(_mspec_path),
+                                 "--mapping-mode"])
+            _sci_plain = main(["--preflight", "--cells-json", str(_sci_json),
+                               "--prompt-pool", str(_pool_json)])
+        check("(19) …and a SCIENCE document is unaffected by the mode's existence: "
+              "flagless it preflights exactly as before, flagged it is refused "
+              "because the operator asserted something untrue about this run",
+              _sci_plain == 0 and _sci_flagged == 2)
+
     failures = [c for c in checks if not c[1]]
     print(f"\nselftest: {len(failures)} failure(s)")
     for name, _, detail in failures:
@@ -8583,6 +9547,21 @@ def main(argv: Optional[list[str]] = None) -> int:
                          "every cell's stamp. WITHOUT it the stamp reads OWED with "
                          "its honest note, exactly as before this flag existed — "
                          "which is the truth only while no verdict has been filed.")
+    ap.add_argument("--mapping-spec", type=Path, default=None,
+                    help="THE MAPPING MODE (Luxia's ratification 2026-08-08): the "
+                         "desk's dose-window spec for THIS column (JSON: "
+                         "experiment_id, node_key, arm, site, doses, "
+                         "prestatement_of_record, ratified_by, ledger_date). "
+                         "Validated to name this column; its sha256 and dose set must "
+                         "equal what every staged mapping cell carries. Requires "
+                         "--mapping-mode beside it. WITHOUT BOTH, nothing about this "
+                         "module changes and a staged mapping cell is REFUSED.")
+    ap.add_argument("--mapping-mode", action="store_true",
+                    help="THE MAPPING MODE's second key: the operator's explicit "
+                         "assertion that THIS run fires a mapping column. A mapping "
+                         "cell licenses nothing — it can satisfy no §4.2 criterion "
+                         "and license no transported-write cell — and the frozen "
+                         "DOSE_LADDER is untouched for every science cell.")
     ap.add_argument("--no-characterize", action="store_true",
                     help="skip §2.7's DESCRIPTIVE B=8/B=1 characterization (M19: it "
                          "can never fail a gate, so skipping it costs no assertion)")
@@ -8666,6 +9645,43 @@ def main(argv: Optional[list[str]] = None) -> int:
                "outside_band_doses", "coherence_at_scoring_dose")),
             ACTUATION_CALIBRATION_SCORER_OF_RECORD)
 
+    # THE MAPPING MODE's two keys, checked against each other BEFORE the model loads.
+    # Either alone is refused by name rather than silently ignored: an operator who
+    # passed one and not the other believes something about this run that is false.
+    mapping_authorization: Optional[MappingAuthorization] = None
+    if bool(args.mapping_spec is not None) != bool(args.mapping_mode):
+        logger.error(
+            "HALT: the mapping mode needs BOTH %s and %s (given: %s). The spec is the "
+            "CONTENT and the flag is the AUTHORIZATION; either alone leaves the "
+            "engine exactly what it was, and a run that meant to map would fire "
+            "science doses instead. %s", MAPPING_SPEC_FLAG, MAPPING_MODE_FLAG,
+            MAPPING_SPEC_FLAG if args.mapping_spec is not None else MAPPING_MODE_FLAG,
+            MAPPING_LICENSES_NOTHING)
+        return 2
+    if args.mapping_spec is not None:
+        try:
+            mapping_spec, mapping_authorization = load_mapping_spec(
+                args.mapping_spec, node_key=doc.node_key, arm=doc.arm, site=doc.site)
+        except BehavioralHarnessError as exc:
+            logger.error("HALT (%s): %s", type(exc).__name__, exc)
+            return 2
+        logger.info(
+            "MAPPING MODE: spec %s (%s L%d, %s arm) doses %s — ratified by %s on %s, "
+            "pinned by %s. %s", mapping_spec.experiment_id, mapping_spec.node_key,
+            mapping_spec.site, mapping_spec.arm, list(mapping_spec.doses),
+            mapping_spec.ratified_by, mapping_spec.ledger_date.isoformat(),
+            mapping_spec.prestatement_of_record, MAPPING_LICENSES_NOTHING)
+    # Unconditional, and BEFORE the model loads: this is where a cells document that
+    # smuggled mapping cells past a flagless invocation is refused, and where a
+    # --preflight (which never reaches `run_column`) gets the same admission gate the
+    # real run gets. `run_column` re-asserts on its own specs regardless.
+    try:
+        assert_mapping_column(doc.cell_specs(), authorization=mapping_authorization,
+                              node_key=doc.node_key)
+    except BehavioralHarnessError as exc:
+        logger.error("HALT (%s): %s", type(exc).__name__, exc)
+        return 2
+
     basis = args.corpus_sha_of_record or doc.corpus_manifest_sha256
     logger.info("cells document: %s L%d (%s arm), %d cells, basis %s%s",
                 doc.node_key, doc.site, doc.arm, len(doc.cells), basis[:12],
@@ -8704,6 +9720,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             characterize=not args.no_characterize,
             scheduler_card_index=args.scheduler_card_index,
             resume=args.resume,
+            mapping_authorization=mapping_authorization,
             take_attempt_lock=not args.no_attempt_lock,
             cells_document_file_sha256=hashlib.sha256(
                 Path(args.cells_json).read_bytes()).hexdigest(),

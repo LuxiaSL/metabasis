@@ -72,9 +72,10 @@ import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from metabasis.scripts.run_behavioral_cells import (
-    BRIEF_OF_RECORD, BRIEF_SHA256, CELL_ID_TEMPLATE, DOSE_LADDER, GRADE_LINE,
-    N_PER_CELL, SCORING_DOSES, BehavioralHarnessError, CellSpec,
-    NativeVectorUnavailable, SiteNotOfRecord, apply_dose_ladder, baseline_cell)
+    BASELINE_DOSE, BRIEF_OF_RECORD, BRIEF_SHA256, CELL_ID_TEMPLATE, DOSE_LADDER,
+    GRADE_LINE, MAPPING_CELL_KIND, MAPPING_LICENSES_NOTHING, N_PER_CELL,
+    SCORING_DOSES, BehavioralHarnessError, CellSpec, NativeVectorUnavailable,
+    SiteNotOfRecord, apply_dose_ladder, baseline_cell)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("actuation_calibration")
@@ -187,6 +188,29 @@ class RegistryGap(BehavioralHarnessError):
 
 class CalibrationLeverRefused(BehavioralHarnessError):
     """A calibration-only lever was asked to do something ruling 2 forbids."""
+
+
+class MappingCellInScoringPopulation(BehavioralHarnessError):
+    """A MAPPING cell reached a §4.2 population (2026-08-08's ratified deviation).
+
+    The mapping mode's contract, stated from the scorer's side: a cell that measures
+    where a model's response window ENDS can never satisfy a criterion that licenses
+    a transported-write cell. Refused rather than filtered — silently dropping a cell
+    from a §4.2 population is how a criterion's arity changes without anyone deciding
+    to change it.
+    """
+
+
+class OffLadderDoseInScoring(MappingCellInScoringPopulation):
+    """A §4.2 population carries a dose that is not on the FROZEN ladder.
+
+    The dose-keyed form of the same refusal, and the one that actually closes the
+    door: §4.2's inputs arrive as `{dose: rise}` maps rather than as cells, so the
+    strongest structural guard available here is that every key must be a ladder dose
+    (or the α=0 baseline). Mapping doses are DISJOINT from the ladder by construction
+    (`CellSpec` refuses a mapping cell at a ladder dose), so a mapping rise cannot be
+    passed to this module under any spelling without landing here.
+    """
 
 
 # ---------------------------------------------------------------- typed records
@@ -399,6 +423,44 @@ class RemedyLadder(BaseModel):
     note: str = ""
 
 
+# ------------------------------------------- the mapping mode's §4.2 exclusion (2026-08-08)
+def assert_no_mapping_cells(cells: Sequence[Any], *, where: str) -> None:
+    """Refuse a MAPPING cell in a population this module reads. A refusal, not a filter.
+
+    Reads `kind` off anything cell-shaped rather than importing a type, because the
+    populations §4 is handed come from the staging module, from a cells document read
+    back off disk and from the desk's own scripts — three spellings of the same fact,
+    and a guard that only recognized one of them would be a guard with a hole.
+    """
+    offenders = sorted(str(getattr(c, "cell_id", c)) for c in cells
+                       if getattr(c, "kind", None) == MAPPING_CELL_KIND
+                       or (isinstance(c, dict)
+                           and c.get("kind") == MAPPING_CELL_KIND))
+    if offenders:
+        raise MappingCellInScoringPopulation(
+            f"MAPPING cell(s) {offenders} reached {where}. "
+            f"{MAPPING_LICENSES_NOTHING}")
+
+
+def assert_doses_on_frozen_ladder(doses: Sequence[float], *, where: str) -> None:
+    """Every dose a §4.2 criterion reads is on the FROZEN ladder, or this raises.
+
+    The §4.2 criteria iterate `DOSE_LADDER` and would simply IGNORE an extra key, so
+    without this an off-ladder rise could ride along in the caller's dict, be quoted
+    beside the verdict, and read as though the verdict had seen it. Refusing the key
+    outright is the difference between "the mapping dose did not count" and "the
+    mapping dose was never in the room".
+    """
+    strays = sorted(d for d in doses
+                    if d not in DOSE_LADDER and d != BASELINE_DOSE)
+    if strays:
+        raise OffLadderDoseInScoring(
+            f"{where}: dose(s) {strays} are not on the FROZEN ladder "
+            f"{list(DOSE_LADDER)} (nor the α=0 baseline). §4.2 is defined ON the "
+            "ladder and nowhere else; an off-ladder dose in a scoring population is "
+            f"a MAPPING dose by construction. {MAPPING_LICENSES_NOTHING}")
+
+
 # ---------------------------------------------------------------- §4.2 criteria
 def dose_ordering(doses: Sequence[float], rises: Sequence[float]
                   ) -> tuple[Optional[float], bool, bool]:
@@ -481,7 +543,15 @@ def evaluate_actuation(*, node_key: str, site: int, arm: str,
 
     Mechanics only. C§8: the desk decides; this returns a verdict object with every
     input value beside it, so the desk can re-apply the criteria by hand.
+
+    THE MAPPING MODE's exclusion (2026-08-08) is the first thing that happens here:
+    both dose maps must be keyed on the FROZEN ladder. A science population passes it
+    without a value moving; a mapping rise cannot be handed to §4.2 at all.
     """
+    assert_doses_on_frozen_ladder(
+        list(rises_by_dose), where=f"§4.2 rises_by_dose for {node_key} L{site}")
+    assert_doses_on_frozen_ladder(
+        list(band_by_dose), where=f"§4.2 band_by_dose for {node_key} L{site}")
     rho, flips, a_ok = dose_ordering(list(DOSE_LADDER),
                                      [rises_by_dose.get(d) for d in DOSE_LADDER])
     n_out, both, per_dose, b_ok = band_separation(rises_by_dose, band_by_dose)
@@ -539,13 +609,24 @@ def evaluate_actuation(*, node_key: str, site: int, arm: str,
         criteria=criteria, verdict=verdict, verdict_rationale=why)
 
 
-def gate_transported_cells(result: ActuationCalibrationResult) -> None:
+def gate_transported_cells(result: ActuationCalibrationResult, *,
+                           population: Sequence[Any] = ()) -> None:
     """§9 item 5: FAIL or DEGENERATE → no transported-write cells at that site.
 
     A refusal, not a warning. §4.2's consequence is frozen, and an enactor never
     adjudicates a live HALT — the remedy ladder (`remedy_ladder`) is what a caller
     reaches for next, and its end is a LABEL, not an override.
+
+    THE MAPPING MODE (2026-08-08): `population` is the cell set the verdict was
+    computed over, when the caller holds it, and any MAPPING cell in it is refused by
+    name. It defaults to empty — every existing caller's behavior is unchanged — and
+    it is a belt beside two braces, not the main defence: a mapping cell cannot reach
+    a verdict in the first place, because its dose is off the frozen ladder by
+    construction and `evaluate_actuation` refuses an off-ladder key. The parameter
+    exists so a caller that DOES hold the population can say so, and so the refusal
+    has a name at the door §4.2's consequence is actually asserted at.
     """
+    assert_no_mapping_cells(population, where="actuation_calibration.gate_transported_cells")
     if not result.licenses_transported_cells:
         raise ActuationGateNotPassed(
             f"{result.node_key} L{result.site}: actuation calibration verdict "
@@ -1498,6 +1579,50 @@ def selftest() -> int:                                   # noqa: C901 — a chec
     check("the gate refusal restates that a site is never re-chosen on behavior",
           "NEVER re-chosen on behavioral evidence" in
           _msg(lambda: gate_transported_cells(failing)))
+
+    # ---- the mapping mode's §4.2 exclusion (2026-08-08) -----------------------
+    print("== selftest: the mapping mode can never reach a §4.2 verdict ==")
+    _clean = _ladder([-0.30, -0.10, -0.03, 0.03, 0.10, 0.30])
+    _bands = _band([0.01] * 6)
+    _passing = evaluate_actuation(node_key="qwen2.5-3b-instruct", site=26,
+                                  arm="native", rises_by_dose=_clean,
+                                  band_by_dose=_bands,
+                                  coherence_at_scoring_dose=0.62)
+    check("a science population still scores exactly as it did — the exclusion costs "
+          "the frozen criteria nothing",
+          _passing.verdict == "PASS" and _passing.licenses_transported_cells)
+    check("an OFF-LADDER dose in either §4.2 population is REFUSED by name, so a "
+          "mapping rise is never in the room rather than merely never counted",
+          _raises(lambda: evaluate_actuation(
+              node_key="qwen2.5-3b-instruct", site=26, arm="native",
+              rises_by_dose={**_clean, 0.15: 9.9}, band_by_dose=_bands,
+              coherence_at_scoring_dose=0.62), OffLadderDoseInScoring)
+          and _raises(lambda: evaluate_actuation(
+              node_key="qwen2.5-3b-instruct", site=26, arm="native",
+              rises_by_dose=_clean, band_by_dose={**_bands, -0.25: (-0.01, 0.01)},
+              coherence_at_scoring_dose=0.62), OffLadderDoseInScoring))
+    check("…and the α=0 baseline is NOT an off-ladder stray (it is a cell, not a "
+          "ladder member, and §4.2 reads past it)",
+          _ok(lambda: assert_doses_on_frozen_ladder(
+              list(DOSE_LADDER) + [0.0], where="a test")))
+    _map_cell = {"cell_id": "entropy_gradient_L26_a+0.15", "kind": MAPPING_CELL_KIND}
+    check("`gate_transported_cells` refuses a MAPPING cell in the population it is "
+          "handed — §4.2's consequence has a named door and the mapping cell is "
+          "turned away at it",
+          _raises(lambda: gate_transported_cells(_passing, population=[_map_cell]),
+                  MappingCellInScoringPopulation)
+          and _ok(lambda: gate_transported_cells(_passing))
+          and _ok(lambda: gate_transported_cells(
+              _passing, population=calibration_cell_plan(
+                  node_key="qwen2.5-3b-instruct", site=26, arm="native",
+                  per_token_median_resid_norm=10.0,
+                  vector_provenance="node native lever").cells)))
+    check("…and the guard reads a mapping cell in EVERY spelling it can arrive in "
+          "(typed CellSpec, staged object, plain dict off disk)",
+          _raises(lambda: assert_no_mapping_cells(
+              [_map_cell], where="a test"), MappingCellInScoringPopulation)
+          and _ok(lambda: assert_no_mapping_cells(
+              [{"cell_id": "x", "kind": "calibration"}], where="a test")))
 
     failures = [c for c in checks if not c[1]]
     print(f"\nselftest: {len(failures)} failure(s)")
