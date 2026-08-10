@@ -25,6 +25,21 @@ invocation. Re-pointing this module at another basis is editing a spec, never ed
 this file. The one thing that is frozen is the SHAPE of the column (§4.1 + §5.1's cell
 table, the signed ladder, n/cell) — that is the brief, not the basis.
 
+THE AMENDED LADDER, STAGING SIDE (re-freeze #2 item 4, 2026-08-09). The signed ladder
+above is the DEFAULT, not the only admissible one: a node whose response window was
+measured and RATIFIED may be staged on an amended ladder, and the mechanism is the
+engine's, imported whole. Two keys, exactly the engine's pair: `--ladder-spec PATH`
+(the CONTENT — the desk's ratified document, read by the ENGINE's `load_ladder_spec`
+and validated to name THIS column's node and site) and `--amended-ladder` (the
+AUTHORIZATION — this operator, this invocation, meant it). Either alone is refused by
+name; WITHOUT BOTH this module is byte-for-byte what it was, down to the staged JSON.
+The amendment is WHOLE-COLUMN — every lever, every band, the Σ-besides and the naive
+null all move onto the ratified ladder, the α=0 baseline is unchanged — and the planner
+hands its finished column to the engine's own `assert_amended_ladder_column` before
+returning it, so a MIXED column cannot be staged at all rather than being caught later.
+No ladder is written here: this module holds no dose constant of its own and never will
+(§2.5 as amended: no ladder without a ratified document).
+
 THE BANDS THAT DO NOT EXIST YET. The census (`--census`) is the first-class product of
 this module precisely because the v2.1 random bands (`Rband*` native, `gRband*`
 transported) have never been built for any node: it reports, per required artifact,
@@ -74,14 +89,17 @@ import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from metabasis.scripts.run_behavioral_cells import (
+    AMENDED_LADDER_FLAG, AMENDED_LADDER_NOTE, AmendedLadderNotEngaged,
     ArtifactShaMismatch, BASELINE_DOSE, BESIDE_BAND_FAMILIES, BRIEF_OF_RECORD,
     BRIEF_SHA256, BehavioralHarnessError, CELL_ID_TEMPLATE, CORPUS_SHA_V21, CellKind,
     CellSpec, CorpusVintageError, DOSE_LADDER, ENVELOPE_RULING_OF_RECORD,
-    ExpectedNShortfall, GATE_BAND_FAMILIES, GRADE_LINE, LesionRecipeViolation,
+    ExpectedNShortfall, GATE_BAND_FAMILIES, GRADE_LINE, LADDER_SPEC_FLAG,
+    LadderAuthorization, LadderColumnNotPure, LesionRecipeViolation,
     MAX_NEW_TOKENS, N_PER_CELL, NaiveTransplantRowMissing, NativeVectorUnavailable,
     SCORING_DOSES, SEED_MATERIAL_TEMPLATE, SEED_MATERIAL_TEMPLATE_DIGEST,
-    SamplingConfig, SiteNotOfRecord, apply_dose_ladder, assert_corpus_vintage,
-    assert_naive_row_banked, assert_no_lesion_recipe, baseline_cell, seed_int)
+    SamplingConfig, SiteNotOfRecord, apply_amended_ladder, apply_dose_ladder,
+    assert_amended_ladder_column, assert_corpus_vintage, assert_naive_row_banked,
+    assert_no_lesion_recipe, baseline_cell, load_ladder_spec, seed_int)
 from metabasis.threads import (PRE_RULING_UNRECORDED, RULED_OMP_NUM_THREADS,
                                THREAD_COUNT_MISMATCH_LABEL, ThreadConfig,
                                stamp_thread_config, thread_config_stamp,
@@ -117,9 +135,46 @@ N_FULL_COLUMN_CELLS = (N_BASELINE_CELLS + N_CALIBRATION_SIGNAL_CELLS
 #: signed ladder) was the other option filed to Luxia at staging; she ruled 6.
 N_SIGMA_BESIDE_CELLS = N_BAND_MEMBERS * len(SCORING_DOSES)       # 6
 #: The doses a Σ-beside cell is staged at, in ladder order (a subset of DOSE_LADDER, so
-#: `CellSpec`'s frozen-ladder validator accepts every one of them).
+#: `CellSpec`'s frozen-ladder validator accepts every one of them). The FROZEN default;
+#: an amended column reads the same convention off its own ladder — see
+#: `sigma_beside_doses_in_force` and `AMENDED_LADDER_SCORING_DOSE_READING`.
 SIGMA_BESIDE_DOSES: tuple[float, ...] = tuple(
     d for d in DOSE_LADDER if d in SCORING_DOSES)
+
+#: THE AMENDED LADDER's staging-side reading of "the SCORING doses" — an ENACTOR
+#: READING, recorded the way `AMENDED_LADDER_SIGNAL_ROLE_READING` was so the desk can
+#: rule differently without hunting for the assumption. DESK-OWED.
+#:
+#: Two of this module's cell families are quoted at the SCORING doses rather than across
+#: the whole ladder: ruling 5's naive null (±0.3, ~4% of a pair's budget) and B4's
+#: Σ-beside (3 members × the same two doses). Both derive from `SCORING_DOSES`, which is
+#: the FROZEN ladder's own extreme pair — so on a column re-calibrated to a narrower
+#: window there is no such cell to stage. Read literally, staging an amended column
+#: would put those 8 cells at doses the ladder in force does not carry, and the whole
+#: column would be refused: as frozen-ladder cells they make the column MIXED
+#: (`LadderColumnNotPure`), and as amended cells they are off the ladder in force
+#: (`LadderDoseNotOnLadderInForce`). Either way an amendment could not be staged at all,
+#: which is not a re-calibration mechanism.
+#:
+#: So "the scoring doses" are read on THE LADDER IN FORCE, as its two EXTREME rungs —
+#: the same generalization the ratified spec makes for §4.2(b) in its own
+#: `gate_reading_rule` ("both |0.3|" reads "both extreme doses"), and the same one the
+#: engine already makes for §2.7's signal role. The ARITY is preserved exactly (2 doses,
+#: so `N_NAIVE_CELLS` and `N_SIGMA_BESIDE_CELLS` are the numbers they were), and on the
+#: frozen ladder the pair IS `SCORING_DOSES`, so every column staged before this ruling
+#: is staged byte-identically. The named alternative — drop the naive and Σ halves from
+#: an amended column — was NOT taken: it changes the column's SHAPE (§4.1/§5.1's table)
+#: to accommodate a dose reading, and the ratified document says the amendment applies
+#: to "the whole science column at this (node_key, site)".
+AMENDED_LADDER_SCORING_DOSE_READING = (
+    "enactor reading (re-freeze #2 item 4, 2026-08-09), DESK-OWED: on a column staged "
+    "under a ratified AMENDED ladder, 'the SCORING doses' — ruling 5's naive-null pair "
+    "and B4's Σ-beside pair — are read as the two EXTREME rungs of THE LADDER IN FORCE "
+    "rather than as the literal ±0.3, the same generalization the ladder spec's own "
+    "gate_reading_rule makes for §4.2(b). The cell ARITY is unchanged (2 doses; 2 naive "
+    "cells, 6 Σ-beside cells per designated row) and a frozen-ladder column's scoring "
+    "pair IS ±0.3, so nothing about it moves. The amendment is WHOLE-COLUMN: no science "
+    "cell is left on the frozen ladder, because a mixed column is refused.")
 
 #: Ruling 5: the behavioral naive-transplant null fires at ±0.3 ONLY (~4% of a pair's
 #: budget), and the object injected is the coordinate-identified RAW source vector —
@@ -1793,10 +1848,68 @@ def planned_sigma_beside_count(spec: BankSpec) -> int:
     return n
 
 
+# --------------------------------------------- the ladder in force (re-freeze #2)
+def doses_in_force(authorization: Optional[LadderAuthorization]) -> tuple[float, ...]:
+    """The ladder this column is STAGED on: the ratified one, or the frozen default.
+
+    The staging-side twin of the engine's `ladder_in_force`, which reads the answer off
+    a cell SET; here the question is asked before any cell exists, so it is asked of the
+    authorization. `None` — every column staged before re-freeze #2 — answers
+    `DOSE_LADDER`, and no caller of this function has a second source of doses.
+    """
+    return DOSE_LADDER if authorization is None else authorization.ladder
+
+
+def scoring_doses_in_force(authorization: Optional[LadderAuthorization]
+                           ) -> tuple[float, ...]:
+    """"The SCORING doses", read on the ladder in force: its two EXTREME rungs.
+
+    `SCORING_DOSES` exactly when the frozen ladder is in force, because ±0.3 IS that
+    ladder's extreme pair — so a frozen column's naive and Σ-beside cells are the cells
+    they always were, down to the cell ids. See `AMENDED_LADDER_SCORING_DOSE_READING`
+    for why the generalization is made at all and what the named alternative was.
+
+    The pair is `(min, max)` of the ladder rather than `±max(|dose|)`: both members are
+    then rungs of the ladder in force by construction, so a document ratifying an
+    ASYMMETRIC ladder still stages a scoring pair its own cells can carry. (The engine's
+    §2.7 signal role reads a MAGNITUDE, `extreme_magnitude`; the two agree on every
+    symmetric ladder, which the ratified mixtral document is.)
+    """
+    ladder = doses_in_force(authorization)
+    return (min(ladder), max(ladder))
+
+
+def sigma_beside_doses_in_force(authorization: Optional[LadderAuthorization]
+                                ) -> tuple[float, ...]:
+    """B4's Σ-beside doses on the ladder in force — `SIGMA_BESIDE_DOSES` when frozen.
+
+    Written as the same filter `SIGMA_BESIDE_DOSES` is written as, so the two cannot
+    drift: the scoring doses that are ALSO rungs, in ladder order. Its arity is what
+    `N_SIGMA_BESIDE_CELLS` counts against, and it is 2 under any ratified ladder.
+    """
+    scoring = scoring_doses_in_force(authorization)
+    return tuple(d for d in doses_in_force(authorization) if d in scoring)
+
+
 def _ladder_cells(vector_key: str, site: int, *, kind: CellKind,
                   band_family: Optional[Literal["Rband", "gRband"]],
                   provenance: str, npz: Optional[str], n: int,
-                  norm: float) -> list[tuple[CellSpec, float]]:
+                  norm: float,
+                  ladder_authorization: Optional[LadderAuthorization] = None
+                  ) -> list[tuple[CellSpec, float]]:
+    """One vector's science cells, on the ladder in force (§2.5 as amended 2026-08-09).
+
+    TWO APPLIERS, NEVER A PARAMETER ON ONE — the engine's own shape, kept here so that
+    reading either applier answers "which doses does this path take?" with no branch to
+    follow. The default is `None` and the default path is `apply_dose_ladder` called
+    with exactly the arguments it was called with before this field existed, which is
+    the flag-absent byte-identity condition of the re-freeze.
+    """
+    if ladder_authorization is not None:
+        return apply_amended_ladder(
+            vector_key, site, per_token_median_resid_norm=norm,
+            authorization=ladder_authorization, kind=kind,
+            band_family=band_family, vector_npz=npz, vector_provenance=provenance, n=n)
     return apply_dose_ladder(
         vector_key, site, per_token_median_resid_norm=norm, kind=kind,
         band_family=band_family, vector_npz=npz, vector_provenance=provenance, n=n)
@@ -1804,7 +1917,9 @@ def _ladder_cells(vector_key: str, site: int, *, kind: CellKind,
 
 def _sigma_beside_cells(recipe: SigmaBandRecipe, site: int, *, kind: CellKind,
                         provenance: str, npz: Optional[str], n: int,
-                        norm: float) -> list[tuple[CellSpec, float]]:
+                        norm: float,
+                        ladder_authorization: Optional[LadderAuthorization] = None
+                        ) -> list[tuple[CellSpec, float]]:
     """B4's Σ-beside cells for ONE designated row: 3 members × the SCORING doses.
 
     The designation is re-asserted here — the guard already fires inside
@@ -1812,23 +1927,31 @@ def _sigma_beside_cells(recipe: SigmaBandRecipe, site: int, *, kind: CellKind,
     reached `--census`/`plan_cells` with an undesignated Σ recipe would otherwise
     ANNOUNCE cells that could never be built. Refusing at plan time is what makes the
     designation part of the engine-facing contract rather than of the builder alone.
+
+    THE AMENDED LADDER (2026-08-09): a Σ-beside is a SCIENCE cell, so an amendment
+    reaches it too — the doses come from `sigma_beside_doses_in_force` and the
+    authorization rides every cell. With no authorization the doses are
+    `SIGMA_BESIDE_DOSES` and the cells are byte-for-byte the cells B4 ruled.
     """
     assert_sigma_beside_designated(recipe)
     assert_no_lesion_recipe(provenance, SIGMA_BAND_KIND)
+    doses = sigma_beside_doses_in_force(ladder_authorization)
     out: list[tuple[CellSpec, float]] = []
     for i in range(1, recipe.n_members + 1):
         key = f"{SIGMA_BAND_KIND}{i}"
-        for frac in SIGMA_BESIDE_DOSES:
+        for frac in doses:
             out.append((CellSpec(
                 cell_id=CELL_ID_TEMPLATE.format(vector_key=key, site=site, frac=frac),
                 kind=kind, vector_key=key, site=site, alpha_frac=frac, n=n,
                 band_family=SIGMA_BAND_KIND, vector_npz=npz,
-                vector_provenance=provenance), frac * norm))
+                vector_provenance=provenance,
+                ladder_authorization=ladder_authorization), frac * norm))
     if len(out) != N_SIGMA_BESIDE_CELLS:                          # pragma: no cover
         raise ExpectedNShortfall(
             f"Σ-beside {recipe.designation}: planned {len(out)} cells, B4 says "
             f"{N_SIGMA_BESIDE_CELLS} ({recipe.n_members} members × "
-            f"{len(SIGMA_BESIDE_DOSES)} scoring doses)")
+            f"{len(doses)} scoring doses on the ladder in force "
+            f"{list(doses_in_force(ladder_authorization))})")
     return out
 
 
@@ -1855,7 +1978,9 @@ def plan_cells(spec: BankSpec, *, vector_npz: Optional[str] = None,
                transport_map_stamp: Optional[dict] = None,
                naive_row: Optional[dict] = None,
                vector_sha256: Optional[str] = None,
-               provisional_norm: Optional[float] = None) -> list[StagedCell]:
+               provisional_norm: Optional[float] = None,
+               ladder_authorization: Optional[LadderAuthorization] = None
+               ) -> list[StagedCell]:
     """§4.1 + §5.1's cell table for one column, in fire order.
 
     Order is calibration-then-transported on purpose: §4's gate is a GATE, and a node
@@ -1866,6 +1991,20 @@ def plan_cells(spec: BankSpec, *, vector_npz: Optional[str] = None,
     per-token median residual norm in-job and re-resolves. When no banked norm exists —
     the ordinary case for a new node — the unit placeholder 1.0 is used so the numbers
     in the document are transparently fractions rather than plausible-looking doses.
+
+    THE AMENDED LADDER (re-freeze #2, 2026-08-09). `ladder_authorization` is the RUN's
+    half of the two-key ceremony, derived by the engine's `load_ladder_spec` from a
+    document that has already been validated to name this column. It reaches every
+    SCIENCE cell and only those: the α=0 baseline is built exactly as §5.1 shares it
+    (α=0 is α=0 under any ladder, and `CellSpec` refuses an authorization on it by
+    name). `None` is the frozen ladder and the default, and this function then makes
+    precisely the calls it made before the field existed.
+
+    The finished column is handed to the ENGINE's `assert_amended_ladder_column` before
+    it is returned — unconditionally, the way the engine's CLI runs it. That is what
+    makes a MIXED column unstageable rather than merely unlikely: a science cell left on
+    the frozen ladder, or an authorization that engaged nothing, is refused HERE, by the
+    same gate and with the same message the job would have refused it with.
     """
     norm = provisional_norm if provisional_norm and provisional_norm > 0 else 1.0
     n = spec.n_per_cell
@@ -1884,7 +2023,8 @@ def plan_cells(spec: BankSpec, *, vector_npz: Optional[str] = None,
         assert_no_lesion_recipe(lever_prov, lever_key)
         for c, a in _ladder_cells(lever_key, spec.site, kind="calibration",
                                   band_family=None, provenance=lever_prov,
-                                  npz=vector_npz, n=n, norm=norm):
+                                  npz=vector_npz, n=n, norm=norm,
+                                  ladder_authorization=ladder_authorization):
             cells.append(StagedCell(spec=c, provisional_alpha=a,
                                     vector_sha256=vector_sha256, **cal_class))
         for i in range(1, N_BAND_MEMBERS + 1):
@@ -1894,7 +2034,8 @@ def plan_cells(spec: BankSpec, *, vector_npz: Optional[str] = None,
                     "never whether the transport carries")
             for c, a in _ladder_cells(key, spec.site, kind="calibration_band",
                                       band_family="Rband", provenance=prov,
-                                      npz=vector_npz, n=n, norm=norm):
+                                      npz=vector_npz, n=n, norm=norm,
+                                      ladder_authorization=ladder_authorization):
                 cells.append(StagedCell(spec=c, provisional_alpha=a,
                                         vector_sha256=vector_sha256, **cal_class))
         if spec.native_band.sigma_beside is not None:
@@ -1906,7 +2047,8 @@ def plan_cells(spec: BankSpec, *, vector_npz: Optional[str] = None,
                      "(pre-statement §2 / O-2; Luxia's B4 ruling 2026-08-04)")
             for c, a in _sigma_beside_cells(sig, spec.site, kind="calibration_band",
                                             provenance=sprov, npz=vector_npz, n=n,
-                                            norm=norm):
+                                            norm=norm,
+                                            ladder_authorization=ladder_authorization):
                 cells.append(StagedCell(spec=c, provisional_alpha=a,
                                         vector_sha256=vector_sha256, **cal_class))
 
@@ -1922,7 +2064,8 @@ def plan_cells(spec: BankSpec, *, vector_npz: Optional[str] = None,
         assert_no_lesion_recipe(prov, signal_key)
         for c, a in _ladder_cells(signal_key, spec.site, kind="transported",
                                   band_family=None, provenance=prov, npz=vector_npz,
-                                  n=n, norm=norm):
+                                  n=n, norm=norm,
+                                  ladder_authorization=ladder_authorization):
             cells.append(StagedCell(spec=c, provisional_alpha=a,
                                     transport_map=transport_map_stamp,
                                     naive_row=naive_row, vector_sha256=vector_sha256,
@@ -1935,7 +2078,8 @@ def plan_cells(spec: BankSpec, *, vector_npz: Optional[str] = None,
                      f"{N_BAND_MEMBERS} transported members")
             for c, a in _ladder_cells(key, spec.site, kind="transported_band",
                                       band_family="gRband", provenance=bprov,
-                                      npz=vector_npz, n=n, norm=norm):
+                                      npz=vector_npz, n=n, norm=norm,
+                                      ladder_authorization=ladder_authorization):
                 cells.append(StagedCell(spec=c, provisional_alpha=a,
                                         transport_map=transport_map_stamp,
                                         naive_row=naive_row,
@@ -1950,7 +2094,8 @@ def plan_cells(spec: BankSpec, *, vector_npz: Optional[str] = None,
                      "(pre-statement §2 / O-2; Luxia's B4 ruling 2026-08-04)")
             for c, a in _sigma_beside_cells(sig, spec.site, kind="transported_band",
                                             provenance=sprov, npz=vector_npz, n=n,
-                                            norm=norm):
+                                            norm=norm,
+                                            ladder_authorization=ladder_authorization):
                 cells.append(StagedCell(spec=c, provisional_alpha=a,
                                         transport_map=transport_map_stamp,
                                         naive_row=naive_row,
@@ -1961,7 +2106,9 @@ def plan_cells(spec: BankSpec, *, vector_npz: Optional[str] = None,
         nprov = (f"{NAIVE_CONSTRUCTION}; {spec.source_key or 'source'} → "
                  f"{spec.node_key} L{spec.site}, pair {spec.pair or '(unnamed)'}")
         assert_no_lesion_recipe(nprov, key)
-        for frac in SCORING_DOSES:
+        # Ruling 5's ±0.3, read on the ladder in force — `SCORING_DOSES` itself for
+        # every frozen-ladder column. See `AMENDED_LADDER_SCORING_DOSE_READING`.
+        for frac in scoring_doses_in_force(ladder_authorization):
             cell = CellSpec(
                 cell_id=CELL_ID_TEMPLATE.format(vector_key=key, site=spec.site,
                                                 frac=frac),
@@ -1969,7 +2116,8 @@ def plan_cells(spec: BankSpec, *, vector_npz: Optional[str] = None,
                 band_family=None, vector_npz=vector_npz, vector_provenance=nprov,
                 sampling=SamplingConfig(
                     name="pure-ancestral", provenance="ruling 4: the config of record "
-                                                      "applies to the naive null too"))
+                                                      "applies to the naive null too"),
+                ladder_authorization=ladder_authorization)
             cells.append(StagedCell(spec=cell, provisional_alpha=frac * norm,
                                     transport_map=None, naive_row=naive_row,
                                     vector_sha256=vector_sha256, **src_class))
@@ -1989,6 +2137,16 @@ def plan_cells(spec: BankSpec, *, vector_npz: Optional[str] = None,
             f"{spec.node_key}: planned {len(of_record)} cells OF RECORD, the "
             f"§4.1+§5.1 table says {expected_of_record} "
             f"({len(cells) - len(of_record)} Σ-beside cells were staged beside them)")
+    # THE AMENDED LADDER's admission gate, run on the finished column by the ENGINE's
+    # own function — unconditionally, exactly as the engine's CLI runs it before the
+    # model loads. With no authorization and no amended cell (every column staged before
+    # re-freeze #2) it asserts nothing and returns False, so this line costs the frozen
+    # path nothing. With one it is what makes a MIXED column unstageable: purity, the
+    # two-keys-are-the-same-key test and "the flag is not a mode to leave on" are all
+    # asserted HERE, in the staging module, with the job's own messages.
+    assert_amended_ladder_column([c.spec for c in cells],
+                                 authorization=ladder_authorization,
+                                 node_key=spec.node_key)
     return cells
 
 
@@ -2137,13 +2295,23 @@ class BuildResult(BaseModel):
 
 
 def build_banks(spec: BankSpec, *, construct_bands: bool = False,
-                write: bool = True) -> tuple[BuildResult, CellsDocument]:
+                write: bool = True,
+                ladder_authorization: Optional[LadderAuthorization] = None
+                ) -> tuple[BuildResult, CellsDocument]:
     """Stage one column: verify, construct, plan, stamp, write.
 
     Refuses on a non-READY census (`CensusNotReady`) unless every owed row is a band
     the spec explicitly authorized CONSTRUCTING and `construct_bands` is set — which is
     the one place a bank CONTENT decision is taken, and it is taken in writing, twice
     (a recipe in the spec plus a flag on the command line).
+
+    THE AMENDED LADDER (2026-08-09): `ladder_authorization` is the run's ratified key,
+    built by `main` from the `--ladder-spec` / `--amended-ladder` pair and already
+    validated to name this column. It touches the PLAN and the STAMP and nothing else —
+    no vector, no band draw, no map and no sha depends on which ladder is in force, so
+    an amended column banks byte-identical OBJECTS and differs only in which doses its
+    cells name. `None` — the default — is the frozen ladder and the path this function
+    took before the field existed.
     """
     from metabasis.scripts.capability_battery import BATTERY_ITEM_SET_SHA256
 
@@ -2359,7 +2527,8 @@ def build_banks(spec: BankSpec, *, construct_bands: bool = False,
     cells = plan_cells(
         spec, vector_npz=str(npz_path) if vectors else None,
         transport_map_stamp=tm_stamp, naive_row=naive_row,
-        provisional_norm=provisional_norm)
+        provisional_norm=provisional_norm,
+        ladder_authorization=ladder_authorization)
 
     vintage_chain: dict[str, Optional[str]] = {
         "corpus_manifest": (sha256_file(spec.corpus_manifest)
@@ -2387,7 +2556,8 @@ def build_banks(spec: BankSpec, *, construct_bands: bool = False,
                        prompt_pool_sha256=pool_sha,
                        battery_item_set_sha256=BATTERY_ITEM_SET_SHA256,
                        band_seed_materials=band_seed_materials,
-                       sigma_beside=sigma_facts)
+                       sigma_beside=sigma_facts,
+                       ladder_authorization=ladder_authorization)
 
     doc = CellsDocument(
         node_key=spec.node_key, arm=spec.arm, site=spec.site,
@@ -2484,12 +2654,22 @@ def bank_stamp(spec: BankSpec, *, cells: Sequence[StagedCell],
                prompt_pool_sha256: Optional[str],
                battery_item_set_sha256: str,
                band_seed_materials: Optional[dict[str, str]] = None,
-               sigma_beside: Optional[dict[str, dict]] = None) -> dict:
+               sigma_beside: Optional[dict[str, dict]] = None,
+               ladder_authorization: Optional[LadderAuthorization] = None) -> dict:
     """The staging half of §2.8's custody, as one document.
 
     Everything here is a fact this module established from disk or constructed itself.
     Nothing is defaulted into existence: an unknown is written as `None` and shows up
     in the desk's OWED column (§10), which is the point.
+
+    THE AMENDED LADDER (2026-08-09): `dose_ladder` states the ladder ACTUALLY STAGED,
+    and an `amended_ladder` block appears BESIDE it — never instead of it — quoting the
+    frozen ladder and naming the document by id and by sha. The block is written only
+    when the column is amended, by the same rule HALT D's `vector_class` follows below,
+    so a frozen-ladder bank stamp is byte-identical to the one this function wrote
+    before the mechanism existed. Stating one without the other is the failure the block
+    exists to prevent: a stamp whose `dose_ladder` had silently moved would let an
+    amended column present as a frozen-ladder one downstream.
     """
     fd = _read_json(spec.native_vector.fd_gate if spec.native_vector else None,
                     what="native FD gate")
@@ -2515,7 +2695,9 @@ def bank_stamp(spec: BankSpec, *, cells: Sequence[StagedCell],
                       "this bank is re-pointable at another corpus/basis by editing "
                       "the spec, never this module",
         "behavioral_prompt_pool_sha256": prompt_pool_sha256,
-        "dose_ladder": list(DOSE_LADDER),
+        # the ladder IN FORCE — `DOSE_LADDER` for every column with no ratified
+        # amendment, so a frozen bank stamp's field is the field it always was.
+        "dose_ladder": list(doses_in_force(ladder_authorization)),
         "baseline_dose": BASELINE_DOSE,
         "n_per_cell": spec.n_per_cell,
         "max_new_tokens": spec.max_new_tokens,
@@ -2581,7 +2763,7 @@ def bank_stamp(spec: BankSpec, *, cells: Sequence[StagedCell],
         "sigma_beside_cells": {
             "designations": list(spec.sigma_beside_designations) or None,
             "n_cells_per_designated_row": N_SIGMA_BESIDE_CELLS,
-            "doses": list(SIGMA_BESIDE_DOSES),
+            "doses": list(sigma_beside_doses_in_force(ladder_authorization)),
             "ruling": "B4 (Luxia, 2026-08-04): 6 Σ-beside cells at the SCORING doses "
                       "per designated row; the CellSpec band-family widening authorized "
                       "as a beside family only",
@@ -2589,8 +2771,10 @@ def bank_stamp(spec: BankSpec, *, cells: Sequence[StagedCell],
                           f"signal it controls rides ({N_BAND_MEMBERS} × "
                           f"{len(DOSE_LADDER)} = {N_CALIBRATION_BAND_CELLS} for the "
                           f"isotropic band). The Σ band is quoted at the SCORING doses "
-                          f"only, so the same convention over {list(SCORING_DOSES)} "
-                          f"gives {N_BAND_MEMBERS} × {len(SIGMA_BESIDE_DOSES)} = "
+                          f"only, so the same convention over "
+                          f"{list(scoring_doses_in_force(ladder_authorization))} "
+                          f"gives {N_BAND_MEMBERS} × "
+                          f"{len(sigma_beside_doses_in_force(ladder_authorization))} = "
                           f"{N_SIGMA_BESIDE_CELLS}",
             "gate_discipline": "these cells enter NO gate: not the §2.7 replay gate "
                                "(no stratum), not the §4 actuation criteria (Rband "
@@ -2604,6 +2788,30 @@ def bank_stamp(spec: BankSpec, *, cells: Sequence[StagedCell],
         "stamp_field_partition": {"staged_here": list(STAGED_STAMP_FIELDS),
                                   "filled_in_job": list(IN_JOB_STAMP_FIELDS)},
     }
+    # THE AMENDED LADDER. The bank says which ladder it was STAGED on, with the document
+    # that ratified the replacement named by id and by sha and the frozen ladder quoted
+    # beside — the staging-side counterpart of the engine's per-cell badge, and written
+    # ONLY on an amended column. A desk reading this stamp alone can tell which ladder
+    # the 51 cells below carry, which is what makes the comparability rider enforceable
+    # before a single generation exists.
+    if ladder_authorization is not None:
+        stamp["amended_ladder"] = {
+            "amended": True,
+            "experiment_id": ladder_authorization.experiment_id,
+            "ladder_spec_sha256": ladder_authorization.spec_sha256,
+            "ladder_in_force": list(ladder_authorization.ladder),
+            "frozen_dose_ladder": list(DOSE_LADDER),
+            "replaces_frozen_ladder": True,
+            "extreme_magnitude": ladder_authorization.extreme_magnitude,
+            "scoring_doses_in_force": list(
+                scoring_doses_in_force(ladder_authorization)),
+            "frozen_scoring_doses": list(SCORING_DOSES),
+            "scoring_dose_reading": AMENDED_LADDER_SCORING_DOSE_READING,
+            "staged_by": f"{LADDER_SPEC_FLAG} + {AMENDED_LADDER_FLAG} at staging; the "
+                         "engine requires the SAME pair at --run, against this same "
+                         "document",
+            "note": AMENDED_LADDER_NOTE,
+        }
     # HALT D. THE TWO BASES, BOTH NAMED — and written ONLY when the column actually
     # carries a class object, so an entropy-gradient column's stamp is byte-identical
     # to the pre-ruling engine's (the flag-absent condition of the re-freeze).
@@ -2772,6 +2980,8 @@ def _toy_map_npz(dirpath: Path, d_src: int, d_tgt: int, *, seed: int) -> Path:
 
 def selftest() -> int:                                   # noqa: C901 — a checklist
     """CPU-only, data-independent, torch-free verification of the staging contract."""
+    import contextlib
+    import io
     import tempfile
 
     checks: list[tuple[str, bool, str]] = []
@@ -3932,6 +4142,320 @@ def selftest() -> int:                                   # noqa: C901 — a chec
               {"gentropy_gradient", "naive_entropy_gradient"}
               <= _npz_keys(Path(egv_built.vectors_npz)))
 
+        # ---- 13. THE AMENDED LADDER at staging (re-freeze #2 item 4) ----------
+        print("== selftest 13: the AMENDED LADDER — staging's two keys ==")
+        # The engine owns the mechanism and its fixtures; both are IMPORTED rather than
+        # re-written, which is the whole point of this brief. `_toy_ladder_spec_body`
+        # carries the RATIFIED document's exact key set, and the needle is the ratified
+        # mixtral ladder itself — imported (never re-typed) so this module still holds
+        # no per-node ladder literal, which is what the AST property below asserts.
+        from metabasis.scripts.run_behavioral_cells import (
+            _RATIFIED_MIXTRAL_LADDER_NEEDLE, _TOY_AMENDED_LADDER,
+            _toy_ladder_spec_body, _toy_pool)
+        from metabasis.scripts.run_behavioral_cells import main as engine_main
+
+        lspec_path = root / "ladder-spec.json"
+        lspec_path.write_text(json.dumps(
+            _toy_ladder_spec_body(node="toy-node", site=7), indent=1))
+        lspec, lauth = load_ladder_spec(lspec_path, node_key="toy-node", site=7)
+        amended_edges = (min(_TOY_AMENDED_LADDER), max(_TOY_AMENDED_LADDER))
+
+        check("the three readings recover the FROZEN constants EXACTLY when no ladder "
+              "is authorized, and move together onto the ratified ladder when one is",
+              doses_in_force(None) == DOSE_LADDER
+              and scoring_doses_in_force(None) == SCORING_DOSES
+              and sigma_beside_doses_in_force(None) == SIGMA_BESIDE_DOSES
+              and doses_in_force(lauth) == _TOY_AMENDED_LADDER
+              and scoring_doses_in_force(lauth) == amended_edges
+              and sigma_beside_doses_in_force(lauth) == amended_edges
+              and len(sigma_beside_doses_in_force(lauth)) == len(SIGMA_BESIDE_DOSES),
+              f"frozen {list(SCORING_DOSES)} → amended {list(amended_edges)}; "
+              "arity preserved, so N_NAIVE_CELLS and N_SIGMA_BESIDE_CELLS are unmoved")
+
+        # --- (a) the FROZEN path, byte-identical -------------------------------
+        _plain_res, plain_doc = build_banks(spec_c.model_copy(
+            update={"out_dir": root / "out_frozen_plain"}),
+            construct_bands=True, write=False)
+        _kwarg_res, kwarg_doc = build_banks(spec_c.model_copy(
+            update={"out_dir": root / "out_frozen_plain"}),
+            construct_bands=True, write=False, ladder_authorization=None)
+        check("the FROZEN path is BYTE-IDENTICAL: the same spec staged with the new "
+              "keyword defaulted and passed-as-None produces the same document, byte "
+              "for byte, and no staged cell carries an authorization at all",
+              plain_doc.model_dump_json() == kwarg_doc.model_dump_json()
+              and all(c.spec.ladder_authorization is None for c in plain_doc.cells)
+              and not any(c.spec.is_amended_ladder for c in plain_doc.cells),
+              f"{len(plain_doc.model_dump_json())} bytes, {len(plain_doc.cells)} cells")
+        check("…and its bank stamp still states the FROZEN ladder with NO badge beside "
+              "it — the flag-absent artifact is the artifact it always was",
+              plain_doc.bank_stamp["dose_ladder"] == list(DOSE_LADDER)
+              and "amended_ladder" not in plain_doc.bank_stamp
+              and plain_doc.bank_stamp["baseline_dose"] == BASELINE_DOSE,
+              str(plain_doc.bank_stamp["dose_ladder"]))
+
+        # --- (b) an AMENDED column stages, whole-column ------------------------
+        # n/cell is reduced so the end-to-end preflight below is cheap; §5.1 freezes it
+        # at 80, so the reduction carries the LABEL the spec validator demands of any
+        # rehearsal — and the label rides the CLI round-trip in (e).
+        amended_spec = spec_c.model_copy(update={
+            "out_dir": root / "out_amended", "n_per_cell": 4,
+            "label": "selftest rehearsal at reduced n (§5.1 n/cell of record is 80)"})
+        am_res, am_doc = build_banks(amended_spec, construct_bands=True, write=True,
+                                     ladder_authorization=lauth)
+        am_science = [c for c in am_doc.cells if not c.spec.is_baseline]
+        am_base = [c for c in am_doc.cells if c.spec.is_baseline]
+        am_naive = [c for c in am_doc.cells if c.spec.kind == "naive"]
+        check("an AMENDED column stages at full §4.1+§5.1 arity with EVERY science cell "
+              "on the ratified ladder and carrying the document's authorization — "
+              "lever, both bands and the transported signal alike",
+              am_res.n_cells == N_FULL_COLUMN_CELLS == 51
+              and len(am_science) == 50 and len(am_base) == 1
+              and all(c.spec.is_amended_ladder
+                      and c.spec.ladder_authorization.spec_sha256 == lauth.spec_sha256
+                      for c in am_science)
+              and {c.spec.alpha_frac for c in am_science
+                   if c.spec.kind != "naive"} == set(_TOY_AMENDED_LADDER),
+              f"{len(am_science)} science cells on {list(_TOY_AMENDED_LADDER)}")
+        check("…the α=0 BASELINE carries none (α=0 is α=0 under any ladder, §5.1's "
+              "shared cell), and ruling 5's naive null moved onto the ladder's own "
+              "extreme pair rather than off the ladder entirely",
+              am_base[0].spec.ladder_authorization is None
+              and am_base[0].spec.alpha_frac == BASELINE_DOSE
+              and len(am_naive) == N_NAIVE_CELLS == 2
+              and sorted(c.spec.alpha_frac for c in am_naive) == sorted(amended_edges)
+              and all(c.spec.is_amended_ladder for c in am_naive),
+              f"naive at {sorted(c.spec.alpha_frac for c in am_naive)} "
+              f"(frozen ruling 5: {sorted(SCORING_DOSES)})")
+        check("…and the cell ids re-format at the ratified doses under the SAME banked "
+              "a{frac:+.2f} template (§2.3), so nothing downstream has to parse a "
+              "second convention",
+              all(c.spec.cell_id.endswith(f"a{c.spec.alpha_frac:+.2f}")
+                  for c in am_science)
+              and "gentropy_gradient_L7_a+0.20" in {c.spec.cell_id
+                                                    for c in am_doc.cells},
+              str(sorted(c.spec.cell_id for c in am_naive)))
+        # B4's beside is a science cell too, so the amendment reaches it
+        sig_lspec_path = root / "ladder-spec-sigma.json"
+        sig_lspec_path.write_text(json.dumps(
+            _toy_ladder_spec_body(node=dn, site=ds), indent=1))
+        _sig_spec_doc, sig_lauth = load_ladder_spec(sig_lspec_path, node_key=dn,
+                                                    site=ds)
+        sig_amended = plan_cells(_designated_spec(), ladder_authorization=sig_lauth)
+        sig_beside = [c for c in sig_amended if c.spec.is_beside]
+        check("B4's Σ-BESIDE is a science cell, so the amendment reaches it too: still "
+              "3 members × 2 scoring doses = 6, still a beside and never a gate input, "
+              "but quoted at the LADDER IN FORCE's extremes",
+              len(sig_beside) == N_SIGMA_BESIDE_CELLS == 6
+              and sorted({c.spec.alpha_frac for c in sig_beside})
+              == sorted(amended_edges)
+              and all(c.spec.is_beside and not c.spec.is_null_of_record
+                      and c.spec.is_amended_ladder for c in sig_beside)
+              and len(sig_amended) == 31,
+              str(sorted(c.spec.cell_id for c in sig_beside)))
+
+        # --- (c) a MIXED column cannot be staged -------------------------------
+        check("the planner hands its finished column to the ENGINE's own admission "
+              "gate: an authorization that engages NO science cell is refused at "
+              "staging, before any object is banked",
+              _raises(lambda: plan_cells(
+                  spec_c.model_copy(update={"include_calibration": False,
+                                            "include_transported": False,
+                                            "include_naive": False}),
+                  ladder_authorization=lauth), AmendedLadderNotEngaged)
+              and _ok(lambda: assert_amended_ladder_column(
+                  [c.spec for c in am_doc.cells], authorization=lauth,
+                  node_key="toy-node")))
+        # THE COUNTERFACTUAL, and the reason `AMENDED_LADDER_SCORING_DOSE_READING`
+        # exists: had ruling 5's null been left at the literal ±0.3, this is the column
+        # staging would have produced — and it is refused, so the reading is forced
+        # rather than chosen.
+        naive_key = amended_spec.naive_key
+        mixed = [c.spec for c in am_doc.cells if c.spec.kind != "naive"] + [
+            CellSpec(cell_id=CELL_ID_TEMPLATE.format(vector_key=naive_key, site=7,
+                                                     frac=f),
+                     kind="naive", vector_key=naive_key, site=7, alpha_frac=f, n=4,
+                     vector_provenance=NAIVE_CONSTRUCTION)
+            for f in SCORING_DOSES]
+        check("a MIXED column is unstageable: amended science cells beside frozen-ladder "
+              "ones are refused as LadderColumnNotPure — which is exactly the column a "
+              "naive null left at the literal ±0.3 would have made",
+              _raises(lambda: assert_amended_ladder_column(
+                  mixed, authorization=lauth, node_key="toy-node"),
+                  LadderColumnNotPure)
+              and len([c for c in mixed if c.ladder_authorization is None
+                       and not c.is_baseline]) == 2,
+              "the 2 frozen naive cells are the whole mixture")
+
+        # --- (d) the bank STAMP says which ladder it staged --------------------
+        am_badge = am_doc.bank_stamp.get("amended_ladder")
+        check("the bank stamp states the ladder IN FORCE and carries a badge BESIDE it "
+              "naming the document by id and by sha, with the frozen ladder quoted — a "
+              "desk reading this stamp alone can never mistake it for a frozen column",
+              am_doc.bank_stamp["dose_ladder"] == list(_TOY_AMENDED_LADDER)
+              and isinstance(am_badge, dict)
+              and am_badge["amended"] is True
+              and am_badge["ladder_spec_sha256"]
+              == hashlib.sha256(lspec_path.read_bytes()).hexdigest()
+              and am_badge["experiment_id"] == lspec.experiment_id
+              and am_badge["frozen_dose_ladder"] == list(DOSE_LADDER)
+              and am_badge["scoring_doses_in_force"] == list(amended_edges)
+              and am_badge["frozen_scoring_doses"] == list(SCORING_DOSES),
+              am_badge["ladder_spec_sha256"][:12] if am_badge else "NO BADGE")
+
+        # --- (e) the staging CLI's two keys ------------------------------------
+        cli_spec_path = root / "cli_spec.json"
+        cli_spec_path.write_text(amended_spec.model_copy(update={
+            "out_dir": root / "out_cli"}).model_dump_json())
+
+        def _stage(*extra: str) -> int:
+            with contextlib.redirect_stdout(io.StringIO()):
+                return main(["--spec", str(cli_spec_path), "--build",
+                             "--construct-bands", *extra])
+
+        check(f"THE STAGING CLI's two keys: {LADDER_SPEC_FLAG} alone is refused, "
+              f"{AMENDED_LADDER_FLAG} alone is refused, and only both together stage an "
+              "amended column — the engine's ceremony, at the other end of the pipe",
+              _stage("--ladder-spec", str(lspec_path)) == 2
+              and _stage("--amended-ladder") == 2
+              and _stage() == 0
+              and _stage("--ladder-spec", str(lspec_path), "--amended-ladder") == 0)
+        wrong_node = root / "ladder-spec-wrong-node.json"
+        wrong_node.write_text(json.dumps(
+            _toy_ladder_spec_body(node="another-node", site=7)))
+        wrong_site = root / "ladder-spec-wrong-site.json"
+        wrong_site.write_text(json.dumps(
+            _toy_ladder_spec_body(node="toy-node", site=8)))
+        check("…and the spec is cross-checked against THE COLUMN BEING STAGED: a "
+              "document amending another node, or the same node at another site, is "
+              "refused before a single object is read from disk",
+              _stage("--ladder-spec", str(wrong_node), "--amended-ladder") == 2
+              and _stage("--ladder-spec", str(wrong_site), "--amended-ladder") == 2
+              and _raises(lambda: load_ladder_spec(wrong_node, node_key="toy-node",
+                                                   site=7), BehavioralHarnessError))
+
+        # --- (f) END TO END: the staged column runs through the ENGINE's CLI ----
+        pool_path = root / "prompt_pool.json"
+        _pool = _toy_pool()
+        pool_path.write_text(json.dumps(
+            {"sha256": _pool.sha256,
+             "prompts": [p.model_dump() for p in _pool.prompts]}))
+        e2e_spec = amended_spec.model_copy(update={"out_dir": root / "out_e2e",
+                                                   "prompt_pool": pool_path})
+        e2e_res, _e2e_doc = build_banks(e2e_spec, construct_bands=True, write=True,
+                                        ladder_authorization=lauth)
+        frozen_res, _frozen_doc = build_banks(
+            e2e_spec.model_copy(update={"out_dir": root / "out_e2e_frozen"}),
+            construct_bands=True, write=True)
+
+        def _engine(cells_json: str, *extra: str) -> tuple[int, str]:
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = engine_main(["--preflight", "--cells-json", cells_json,
+                                  "--prompt-pool", str(pool_path), *extra])
+            return rc, buf.getvalue()
+
+        e2e_rc, e2e_out = _engine(e2e_res.cells_json, "--ladder-spec", str(lspec_path),
+                                  "--amended-ladder")
+        e2e_report = json.loads(e2e_out) if e2e_rc == 0 else {}
+        check("END TO END: a column STAGED here is admitted by the ENGINE's own CLI "
+              "under the same two keys and the same document, its §2.7 gate constitutes "
+              "on the ladder in force, and the amended_ladder BADGE is present in the "
+              "engine's own report — the staging→engine contract, closed",
+              e2e_rc == 0
+              and e2e_report.get("dose_ladder") == list(_TOY_AMENDED_LADDER)
+              and e2e_report.get("amended_ladder", {}).get("amended") is True
+              and e2e_report["amended_ladder"]["frozen_dose_ladder"]
+              == list(DOSE_LADDER)
+              and len(e2e_report["replay_gate"]["cells"]) == 3,
+              f"rc {e2e_rc}, gate {e2e_report.get('replay_gate', {}).get('cells')}")
+        check("…and the keys are demanded at BOTH ends: the staged amended document is "
+              "refused by the engine flagless (the cells-json alone is not a key), while "
+              "the FROZEN column staged from the same spec preflights flagless exactly "
+              "as it always did and is refused UNDER the flags",
+              _engine(e2e_res.cells_json)[0] == 2
+              and _engine(e2e_res.cells_json, "--amended-ladder")[0] == 2
+              and _engine(frozen_res.cells_json)[0] == 0
+              and _engine(frozen_res.cells_json, "--ladder-spec", str(lspec_path),
+                          "--amended-ladder")[0] == 2)
+
+        # --- (g) M58: the AST property, never a string grep --------------------
+        # This module must hold NO ladder of its own. Walking module-level assignments
+        # (rather than grepping for "0.15") also catches a constant spelled differently
+        # — reordered, or written as a list — and the needle is IMPORTED from the engine
+        # so asserting the property does not itself introduce the literal.
+        import ast as _ast
+
+        def _const_tuples(source: str) -> list[tuple[str, tuple[float, ...]]]:
+            """Every module-level `NAME = (<numbers>)` / `[<numbers>]` in a source."""
+            found: list[tuple[str, tuple[float, ...]]] = []
+            for node in _ast.parse(source).body:
+                if not isinstance(node, (_ast.Assign, _ast.AnnAssign)):
+                    continue
+                value = node.value
+                targets = (node.targets if isinstance(node, _ast.Assign)
+                           else [node.target])
+                names = [t.id for t in targets if isinstance(t, _ast.Name)]
+                if value is None or not isinstance(value, (_ast.Tuple, _ast.List)):
+                    continue
+                nums: list[float] = []
+                for el in value.elts:
+                    if isinstance(el, _ast.Constant) and isinstance(
+                            el.value, (int, float)) and not isinstance(el.value, bool):
+                        nums.append(float(el.value))
+                    elif (isinstance(el, _ast.UnaryOp)
+                          and isinstance(el.op, _ast.USub)
+                          and isinstance(el.operand, _ast.Constant)
+                          and isinstance(el.operand.value, (int, float))):
+                        nums.append(-float(el.operand.value))
+                    else:
+                        nums = []
+                        break
+                if nums:
+                    found.extend((n, tuple(nums)) for n in names)
+            return found
+
+        staged_constants = _const_tuples(Path(__file__).read_text())
+        offenders = [n for n, v in staged_constants
+                     if v == _RATIFIED_MIXTRAL_LADDER_NEEDLE
+                     or (len(v) == len(DOSE_LADDER) and v != DOSE_LADDER
+                         and all(0.0 < abs(x) < 1.0 for x in v))]
+        # the walker is proven NON-VACUOUS against a source that does carry one, so
+        # "no offenders" cannot mean "the walk found nothing at all".
+        planted = _const_tuples(
+            "LADDER = " + repr(list(_RATIFIED_MIXTRAL_LADDER_NEEDLE)) + "\n"
+            "OTHER = (1, 2)\n")
+        check("(M58) [AST] this staging module carries NO per-node ladder constant: no "
+              "module-level numeric constant equals the ratified mixtral ladder, and "
+              "none is ladder-SHAPED at all — the policy is the document's, and the "
+              "walker is proven against a source that plants one",
+              not offenders
+              and [n for n, v in planted
+                   if v == _RATIFIED_MIXTRAL_LADDER_NEEDLE] == ["LADDER"]
+              and len(planted) == 2,
+              f"{len(staged_constants)} module-level numeric constant(s) walked, "
+              f"offenders {offenders}")
+
+    # ---- M59: the suite's own arithmetic, asserted rather than printed ---------
+    # SKIP IS NOT PASS, and a block that silently stopped running is indistinguishable
+    # from a block that never existed unless the TOTAL is asserted. Adopted here from
+    # the engine's suite at re-freeze #2 item 4 (2026-08-09): the floor is the count
+    # STANDING WHEN THIS CHECK RUNS, so it is one below the total this file was merged
+    # at — 167 checks before the amended-ladder staging block, 183 after it (+16: 15
+    # mechanism checks and this one). It may only GROW: a change that removes a check
+    # has to change this constant in the same diff, which is exactly the moment a
+    # reviewer gets to ask why.
+    # This module's suite is configuration-invariant by construction (M44), so its known
+    # skip set is EMPTY and a block that started skipping fails here.
+    SELFTEST_CHECK_FLOOR = 182
+    KNOWN_SKIP_CEILING = 0
+    check(f"(M59) the suite ran at least its recorded floor of {SELFTEST_CHECK_FLOOR} "
+          f"checks and named no more than {KNOWN_SKIP_CEILING} skip(s) — a block that "
+          "stopped running, or started skipping, is caught here rather than read as a "
+          "clean run",
+          len(checks) >= SELFTEST_CHECK_FLOOR and len(skips) <= KNOWN_SKIP_CEILING,
+          f"{len(checks)} checks (floor {SELFTEST_CHECK_FLOOR}), "
+          f"{len(skips)} skip(s) (ceiling {KNOWN_SKIP_CEILING})")
+
     failures = [c for c in checks if not c[1]]
     print(f"\nselftest: {len(failures)} failure(s)")
     for name, _, detail in failures:
@@ -4068,6 +4592,22 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--construct-bands", action="store_true",
                     help="build the random band(s) from the spec's named recipe — a "
                          "BANK-CONTENT act, required in writing twice")
+    ap.add_argument("--ladder-spec", type=Path, default=None,
+                    help="THE AMENDED LADDER (re-freeze #2, 2026-08-09): the desk's "
+                         "ratified re-calibration document for THIS column's node and "
+                         "site (schema behavioral-ladder-spec/1). Read by the ENGINE's "
+                         "own loader and validated to name this column; its sha256 "
+                         "becomes the authorization every staged SCIENCE cell carries, "
+                         "and the engine's --run demands the same pair against the same "
+                         "document. Requires --amended-ladder beside it. WITHOUT BOTH, "
+                         "the FROZEN dose ladder is in force and every staged byte is "
+                         "what it was.")
+    ap.add_argument("--amended-ladder", action="store_true",
+                    help="THE AMENDED LADDER's second key: the operator's explicit "
+                         "assertion that THIS column is staged on a re-calibrated "
+                         "ladder. The amendment is WHOLE-COLUMN (every lever, every "
+                         "band, the Σ-besides and the naive null; the α=0 baseline is "
+                         "unchanged) and a mixed column cannot be staged at all.")
     ap.add_argument("--out-dir", type=Path, default=None,
                     help="override the spec's out_dir")
     ap.add_argument("--dry-run", action="store_true",
@@ -4092,6 +4632,41 @@ def main(argv: Optional[list[str]] = None) -> int:
     if args.out_dir is not None:
         spec = spec.model_copy(update={"out_dir": args.out_dir})
 
+    # THE AMENDED LADDER's two keys, checked against each other BEFORE anything is read
+    # from disk, by the engine's pattern exactly. Either alone is refused by name rather
+    # than silently ignored: an operator who passed one and not the other believes
+    # something about which ladder this column is staged on that is false. The spec is
+    # loaded by the ENGINE's `load_ladder_spec` — one loader for the campaign, so the
+    # document that authorizes the staging is the document that authorizes the run —
+    # and it is cross-checked against THIS spec's (node_key, site) there.
+    ladder_authorization: Optional[LadderAuthorization] = None
+    if bool(args.ladder_spec is not None) != bool(args.amended_ladder):
+        logger.error(
+            "HALT: an amended ladder needs BOTH %s and %s (given: %s). The spec is the "
+            "CONTENT and the flag is the AUTHORIZATION; either alone leaves the FROZEN "
+            "ladder in force, and a column that meant to be re-calibrated would be "
+            "staged at the frozen doses instead. %s", LADDER_SPEC_FLAG,
+            AMENDED_LADDER_FLAG,
+            LADDER_SPEC_FLAG if args.ladder_spec is not None else AMENDED_LADDER_FLAG,
+            AMENDED_LADDER_NOTE)
+        return 2
+    if args.ladder_spec is not None:
+        try:
+            ladder_spec, ladder_authorization = load_ladder_spec(
+                args.ladder_spec, node_key=spec.node_key, site=spec.site)
+        except BehavioralHarnessError as exc:
+            logger.error("HALT (%s): %s", type(exc).__name__, exc)
+            return 2
+        logger.info(
+            "AMENDED LADDER at staging: spec %s (%s L%d) ladder %s replacing the frozen "
+            "%s — %s; pinned by %s. Lineage: %s. Scoring doses in force: %s. %s",
+            ladder_spec.experiment_id, ladder_spec.node_key, ladder_spec.site,
+            list(ladder_spec.ladder), list(DOSE_LADDER), ladder_spec.replaces,
+            ladder_spec.prestatement_of_record,
+            " | ".join(ladder_spec.ratification_lineage),
+            list(scoring_doses_in_force(ladder_authorization)),
+            AMENDED_LADDER_SCORING_DOSE_READING)
+
     try:
         cen = census(spec)
     except BehavioralHarnessError as exc:                     # a HALT during census
@@ -4103,7 +4678,8 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     try:
         result, _ = build_banks(spec, construct_bands=args.construct_bands,
-                                write=not args.dry_run)
+                                write=not args.dry_run,
+                                ladder_authorization=ladder_authorization)
     except BehavioralHarnessError as exc:
         logger.error("HALT: %s", exc)
         return 2
