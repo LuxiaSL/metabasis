@@ -154,6 +154,37 @@ Absent either, this module's behavior is unchanged in every byte.
     replaced by a NON-VERDICT — any verdict handed to the run rides beside, quoted,
     where nothing can read it as this cell's license.
 
+THE AMENDED LADDER (2026-08-09, re-freeze #2 — Luxia's close-out ruling "Push for
+re-cal this program", on the ratified `LADDER-SPEC-*.json`). Where the mapping mode
+measures a window BESIDE the science, this mechanism RE-CALIBRATES the science itself:
+once a node's window has been mapped and a ladder ratified for it, that node's science
+column runs the ratified ladder instead of the frozen one. The encumbrance ruling is
+what shapes it — POLICY LIVES IN DOCUMENTS, NOT IN ENGINE CONSTANTS — so this module
+carries no per-node ladder, only the machinery to validate a document and record it.
+
+  * The two keys again, by the mapping mode's pattern: `--ladder-spec PATH` (the
+    CONTENT — schema `behavioral-ladder-spec/1`, naming this run's node and site) and
+    `--amended-ladder` (the AUTHORIZATION — this operator, this invocation, meant it).
+    Either alone is refused by name. ABSENT BOTH, this module is byte-for-byte what it
+    was: `DOSE_LADDER` is untouched and remains every node's default.
+  * WHOLE-COLUMN REPLACEMENT. An amended ladder replaces the ladder for the entire
+    science column at that (node, site) — every arm, every lever, every band; the α=0
+    baseline is unchanged because α=0 is α=0 under any ladder. Science cells carry the
+    spec's `LadderAuthorization` and are validated against THE LADDER IN FORCE; a
+    column mixing spec-ladder and frozen-ladder science cells is REFUSED, because a
+    half-amended column is a column whose §4.2 arithmetic has two denominators.
+  * UNLIKE the mapping mode, amended doses MAY coincide with frozen ones. Replacement
+    is the contract, not disjointness: a re-calibrated ladder that keeps ±0.03 and
+    ±0.10 and moves only its extremes is the ordinary case, and a disjointness law here
+    would forbid exactly the amendment the mechanism exists to carry.
+  * The stamp records the spec's sha, the ladder in force AND the frozen ladder beside
+    it (`amended_ladder`), and `dose_ladder` states the ladder actually run — so an
+    amended-ladder column can never present as a frozen-ladder one, and the
+    comparability rider (never pooled without the ladder quoted) has something to read.
+  * §4.2 STAYS DESK-SIDE. This module runs and records; it never scores. The one place
+    the amendment reaches engine machinery is §2.7's signal role, which reads "the
+    extreme dose" — of the ladder in force, `AMENDED_LADDER_SIGNAL_ROLE_READING`.
+
     python -m metabasis.scripts.run_behavioral_cells --preflight ...   # M10: a
         first-class exit-early mode, never output truncation.
 """
@@ -190,6 +221,18 @@ BRIEF_SHA256 = "475bc2a8ce767f70890837129644917f17094734b70bb510524be4aa0ecdcea4
 #: per-node tuning. The α=0 baseline is a separate cell and is deliberately NOT a
 #: member of the ladder, so `len(DOSE_LADDER) == 6` is the ladder's own arity
 #: everywhere (the §4.2 "4/6 doses" criterion counts against exactly this tuple).
+#:
+#: DATED AMENDMENT (2026-08-09, re-freeze #2 — Luxia's close-out ruling, on the
+#: ratified `LADDER-SPEC-*.json`). The rule above is now stated at the layer it was
+#: always about: NO LADDER WITHOUT A RATIFIED DOCUMENT. "No per-node tuning" never
+#: meant that a model whose response window was measured to end at |0.15| must be
+#: dosed at |0.3| forever; it meant that no ladder may be chosen at the console, in a
+#: staging script, or by an engine constant edited between runs. A per-node ladder is
+#: admissible ONLY as `LadderSpec` — a desk document that names the node and site it
+#: amends, carries its ratification lineage, and becomes an authorization through its
+#: own sha256. This tuple is the DEFAULT and the fallback: it is untouched, it remains
+#: the ladder for every node with no ratified amendment, and a run given no document
+#: validates against it exactly as before. See `AMENDED_LADDER_NOTE`.
 DOSE_LADDER: tuple[float, ...] = (-0.3, -0.1, -0.03, 0.03, 0.1, 0.3)
 BASELINE_DOSE = 0.0
 #: THE MAPPING MODE (Luxia's ratification, 2026-08-08). The one kind of cell whose dose
@@ -237,6 +280,50 @@ MAPPING_ONLY_ROLE_READING = (
     "Deterministic selection, bitwise replay and the blocking HALT are unchanged, and "
     "a column that cannot fill a mapped role still raises ExpectedNShortfall — "
     "incomplete, not exempt. A science column never reaches this mapping.")
+#: THE AMENDED LADDER (re-freeze #2, 2026-08-09). The same two-key shape as the
+#: mapping mode, and named as constants for the same reason: either flag alone leaves
+#: the engine byte-for-byte what it was, and both are quoted in every refusal.
+LADDER_SPEC_FLAG = "--ladder-spec"
+AMENDED_LADDER_FLAG = "--amended-ladder"
+LADDER_SPEC_SCHEMA_VERSION = "behavioral-ladder-spec/1"
+#: What an amended ladder IS, written onto every amended cell's stamp so a reader
+#: holding one cell's stamp and nothing else knows which ladder produced the number in
+#: front of them. Deliberately free of any node, any dose and any window: the doses are
+#: the DOCUMENT's, and an engine constant that named them would be the encumbrance the
+#: re-freeze was commissioned to remove.
+AMENDED_LADDER_NOTE = (
+    "AMENDED LADDER — this cell ran a RE-CALIBRATED dose ladder, not the frozen one. "
+    "The ladder in force is named beside the frozen ladder on this stamp, and the "
+    "document that ratified it is named by id and by sha256. The amendment is "
+    "WHOLE-COLUMN (every arm, every lever, every band at this node and site; the α=0 "
+    "baseline is unchanged because α=0 is α=0 under any ladder) and it REPLACES rather "
+    "than extends — amended doses may coincide with frozen ones. COMPARABILITY: rows "
+    "from an amended-ladder column never pool with frozen-ladder rows in a cross-node "
+    "table without this ladder quoted beside them. Ratified per document (re-freeze "
+    "#2, Luxia 2026-08-09); never a silent re-calibration and never retroactive.")
+#: §2.7's signal role under an amended ladder — an ENACTOR READING, recorded the way
+#: B-1's and the mapping mode's were so the desk can rule differently without hunting
+#: for the assumption. The frozen role mapping reads the signal role at |0.3| because
+#: |0.3| is the frozen ladder's EXTREME, and a column re-calibrated to a narrower
+#: window has no cell there at all: read literally, an amended column would burn its
+#: whole budget and then HALT on `ExpectedNShortfall`, which is not a re-calibration
+#: mechanism. So "the extreme dose" is read on THE LADDER IN FORCE — which is the same
+#: generalization the ratified spec makes for §4.2(b) in its own `gate_reading_rule`,
+#: applied at the one place it touches engine machinery. `REPLAY_GATE_STRATA`, K == 3,
+#: the deterministic selection, the bitwise comparison and the blocking HALT are all
+#: untouched; a frozen-ladder column's extreme IS |0.3|, so its selection, strata and
+#: digest are byte-identical. The named alternative — leave the signal role pinned to
+#: the literal 0.3, so an amended column cannot run — was NOT taken, because a ladder
+#: the engine refuses to run is not a ratified ladder. DESK-OWED READING.
+AMENDED_LADDER_SIGNAL_ROLE_READING = (
+    "enactor reading (re-freeze #2, 2026-08-09), DESK-OWED: on a column running a "
+    "ratified AMENDED ladder, §2.7's signal role reads 'the extreme dose' on THE "
+    "LADDER IN FORCE rather than on the literal |0.3| — the same generalization the "
+    "ladder spec's own gate_reading_rule makes for §4.2(b). The stratum set, K == 3, "
+    "the deterministic selection, the bitwise replay and the blocking HALT are "
+    "unchanged, and a column that cannot fill the role still raises ExpectedNShortfall "
+    "— incomplete, not exempt. A frozen-ladder column's extreme is |0.3|, so nothing "
+    "about its gate moves.")
 #: §4.2(a)/§5.5 read the ordering across the full SIGNED ladder, sign flipping
 #: through zero; §4.2(b)'s "both |0.3| doses" are these two.
 SCORING_DOSES: tuple[float, ...] = (-0.3, 0.3)
@@ -539,6 +626,59 @@ class MappingColumnNotPure(MappingModeError):
 
 class MappingSpecError(MappingModeError):
     """The mapping spec document is unreadable, unrecognized or not for this column."""
+
+
+class AmendedLadderError(BehavioralHarnessError):
+    """The amended ladder's refusal family (re-freeze #2, 2026-08-09).
+
+    Every member is a REFUSAL. The mechanism's whole authorization is that a ladder can
+    only be changed by a ratified document naming the column it changes; a member that
+    warned and continued would be the console-side per-node tuning §2.5 forbids,
+    wearing a document as cover.
+    """
+
+
+class LadderAuthorizationOnMappingCell(AmendedLadderError):
+    """A `kind="mapping"` cell carried a ladder authorization.
+
+    The two mechanisms are separate by construction: a mapping cell measures where a
+    window ends and licenses nothing, an amended-ladder cell IS the science. A cell
+    claiming both would be a mapping cell that had quietly become scorable.
+    """
+
+
+class LadderAuthorizationOnBaseline(AmendedLadderError):
+    """The α=0 baseline carried a ladder authorization.
+
+    Refused because the baseline is genuinely UNCHANGED by an amendment — α=0 is α=0
+    under any ladder, and §5.1's shared-baseline design has one baseline serve the
+    column either way. A baseline that declared a ladder would invite the reading that
+    there are two different α=0 cells, which there are not.
+    """
+
+
+class LadderDoseNotOnLadderInForce(AmendedLadderError):
+    """A science cell's dose is not on the ladder in force (amended or frozen)."""
+
+
+class LadderCellsUnauthorized(AmendedLadderError):
+    """Amended-ladder cells are staged but the run carries no spec + flag authorization."""
+
+
+class AmendedLadderNotEngaged(AmendedLadderError):
+    """An amended ladder was authorized on a column that holds no amended cell."""
+
+
+class LadderAuthorizationMismatch(AmendedLadderError):
+    """A staged amended cell names an authorization other than this run's."""
+
+
+class LadderColumnNotPure(AmendedLadderError):
+    """Spec-ladder and frozen-ladder science cells in one column — refused by name."""
+
+
+class LadderSpecError(AmendedLadderError):
+    """The ladder spec document is unreadable, unrecognized or not for this column."""
 
 
 class ExpectedNShortfall(BehavioralHarnessError):
@@ -1122,6 +1262,146 @@ class MappingSpec(BaseModel):
                 "own specific sensitivity range').")
 
 
+class LadderAuthorization(BaseModel):
+    """What an AMENDED-LADDER science cell carries: which spec, and which ladder.
+
+    `MappingAuthorization`'s twin, and deliberately the same small frozen shape: the
+    run loads the spec document, derives the authorization from it, and every staged
+    science cell's carried copy must equal it. Neither key alone opens the door — a
+    cells-json that invented a ladder would have to invent a sha the operator's file
+    agrees with, and a spec file swapped for another cannot pass because the cells
+    declare the one they were staged under.
+
+    THE INVERTED LAW. `MappingAuthorization` refuses doses that touch `DOSE_LADDER`;
+    this one does NOT, and the omission is the contract rather than an oversight. An
+    amended ladder REPLACES the frozen ladder for its column, so overlap is the
+    ordinary case (the ratified mixtral ladder keeps ±0.03 and ±0.10 and moves only its
+    extremes). What makes an amended cell distinguishable is not a disjoint dose — it
+    is this authorization, carried on the cell and stamped on its record.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    experiment_id: str = Field(min_length=1)
+    spec_sha256: str = Field(min_length=64, max_length=64)
+    #: the spec's ladder, verbatim and in the spec's order — the LADDER IN FORCE.
+    ladder: tuple[float, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _is_a_ladder(self) -> "LadderAuthorization":
+        """The STRUCTURAL properties §4.2's arithmetic reads off any ladder.
+
+        Not policy — policy is which doses, and that is the document's. These are the
+        shape the frozen ladder has and that every criterion assumes it has, asserted
+        so an amended ladder cannot silently break a reading rule the spec claims to
+        preserve. Each refusal names the criterion that needs it. ENACTOR READING, on
+        the record for the desk: the alternative (accept any tuple and let §4.2 fail
+        at scoring time) was not taken, because a column costs a budget to run and a
+        ladder that cannot be scored should be refused before it fires.
+        """
+        if any(not np.isfinite(d) for d in self.ladder):
+            raise LadderDoseNotOnLadderInForce(
+                f"ladder spec {self.experiment_id!r}: every dose must be finite, got "
+                f"{list(self.ladder)}.")
+        if any(d == 0.0 for d in self.ladder):
+            raise LadderDoseNotOnLadderInForce(
+                f"ladder spec {self.experiment_id!r}: the α=0 read is the BASELINE "
+                f"cell (§5.1) and is never a rung — got {list(self.ladder)}. The "
+                "baseline is unchanged by an amendment and is staged as it always was.")
+        if list(self.ladder) != sorted(set(self.ladder)):
+            raise LadderDoseNotOnLadderInForce(
+                f"ladder spec {self.experiment_id!r}: the ladder must be strictly "
+                f"ASCENDING and free of duplicates, got {list(self.ladder)}. §4.2(a) "
+                "reads the ordering across the full SIGNED ladder, sign flipping "
+                "through zero; a ladder whose order is not its own order makes that "
+                "reading depend on how the document happened to list it.")
+        if len(self.ladder) != len(DOSE_LADDER):
+            raise LadderDoseNotOnLadderInForce(
+                f"ladder spec {self.experiment_id!r}: an amended ladder has "
+                f"{len(DOSE_LADDER)} rungs like the frozen one, got "
+                f"{len(self.ladder)} ({list(self.ladder)}). The arity is not "
+                "decoration: §4.2(b) counts '4 of 6 doses outside the band' against "
+                "the ladder's own arity, and a ladder of another length would change "
+                "a frozen criterion's denominator while claiming to preserve it.")
+        if not (any(d < 0 for d in self.ladder) and any(d > 0 for d in self.ladder)):
+            raise LadderDoseNotOnLadderInForce(
+                f"ladder spec {self.experiment_id!r}: a ladder carries doses of BOTH "
+                f"signs, got {list(self.ladder)}. §4.2(a)/§5.5 read the ordering "
+                "'sign flipping through zero' and §4.2(b) reads BOTH extremes; a "
+                "one-sided ladder has no such pair to read.")
+        return self
+
+    @property
+    def extreme_magnitude(self) -> float:
+        """|the ladder's edge| — what §2.7's signal role reads instead of |0.3|."""
+        return max(abs(d) for d in self.ladder)
+
+
+class LadderSpec(BaseModel):
+    """The amended ladder's SPEC DOCUMENT — the desk's ratified re-calibration.
+
+    Written by the desk, named on the CLI beside `--amended-ladder`, and validated to
+    name THIS column's node and site before a single science cell is admitted at a dose
+    the frozen ladder does not carry. It carries its ratification lineage because a
+    dated re-calibration whose document does not say who dated it is not a dated
+    re-calibration.
+
+    NO `arm` FIELD, and the absence is deliberate — the one shape difference from
+    `MappingSpec`. A response window is a property of the MODEL, not of an arm: the
+    native lever and the transported object are dosed on the same residual stream at
+    the same site, so a ladder amended for one arm and not the other would make the
+    two arms of one column mutually unreadable. The amendment is whole-column, which
+    means both arms, and the document names (node_key, site) exactly.
+
+    The ladder is the spec's, not this module's: `DOSE_LADDER` stays where it is, and a
+    second model's re-calibration is carried by writing a second document rather than
+    by editing an engine constant.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    schema_version: Literal["behavioral-ladder-spec/1"] = LADDER_SPEC_SCHEMA_VERSION
+    experiment_id: str = Field(min_length=1)
+    node_key: str = Field(min_length=1)
+    site: int = Field(ge=0)
+    #: the amendment's own statement of its scope, in the desk's words.
+    applies_to: str = Field(min_length=1)
+    ladder: tuple[float, ...] = Field(min_length=1)
+    #: what this ladder replaces, and under which ratified window.
+    replaces: str = Field(min_length=1)
+    #: the chain of rulings that got here — the analogue of `MappingSpec.ratified_by`,
+    #: a list because a re-calibration is reached by more than one ruling and the desk
+    #: files each with its date.
+    ratification_lineage: tuple[str, ...] = Field(min_length=1)
+    #: DESK POLICY, carried for the record and never executed here: how §4.2 reads its
+    #: extreme-dose references on this ladder. The engine does not score (§4.2 is
+    #: desk-side), so this field is validated as present and prose and nothing more.
+    gate_reading_rule: str = Field(min_length=1)
+    #: the pooling rule an amended-ladder row travels under.
+    comparability_rider: str = Field(min_length=1)
+    prestatement_of_record: str = Field(min_length=1)
+    asymmetry_note: str = ""
+    note: str = ""
+
+    def authorization(self, *, spec_sha256: str) -> LadderAuthorization:
+        """The cell-carried half, derived from the document and its file digest."""
+        return LadderAuthorization(experiment_id=self.experiment_id,
+                                   spec_sha256=spec_sha256, ladder=self.ladder)
+
+    def assert_names_column(self, *, node_key: str, site: int) -> None:
+        """Refuse a spec that amends a DIFFERENT column (§4.2's identity habit).
+
+        Node and site only — see the class docstring on why there is no arm to check.
+        """
+        if (self.node_key, int(self.site)) != (node_key, int(site)):
+            raise LadderSpecError(
+                f"ladder spec {self.experiment_id!r} amends "
+                f"{self.node_key} L{self.site}; this column is {node_key} L{site}. A "
+                "spec for another column cannot amend this one — the ladder is a "
+                "property of THIS model's response window (Luxia's ruling of record: "
+                "'every model has their own specific sensitivity range').")
+
+
 class CellSpec(BaseModel):
     """One behavioral cell: 80 generations sharing ONE injection spec (§2.2)."""
 
@@ -1151,6 +1431,28 @@ class CellSpec(BaseModel):
     #: anything holding a spec. `None` — the default — is the science cell, whose
     #: validation below is byte-for-byte what it was before this field existed.
     mapping_authorization: Optional[MappingAuthorization] = None
+    #: THE AMENDED LADDER's cell-carried key (re-freeze #2, 2026-08-09). Present on a
+    #: SCIENCE cell whose column runs a ratified amended ladder, and refused on the
+    #: baseline and on every mapping cell. `None` — the default — is the frozen-ladder
+    #: science cell, whose validation below is byte-for-byte what it was before this
+    #: field existed.
+    ladder_authorization: Optional[LadderAuthorization] = None
+
+    @property
+    def ladder_in_force(self) -> tuple[float, ...]:
+        """The ladder THIS cell is validated against: the amended one, or the frozen one.
+
+        A property rather than a conditional at each site, so every consumer asks the
+        question the same way and a grep finds all of them. A cell with no
+        authorization answers `DOSE_LADDER`, which is every cell that ever ran.
+        """
+        return (DOSE_LADDER if self.ladder_authorization is None
+                else self.ladder_authorization.ladder)
+
+    @property
+    def is_amended_ladder(self) -> bool:
+        """True iff this cell runs a ratified AMENDED ladder rather than the frozen one."""
+        return self.ladder_authorization is not None
 
     @property
     def is_mapping(self) -> bool:
@@ -1195,6 +1497,24 @@ class CellSpec(BaseModel):
                 "('calibration_band' beside an Rband, 'transported_band' beside a "
                 f"gRband), not as {self.kind!r} — a beside that wore a signal kind "
                 "would be pooled as signal by every consumer that splits on kind")
+        # THE AMENDED LADDER (2026-08-09): the two cells that may never carry one, both
+        # refused before any dose is looked at. A mapping cell is the other mechanism
+        # and stays untouched by this one; the baseline is unchanged by an amendment.
+        if self.ladder_authorization is not None:
+            if self.is_mapping:
+                raise LadderAuthorizationOnMappingCell(
+                    f"{self.cell_id}: a {MAPPING_CELL_KIND!r} cell carries a "
+                    "`ladder_authorization`. The mapping mode and the amended ladder "
+                    "are separate mechanisms — a mapping cell licenses nothing and "
+                    "takes its doses from a mapping spec; a cell claiming both keys "
+                    "would be a window measurement that had become scorable.")
+            if self.is_baseline:
+                raise LadderAuthorizationOnBaseline(
+                    f"{self.cell_id}: the α=0 baseline carries a "
+                    "`ladder_authorization`. α=0 is α=0 under any ladder: the baseline "
+                    "is UNCHANGED by an amendment and is shared by the column exactly "
+                    "as §5.1 shares it. A baseline that declared a ladder would imply "
+                    "two different α=0 cells, and there is only ever one.")
         if self.is_baseline:
             if self.alpha_frac != BASELINE_DOSE or self.vector_key is not None:
                 raise ValueError(
@@ -1228,11 +1548,25 @@ class CellSpec(BaseModel):
                     "science cell wearing a mapping key is the laundering direction "
                     "this contract exists to close, and it is refused at "
                     "construction rather than at a gate.")
-            if self.alpha_frac not in DOSE_LADDER:
-                raise ValueError(
-                    f"{self.cell_id}: dose {self.alpha_frac} is not on the FROZEN "
-                    f"ladder {DOSE_LADDER} (§2.5/§11: no extension, no interpolation, "
-                    "no per-node tuning)")
+            # §2.5's membership test, now read against THE LADDER IN FORCE (re-freeze
+            # #2). With no authorization — every cell that ever ran — the ladder in
+            # force IS `DOSE_LADDER` and this raise is byte-for-byte the frozen one,
+            # message included. With one, the ratified document is the ladder and the
+            # refusal names the document rather than the constant.
+            if self.alpha_frac not in self.ladder_in_force:
+                if self.ladder_authorization is None:
+                    raise ValueError(
+                        f"{self.cell_id}: dose {self.alpha_frac} is not on the FROZEN "
+                        f"ladder {DOSE_LADDER} (§2.5/§11: no extension, no interpolation, "
+                        "no per-node tuning)")
+                raise LadderDoseNotOnLadderInForce(
+                    f"{self.cell_id}: dose {self.alpha_frac} is not on the AMENDED "
+                    f"ladder {list(self.ladder_in_force)} ratified by ladder spec "
+                    f"{self.ladder_authorization.experiment_id!r} (which replaces the "
+                    f"frozen {list(DOSE_LADDER)} for this column). The document is the "
+                    "only source of an amended dose — the engine hardcodes none and "
+                    "interpolates none (§2.5 as amended 2026-08-09: no ladder without "
+                    "a ratified document).")
         expected = CELL_ID_TEMPLATE.format(
             vector_key=self.vector_key, site=self.site, frac=self.alpha_frac)
         if self.cell_id != expected:
@@ -2172,6 +2506,19 @@ def resolve_alpha(alpha_frac: float, per_token_median_resid_norm: float, *,
                 f"not this cell's authorized dose {cell.alpha_frac} "
                 f"(spec {auth.experiment_id!r} authorizes {list(auth.doses)}).")
         return float(alpha_frac) * float(per_token_median_resid_norm)
+    # THE AMENDED LADDER (2026-08-09). The second and last way a dose off the frozen
+    # ladder resolves here, and honoured only for a cell that CARRIES the ratified
+    # authorization. Same shape as the mapping branch above and same guarantee below
+    # it: a caller that passes no cell, or a cell with no authorization, meets the
+    # frozen check unchanged.
+    if cell is not None and cell.ladder_authorization is not None:
+        lauth = cell.ladder_authorization
+        if alpha_frac != cell.alpha_frac or alpha_frac not in lauth.ladder:
+            raise LadderDoseNotOnLadderInForce(
+                f"{cell.cell_id}: α-resolution asked for dose {alpha_frac}, which is "
+                f"not this cell's dose {cell.alpha_frac} on the amended ladder "
+                f"{list(lauth.ladder)} (spec {lauth.experiment_id!r}).")
+        return float(alpha_frac) * float(per_token_median_resid_norm)
     if alpha_frac != BASELINE_DOSE and alpha_frac not in DOSE_LADDER:
         raise ValueError(
             f"dose {alpha_frac} is not on the FROZEN ladder {DOSE_LADDER} (§2.5)")
@@ -2237,6 +2584,186 @@ def apply_mapping_ladder(vector_key: str, site: int, *,
             mapping_authorization=authorization)
         out.append((cell, resolve_alpha(frac, per_token_median_resid_norm, cell=cell)))
     return out
+
+
+def apply_amended_ladder(vector_key: str, site: int, *,
+                         per_token_median_resid_norm: float,
+                         authorization: LadderAuthorization,
+                         kind: CellKind,
+                         band_family: Optional[str] = None,
+                         vector_npz: Optional[str] = None,
+                         vector_provenance: str = "",
+                         sampling: SamplingConfig = SAMPLING_OF_RECORD,
+                         n: int = N_PER_CELL) -> list[tuple[CellSpec, float]]:
+    """The RATIFIED ladder applied to one vector: one science cell per amended rung.
+
+    `apply_dose_ladder`'s amended twin, and a separate function for the same reason
+    `apply_mapping_ladder` is: the frozen ladder's applier must keep having exactly ONE
+    dose source, so that reading it answers "which doses does a default column take?"
+    with no branch to follow. Everything else — the kind, the cell-id formatting, the
+    lesion-recipe law, the α arithmetic — is the same code path, because an
+    amended-ladder cell is a differently-DOSED science cell and not a differently-built
+    one. Note `kind` is a parameter here and is NOT in `apply_mapping_ladder`: an
+    amendment applies to the whole science column, so every kind the frozen applier
+    serves (lever, band, transported) is served by this one too.
+    """
+    assert_no_lesion_recipe(vector_provenance, vector_key)
+    out = []
+    for frac in authorization.ladder:
+        cell = CellSpec(
+            cell_id=CELL_ID_TEMPLATE.format(vector_key=vector_key, site=site,
+                                            frac=frac),
+            kind=kind, vector_key=vector_key, site=site, alpha_frac=frac, n=n,
+            band_family=band_family, vector_npz=vector_npz,
+            vector_provenance=vector_provenance, sampling=sampling,
+            ladder_authorization=authorization)
+        out.append((cell, resolve_alpha(frac, per_token_median_resid_norm, cell=cell)))
+    return out
+
+
+def ladder_in_force(cells: Sequence[CellSpec]) -> tuple[float, ...]:
+    """The ladder a cell SET runs: the amended one if any cell carries it, else frozen.
+
+    Reads the first authorization it finds rather than reconciling them, because
+    `assert_amended_ladder_column` has already refused a column whose cells disagree —
+    and this function is called from places (the stamp, the preflight, §2.7's
+    magnitude) that must give an answer for a set that has passed that gate.
+    """
+    for c in cells:
+        if c.ladder_authorization is not None:
+            return c.ladder_authorization.ladder
+    return DOSE_LADDER
+
+
+def scoring_dose_magnitude(cells: Sequence[CellSpec]) -> float:
+    """|the extreme dose| of the ladder this cell set runs (`SCORING_DOSE_MAGNITUDE`).
+
+    The §2.7 signal role's threshold, computed from the cell SET rather than read from
+    a constant — exactly as `mapping_signal_magnitude` is. For every frozen-ladder
+    column this returns 0.3, which is `SCORING_DOSE_MAGNITUDE` itself, so no existing
+    column's gate moves. See `AMENDED_LADDER_SIGNAL_ROLE_READING`.
+    """
+    return max(abs(d) for d in ladder_in_force(cells))
+
+
+def column_is_amended_ladder(cells: Sequence[CellSpec]) -> bool:
+    """True iff this cell set runs an AMENDED ladder (any amended cell at all).
+
+    "Any" rather than "all" for the reason `column_is_mapping` gives: purity is
+    asserted by `assert_amended_ladder_column`, and a predicate that answered False for
+    a half-amended column would route the mixture down the frozen path.
+    """
+    return any(c.ladder_authorization is not None for c in cells)
+
+
+def assert_amended_ladder_column(cells: Sequence[CellSpec], *,
+                                 authorization: Optional[LadderAuthorization],
+                                 node_key: str = "") -> bool:
+    """The amended ladder's admission gate, in one place. Returns: is this amended?
+
+    `assert_mapping_column`'s twin, with the same four refusals and one different
+    population: the cells this gate rules over are the SCIENCE cells — mapping cells
+    are their own mechanism and the α=0 baseline is unchanged by an amendment, so
+    neither is counted on either side of the purity test.
+
+      1. amended cells with no run authorization — the cells-json alone is not a key;
+      2. an authorization with no amended cells — the flags alone are not a key either;
+      3. a cell whose carried authorization is not this run's — the two keys must be
+         the SAME key, which is what makes a swapped spec file unusable;
+      4. a column holding both amended and frozen science cells — refused because a
+         half-amended column is a column whose §4.2 arithmetic has two denominators,
+         and "the ladder in force" would name two ladders at once.
+
+    A column with neither amended cells nor an authorization returns False having
+    asserted nothing, which is every column that ran before this ruling.
+    """
+    science = [c for c in cells if not c.is_mapping and not c.is_baseline]
+    amended = [c for c in science if c.ladder_authorization is not None]
+    frozen = [c for c in science if c.ladder_authorization is None]
+    who = node_key or "column"
+    if amended and authorization is None:
+        raise LadderCellsUnauthorized(
+            f"{who}: {len(amended)} AMENDED-LADDER cell(s) staged (e.g. "
+            f"{amended[0].cell_id}) but this run carries no ladder authorization. An "
+            f"amended ladder is admitted ONLY with BOTH {LADDER_SPEC_FLAG} and "
+            f"{AMENDED_LADDER_FLAG}; a cells document alone cannot re-calibrate a "
+            "node (§2.5 as amended: no ladder without a ratified document).")
+    if authorization is not None and not amended:
+        raise AmendedLadderNotEngaged(
+            f"{who}: an amended ladder is authorized (spec "
+            f"{authorization.experiment_id!r}, ladder {list(authorization.ladder)}) "
+            "but the column holds no amended-ladder science cell. The flag is an "
+            "assertion about what this run fires, not a mode to leave on — a run whose "
+            "operator and whose document disagree about which ladder is firing stops "
+            "here, before the budget.")
+    if not amended:
+        return False
+    # COMPARED BY VALUE, never by object identity — the dual-import-path rake. The
+    # engine runs as `__main__` while every importer sees
+    # `metabasis.scripts.run_behavioral_cells`, so a cell that travelled through the
+    # staging module carries an authorization compiled from the OTHER copy of this
+    # source, and pydantic's `==` compares classes first. The same rake
+    # `StagedCell._accept_a_cellspec_from_either_import_path` was written for.
+    want = authorization.model_dump()                    # type: ignore[union-attr]
+    wrong = sorted(c.cell_id for c in amended
+                   if c.ladder_authorization is None
+                   or c.ladder_authorization.model_dump() != want)
+    if wrong:
+        raise LadderAuthorizationMismatch(
+            f"{who}: science cell(s) {wrong} carry a ladder authorization that is not "
+            f"this run's (spec {authorization.experiment_id!r}, sha "  # type: ignore[union-attr]
+            f"{authorization.spec_sha256[:12]}…). The staged cells and the operator's "  # type: ignore[union-attr]
+            "spec file must be the SAME document, by id, by sha and by ladder.")
+    if frozen:
+        raise LadderColumnNotPure(
+            f"{who}: {len(amended)} amended-ladder cell(s) and {len(frozen)} "
+            f"frozen-ladder science cell(s) in one column (e.g. "
+            f"{sorted(c.cell_id for c in frozen)[0]}). An amendment is WHOLE-COLUMN: "
+            "it replaces the ladder for every arm, every lever and every band at this "
+            "node and site. A mixed column would have two ladders in force at once, so "
+            "'the ladder in force' would name neither and §4.2 would count against two "
+            "denominators. Re-stage the column under one ladder.")
+    logger.info("AMENDED LADDER engaged: %d science cell(s) on ladder %s under spec %s "
+                "(frozen ladder %s is REPLACED for this column). %s",
+                len(amended), list(authorization.ladder),  # type: ignore[union-attr]
+                authorization.experiment_id,  # type: ignore[union-attr]
+                list(DOSE_LADDER), AMENDED_LADDER_NOTE)
+    return True
+
+
+def load_ladder_spec(path: Path, *, node_key: str, site: int
+                     ) -> tuple[LadderSpec, LadderAuthorization]:
+    """Read the ladder document, refuse it by name, and derive this run's authorization.
+
+    Modelled directly on `load_mapping_spec`: the schema version is checked BEFORE the
+    body (a silently-changed contract is a column built against terms nobody agreed
+    to), the document must NAME this column, and the file's own sha256 becomes half the
+    authorization — so the bytes the operator handed in are the bytes the staged cells
+    declared. No arm is checked, because an amendment is whole-column; see `LadderSpec`.
+    """
+    if not path.exists():
+        raise LadderSpecError(f"no ladder spec at {path} ({LADDER_SPEC_FLAG})")
+    try:
+        body = json.loads(path.read_text())
+    except (json.JSONDecodeError, OSError) as exc:
+        raise LadderSpecError(
+            f"{path}: unreadable ladder spec ({type(exc).__name__}: {exc})") from exc
+    if not isinstance(body, dict):
+        raise LadderSpecError(f"{path}: a ladder spec is a JSON object")
+    version = body.get("schema_version")
+    if version != LADDER_SPEC_SCHEMA_VERSION:
+        raise LadderSpecError(
+            f"{path}: ladder spec schema {version!r}, this engine speaks "
+            f"{LADDER_SPEC_SCHEMA_VERSION!r} — refusing a contract nobody agreed to.")
+    try:
+        spec = LadderSpec(**body)
+    except AmendedLadderError:
+        raise
+    except (TypeError, ValueError) as exc:
+        raise LadderSpecError(f"{path}: {exc}") from exc
+    spec.assert_names_column(node_key=node_key, site=site)
+    return spec, spec.authorization(
+        spec_sha256=hashlib.sha256(path.read_bytes()).hexdigest())
 
 
 def column_is_mapping(cells: Sequence[CellSpec]) -> bool:
@@ -2594,7 +3121,8 @@ def characterize_probe_batch_invariance(
 # ---------------------------------------------------------------- replay gate (§2.7)
 def _stratum_of(cell: CellSpec, *, calibration_only: bool = False,
                 mapping_only: bool = False,
-                mapping_signal_magnitude: Optional[float] = None) -> Optional[str]:
+                mapping_signal_magnitude: Optional[float] = None,
+                scoring_magnitude: float = SCORING_DOSE_MAGNITUDE) -> Optional[str]:
     # B4: a BESIDE cell holds NO stratum. Written as the first test rather than left
     # to fall through the family comparisons below, so that adding a stratum later
     # cannot accidentally admit one. It is the first test under ALL role mappings.
@@ -2611,17 +3139,24 @@ def _stratum_of(cell: CellSpec, *, calibration_only: bool = False,
     if cell.is_mapping:
         return None
     if calibration_only:
-        return _stratum_of_calibration_only(cell)
+        return _stratum_of_calibration_only(cell, scoring_magnitude=scoring_magnitude)
     if cell.kind in ("calibration", "calibration_band"):
         return "calibration" if cell.kind == "calibration" else None
     if cell.band_family == "gRband":
         return "random_band"
-    if cell.kind in ("transported", "bridge") and abs(cell.alpha_frac) == 0.3:
+    # THE AMENDED LADDER (2026-08-09): "the extreme dose", read on the ladder in force.
+    # `scoring_magnitude` defaults to `SCORING_DOSE_MAGNITUDE` and IS 0.3 for every
+    # frozen-ladder column, so this line is the line it was. See
+    # `AMENDED_LADDER_SIGNAL_ROLE_READING`.
+    if (cell.kind in ("transported", "bridge")
+            and abs(cell.alpha_frac) == scoring_magnitude):
         return "signal_at_0.3"
     return None
 
 
-def _stratum_of_calibration_only(cell: CellSpec) -> Optional[str]:
+def _stratum_of_calibration_only(cell: CellSpec, *,
+                                 scoring_magnitude: float = SCORING_DOSE_MAGNITUDE
+                                 ) -> Optional[str]:
     """B-1's RULED role mapping (`CALIBRATION_ONLY_ROLE_READING`), for one cell.
 
     Reached ONLY through `_stratum_of(..., calibration_only=True)`, which
@@ -2632,9 +3167,12 @@ def _stratum_of_calibration_only(cell: CellSpec) -> Optional[str]:
     if cell.band_family == "Rband":              # band role: the node's OWN band
         return "random_band"
     if cell.kind == "calibration":               # the native lever, split by dose
-        if abs(cell.alpha_frac) == SCORING_DOSE_MAGNITUDE:
+        # `scoring_magnitude` is the ladder in force's EXTREME (2026-08-09) and is
+        # `SCORING_DOSE_MAGNITUDE` for every frozen-ladder column, so B-1's mapping is
+        # unmoved for every column it was ruled over.
+        if abs(cell.alpha_frac) == scoring_magnitude:
             return "signal_at_0.3"               # signal role: native EGV at |0.3|
-        if 0.0 < abs(cell.alpha_frac) < SCORING_DOSE_MAGNITUDE:
+        if 0.0 < abs(cell.alpha_frac) < scoring_magnitude:
             return "calibration"                 # calibration role: a small-dose cell
     return None
 
@@ -2679,10 +3217,14 @@ def _bucket_by_stratum(cells: Sequence[CellSpec], *, calibration_only: bool,
                        mapping_only: bool = False) -> dict[str, list[str]]:
     """The per-stratum cell_id buckets under one role mapping (never sorted here)."""
     signal = mapping_signal_magnitude(cells) if mapping_only else None
+    # The extreme of THE LADDER IN FORCE — 0.3 for every frozen-ladder column, so every
+    # bucket a science column ever produced is the bucket it produced (2026-08-09).
+    extreme = scoring_dose_magnitude(cells)
     buckets: dict[str, list[str]] = {s: [] for s in REPLAY_GATE_STRATA}
     for c in cells:
         s = _stratum_of(c, calibration_only=calibration_only,
-                        mapping_only=mapping_only, mapping_signal_magnitude=signal)
+                        mapping_only=mapping_only, mapping_signal_magnitude=signal,
+                        scoring_magnitude=extreme)
         if s is not None:
             buckets[s].append(c.cell_id)
     return buckets
@@ -3282,6 +3824,7 @@ def assert_stamp_complete(stamp: dict, *, cell_kind: Optional[CellKind] = None,
             "carries a card index and a ROGUE carries the sentinel — this is the "
             "field that caught the rogue run, so it can never be absent.")
     assert_mapping_stamp_contract(stamp, cell_kind=cell_kind)
+    assert_amended_ladder_stamp_contract(stamp, cell_kind=cell_kind)
     assert_vector_class_contract(stamp, vector_class=declared)
 
 
@@ -3315,6 +3858,53 @@ def assert_mapping_stamp_contract(stamp: dict, *, cell_kind: Optional[CellKind]
             f"a {kind!r} cell's stamp carries a `mapping_mode` block. The badge "
             "belongs to mapping cells and to nothing else — a science cell wearing "
             "it could be excused from a gate by any consumer that reads it.")
+
+
+def assert_amended_ladder_stamp_contract(stamp: dict, *, cell_kind: Optional[CellKind]
+                                         ) -> None:
+    """The amended ladder's stamp contract (2026-08-09), in both directions.
+
+    A stamp carrying an `amended_ladder` block must carry a WELL-FORMED one — amended
+    is True, the spec sha is a sha, the ladder in force is a non-empty list, and
+    `dose_ladder` (the field every downstream reader actually reads) AGREES with it.
+    That last equality is the load-bearing one: a stamp whose badge says ±0.15 while
+    its `dose_ladder` says the frozen six would be a stamp that presents as
+    frozen-ladder to every consumer that does not know the badge exists, which is the
+    exact failure the block was added to prevent.
+
+    And the mirror: a MAPPING cell's stamp may never carry the block. The two
+    mechanisms are separate, and a mapping cell wearing a science re-calibration's
+    badge would be a window measurement claiming a ladder.
+
+    A stamp with no block is a frozen-ladder cell and is checked as it always was —
+    nothing is asserted, which is every stamp banked before this ruling.
+    """
+    block = stamp.get("amended_ladder")
+    kind = cell_kind or stamp.get("cell_kind")
+    if block is None:
+        return
+    if kind == MAPPING_CELL_KIND:
+        raise StampIncompleteError(
+            f"a {MAPPING_CELL_KIND!r} cell's stamp carries an `amended_ladder` block. "
+            "The mapping mode and the amended ladder are separate mechanisms: a "
+            "mapping cell licenses nothing and takes its doses from a mapping spec, so "
+            "it can carry no re-calibration of the science ladder.")
+    ladder = block.get("ladder_in_force") if isinstance(block, dict) else None
+    if (not isinstance(block, dict) or block.get("amended") is not True
+            or not isinstance(block.get("ladder_spec_sha256"), str)
+            or len(block.get("ladder_spec_sha256", "")) != 64
+            or not isinstance(ladder, list) or not ladder):
+        raise StampIncompleteError(
+            "an `amended_ladder` stamp block is malformed: it must carry "
+            "`amended = True`, a 64-character `ladder_spec_sha256` and a non-empty "
+            f"`ladder_in_force`. Got {block!r}. The badge is the only thing that "
+            f"travels with a cell file once it leaves its column. {AMENDED_LADDER_NOTE}")
+    if list(stamp.get("dose_ladder") or []) != list(ladder):
+        raise StampIncompleteError(
+            f"stamp `dose_ladder` {stamp.get('dose_ladder')!r} disagrees with the "
+            f"`amended_ladder.ladder_in_force` {ladder!r}. A stamp states ONE ladder: "
+            "the one the cell ran. A disagreement here is a cell that would present as "
+            "frozen-ladder to every consumer reading the ordinary field.")
 
 
 def assert_vector_class_contract(stamp: dict, *, vector_class: str) -> None:
@@ -3448,7 +4038,12 @@ def build_stamp(*, cell: CellSpec, alpha: float, layout: CanonicalLayout,
         "site_cross_check": site_cross_check,
         "arm": arm,
         "node_key": node_key,
-        "dose_ladder": list(DOSE_LADDER),
+        # THE LADDER THIS CELL RAN (2026-08-09). `cell.ladder_in_force` is `DOSE_LADDER`
+        # for every cell with no ratified amendment — which is every cell banked before
+        # re-freeze #2 — so this field is byte-for-byte what it was. For an amended cell
+        # it states the ladder actually run, and the `amended_ladder` block below names
+        # the frozen one beside it: a stamp never says "frozen" about an amended column.
+        "dose_ladder": list(cell.ladder_in_force),
         "alpha_frac": cell.alpha_frac,
         "alpha_value": alpha,
         "norm_conventions": norms.model_dump(),
@@ -3517,6 +4112,29 @@ def build_stamp(*, cell: CellSpec, alpha: float, layout: CanonicalLayout,
             "doses_disjoint_from_frozen_ladder": True,
             "role_mapping_reading": MAPPING_ONLY_ROLE_READING,
             "note": MAPPING_LICENSES_NOTHING,
+        }
+    # THE AMENDED LADDER: the cell says which ladder produced it, with the document
+    # that ratified the replacement named by id and by sha, and the FROZEN ladder
+    # quoted beside so the substitution is legible from this stamp alone. This is the
+    # block that makes the comparability rider enforceable downstream — a reader
+    # pooling rows can tell, per row, which ladder it is holding.
+    if cell.ladder_authorization is not None:
+        stamp["amended_ladder"] = {
+            "amended": True,
+            "experiment_id": cell.ladder_authorization.experiment_id,
+            "ladder_spec_sha256": cell.ladder_authorization.spec_sha256,
+            "ladder_in_force": list(cell.ladder_authorization.ladder),
+            "frozen_dose_ladder": list(DOSE_LADDER),
+            "replaces_frozen_ladder": True,
+            "extreme_magnitude": cell.ladder_authorization.extreme_magnitude,
+            "signal_role_reading": AMENDED_LADDER_SIGNAL_ROLE_READING,
+            # §4.2 is DESK-SIDE: the reading rule lives in the document named above and
+            # is not executed, paraphrased or scored here. The sha is the pointer to it.
+            "gate_reading_rule": (
+                "read §4.2's extreme-dose references on the ladder in force; the "
+                "ratified wording is in the ladder spec named by the sha above "
+                "(desk policy — the engine runs and records, it does not score)"),
+            "note": AMENDED_LADDER_NOTE,
         }
     # HALT D: the two bases, both named, only on a class cell.
     if vector_class != EGV_VECTOR_CLASS:
@@ -4223,6 +4841,7 @@ def run_column(runtime: NodeRuntime, *, doc: Any, pool: PromptPool,
                cells_document_file_sha256: Optional[str] = None,
                actuation_calibration_sha256: Optional[str] = None,
                mapping_authorization: Optional[MappingAuthorization] = None,
+               ladder_authorization: Optional[LadderAuthorization] = None,
                take_attempt_lock: bool = True) -> ColumnResult:
     """§2.1's one-load-per-node job, in order, with every §9 HALT live.
 
@@ -4252,6 +4871,13 @@ def run_column(runtime: NodeRuntime, *, doc: Any, pool: PromptPool,
     it None and no mapping cell staged, `assert_mapping_column` asserts nothing and
     this job is byte-for-byte the job it was. With it set, the column must be a PURE
     mapping column whose every cell names this exact spec.
+
+    THE AMENDED LADDER (2026-08-09). `ladder_authorization` is the run's half of the
+    second two-key admission and defaults to None, which is every column that ever ran:
+    with it None and no amended cell staged, `assert_amended_ladder_column` asserts
+    nothing and every dose validates against the frozen ladder as before. With it set,
+    every science cell in the column must name this exact spec — the amendment is
+    whole-column, so a mixture is refused.
     """
     doc_sha = document_content_sha256(doc)
     with attempt_lock(Path(work_root) if work_root is not None else None,
@@ -4267,6 +4893,7 @@ def run_column(runtime: NodeRuntime, *, doc: Any, pool: PromptPool,
             cells_document_file_sha256=cells_document_file_sha256,
             actuation_calibration_sha256=actuation_calibration_sha256,
             mapping_authorization=mapping_authorization,
+            ladder_authorization=ladder_authorization,
             lock_block=lock_block)
 
 
@@ -4280,6 +4907,7 @@ def _run_column_locked(runtime: NodeRuntime, *, doc: Any, pool: PromptPool,
                        cells_document_file_sha256: Optional[str],
                        actuation_calibration_sha256: Optional[str],
                        mapping_authorization: Optional[MappingAuthorization],
+                       ladder_authorization: Optional[LadderAuthorization],
                        lock_block: Optional[dict]) -> ColumnResult:
     """§2.1's job, inside the M55 attempt lock. See `run_column` for the contract."""
     node_key, arm, site = doc.node_key, doc.arm, doc.site
@@ -4340,6 +4968,11 @@ def _run_column_locked(runtime: NodeRuntime, *, doc: Any, pool: PromptPool,
     # spent: a run whose two keys disagree stops here, not after the budget.
     is_mapping_column = assert_mapping_column(
         specs, authorization=mapping_authorization, node_key=node_key)
+    # THE AMENDED LADDER's admission gate, in the same place and for the same reason:
+    # a run whose two keys disagree about which ladder is firing stops before the
+    # budget, not after it.
+    assert_amended_ladder_column(
+        specs, authorization=ladder_authorization, node_key=node_key)
     seed_roots = {c.cell_id: cell_seed_root(corpus_sha=corpus_sha, node_key=node_key,
                                             arm=arm, site=site, cell_id=c.cell_id)
                   for c in specs}
@@ -6158,7 +6791,18 @@ def preflight_report(doc: Any, pool: PromptPool, *,
         "n_cells": len(specs), "cells_by_kind": kinds,
         "n_per_cell": doc.n_per_cell,
         "n_generations": len(specs) * doc.n_per_cell,
-        "dose_ladder": list(DOSE_LADDER),
+        # the ladder IN FORCE — `DOSE_LADDER` for every column with no ratified
+        # amendment, so a frozen column's preflight report is unchanged (2026-08-09).
+        # The `amended_ladder` key below appears ONLY on an amended column, by the same
+        # rule `site_role` and `vector_class` follow on the stamp: a flag-absent run
+        # produces the byte-identical artifact it produced before the flag existed.
+        "dose_ladder": list(ladder_in_force(specs)),
+        **({"amended_ladder": {
+            "amended": True,
+            "ladder_in_force": list(ladder_in_force(specs)),
+            "frozen_dose_ladder": list(DOSE_LADDER),
+            "note": AMENDED_LADDER_NOTE}}
+           if column_is_amended_ladder(specs) else {}),
         "sampling_of_record": SAMPLING_OF_RECORD.model_dump(),
         "prompt_pool": {"sha256": pool.sha256, "n": len(pool.prompts),
                         "matches_document": (doc.prompt_pool_sha256 is None
@@ -6617,6 +7261,66 @@ def _mapping_cells(site: int, authorization: MappingAuthorization,
                 kind=MAPPING_CELL_KIND, vector_key=key, site=site, alpha_frac=frac,
                 band_family=band, vector_provenance=f"toy::{key}",
                 mapping_authorization=authorization))
+    return cells
+
+
+#: The selftest's AMENDED ladder. Deliberately NOT the ratified mixtral ladder: the
+#: "this engine carries no per-node ladder" property is asserted below by walking this
+#: module's AST for exactly that tuple, and a selftest fixture equal to it would make
+#: the assertion pass by luck. It SHARES ±0.03 and ±0.10 with the frozen ladder and
+#: moves only the extremes — the overlap `MappingAuthorization` forbids and this
+#: mechanism requires, so every fixture built from it exercises the inverted law.
+_TOY_AMENDED_LADDER: tuple[float, ...] = (-0.2, -0.1, -0.03, 0.03, 0.1, 0.2)
+#: The ratified mixtral ladder, quoted ONLY as the needle the AST check hunts for. It
+#: is not a dose source: nothing constructs a cell or an authorization from it, and the
+#: check below fails if any module-level constant in this file ever equals it.
+_RATIFIED_MIXTRAL_LADDER_NEEDLE: tuple[float, ...] = (-0.15, -0.1, -0.03, 0.03,
+                                                      0.1, 0.15)
+
+
+def _toy_ladder_spec_body(*, node: str, site: int,
+                          ladder: Sequence[float] = _TOY_AMENDED_LADDER) -> dict:
+    """A `LadderSpec` document body, with the RATIFIED document's exact key set.
+
+    Keyed deliberately like `docs/desk/LADDER-SPEC-mixtral-recal-2026-08-09.json` —
+    same fields, same shape, different node and ladder — so this fixture proves the
+    loader accepts the document of record's schema rather than a schema invented here.
+    """
+    return {"schema_version": LADDER_SPEC_SCHEMA_VERSION,
+            "experiment_id": "selftest-recal-amended-ladder",
+            "node_key": node, "site": site,
+            "applies_to": "the whole science column at this (node_key, site)",
+            "ladder": list(ladder),
+            "replaces": f"the FROZEN DOSE_LADDER {DOSE_LADDER} FOR THIS NODE ONLY",
+            "ratification_lineage": ["SELFTEST (not a ruling)"],
+            "gate_reading_rule": "§4.2's extreme-dose references read on this ladder",
+            "comparability_rider": "never pooled without this ladder quoted beside",
+            "asymmetry_note": "SELFTEST, NOT A READ",
+            "prestatement_of_record":
+                "PRESTATEMENT-moe-dose-window-mixtral-2026-08-08.md",
+            "note": "SELFTEST, NOT A READ"}
+
+
+def _amended_cells(site: int, authorization: LadderAuthorization) -> list[CellSpec]:
+    """`_toy_cells`' AMENDED twin: the same §4 + §5 shape, on the ratified ladder.
+
+    Same kinds, same vector keys, same band families — only the ladder differs — so a
+    diff against `_toy_cells` shows exactly what an amendment changes about a column
+    and nothing else. The α=0 baseline is built by `baseline_cell` and carries NO
+    authorization, because it is the same cell under either ladder (§5.1).
+    """
+    cells = [baseline_cell(site)]
+    for key, kind, band in (
+            ("entropy_gradient", "calibration", None),
+            ("Rband1", "calibration_band", "Rband"),
+            ("gentropy_gradient", "transported", None),
+            ("gRband1", "transported_band", "gRband")):
+        for frac in authorization.ladder:
+            cells.append(CellSpec(
+                cell_id=CELL_ID_TEMPLATE.format(vector_key=key, site=site, frac=frac),
+                kind=kind, vector_key=key, site=site, alpha_frac=frac,
+                band_family=band, vector_provenance=f"toy::{key}",
+                ladder_authorization=authorization))
     return cells
 
 
@@ -9303,6 +10007,448 @@ def selftest() -> int:                                   # noqa: C901 — a chec
               "because the operator asserted something untrue about this run",
               _sci_plain == 0 and _sci_flagged == 2)
 
+    # ---- 20. THE AMENDED LADDER (re-freeze #2, 2026-08-09) ----------------------
+    print("== selftest 20: the amended ladder — two keys, whole column, spec-driven ==")
+    check("(20) the FROZEN ladder is STILL untouched, literally and by arity — the "
+          "property re-freeze #2 was ratified on",
+          DOSE_LADDER == (-0.3, -0.1, -0.03, 0.03, 0.1, 0.3)
+          and len(DOSE_LADDER) == 6 and BASELINE_DOSE == 0.0
+          and SCORING_DOSE_MAGNITUDE == 0.3,
+          f"{DOSE_LADDER}")
+    # M58: a code property is asserted on the SYNTAX TREE, never on a substring of the
+    # source. The property: no module-level constant in this engine equals the ratified
+    # mixtral ladder — policy lives in the document, and a per-node ladder that had
+    # crept back in as a constant is exactly what this check exists to catch. Walking
+    # assignments (rather than grepping for "0.15") also means a constant spelled
+    # differently — reordered, or written as a list — is still caught.
+    import ast as _ast
+    _tree = _ast.parse(Path(__file__).read_text())
+
+    def _const_tuples(tree: Any) -> list[tuple[str, tuple[float, ...]]]:
+        """Every module-level `NAME = (<numbers>)` / `[<numbers>]` in this file."""
+        found: list[tuple[str, tuple[float, ...]]] = []
+        for node in tree.body:
+            if isinstance(node, (_ast.Assign, _ast.AnnAssign)):
+                value = node.value
+                targets = (node.targets if isinstance(node, _ast.Assign)
+                           else [node.target])
+                names = [t.id for t in targets if isinstance(t, _ast.Name)]
+                if value is None or not isinstance(value, (_ast.Tuple, _ast.List)):
+                    continue
+                nums: list[float] = []
+                for el in value.elts:
+                    if isinstance(el, _ast.Constant) and isinstance(
+                            el.value, (int, float)) and not isinstance(el.value, bool):
+                        nums.append(float(el.value))
+                    elif (isinstance(el, _ast.UnaryOp)
+                          and isinstance(el.op, _ast.USub)
+                          and isinstance(el.operand, _ast.Constant)
+                          and isinstance(el.operand.value, (int, float))):
+                        nums.append(-float(el.operand.value))
+                    else:
+                        nums = []
+                        break
+                if nums:
+                    found.extend((n, tuple(nums)) for n in names)
+        return found
+
+    _numeric_constants = _const_tuples(_tree)
+    _mixtral_constants = [n for n, v in _numeric_constants
+                          if v == _RATIFIED_MIXTRAL_LADDER_NEEDLE
+                          and n != "_RATIFIED_MIXTRAL_LADDER_NEEDLE"]
+    check("(20) [AST] this engine carries NO per-node ladder constant: no module-level "
+          "numeric constant equals the ratified mixtral ladder — the document is the "
+          "policy, and a constant that crept back would be the encumbrance removed",
+          not _mixtral_constants and len(_numeric_constants) > 3,
+          f"{len(_numeric_constants)} module-level numeric constant(s) walked, "
+          f"offenders {_mixtral_constants}")
+    check("(20) [AST] `DOSE_LADDER`'s own literal is unchanged in the source, and it "
+          "is assigned exactly once — the frozen default is not re-bound anywhere",
+          [v for n, v in _numeric_constants if n == "DOSE_LADDER"]
+          == [(-0.3, -0.1, -0.03, 0.03, 0.1, 0.3)],
+          str([v for n, v in _numeric_constants if n == "DOSE_LADDER"]))
+    # --- the authorization: the INVERTED law, and the structural shape ------------
+    _lspec = LadderSpec(**_toy_ladder_spec_body(node=node, site=site))
+    _lauth = _lspec.authorization(spec_sha256="7" * 64)
+    check("(20) an amended ladder MAY overlap the frozen one — replacement, not "
+          "disjointness. The law `MappingAuthorization` asserts is the law this "
+          "mechanism must NOT assert, and the fixture shares ±0.03 and ±0.10",
+          set(_lauth.ladder) & set(DOSE_LADDER) == {-0.1, -0.03, 0.03, 0.1}
+          and _ok(lambda: LadderAuthorization(
+              experiment_id="x", spec_sha256="7" * 64, ladder=DOSE_LADDER))
+          and _raises(lambda: MappingAuthorization(
+              experiment_id="x", spec_sha256="7" * 64, doses=DOSE_LADDER),
+              MappingDoseImpersonatesScience),
+          f"shared rungs {sorted(set(_lauth.ladder) & set(DOSE_LADDER))}")
+    check("(20) the structural shape §4.2's arithmetic reads is asserted on any "
+          "ladder: 6 rungs, strictly ascending, no duplicate, no zero, both signs",
+          _raises(lambda: LadderAuthorization(
+              experiment_id="x", spec_sha256="7" * 64,
+              ladder=(-0.2, -0.1, 0.1, 0.2)), LadderDoseNotOnLadderInForce)
+          and _raises(lambda: LadderAuthorization(
+              experiment_id="x", spec_sha256="7" * 64,
+              ladder=(0.2, -0.1, -0.03, 0.03, 0.1, -0.2)),
+              LadderDoseNotOnLadderInForce)
+          and _raises(lambda: LadderAuthorization(
+              experiment_id="x", spec_sha256="7" * 64,
+              ladder=(-0.2, -0.1, -0.03, 0.03, 0.1, 0.1)),
+              LadderDoseNotOnLadderInForce)
+          and _raises(lambda: LadderAuthorization(
+              experiment_id="x", spec_sha256="7" * 64,
+              ladder=(-0.2, -0.1, -0.03, 0.0, 0.1, 0.2)),
+              LadderDoseNotOnLadderInForce)
+          and _raises(lambda: LadderAuthorization(
+              experiment_id="x", spec_sha256="7" * 64,
+              ladder=(0.02, 0.03, 0.05, 0.1, 0.2, 0.3)),
+              LadderDoseNotOnLadderInForce)
+          and _raises(lambda: LadderAuthorization(
+              experiment_id="x", spec_sha256="7" * 64,
+              ladder=(-0.2, -0.1, -0.03, 0.03, 0.1, float("inf"))),
+              LadderDoseNotOnLadderInForce))
+    # --- the cell: the ladder in force, and the two cells that may never carry one --
+    _acells = _amended_cells(site, _lauth)
+    check("(20) an amended science cell takes the SPEC's dose, carries its "
+          "authorization, and formats its id under the banked template",
+          len(_acells) == 1 + 4 * len(_TOY_AMENDED_LADDER)
+          and all(c.is_amended_ladder and c.ladder_in_force == _TOY_AMENDED_LADDER
+                  for c in _acells if not c.is_baseline)
+          and f"entropy_gradient_L{site}_a+0.20" in {c.cell_id for c in _acells},
+          f"{len(_acells)} cells")
+    check("(20) a science cell at an amended dose with NO authorization is refused "
+          "with the FROZEN ladder's own message — the flag-absent path is unmoved",
+          _raises(lambda: CellSpec(cell_id=f"entropy_gradient_L{site}_a+0.20",
+                                   kind="calibration", vector_key="entropy_gradient",
+                                   site=site, alpha_frac=0.2), ValueError)
+          and "not on the FROZEN ladder" in _msg17(
+              lambda: CellSpec(cell_id=f"entropy_gradient_L{site}_a+0.20",
+                               kind="calibration", vector_key="entropy_gradient",
+                               site=site, alpha_frac=0.2)))
+    check("(20) …and a cell at a dose the AMENDED ladder does not carry is refused "
+          "against the DOCUMENT, naming it — including a frozen dose the amendment "
+          "dropped (|0.3| is off this ladder now)",
+          _raises(lambda: CellSpec(cell_id=f"entropy_gradient_L{site}_a+0.30",
+                                   kind="calibration", vector_key="entropy_gradient",
+                                   site=site, alpha_frac=0.3,
+                                   ladder_authorization=_lauth),
+                  LadderDoseNotOnLadderInForce)
+          and "AMENDED" in _msg17(
+              lambda: CellSpec(cell_id=f"entropy_gradient_L{site}_a+0.30",
+                               kind="calibration", vector_key="entropy_gradient",
+                               site=site, alpha_frac=0.3,
+                               ladder_authorization=_lauth)))
+    check("(20) the baseline and every MAPPING cell REFUSE a ladder authorization — "
+          "α=0 is α=0 under any ladder, and the two mechanisms stay separate",
+          _raises(lambda: CellSpec(cell_id=f"baseline_L{site}_a+0.00", kind="baseline",
+                                   vector_key=None, site=site, alpha_frac=0.0,
+                                   ladder_authorization=_lauth),
+                  LadderAuthorizationOnBaseline)
+          and _raises(lambda: CellSpec(
+              cell_id=f"entropy_gradient_L{site}_a+0.20", kind=MAPPING_CELL_KIND,
+              vector_key="entropy_gradient", site=site, alpha_frac=0.2,
+              mapping_authorization=_mauth.model_copy(update={"doses": (0.2,)}),
+              ladder_authorization=_lauth), LadderAuthorizationOnMappingCell)
+          and baseline_cell(site).ladder_in_force == DOSE_LADDER)
+    check("(20) `resolve_alpha` takes an amended dose ONLY for a cell carrying the "
+          "authorization — flag-absent it is byte-for-byte the frozen function",
+          _raises(lambda: resolve_alpha(0.2, _norm), ValueError)
+          and _raises(lambda: resolve_alpha(
+              0.2, _norm, cell=CellSpec(
+                  cell_id=f"entropy_gradient_L{site}_a+0.30", kind="calibration",
+                  vector_key="entropy_gradient", site=site, alpha_frac=0.3)),
+              ValueError)
+          and resolve_alpha(0.2, _norm, cell=next(
+              c for c in _acells if c.alpha_frac == 0.2)) == 0.2 * _norm
+          and resolve_alpha(0.3, _norm) == 0.3 * _norm
+          and resolve_alpha(BASELINE_DOSE, _norm) == 0.0)
+    check("(20) `apply_amended_ladder` builds one cell per RATIFIED rung and no more, "
+          "with α resolved per cell, while `apply_dose_ladder` keeps exactly one dose "
+          "source and still builds the frozen six",
+          [c.alpha_frac for c, _ in apply_amended_ladder(
+              "entropy_gradient", site, per_token_median_resid_norm=_norm,
+              authorization=_lauth, kind="calibration",
+              vector_provenance="toy::entropy_gradient")] == list(_lauth.ladder)
+          and all(a == f * _norm for (c, a), f in zip(apply_amended_ladder(
+              "entropy_gradient", site, per_token_median_resid_norm=_norm,
+              authorization=_lauth, kind="calibration",
+              vector_provenance="toy::entropy_gradient"), _lauth.ladder))
+          and [c.alpha_frac for c, _ in apply_dose_ladder(
+              "entropy_gradient", site, per_token_median_resid_norm=_norm,
+              kind="calibration", vector_provenance="toy::entropy_gradient")]
+          == list(DOSE_LADDER))
+    # --- the two-key admission gate, each refusal by its own name -----------------
+    _frozen_cells = _toy_cells(site)
+    check("(20) the two keys: amended cells with no authorization are REFUSED, an "
+          "authorization with no amended cells is REFUSED, a swapped spec is REFUSED, "
+          "and a MIXED frozen/amended column is REFUSED",
+          _raises(lambda: assert_amended_ladder_column(_acells, authorization=None),
+                  LadderCellsUnauthorized)
+          and _raises(lambda: assert_amended_ladder_column(_frozen_cells,
+                                                           authorization=_lauth),
+                      AmendedLadderNotEngaged)
+          and _raises(lambda: assert_amended_ladder_column(
+              _acells, authorization=_lauth.model_copy(
+                  update={"spec_sha256": "6" * 64})),
+              LadderAuthorizationMismatch)
+          and _raises(lambda: assert_amended_ladder_column(
+              list(_acells) + [c for c in _frozen_cells if not c.is_baseline],
+              authorization=_lauth), LadderColumnNotPure))
+    check("(20) …and the AUTHORIZATION MISMATCH is caught BY VALUE, not by identity — "
+          "a cell whose authorization was rebuilt from a dump (the dual-import-path "
+          "rake) is accepted, and one differing in any field is refused",
+          _ok(lambda: assert_amended_ladder_column(
+              [c.model_copy(update={"ladder_authorization": LadderAuthorization(
+                  **_lauth.model_dump())}) if not c.is_baseline else c
+               for c in _acells], authorization=_lauth))
+          and _raises(lambda: assert_amended_ladder_column(
+              _acells, authorization=_lauth.model_copy(
+                  update={"experiment_id": "another-experiment"})),
+              LadderAuthorizationMismatch)
+          and _raises(lambda: assert_amended_ladder_column(
+              _acells, authorization=_lauth.model_copy(
+                  update={"ladder": (-0.2, -0.1, -0.03, 0.03, 0.1, 0.25)})),
+              LadderAuthorizationMismatch))
+    check("(20) …and the clean pair admits, while a column with neither key asserts "
+          "nothing at all (every column that ran before this ruling)",
+          assert_amended_ladder_column(_acells, authorization=_lauth) is True
+          and assert_amended_ladder_column(_frozen_cells, authorization=None) is False
+          and assert_amended_ladder_column(_mcells, authorization=None) is False)
+    check("(20) the baseline is EXEMPT from the purity test on both sides — it is the "
+          "same α=0 cell under either ladder and never makes a column mixed",
+          assert_amended_ladder_column(
+              [c for c in _acells if c.is_baseline]
+              + [c for c in _acells if not c.is_baseline],
+              authorization=_lauth) is True
+          and ladder_in_force([baseline_cell(site)]) == DOSE_LADDER)
+    # --- §2.7: the signal role reads the ladder in force, science columns unmoved ---
+    check("(20) `ladder_in_force` / `scoring_dose_magnitude` answer FROZEN for every "
+          "column that has no amendment — so no existing gate can move",
+          ladder_in_force(_frozen_cells) == DOSE_LADDER
+          and scoring_dose_magnitude(_frozen_cells) == SCORING_DOSE_MAGNITUDE
+          and scoring_dose_magnitude(_calibration_only_cells(site))
+          == SCORING_DOSE_MAGNITUDE
+          and ladder_in_force(_acells) == _TOY_AMENDED_LADDER
+          and scoring_dose_magnitude(_acells) == 0.2)
+    _asel, _astrata, _adigest = select_replay_cells(_acells, node, corpus)
+    _fsel, _fstrata, _fdigest = select_replay_cells(_frozen_cells, node, corpus)
+    check("(20) an AMENDED column constitutes the blocking §2.7 gate: the signal role "
+          "is filled at the ladder in force's EXTREME (|0.2| here, not the literal "
+          "|0.3| the column has no cell at), band and calibration roles unmoved",
+          sorted(_astrata) == sorted(REPLAY_GATE_STRATA)
+          and len(_asel) == REPLAY_GATE_K
+          and abs(next(c for c in _acells
+                       if c.cell_id == _astrata["signal_at_0.3"]).alpha_frac) == 0.2
+          and next(c for c in _acells
+                   if c.cell_id == _astrata["signal_at_0.3"]).kind == "transported"
+          and next(c for c in _acells
+                   if c.cell_id == _astrata["random_band"]).band_family == "gRband"
+          and replay_gate_role_mapping(_acells) == REPLAY_ROLE_MAPPING_OF_RECORD,
+          json.dumps(_astrata))
+    check("(20) …and a FROZEN column's role mapping, selection, strata and digest are "
+          "byte-for-byte what they were before re-freeze #2 existed — asserted against "
+          "B-1's own pre-ruling constant, so the generalization cannot have moved it",
+          tuple(_fsel) == B1_PRE_RULING_SELECTION
+          and _fdigest == hashlib.sha256(f"{node}|{corpus}".encode()).hexdigest()
+          and replay_gate_role_mapping(_frozen_cells) == REPLAY_ROLE_MAPPING_OF_RECORD,
+          json.dumps(_fstrata))
+    check("(20) an amended column that cannot fill the signal role at its OWN extreme "
+          "still HALTs — incomplete, not exempt (the role mapping is not a waiver)",
+          _raises(lambda: select_replay_cells(
+              [c for c in _acells
+               if not (c.kind == "transported" and abs(c.alpha_frac) == 0.2)],
+              node, corpus), ExpectedNShortfall))
+    # --- the stamp: the ladder in force, and the badge -----------------------------
+    _acell_02 = next(c for c in _acells
+                     if c.alpha_frac == 0.2 and c.kind == "transported")
+    _fcell_03 = next(c for c in _frozen_cells
+                     if c.alpha_frac == 0.3 and c.kind == "transported")
+    _astamp = _toy_stamp(cell=_acell_02, alpha=0.2 * _norm,
+                         layout=freeze_layout(80, dtype="bfloat16"),
+                         pool=pool, norms=_mnorms, corpus=corpus, node=node, arm=arm,
+                         roots={_acell_02.cell_id: "0" * 64})
+    _fstamp = _toy_stamp(cell=_fcell_03, alpha=0.3 * _norm,
+                         layout=freeze_layout(80, dtype="bfloat16"),
+                         pool=pool, norms=_mnorms, corpus=corpus, node=node, arm=arm,
+                         roots={_fcell_03.cell_id: "0" * 64})
+    check("(20) an amended cell's stamp states the ladder IT RAN, names the spec by "
+          "sha, and quotes the frozen ladder beside — an amended column can never "
+          "present as frozen-ladder to a reader holding one cell's stamp",
+          _astamp["dose_ladder"] == list(_TOY_AMENDED_LADDER)
+          and _astamp["amended_ladder"]["amended"] is True
+          and _astamp["amended_ladder"]["ladder_spec_sha256"] == "7" * 64
+          and _astamp["amended_ladder"]["frozen_dose_ladder"] == list(DOSE_LADDER)
+          and _astamp["amended_ladder"]["extreme_magnitude"] == 0.2
+          and _astamp["amended_ladder"]["replaces_frozen_ladder"] is True,
+          json.dumps(_astamp["amended_ladder"]["ladder_in_force"]))
+    check("(20) …while a FROZEN cell's stamp carries `dose_ladder` = the frozen six "
+          "and NO `amended_ladder` block at all — the flag-absent stamp is unchanged",
+          _fstamp["dose_ladder"] == list(DOSE_LADDER)
+          and "amended_ladder" not in _fstamp
+          and _ok(lambda: assert_stamp_complete(dict(_fstamp),
+                                                cell_kind="transported")))
+    check("(20) the badge is checked wherever a stamp is checked, including off disk: "
+          "a malformed block is refused, a block on a MAPPING stamp is refused, and a "
+          "block disagreeing with `dose_ladder` is refused (the presenting-as-frozen "
+          "failure the block exists to prevent)",
+          _ok(lambda: assert_stamp_complete(dict(_astamp), cell_kind="transported"))
+          and _raises(lambda: assert_stamp_complete(
+              dict(_astamp, dose_ladder=list(DOSE_LADDER)), cell_kind="transported"),
+              StampIncompleteError)
+          and _raises(lambda: assert_stamp_complete(
+              dict(_astamp, amended_ladder={**_astamp["amended_ladder"],
+                                            "amended": False}),
+              cell_kind="transported"), StampIncompleteError)
+          and _raises(lambda: assert_stamp_complete(
+              dict(_astamp, amended_ladder={**_astamp["amended_ladder"],
+                                            "ladder_spec_sha256": "short"}),
+              cell_kind="transported"), StampIncompleteError)
+          and _raises(lambda: assert_amended_ladder_stamp_contract(
+              dict(_astamp, cell_kind=MAPPING_CELL_KIND), cell_kind=None),
+              StampIncompleteError)
+          and _ok(lambda: assert_amended_ladder_stamp_contract(dict(_fstamp),
+                                                               cell_kind=None)))
+    # --- the loader, and end to end through the CLI --------------------------------
+    with tempfile.TemporaryDirectory(prefix="behav_ladder_") as td:
+        _lroot = Path(td)
+        _lspec_path = _lroot / "ladder-spec.json"
+        _lspec_path.write_text(json.dumps(
+            _toy_ladder_spec_body(node=node, site=site), indent=1))
+        _loaded_lspec, _loaded_lauth = load_ladder_spec(
+            _lspec_path, node_key=node, site=site)
+        check("(20) the spec loads under the RATIFIED document's key set, names this "
+              "column, and its FILE sha becomes half the authorization",
+              _loaded_lauth.spec_sha256
+              == hashlib.sha256(_lspec_path.read_bytes()).hexdigest()
+              and _loaded_lauth.ladder == _TOY_AMENDED_LADDER
+              and _loaded_lspec.schema_version == LADDER_SPEC_SCHEMA_VERSION,
+              _loaded_lauth.spec_sha256[:12])
+        _badver = _lroot / "badver.json"
+        _badver.write_text(json.dumps(
+            {**_toy_ladder_spec_body(node=node, site=site),
+             "schema_version": "behavioral-ladder-spec/2"}))
+        _badbody = _lroot / "badbody.json"
+        _badbody.write_text(json.dumps(
+            {k: v for k, v in _toy_ladder_spec_body(node=node, site=site).items()
+             if k != "ratification_lineage"}))
+        _notjson = _lroot / "notjson.json"
+        _notjson.write_text("[]")
+        check("(20) the loader's refusals, each by name: NO FILE · WRONG SCHEMA "
+              "VERSION (checked before the body) · another node · another site · not "
+              "an object · a body missing its ratification lineage",
+              _raises(lambda: load_ladder_spec(_lroot / "nope.json", node_key=node,
+                                               site=site), LadderSpecError)
+              and _raises(lambda: load_ladder_spec(_badver, node_key=node, site=site),
+                          LadderSpecError)
+              and _raises(lambda: load_ladder_spec(_lspec_path,
+                                                   node_key="another-node", site=site),
+                          LadderSpecError)
+              and _raises(lambda: load_ladder_spec(_lspec_path, node_key=node,
+                                                   site=site + 1), LadderSpecError)
+              and _raises(lambda: load_ladder_spec(_notjson, node_key=node, site=site),
+                          LadderSpecError)
+              and _raises(lambda: load_ladder_spec(_badbody, node_key=node, site=site),
+                          LadderSpecError))
+        _ldoc = _toy_document(pool, node=node, arm=arm, site=site, corpus=corpus,
+                              cells=_amended_cells(site, _loaded_lauth),
+                              n_per_cell=4, max_new_tokens=5)
+        os.environ["CUDA_VISIBLE_DEVICES"] = "3"
+        _lcolumn = run_column(_StubRuntime(pool, tok, arm, site), doc=_ldoc, pool=pool,
+                              work_root=_lroot / "col", corpus_sha_of_record=corpus,
+                              characterize=False, scheduler_card_index="3",
+                              ladder_authorization=_loaded_lauth)
+        check("(20) the whole §2.1 job runs an AMENDED-LADDER column end to end: every "
+              "cell fires, α is the ratified dose × the measured norm, the blocking "
+              "§2.7 gate passes bitwise, and every science stamp carries the spec sha",
+              len(_lcolumn.cells) == 1 + 4 * len(_TOY_AMENDED_LADDER)
+              and _lcolumn.replay_gate.passed
+              and all(abs(c.alpha - c.alpha_frac * 12.2391) < 1e-12
+                      for c in _lcolumn.cells)
+              and all(c.stamp["amended_ladder"]["ladder_spec_sha256"]
+                      == _loaded_lauth.spec_sha256
+                      for c in _lcolumn.cells if c.alpha_frac != BASELINE_DOSE)
+              and all(c.stamp["dose_ladder"] == list(_TOY_AMENDED_LADDER)
+                      for c in _lcolumn.cells if c.alpha_frac != BASELINE_DOSE),
+              f"{len(_lcolumn.cells)} cells, gate {_lcolumn.replay_gate.cells}")
+        check("(20) …the α=0 baseline in that same column is UNCHANGED: no badge, the "
+              "frozen ladder on its stamp, α exactly 0 (§5.1's shared baseline)",
+              all("amended_ladder" not in c.stamp
+                  and c.stamp["dose_ladder"] == list(DOSE_LADDER) and c.alpha == 0.0
+                  for c in _lcolumn.cells if c.alpha_frac == BASELINE_DOSE))
+        check("(20) …and the same document run WITHOUT the authorization is refused "
+              "before a cell fires (the cells-json alone is not a key)",
+              _raises(lambda: run_column(
+                  _StubRuntime(pool, tok, arm, site), doc=_ldoc, pool=pool,
+                  work_root=_lroot / "col-unauth", corpus_sha_of_record=corpus,
+                  characterize=False, scheduler_card_index="3"),
+                  LadderCellsUnauthorized))
+        _lcells_json = _lroot / "ladder-cells.json"
+        _lcells_json.write_text(_ldoc.model_dump_json())
+        _lsci_doc = _toy_document(pool, node=node, arm=arm, site=site, corpus=corpus,
+                                  cells=_toy_cells(site), n_per_cell=4,
+                                  max_new_tokens=5)
+        _lsci_json = _lroot / "frozen-cells.json"
+        _lsci_json.write_text(_lsci_doc.model_dump_json())
+        _lpool_json = _lroot / "pool.json"
+        _lpool_json.write_text(json.dumps(
+            {"sha256": pool.sha256,
+             "prompts": [p.model_dump() for p in pool.prompts]}))
+
+        def _lcli(cells_json: Path, *extra: str) -> int:
+            with contextlib.redirect_stdout(io.StringIO()):
+                return main(["--preflight", "--cells-json", str(cells_json),
+                             "--prompt-pool", str(_lpool_json), *extra])
+
+        check("(20) THE CLI's two keys: the spec alone is refused, the flag alone is "
+              "refused, a flagless run of an amended document is refused, and only "
+              "both together admit",
+              _lcli(_lcells_json, "--ladder-spec", str(_lspec_path)) == 2
+              and _lcli(_lcells_json, "--amended-ladder") == 2
+              and _lcli(_lcells_json) == 2
+              and _lcli(_lcells_json, "--ladder-spec", str(_lspec_path),
+                        "--amended-ladder") == 0)
+        check("(20) …and a FROZEN document is unaffected by the mechanism's existence: "
+              "flagless it preflights exactly as before, flagged it is refused because "
+              "the operator asserted something untrue about which ladder fires",
+              _lcli(_lsci_json) == 0
+              and _lcli(_lsci_json, "--ladder-spec", str(_lspec_path),
+                        "--amended-ladder") == 2)
+        # The two mechanisms, in one place: neither flag pair reaches the other's
+        # cells, and a mapping column is untouched by the amendment machinery. Its
+        # cells document is rebuilt HERE rather than reused from section 19, whose
+        # temporary directory is already gone (a path that no longer exists would make
+        # this check pass for the wrong reason).
+        _mdoc20 = _toy_document(pool, node=node, arm=arm, site=site, corpus=corpus,
+                                cells=_mapping_cells(site, _mauth), n_per_cell=4,
+                                max_new_tokens=5)
+        _mcells_json20 = _lroot / "mapping-cells.json"
+        _mcells_json20.write_text(_mdoc20.model_dump_json())
+        check("(20) the AMENDED LADDER and the MAPPING MODE stay separate: a mapping "
+              "document under the LADDER flags is refused (it holds no amended science "
+              "cell), and the ladder gate asserts nothing about a mapping column",
+              _lcli(_mcells_json20, "--ladder-spec", str(_lspec_path),
+                    "--amended-ladder") == 2
+              and _ok(lambda: assert_amended_ladder_column(_mcells,
+                                                           authorization=None))
+              and ladder_in_force(_mcells) == DOSE_LADDER)
+
+    # ---- M59: the suite's own arithmetic, asserted rather than printed ----------
+    # SKIP IS NOT PASS, and a block that silently stopped running is indistinguishable
+    # from a block that never existed unless the TOTAL is asserted. The floor is the
+    # count this file was merged at (re-freeze #2, 2026-08-09: 352 checks before the
+    # amended ladder, 382 after it, +30); it may only GROW, and a change that removes a
+    # check has to change this constant in the same diff — which is exactly the moment
+    # a reviewer gets to ask why. Named skips are counted apart and bounded by the
+    # known set, so a block that STARTED skipping in a configuration where it used to
+    # run fails here rather than passing quietly as a third state.
+    SELFTEST_CHECK_FLOOR = 382
+    KNOWN_SKIP_CEILING = 3
+    check(f"(M59) the suite ran at least its recorded floor of {SELFTEST_CHECK_FLOOR} "
+          f"checks and named no more than {KNOWN_SKIP_CEILING} skip(s) — a block that "
+          "stopped running, or started skipping, is caught here rather than read as a "
+          "clean run",
+          len(checks) >= SELFTEST_CHECK_FLOOR and len(skips) <= KNOWN_SKIP_CEILING,
+          f"{len(checks)} checks (floor {SELFTEST_CHECK_FLOOR}), "
+          f"{len(skips)} named skip(s) (ceiling {KNOWN_SKIP_CEILING})")
+
     failures = [c for c in checks if not c[1]]
     print(f"\nselftest: {len(failures)} failure(s)")
     for name, _, detail in failures:
@@ -9562,6 +10708,25 @@ def main(argv: Optional[list[str]] = None) -> int:
                          "cell licenses nothing — it can satisfy no §4.2 criterion "
                          "and license no transported-write cell — and the frozen "
                          "DOSE_LADDER is untouched for every science cell.")
+    ap.add_argument("--ladder-spec", type=Path, default=None,
+                    help="THE AMENDED LADDER (re-freeze #2, 2026-08-09): the desk's "
+                         "ratified re-calibration document for THIS column's node and "
+                         "site (JSON: experiment_id, node_key, site, ladder, "
+                         "applies_to, replaces, ratification_lineage, "
+                         "gate_reading_rule, comparability_rider, "
+                         "prestatement_of_record). Validated to name this column; its "
+                         "sha256 and ladder must equal what every staged science cell "
+                         "carries. Requires --amended-ladder beside it. WITHOUT BOTH, "
+                         "the FROZEN dose ladder is in force and nothing about this "
+                         "module changes.")
+    ap.add_argument("--amended-ladder", action="store_true",
+                    help="THE AMENDED LADDER's second key: the operator's explicit "
+                         "assertion that THIS run fires a re-calibrated ladder. The "
+                         "amendment is WHOLE-COLUMN (every arm, every lever, every "
+                         "band at this node and site; the α=0 baseline is unchanged) "
+                         "and mixing amended with frozen-ladder science cells in one "
+                         "column is refused. §4.2 stays desk-side: this engine runs "
+                         "and records the ladder, it never scores it.")
     ap.add_argument("--no-characterize", action="store_true",
                     help="skip §2.7's DESCRIPTIVE B=8/B=1 characterization (M19: it "
                          "can never fail a gate, so skipping it costs no assertion)")
@@ -9682,15 +10847,61 @@ def main(argv: Optional[list[str]] = None) -> int:
         logger.error("HALT (%s): %s", type(exc).__name__, exc)
         return 2
 
+    # THE AMENDED LADDER's two keys, checked against each other BEFORE the model loads,
+    # by the mapping mode's pattern exactly. Either alone is refused by name rather
+    # than silently ignored: an operator who passed one and not the other believes
+    # something about which ladder this column runs that is false.
+    ladder_authorization: Optional[LadderAuthorization] = None
+    if bool(args.ladder_spec is not None) != bool(args.amended_ladder):
+        logger.error(
+            "HALT: an amended ladder needs BOTH %s and %s (given: %s). The spec is the "
+            "CONTENT and the flag is the AUTHORIZATION; either alone leaves the FROZEN "
+            "ladder in force, and a run that meant to re-calibrate would fire the "
+            "frozen doses instead. %s", LADDER_SPEC_FLAG, AMENDED_LADDER_FLAG,
+            LADDER_SPEC_FLAG if args.ladder_spec is not None else AMENDED_LADDER_FLAG,
+            AMENDED_LADDER_NOTE)
+        return 2
+    if args.ladder_spec is not None:
+        try:
+            ladder_spec, ladder_authorization = load_ladder_spec(
+                args.ladder_spec, node_key=doc.node_key, site=doc.site)
+        except BehavioralHarnessError as exc:
+            logger.error("HALT (%s): %s", type(exc).__name__, exc)
+            return 2
+        logger.info(
+            "AMENDED LADDER: spec %s (%s L%d) ladder %s replacing the frozen %s — %s; "
+            "pinned by %s. Lineage: %s. %s",
+            ladder_spec.experiment_id, ladder_spec.node_key, ladder_spec.site,
+            list(ladder_spec.ladder), list(DOSE_LADDER), ladder_spec.replaces,
+            ladder_spec.prestatement_of_record,
+            " | ".join(ladder_spec.ratification_lineage), AMENDED_LADDER_NOTE)
+    # Unconditional and BEFORE the model loads, for the mapping gate's reasons: a cells
+    # document that smuggled amended cells past a flagless invocation is refused here,
+    # and a --preflight (which never reaches `run_column`) gets the same admission gate
+    # the real run gets. `run_column` re-asserts on its own specs regardless.
+    try:
+        assert_amended_ladder_column(doc.cell_specs(),
+                                     authorization=ladder_authorization,
+                                     node_key=doc.node_key)
+    except BehavioralHarnessError as exc:
+        logger.error("HALT (%s): %s", type(exc).__name__, exc)
+        return 2
+
     basis = args.corpus_sha_of_record or doc.corpus_manifest_sha256
     logger.info("cells document: %s L%d (%s arm), %d cells, basis %s%s",
                 doc.node_key, doc.site, doc.arm, len(doc.cells), basis[:12],
                 f" — LABEL: {doc.label}" if doc.label else "")
     logger.info("prompt pool of record: %d prompts, sha %s",
                 len(pool.prompts), pool.sha256)
+    # The flag-absent line is the line it always was; an amended column gets a SECOND
+    # line rather than a reworded first one, so a log from a frozen run is unchanged.
     logger.info("dose ladder (FROZEN): %s; n/cell %d; max_new_tokens %d",
                 list(DOSE_LADDER), args.n_per_cell or doc.n_per_cell,
                 doc.max_new_tokens)
+    if ladder_authorization is not None:
+        logger.info("dose ladder IN FORCE for this column (AMENDED, spec %s): %s",
+                    ladder_authorization.experiment_id,
+                    list(ladder_authorization.ladder))
     logger.info("sampling of record: %s", SAMPLING_OF_RECORD.model_dump())
 
     runtime: Optional[NodeRuntime] = None
@@ -9721,6 +10932,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             scheduler_card_index=args.scheduler_card_index,
             resume=args.resume,
             mapping_authorization=mapping_authorization,
+            ladder_authorization=ladder_authorization,
             take_attempt_lock=not args.no_attempt_lock,
             cells_document_file_sha256=hashlib.sha256(
                 Path(args.cells_json).read_bytes()).hexdigest(),
