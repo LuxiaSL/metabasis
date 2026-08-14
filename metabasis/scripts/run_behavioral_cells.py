@@ -181,9 +181,34 @@ carries no per-node ladder, only the machinery to validate a document and record
     it (`amended_ladder`), and `dose_ladder` states the ladder actually run — so an
     amended-ladder column can never present as a frozen-ladder one, and the
     comparability rider (never pooled without the ladder quoted) has something to read.
-  * §4.2 STAYS DESK-SIDE. This module runs and records; it never scores. The one place
-    the amendment reaches engine machinery is §2.7's signal role, which reads "the
-    extreme dose" — of the ladder in force, `AMENDED_LADDER_SIGNAL_ROLE_READING`.
+  * §4.2 STAYS DESK-SIDE. This module runs and records; it never scores. The amendment
+    reaches engine machinery in exactly TWO places, and nowhere else: §2.7's signal
+    role, which reads "the extreme dose" — of the ladder in force,
+    `AMENDED_LADDER_SIGNAL_ROLE_READING` — and the verdict document's ladder pair
+    below (re-freeze #3).
+
+THE LADDER IN FORCE REACHES THE §4.2 VERDICT DOCUMENT (re-freeze #3, 2026-08-13; Luxia's
+ruling "we need more flexibility here and to rely on documentation around it to proof and
+replicate"). `ActuationCalibrationVerdict` gained an optional `dose_ladder` /
+`scoring_doses` pair, and `stamp_block` emits the document's values when it states them.
+
+  * WHY IT HAD TO MOVE. Those two stamp keys were module constants, so every §5 cell
+    naming an amended column's calibration would have stamped `±0.3` for a column that
+    ran `±0.15` — the false-provenance failure the `--actuation-calibration` flag was
+    ruled into existence to prevent. The desk could not fix it from its side: the
+    document model is `extra="forbid"`, so the desk could not add the fields, and the
+    scorer cannot reach a module constant. It was the last place the amendment did not
+    propagate.
+  * POLICY STILL LIVES IN DOCUMENTS. This module still carries no per-node ladder. It
+    validates a pair and records it; which ladder is right for a node is the ladder
+    spec's ruling and Luxia's, never this file's.
+  * ABSENT THE PAIR, BYTE-IDENTICAL. The fallback is the frozen constants, and no key
+    marks which branch produced them — a frozen ladder stated and a frozen ladder
+    defaulted are the same claim. Every document filed before this field existed stamps
+    exactly as it did.
+  * BOTH OR NEITHER, AND THE PAIR IS `(min, max)`. Not ±magnitude: an asymmetric
+    ratified ladder must read correctly, and every symmetric one is unchanged by the
+    choice. The same reading the ladder spec's `gate_reading_rule` ratifies.
 
     python -m metabasis.scripts.run_behavioral_cells --preflight ...   # M10: a
         first-class exit-early mode, never output truncation.
@@ -4229,7 +4254,8 @@ class ActuationCalibrationVerdict(BaseModel):
     outside_band_doses: int = Field(ge=0, le=len(DOSE_LADDER))
     outside_band_of: int = Field(default=len(DOSE_LADDER), ge=1, le=len(DOSE_LADDER))
     outside_band_at_both_extremes: bool
-    #: (c) the coherence floor's measurement at the scoring dose (+0.3).
+    #: (c) the coherence floor's measurement at the scoring dose — the POSITIVE extreme
+    #: of the ladder in force (+0.3 frozen; +0.15 on the ratified mixtral amendment).
     coherence_at_scoring_dose: float = Field(ge=0.0, le=1.0)
     #: where the desk's scoring arithmetic is on the record, and the ledger day it
     #: was ruled — the two pointers that make the verdict auditable from the stamp.
@@ -4238,16 +4264,63 @@ class ActuationCalibrationVerdict(BaseModel):
     #: the site's role, for the §4.2 remedy ladder (a robustness-site calibration is
     #: a different statement from a site-of-record one). Defaulted, never inferred.
     site_role: Literal["site_of_record", "robustness_site"] = "site_of_record"
+    #: THE LADDER IN FORCE (re-freeze #3, 2026-08-13). §4.2 is scored on the ladder the
+    #: column ACTUALLY RAN, and on an amended-ladder column that is not the frozen one.
+    #: The desk states it HERE, in the document, because policy lives in documents —
+    #: this module still carries no per-node ladder, only the machinery to record one.
+    #:
+    #: ABSENT BOTH, `stamp_block` emits the frozen constants exactly as it always has,
+    #: so every document filed before this field existed stamps BYTE-IDENTICALLY. There
+    #: is deliberately no "which branch produced this" marker in the block: a frozen
+    #: ladder stated explicitly and a frozen ladder taken by default are the same claim.
+    #:
+    #: BOTH OR NEITHER. A scoring pair without its ladder cannot be checked against it,
+    #: and a ladder without its scoring pair leaves §4.2(b)'s extremes to be inferred by
+    #: a reader — the inference this whole mechanism exists to stop.
+    dose_ladder: Optional[list[float]] = None
+    scoring_doses: Optional[list[float]] = None
 
     @model_validator(mode="after")
     def _counts_are_consistent(self) -> "ActuationCalibrationVerdict":
         """Arithmetic self-consistency ONLY — never a re-reading of §4.2.
 
-        A count cannot exceed its own denominator, and "outside at both |0.3| doses"
+        A count cannot exceed its own denominator, and "outside at both extreme doses"
         cannot be true when fewer than two doses are outside at all. Both are
         statements about the document's internal arithmetic, not about whether the
         criteria are MET; the thresholds are never applied here.
+
+        The ladder-in-force pair is checked the same way and no further: present
+        together, distinct and non-empty, arity agreeing with the band denominator, and
+        a scoring pair that IS the ladder's two extremes — `(min, max)`, not
+        ±magnitude, so an asymmetric ratified ladder reads correctly and every
+        symmetric one is unchanged. Whether ±0.15 was the RIGHT window is Luxia's
+        ruling in the ladder spec, never this validator's.
         """
+        if (self.dose_ladder is None) != (self.scoring_doses is None):
+            raise ValueError(
+                "dose_ladder and scoring_doses are BOTH-OR-NEITHER: this document "
+                f"states {'dose_ladder' if self.dose_ladder is not None else 'scoring_doses'} "
+                "alone. A scoring pair without its ladder cannot be checked against it, "
+                "and a ladder without its pair leaves §4.2(b)'s extremes to inference.")
+        if self.dose_ladder is not None:
+            if not self.dose_ladder:
+                raise ValueError("dose_ladder is present but empty — a column runs a "
+                                 "ladder or it runs the frozen one; it never runs none")
+            if len(set(self.dose_ladder)) != len(self.dose_ladder):
+                raise ValueError(
+                    f"dose_ladder {self.dose_ladder} repeats a dose — a ladder's rungs "
+                    "are distinct, and §4.2(a)'s Spearman is over the signed ladder")
+            if len(self.dose_ladder) != self.outside_band_of:
+                raise ValueError(
+                    f"dose_ladder has {len(self.dose_ladder)} rungs but "
+                    f"outside_band_of is {self.outside_band_of} — §4.2(b)'s denominator "
+                    "IS the ladder's arity, so these two cannot disagree")
+            want = [min(self.dose_ladder), max(self.dose_ladder)]
+            if list(self.scoring_doses) != want:
+                raise ValueError(
+                    f"scoring_doses {list(self.scoring_doses)} are not the ladder's two "
+                    f"extremes {want}. The ratified reading is (min, max) of THE LADDER "
+                    "IN FORCE — not ±magnitude, so an asymmetric ladder reads correctly.")
         if self.outside_band_doses > self.outside_band_of:
             raise ValueError(
                 f"outside_band_doses {self.outside_band_doses} exceeds its own "
@@ -4280,8 +4353,13 @@ class ActuationCalibrationVerdict(BaseModel):
                 f"{self.outside_band_doses}/{self.outside_band_of}",
             "outside_band_at_both_extremes": self.outside_band_at_both_extremes,
             "coherence_at_scoring_dose": self.coherence_at_scoring_dose,
-            "dose_ladder": list(DOSE_LADDER),
-            "scoring_doses": list(SCORING_DOSES),
+            # THE LADDER IN FORCE (re-freeze #3): the document's own pair when it
+            # states one, the frozen constants otherwise. The fallback is what makes
+            # every pre-existing verdict document stamp byte-identically.
+            "dose_ladder": (list(self.dose_ladder) if self.dose_ladder is not None
+                            else list(DOSE_LADDER)),
+            "scoring_doses": (list(self.scoring_doses) if self.scoring_doses is not None
+                              else list(SCORING_DOSES)),
             "scoring_log_path": self.scoring_log_path,
             "ledger_date": self.ledger_date.isoformat(),
             "scored_by": ACTUATION_CALIBRATION_SCORER_OF_RECORD,
@@ -8988,6 +9066,76 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                         ActuationCalibrationSchemaError,
                         ActuationCalibrationMismatch)))
 
+    # 16d: THE LADDER IN FORCE in the verdict document (re-freeze #3, 2026-08-13).
+    print("== selftest 16d: §4.2's verdict document states THE LADDER IN FORCE ==")
+    _frozen_block = _load_cal(cal_doc_body)
+    check("(16d) ABSENT the pair, the block is what it always was — the frozen ladder "
+          "and the frozen scoring doses, and NO new key",
+          _frozen_block.get("dose_ladder") == list(DOSE_LADDER)
+          and _frozen_block.get("scoring_doses") == list(SCORING_DOSES)
+          and set(_frozen_block) == set(block),
+          f"{_frozen_block.get('dose_ladder')} · {_frozen_block.get('scoring_doses')}")
+    _amended_ladder = [-0.15, -0.1, -0.03, 0.03, 0.1, 0.15]
+    _amended_doc = {**cal_doc_body, "dose_ladder": _amended_ladder,
+                    "scoring_doses": [-0.15, 0.15]}
+    _amended_block = _load_cal(_amended_doc)
+    check("(16d) a document that STATES the ratified mixtral amendment stamps THAT "
+          "ladder — §5 cells naming it can never claim ±0.3 for a ±0.15 column",
+          _amended_block.get("dose_ladder") == _amended_ladder
+          and _amended_block.get("scoring_doses") == [-0.15, 0.15],
+          json.dumps({k: _amended_block.get(k)
+                      for k in ("dose_ladder", "scoring_doses")}))
+    _doc_identity = {"verdict_document_path", "verdict_document_sha256"}
+    check("(16d) the amended block differs from the frozen one in EXACTLY the two "
+          "ladder keys — the amendment reaches nothing else in the stamp (the two "
+          "document-identity keys differ because it is, of course, a different file)",
+          {k for k in _amended_block
+           if _amended_block[k] != _frozen_block.get(k)} - _doc_identity
+          == {"dose_ladder", "scoring_doses"},
+          json.dumps(sorted({k for k in _amended_block
+                             if _amended_block[k] != _frozen_block.get(k)}
+                            - _doc_identity)))
+    check("(16d) BOTH-OR-NEITHER: a ladder without its scoring pair is refused",
+          _raises(lambda: _load_cal({**cal_doc_body, "dose_ladder": _amended_ladder}),
+                  ActuationCalibrationSchemaError))
+    check("(16d) BOTH-OR-NEITHER: a scoring pair without its ladder is refused",
+          _raises(lambda: _load_cal({**cal_doc_body, "scoring_doses": [-0.15, 0.15]}),
+                  ActuationCalibrationSchemaError))
+    check("(16d) a scoring pair that is not the ladder's extremes is refused — the "
+          "silent-wrong-denominator case §4.2(b) cannot survive",
+          _raises(lambda: _load_cal({**cal_doc_body, "dose_ladder": _amended_ladder,
+                                     "scoring_doses": [-0.3, 0.3]}),
+                  ActuationCalibrationSchemaError))
+    check("(16d) a ladder whose arity disagrees with §4.2(b)'s denominator is refused",
+          _raises(lambda: _load_cal({**cal_doc_body, "outside_band_of": 4,
+                                     "outside_band_doses": 4,
+                                     "dose_ladder": _amended_ladder,
+                                     "scoring_doses": [-0.15, 0.15]}),
+                  ActuationCalibrationSchemaError))
+    check("(16d) a ladder with a repeated rung is refused",
+          _raises(lambda: _load_cal({**cal_doc_body,
+                                     "dose_ladder": [-0.15, -0.1, -0.1, 0.03, 0.1, 0.15],
+                                     "scoring_doses": [-0.15, 0.15]}),
+                  ActuationCalibrationSchemaError))
+    check("(16d) an EMPTY ladder is refused (a column runs a ladder or the frozen one)",
+          _raises(lambda: _load_cal({**cal_doc_body, "dose_ladder": [],
+                                     "scoring_doses": []}),
+                  ActuationCalibrationSchemaError))
+    _asym = [-0.05, -0.03, -0.01, 0.03, 0.1, 0.25]
+    _asym_block = _load_cal({**cal_doc_body, "dose_ladder": _asym,
+                             "scoring_doses": [-0.05, 0.25]})
+    check("(16d) (min, max), NOT ±magnitude: an ASYMMETRIC ratified ladder reads "
+          "correctly, and ±magnitude would have refused it",
+          _asym_block.get("scoring_doses") == [-0.05, 0.25]
+          and _raises(lambda: _load_cal({**cal_doc_body, "dose_ladder": _asym,
+                                         "scoring_doses": [-0.25, 0.25]}),
+                      ActuationCalibrationSchemaError),
+          json.dumps(_asym_block.get("scoring_doses")))
+    check("(16d) `extra=forbid` still holds beside the new pair — a MISTYPED ladder "
+          "key is a refusal, never a silent frozen default",
+          _raises(lambda: _load_cal({**cal_doc_body, "dose_ladders": _amended_ladder}),
+                  ActuationCalibrationSchemaError))
+
     # 16b: the CLI, end to end, weightless — the flag's ONLY effect, byte-proved.
     print("== selftest 16b: the CLI's flag-absent path is byte-identical (B-1 style) ==")
     _saved_globals = {name: globals()[name] for name in
@@ -10439,7 +10587,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
     # a reviewer gets to ask why. Named skips are counted apart and bounded by the
     # known set, so a block that STARTED skipping in a configuration where it used to
     # run fails here rather than passing quietly as a third state.
-    SELFTEST_CHECK_FLOOR = 382
+    SELFTEST_CHECK_FLOOR = 393
     KNOWN_SKIP_CEILING = 3
     check(f"(M59) the suite ran at least its recorded floor of {SELFTEST_CHECK_FLOOR} "
           f"checks and named no more than {KNOWN_SKIP_CEILING} skip(s) — a block that "
