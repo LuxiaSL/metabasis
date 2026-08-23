@@ -70,6 +70,43 @@ CERTIFIED block, verbatim: its identity against the certified tool is pinned by
     only when CUDA is initialised, which the CPU-only preflight never does. The
     runner exports it; this module records what it observed.
 
+THE TWO VECTOR FAMILIES (the class×TP merge, 2026-08-22). Until now the lane's
+two capabilities lived in two besides that were never merged: the repo tool did
+TP but only the ENTROPY family, and the node's `vllm_lane_column_v2.py`
+(`2c327112…`) did the CLASS family but attached in-process and so failed loudly
+at TP>1. v2's class capability is ported IN here, so the program ends with ONE
+tool that fires either family at any tensor-parallel size.
+
+  * WHICH OBJECT a column rides is read from a `vllm-lane-class-spec/1` document
+    (`--class-spec`). ABSENT, `LaneClassSpec()` is the entropy gradient and every
+    key, cell id and emitted field is what this tool produced before the port —
+    that backward compatibility is PROVEN in the selftest by rendering the EGV
+    plan's ids and requiring them to equal the literals the pre-port tool spelled,
+    not asserted in prose.
+  * THE KEYS COME FROM THE OBJECT, NEVER FROM THE CAMPAIGN'S OBJECT OF RECORD
+    (HALT E, 2026-08-05): the transported key is `g` + the native object's own
+    stem and the naive null is `naive_` + the same stem, so `caa_<axis>_L<site>`
+    gives `gcaa_<axis>` / `naive_caa_<axis>` and four axes are four columns rather
+    than four names for one. And the stem is taken from the BANK's own spelling of
+    the key, not from this module's rendering of a template — the two are required
+    to be equal per column (`resolve_keys_from_bank`) rather than assumed.
+  * HALT D's TWO BASES ride the spec into every column artifact: the GENERATION
+    basis is the corpus manifest, the VECTOR basis is the RULED contrast set a
+    class object was built from, and `fd_gate_not_applicable` is admissible for a
+    class object and for nothing else. The four refusals are the engine's own.
+  * THE GRAMMAR STAYS A GUARD. `CELL_ID_GRAMMAR` is no longer a hand-written
+    alternation of three entropy literals; it is GENERATED from the closed
+    `NATIVE_KEY_TEMPLATES` vocabulary with a closed axis token, so it admits the
+    class family and still rejects everything else — an unknown class, an
+    upper-case or underscored axis, a missing site suffix. Widening it to
+    anything-goes would retire the join key against the banked columns.
+  * THE TP BRANCH IS UNTOUCHED BY ANY OF THIS. `worker_extension_cls` +
+    `collective_rpc` + the parent proxies take a SITE and a WIDTH and know nothing
+    about which object is being injected, so the class path reaches TP>1 through
+    exactly the code re-freeze #4 certified. The three TP forks' TP=1 arms and
+    every shared helper are still pinned by `ast.unparse` digest below, and those
+    pins did not move for this port.
+
 DEPLOYMENT NEUTRALITY. This module names no host, no user, and no absolute path.
 The host allow-list and the required-environment list are ARGUMENTS
 (`--allowed-host`, `--require-env`, both repeatable, both empty by default) and
@@ -85,13 +122,14 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import socket
 import sys
 import time
 from pathlib import Path
-from typing import Any, Optional, Sequence
+from typing import Any, Literal, Optional, Sequence
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 C8 = "UNSTAMPED (C§8) — BRIDGE INGREDIENTS. The desk scores the bars; nothing here verdicts."
 
@@ -146,6 +184,105 @@ def instrument_module_sha256() -> dict[str, str]:
                 "absent entry would read as a clean stamp")
         out[rel] = sha256_file(p)
     return out
+
+
+# ── the vector-class vocabulary (HALT D/E), ported from v2 `2c327112…` ───────
+#
+# WHY THESE ARE LITERALS HERE AND NOT IMPORTS. This block is read at MODULE
+# IMPORT to build the cell-id grammar, and the node runs this file directly with
+# `sys.path[0]` at the scripts directory, so `metabasis` is not importable yet
+# (the runner resolves it inside `main` via `--code-root`). The conventions are
+# therefore transcribed — and the selftest PROVES each one equal to the
+# campaign's own definition wherever the package is importable, which is the
+# same "proven to agree, never assumed to" pattern the scipy cross-check uses.
+
+EGV_VECTOR_CLASS = "entropy_gradient"
+
+#: The campaign's banked NATIVE key conventions, one per admissible class. The
+#: vocabulary is CLOSED: an unrecognized class is refused rather than defaulted
+#: to the object of record, because defaulting is exactly how a class object
+#: acquires the entropy gradient's name.
+NATIVE_KEY_TEMPLATES: dict[str, str] = {
+    "entropy_gradient": "entropy_gradient_L{site}",
+    "caa": "caa_{axis}_L{site}",
+    "repeng_pca": "repengpca_{axis}_L{site}",
+}
+
+#: Every native template ends in the site suffix, and the STEM is what remains.
+#: HALT E: a transported object is `g` + the source object's own stem and the
+#: naive null is `naive_` + the same stem — the site suffix drops because a
+#: transported object is named for the cell it is injected INTO, not for where
+#: it came from.
+NATIVE_SITE_SUFFIX = "_L{site}"
+TRANSPORTED_PREFIX = "g"
+NAIVE_PREFIX = "naive"
+SITE_SUFFIX_RE = re.compile(r"_L\d+$")
+
+#: The two band families, unchanged by the port: the native control asks whether
+#: the SITE actuates, the transported control whether the TRANSPORT carries.
+BAND_MEMBER_INDICES: tuple[int, ...] = (1, 2, 3)
+
+#: The axis token, CLOSED. Lower-case alphanumerics with no separator, which is
+#: what all four banked axes are (`sentiment`, `formality`, `refusal`,
+#: `language`). Admitting `_` would make `caa_a_b_L7` parse two ways and the
+#: grammar would stop being able to say which object a cell id names.
+CELL_ID_AXIS_TOKEN = r"[a-z][a-z0-9]*"
+
+
+def native_stem_template(vector_class: str,
+                         templates: Optional[dict[str, str]] = None) -> str:
+    """The class's key template with the site suffix removed.
+
+    Split off the suffix rather than regex-stripped: the suffix is a LITERAL of
+    the template, and a template that does not end in it has no decidable stem —
+    which is a refusal, never a guess at where the stem ends.
+    """
+    template = (NATIVE_KEY_TEMPLATES if templates is None else
+                templates)[vector_class]
+    if not template.endswith(NATIVE_SITE_SUFFIX):
+        raise ValueError(
+            f"the native key template for {vector_class!r} is {template!r}, which "
+            f"does not end in {NATIVE_SITE_SUFFIX!r}; its transported stem is "
+            "undecidable and the lane does not invent one")
+    return template[:-len(NATIVE_SITE_SUFFIX)]
+
+
+def build_cell_id_grammar(templates: Optional[dict[str, str]] = None) -> str:
+    """The cell-id grammar, GENERATED from the closed class vocabulary.
+
+    THE GRAMMAR IS A GUARD AND STAYS ONE. Before the class port this was a
+    hand-written alternation of three entropy literals; widening it by hand to
+    admit the class family would have meant either retyping nine literals (which
+    drift) or relaxing it toward `.*` (which stops guarding). Generating it from
+    `NATIVE_KEY_TEMPLATES` means the ids the grammar admits are exactly the ids
+    the key resolver can PRODUCE — one vocabulary, two consumers — and an axis is
+    a closed token rather than a wildcard.
+
+    The alternation is sorted so the string is stable across runs; the ids are
+    the join key against the BANKED columns, and a grammar whose text depends on
+    dict ordering is a pin that cannot be quoted.
+
+    `templates` is the vocabulary to generate from, defaulting to the module's.
+    It is a parameter for ONE reason: the selftest generates the ENTROPY-ONLY
+    grammar from it and proves that sublanguage identical to the alternation
+    re-freeze #4 wrote by hand, so the generation is checked against the pin it
+    replaced and not only against itself.
+    """
+    vocabulary = NATIVE_KEY_TEMPLATES if templates is None else templates
+    objects = {"baseline"}
+    for vector_class in vocabulary:
+        stem = native_stem_template(vector_class, vocabulary).format(
+            axis=f"(?:{CELL_ID_AXIS_TOKEN})")
+        # the NATIVE id keeps its own `_L<site>` and then takes the cell's, which
+        # is the banked double-suffix (`entropy_gradient_L26_L26_a+0.30`).
+        objects.add(stem + r"_L\d+")
+        objects.add(TRANSPORTED_PREFIX + stem)
+        objects.add(f"{NAIVE_PREFIX}_{stem}")
+    for i in BAND_MEMBER_INDICES:
+        objects.add(f"Rband{i}")
+        objects.add(f"{TRANSPORTED_PREFIX}Rband{i}")
+    return (r"(?:" + "|".join(sorted(objects))
+            + r")_L\d+_a[+-]\d\.\d{2}(?:@absalpha)?")
 
 
 # ── re-freeze #4 identity pins (Luxia's ruling 2026-08-20) ───────────────────
@@ -211,6 +348,65 @@ CERTIFIED_HELPER_DIGESTS: dict[str, str] = {
     "spearman_rho":
         "8866de435255646a19aa67241c026872e187132ef037698e9768e23bf4b75226",
 }
+
+# ── PORTABILITY DEFECT IN THE ABOVE PINS, FOUND 2026-08-22 — NAMED, NOT SILENT ─
+#
+# WHAT WAS FOUND. Those digests are over `ast.unparse` output, and `ast.unparse`
+# IS INTERPRETER-DEPENDENT for f-strings that contain a same-quoted subscript.
+# PEP 701 (3.12) let an f-string reuse its own quote character inside the
+# replacement field, and the two interpreters render it differently:
+#
+#   CPython 3.12.3 (the LANE NODE's venv):  f'… {expect['prompt_tokens']} …'
+#   CPython 3.13.9 (the DESK):              f"… {expect['prompt_tokens']} …"
+#
+# Exactly ONE of the twelve helpers contains such an f-string —
+# `assert_span_accounting`, on three of its lines — so exactly one digest moves.
+# Both renderings are 2206 bytes and parse to the same tree; the difference is
+# quote style and nothing else.
+#
+# WHY IT MATTERS. The digests above were taken on the desk's 3.13. Every lane
+# runner gates on `--selftest || exit 2`. So the tool as merged at re-freeze #4
+# FAILS ITS OWN SELFTEST ON THE NODE IT RUNS ON, and did so before this port:
+# measured on `bb5f1d1` in the node venv, 126/128 with this exact failure. It is
+# a pre-existing defect of the merge, surfaced here because this certification is
+# the first thing to run the repo tool on the node.
+#
+# WHAT IS DONE ABOUT IT HERE, AND WHAT IS NOT. The 3.13 pin above is NOT edited —
+# it is the digest of record and it stays. The 3.12 rendering is admitted as a
+# NAMED, MEASURED ALTERNATIVE for the one affected helper, and the selftest
+# records WHICH rendering it saw. Two guards keep that from being a hole: the
+# alternative is a single hard-coded digest (not a wildcard, not a skip), and the
+# suite additionally requires the unparse to ROUND-TRIP — the code it renders must
+# parse back to the same tree as the source it came from — so an alternative
+# digest cannot silently stand for a different function.
+#
+# WHAT THE DESK SHOULD RULE ON. The durable fix is to pin over `ast.dump`, which
+# renders string VALUES rather than source quoting and is therefore immune to this
+# whole class of variance. `CERTIFIED_HELPER_AST_DUMP_DIGEST` below is that pin,
+# computed and asserted here as ONE aggregate over the same twelve helpers, so the
+# desk can promote it at the next re-freeze without a second archaeology pass.
+# Recomputing the twelve individual pins is a change to certified apparatus and is
+# NOT taken unilaterally (C§8).
+
+#: `ast.unparse` renderings of the affected helper under PEP 701, keyed by helper.
+#: MEASURED, not guessed: the lane venv, CPython 3.12.3, 2026-08-22.
+CERTIFIED_HELPER_DIGESTS_PEP701: dict[str, str] = {
+    "assert_span_accounting":
+        "2cbbbf72329305b49e8a5289a1694fc7e11437b464c7d1c0713a44c84c4d23e8",
+}
+
+#: The INTERPRETER-INDEPENDENT pin: sha256 over the concatenated CANONICAL FORM
+#: of the twelve helpers, in sorted name order, docstrings stripped. The canonical
+#: form is `selftest._canon` — node type plus every declared `_fields` entry,
+#: recursively, leaves as `repr` — and NOT `ast.dump`, because `ast.dump` is not
+#: portable either (3.13 added `show_empty` and defaults it False, so 3.12 prints
+#: `type_params=[]` where 3.13 prints nothing).
+#:
+#: MEASURED EQUAL, NOT ASSUMED: this exact number came out of both CPython 3.12.3
+#: (the lane venv) and CPython 3.13.9 (the desk) on 2026-08-22, for all twelve
+#: helpers individually as well as for the aggregate.
+CERTIFIED_HELPER_AST_DUMP_DIGEST = (
+    "56f59c160681fdc067724d0a6cb679106ccd1009838cf2d1a110dd0184c6053e")
 # `build_arg_parser` is deliberately ABSENT from that map: §6(b) retires
 # `--allow-any-host`, so its AST must differ. It is checked by option name
 # instead (`ARGPARSE_CONTRACT`), which is the contract a runner actually
@@ -227,8 +423,11 @@ CERTIFIED_ENGINE_KWARGS: frozenset[str] = frozenset({
 #: The tool's full option surface. 22 of the certified tool's 23 options are
 #: unchanged; `--allow-any-host` is retired and `--allowed-host`,
 #: `--require-env` and `--code-root` replace it with caller-supplied data.
+#: `--class-spec` is the class port's ONE new option (2026-08-22) and is
+#: OPTIONAL — absent, this tool is the entropy-gradient tool it was, which is
+#: what keeps every existing runner invocation meaning what it meant.
 ARGPARSE_CONTRACT: frozenset[str] = frozenset({
-    "--allowed-host", "--arm", "--code-root", "--corpus-sha",
+    "--allowed-host", "--arm", "--class-spec", "--code-root", "--corpus-sha",
     "--engine-sec25-norm", "--expect-pool-sha256", "--gpu-memory-utilization",
     "--include", "--lane-tag", "--limit-cells", "--matched-absolute-alpha",
     "--max-model-len", "--max-new-tokens", "--model-path", "--n-per-cell",
@@ -247,20 +446,57 @@ REQUIRED_ARGS: frozenset[str] = frozenset({
 #: The cell-id templates, as `ast.unparse` renders them. Cell ids are the join
 #: key against the BANKED byte-exact columns, so a changed template produces a
 #: column that silently matches nothing.
+#:
+#: THE CLASS PORT MOVED THREE OF THESE, AND ONLY THREE. The transported and
+#: naive templates spelled `gentropy_gradient` / `naive_entropy_gradient` as
+#: LITERALS, which is HALT E's defect: a class column run through them would
+#: have stamped CAA content under an entropy-gradient name. They now interpolate
+#: the resolved key the same way the native template always interpolated
+#: `native_key`. For an EGV column the three keys resolve to those very
+#: literals, so every EGV cell id is byte-identical to the pre-port tool's — and
+#: that is PROVEN in the selftest by rendering the plan, not asserted here.
 CELL_ID_TEMPLATES: frozenset[str] = frozenset({
     "f'baseline_L{site}_a+0.00'",
     "f'{native_key}_L{site}_a{frac:+.2f}'",
     "f'Rband{i}_L{site}_a{frac:+.2f}'",
-    "f'gentropy_gradient_L{site}_a{frac:+.2f}'",
+    "f'{transported_key}_L{site}_a{frac:+.2f}'",
     "f'gRband{i}_L{site}_a{frac:+.2f}'",
-    "f'naive_entropy_gradient_L{site}_a{frac:+.2f}'",
-    "f'naive_entropy_gradient_L{site}_a{d:+.2f}'",
+    "f'{naive_key}_L{site}_a{frac:+.2f}'",
+    "f'{naive_key}_L{site}_a{d:+.2f}'",
     "f'{native_key}_L{site}_a{frac:+.2f}@absalpha'",
 })
 
+#: The EGV cell ids the pre-port tool spelled as literals, kept as the
+#: BACKWARD-COMPATIBILITY WITNESS. The selftest renders the plan for a default
+#: (entropy-gradient) spec and requires these exact strings out of it, so
+#: "the EGV path is unchanged" is a property that fails loudly rather than a
+#: sentence in a docstring.
+EGV_CELL_ID_WITNESS: tuple[str, ...] = (
+    "baseline_L26_a+0.00",
+    "entropy_gradient_L26_L26_a-0.30",
+    "entropy_gradient_L26_L26_a+0.30",
+    "Rband1_L26_a-0.30",
+    "Rband3_L26_a+0.30",
+    "gentropy_gradient_L26_a-0.30",
+    "gentropy_gradient_L26_a+0.30",
+    "gRband1_L26_a-0.30",
+    "gRband3_L26_a+0.30",
+    "naive_entropy_gradient_L26_a-0.30",
+    "naive_entropy_gradient_L26_a+0.30",
+)
+
 #: The same grammar as a regex, so the ids those templates PRODUCE are checked
-#: and not only the templates themselves.
-CELL_ID_GRAMMAR = (
+#: and not only the templates themselves. GENERATED from the closed class
+#: vocabulary (see `build_cell_id_grammar`) rather than hand-written, so the two
+#: families cannot drift apart; the EGV alternation it produces is character-for-
+#: character the one re-freeze #4 pinned, which the selftest asserts by value.
+CELL_ID_GRAMMAR = build_cell_id_grammar()
+
+#: The EGV half of that grammar, as re-freeze #4 wrote it by hand. Kept so the
+#: generation is checked against the pin it replaced instead of only against
+#: itself (rake M40's family: a generated pin that vouches for itself is not a
+#: pin).
+CELL_ID_GRAMMAR_EGV_PIN = (
     r"(?:baseline|entropy_gradient_L\d+|Rband[123]|gentropy_gradient"
     r"|gRband[123]|naive_entropy_gradient)_L\d+_a[+-]\d\.\d{2}(?:@absalpha)?")
 
@@ -304,6 +540,26 @@ class LaneCodeRootUnresolved(LaneColumnRefused):
     """`metabasis` is not importable, so the column would run against nothing."""
 
 
+class VectorClassRefused(LaneColumnRefused):
+    """The class spec does not describe an object this lane will fire.
+
+    HALT D's four contract refusals plus the closed-vocabulary one. Every case
+    is a document the byte-exact lane would itself have refused, caught here
+    before a GPU is touched rather than discovered in a banked column.
+    """
+
+
+class VectorKeyUnresolvable(LaneColumnRefused):
+    """The bank and the spec disagree about which object this column rides.
+
+    Two failure shapes, deliberately distinguished because they demand different
+    responses: a bank that simply LACKS the object (go find the right bank), and
+    a bank that holds ANOTHER CLASS's object at this site (the spec is wrong, or
+    the bank is). Naming the second is what stops a lane run from silently
+    becoming a run of a different experiment.
+    """
+
+
 # ── typed documents (pydantic; nothing here is a bare dict on the wire) ───────
 
 class DeploymentGuard(BaseModel):
@@ -329,6 +585,137 @@ class DeploymentGuard(BaseModel):
         description="False when BOTH lists are empty — the runner is the guard")
     blocked_reason: Optional[str] = Field(
         default=None, description="the refusal text, or None when the guard passed")
+
+
+class LaneVectorBasis(BaseModel):
+    """One named basis: WHICH kind, WHICH sha. HALT D's fix, as this lane sees it."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kind: Literal["corpus-manifest", "contrast-set"]
+    sha256: str = Field(min_length=64, max_length=64)
+    provenance: str = ""
+
+    @field_validator("sha256")
+    @classmethod
+    def _is_hex(cls, v: str) -> str:
+        int(v, 16)                       # a non-hex digest is a typo, not a basis
+        return v
+
+
+class LaneClassSpec(BaseModel):
+    """The document that says WHAT OBJECT this column rides (HALT D + HALT E).
+
+    ABSENT, the runner is an entropy-gradient runner and every key, cell id and
+    emitted field is what it produced before the class port — that default is
+    the whole of the backward-compatibility story. PRESENT, it names the class,
+    the axis and both bases, and the refusals below are the ENGINE's own, applied
+    here so a lane column cannot bank a class object under a contract the
+    byte-exact lane would have refused.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    schema_version: Literal["vllm-lane-class-spec/1"] = "vllm-lane-class-spec/1"
+    vector_class: Literal["entropy_gradient", "caa", "repeng_pca"] = EGV_VECTOR_CLASS
+    #: the AXIS a class object is of (`sentiment`, `formality`, …). Required for a
+    #: class object — it is what makes four axes four columns — and refused for an
+    #: EGV, which has exactly one object per site and no axis to name.
+    axis: Optional[str] = None
+    #: HALT D: the FD gate has no analogue for a class object. Admissible for a
+    #: class object and for nothing else; an EGV that set it would bank an
+    #: ungated lever.
+    fd_gate_not_applicable: bool = False
+    #: HALT D: the VECTOR basis — the RULED contrast set a class object was built
+    #: from. Required for a class object, refused for an EGV (whose basis IS the
+    #: corpus manifest and is already carried by the vintage chain).
+    vector_basis: Optional[LaneVectorBasis] = None
+    #: HALT D: the GENERATION basis — the corpus the prompts and generations are
+    #: of. Optional in the document because the runner already takes
+    #: `--corpus-sha`; when both are given they must agree, and a disagreement is
+    #: a refusal rather than a preference.
+    generation_basis: Optional[LaneVectorBasis] = None
+    note: str = ""
+
+    @property
+    def is_class_vector(self) -> bool:
+        return self.vector_class != EGV_VECTOR_CLASS
+
+    @model_validator(mode="after")
+    def _halt_d_contract(self) -> "LaneClassSpec":
+        if self.is_class_vector and not self.axis:
+            raise VectorClassRefused(
+                f"vector_class={self.vector_class!r} names no `axis`. A class "
+                "object's key carries the axis (`caa_<axis>_L<site>`), which is "
+                "what makes four axes four columns instead of four names for one; "
+                "without it the lane would have to guess which object it rides.")
+        if not self.is_class_vector and self.axis:
+            raise VectorClassRefused(
+                f"an entropy-gradient column declared axis={self.axis!r}. The EGV "
+                "is one object per site and has no axis; an axis here would appear "
+                "in a cell id that the banked column does not carry.")
+        if self.fd_gate_not_applicable and not self.is_class_vector:
+            raise VectorClassRefused(
+                "an entropy-gradient object claims fd_gate_not_applicable. The FD "
+                "gate is the EGV's OWN acceptance test (§9 item 3) and waiving it "
+                "would run this lane on an UNGATED lever.")
+        if self.is_class_vector and self.vector_basis is None:
+            raise VectorClassRefused(
+                f"vector_class={self.vector_class!r} names no `vector_basis`. A "
+                "class object's VECTOR basis is the RULED contrast set it was "
+                "built from; writing the corpus sha instead would be false "
+                "provenance and writing nothing would be a hole (§9 item 2).")
+        if self.is_class_vector and self.vector_basis.kind != "contrast-set":
+            raise VectorClassRefused(
+                f"vector_basis.kind={self.vector_basis.kind!r} on a class object. "
+                "The VECTOR basis is the contrast set; `corpus-manifest` is the "
+                "GENERATION basis and rides its own field. The two are never one.")
+        if not self.is_class_vector and self.vector_basis is not None:
+            raise VectorClassRefused(
+                "an entropy-gradient object declared a vector_basis "
+                f"({self.vector_basis.kind}). The EGV's basis IS the corpus "
+                "manifest, already carried by the vintage chain — a second name "
+                "for one basis is how the two bases blur (HALT D).")
+        if (self.generation_basis is not None
+                and self.generation_basis.kind != "corpus-manifest"):
+            raise VectorClassRefused(
+                f"generation_basis.kind={self.generation_basis.kind!r} — the basis "
+                "the PROMPTS and GENERATIONS stand on is the corpus manifest, "
+                "always.")
+        return self
+
+
+class LaneVectorKeys(BaseModel):
+    """The four npz keys a lane column reads, resolved ONCE and used everywhere.
+
+    A typed object rather than four locals so the plan block and the ingredients
+    block cannot drift apart: the pre-port tool spelled `gentropy_gradient` in
+    both, which is exactly how a class column would have kept an entropy-gradient
+    name in half its output.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    vector_class: str
+    axis: Optional[str] = None
+    site: int
+    native: str
+    stem: str
+    transported: str
+    naive: str
+    #: WHERE the stem came from. `template` when nothing but this module's own
+    #: rendering was available (the CPU paths and the selftest); `bank` when the
+    #: bank's own spelling of the native key was read and used, which is what
+    #: every real column does.
+    stem_source: Literal["template", "bank"] = "template"
+
+    @property
+    def band_native(self) -> tuple[str, ...]:
+        return tuple(f"Rband{i}" for i in BAND_MEMBER_INDICES)
+
+    @property
+    def band_transported(self) -> tuple[str, ...]:
+        return tuple(f"{TRANSPORTED_PREFIX}Rband{i}" for i in BAND_MEMBER_INDICES)
 
 
 class RankAttachReport(BaseModel):
@@ -407,6 +794,202 @@ def apply_deployment_guard(allowed_hosts: Sequence[str],
     return DeploymentGuard(host=host, allowed_hosts=allowed, required_env=needed,
                            enforced_by_this_tool=bool(allowed or needed),
                            blocked_reason=reason)
+
+
+# ── key resolution (HALT E), ported from v2 `2c327112…` ──────────────────────
+
+def resolve_vector_keys(*, site: int, vector_class: str = EGV_VECTOR_CLASS,
+                        axis: Optional[str] = None) -> LaneVectorKeys:
+    """The class's native key, and the transported/naive keys DERIVED FROM IT.
+
+    HALT E's rule: the transported and naive keys come from the OBJECT, never
+    from the campaign's object of record. For an EGV column the stem is
+    `entropy_gradient` and the three keys are byte-identical to the literals the
+    pre-port tool spelled; for a CAA column the stem carries the axis, so
+    `gcaa_<axis>` and `naive_caa_<axis>` are per-axis and four axes are four
+    columns.
+
+    This is the TEMPLATE rendering. It is the right answer for the CPU paths and
+    for deciding what to LOOK FOR in a bank, but a column resolves through
+    `resolve_keys_from_bank` so the stem of record is the bank's own bytes.
+    """
+    if vector_class not in NATIVE_KEY_TEMPLATES:
+        raise VectorClassRefused(
+            f"vector_class={vector_class!r} has no banked key convention here "
+            f"(known: {sorted(NATIVE_KEY_TEMPLATES)}). The vocabulary is CLOSED — "
+            "an unrecognized class is refused rather than defaulted to the object "
+            "of record, because defaulting is how a class object acquires the "
+            "campaign's name.")
+    native = NATIVE_KEY_TEMPLATES[vector_class].format(site=site, axis=axis)
+    stem = SITE_SUFFIX_RE.sub("", native)
+    if stem == native:                                          # pragma: no cover
+        raise VectorClassRefused(
+            f"the resolved native key {native!r} carries no `_L<site>` suffix, so "
+            "its transported stem is undecidable. The banked convention is "
+            "`<object>_L<site>`; the lane does not invent one.")
+    return LaneVectorKeys(
+        vector_class=vector_class, axis=axis, site=site, native=native, stem=stem,
+        transported=f"{TRANSPORTED_PREFIX}{stem}",
+        naive=f"{NAIVE_PREFIX}_{stem}", stem_source="template")
+
+
+def native_key_family(key: str, *, site: int) -> Optional[str]:
+    """Which class family a NATIVE bank key belongs to at this site, or None.
+
+    Decided from the banked templates' own literal prefixes plus the `_L<site>`
+    suffix, so a bank's contents are read the way the campaign NAMES them rather
+    than by a heuristic this file invented.
+    """
+    for vector_class in NATIVE_KEY_TEMPLATES:
+        prefix = native_stem_template(vector_class).split("{")[0]
+        if key.startswith(prefix) and key.endswith(f"_L{site}"):
+            return vector_class
+    return None
+
+
+def assert_key_present(keys_in_bank: Sequence[str], wanted: str, *, where: str,
+                       site: int) -> None:
+    """The key is there, or this says WHICH other class's object was there instead."""
+    present = sorted(set(keys_in_bank))
+    if wanted in present:
+        return
+    others = sorted(k for k in present
+                    if k != wanted and native_key_family(k, site=site) is not None)
+    hint = (f" The bank DOES hold {others} at L{site} — another object entirely, "
+            "which this runner will not substitute." if others else "")
+    raise VectorKeyUnresolvable(
+        f"{where} has no {wanted!r} (keys present: {present}).{hint} The lane "
+        "column writes the SAME banked vector the byte-exact column wrote, never "
+        f"a re-derived one, and never another object's. [L{site}]")
+
+
+def assert_bank_unambiguous(keys_in_bank: Sequence[str], *, site: int,
+                            declared: str, where: str) -> None:
+    """A bank holding two class families at this site must have been TOLD which one.
+
+    With no class spec the runner defaults to the entropy gradient, and a bank
+    that also carries CAA objects at the same site would have that default
+    silently pick one of two experiments. Declared explicitly, either is fine;
+    undeclared, this refuses.
+    """
+    families = sorted({f for f in (native_key_family(k, site=site)
+                                   for k in keys_in_bank) if f is not None})
+    if len(families) > 1 and declared == EGV_VECTOR_CLASS:
+        raise VectorKeyUnresolvable(
+            f"{where} carries objects of {families} at L{site} and no vector class "
+            "was DECLARED, so the runner would silently take the campaign's object "
+            "of record out of a bank holding two experiments. Name the class in "
+            "--class-spec; the lane never guesses which object a column rides.")
+
+
+def resolve_keys_from_bank(keys_in_bank: Sequence[str], *, site: int,
+                           spec: LaneClassSpec, where: str) -> LaneVectorKeys:
+    """The keys of record, with the STEM taken from the BANK'S OWN SPELLING.
+
+    THE DIFFERENCE FROM `resolve_vector_keys`, AND WHY IT IS WORTH A FUNCTION.
+    The template rendering says what a `caa`/`language`/`L21` object OUGHT to be
+    called. The bytes in the npz say what it IS called. Those are two claims, and
+    the second is the one every downstream key is derived from — so this looks
+    the native key up IN THE BANK, takes the matched entry's own characters, and
+    derives `stem`/`transported`/`naive` from THOSE. A bank whose spelling
+    differs from the template does not get quietly renamed: `assert_key_present`
+    refuses first, and names which other object it found instead. The equality of
+    the two spellings is therefore PROVEN once per column rather than assumed
+    forever, which is HALT E's rule read strictly.
+
+    The two guards run in this order on purpose: ambiguity first (a bank holding
+    two families under an undeclared class is a question about the RUN, not about
+    one key), then presence.
+    """
+    assert_bank_unambiguous(keys_in_bank, site=site,
+                            declared=spec.vector_class, where=where)
+    wanted = resolve_vector_keys(site=site, vector_class=spec.vector_class,
+                                 axis=spec.axis)
+    assert_key_present(keys_in_bank, wanted.native, where=where, site=site)
+    banked_spelling = next(k for k in keys_in_bank if k == wanted.native)
+    stem = SITE_SUFFIX_RE.sub("", banked_spelling)
+    if stem == banked_spelling:                                 # pragma: no cover
+        raise VectorKeyUnresolvable(
+            f"{where} spells the native key {banked_spelling!r}, which carries no "
+            "`_L<site>` suffix — its transported stem is undecidable and this lane "
+            "does not invent one")
+    return wanted.model_copy(update={
+        "native": banked_spelling, "stem": stem,
+        "transported": f"{TRANSPORTED_PREFIX}{stem}",
+        "naive": f"{NAIVE_PREFIX}_{stem}", "stem_source": "bank"})
+
+
+def load_class_spec(path: Optional[Path]) -> LaneClassSpec:
+    """Read the class spec, or return the ENTROPY-GRADIENT default.
+
+    The default is the whole of the backward-compatibility story: no path means
+    the campaign's object of record, which is what every flag of this runner
+    meant before the class column existed.
+    """
+    if path is None:
+        return LaneClassSpec()
+    if not path.exists():
+        raise VectorClassRefused(f"no class spec at {path}")
+    try:
+        body = json.loads(path.read_text())
+    except (json.JSONDecodeError, OSError) as exc:
+        raise VectorClassRefused(
+            f"{path}: unreadable class spec ({type(exc).__name__}: {exc})") from exc
+    if not isinstance(body, dict):
+        raise VectorClassRefused(f"{path}: a class spec is a JSON object")
+    version = body.get("schema_version", "vllm-lane-class-spec/1")
+    if version != "vllm-lane-class-spec/1":
+        raise VectorClassRefused(
+            f"{path}: class spec schema {version!r}, this runner speaks "
+            "'vllm-lane-class-spec/1' — a silently-changed contract is a column "
+            "run against terms nobody agreed to.")
+    try:
+        return LaneClassSpec(**body)
+    except LaneColumnRefused:
+        raise
+    except (TypeError, ValueError) as exc:
+        raise VectorClassRefused(f"{path}: {exc}") from exc
+
+
+def class_contract_block(spec: LaneClassSpec, *, keys: LaneVectorKeys,
+                         corpus_sha: str) -> dict[str, Any]:
+    """HALT D's contract as the block that rides into every column artifact.
+
+    Both bases are named or neither is trustworthy, so the GENERATION basis is
+    ALWAYS emitted — from the spec when it names one, from `--corpus-sha`
+    otherwise — and a spec whose generation basis disagrees with the corpus the
+    column is actually running against is a refusal, not a preference.
+    """
+    generation = spec.generation_basis
+    if generation is not None and generation.sha256 != corpus_sha:
+        raise VectorClassRefused(
+            f"the class spec's generation_basis {generation.sha256[:12]}… is not "
+            f"the corpus this column runs against ({corpus_sha[:12]}…). The "
+            "GENERATION basis is the corpus the prompts and generations are OF; "
+            "two answers is not a basis.")
+    return {
+        "vector_class": spec.vector_class,
+        "axis": spec.axis,
+        "is_class_vector": spec.is_class_vector,
+        "fd_gate_not_applicable": spec.fd_gate_not_applicable,
+        "vector_basis": (spec.vector_basis.model_dump()
+                         if spec.vector_basis is not None else None),
+        "generation_basis": (generation.model_dump() if generation is not None else {
+            "kind": "corpus-manifest", "sha256": corpus_sha,
+            "provenance": "the corpus manifest the PROMPTS and GENERATIONS are of "
+                          "— the GENERATION basis, never the object's"}),
+        "native_key": keys.native,
+        "transported_key": keys.transported,
+        "naive_key": keys.naive,
+        "two_bases_note": (
+            "HALT D (Luxia's ruling, 2026-08-05): a class cell stands on TWO "
+            "bases. The GENERATION basis is the corpus manifest; the VECTOR basis "
+            "is the RULED contrast set the class object was built from. Both are "
+            "named; neither is readable as the other. `fd_gate_not_applicable` is "
+            "admissible for a class object ONLY — no FD-gate analogue exists for "
+            "it — and an entropy-gradient object still REQUIRES its gate."),
+        "note": spec.note,
+    }
 
 
 # ── small helpers (pure, selftested) ──────────────────────────────────────────
@@ -684,10 +1267,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
     ap.add_argument("--corpus-sha", required=True,
                     help="the basis the banked band was anchored to")
     ap.add_argument("--vectors-npz", type=Path, required=True,
-                    help="the BANKED calibration bank (entropy_gradient_L<site>)")
+                    help="the BANKED calibration bank; must hold the NATIVE key "
+                         "the class spec resolves (entropy_gradient_L<site> by "
+                         "default, caa_<axis>_L<site> under a class spec)")
     ap.add_argument("--transported-npz", type=Path, default=None,
-                    help="the BANKED transported bank (gentropy_gradient, "
-                         "naive_entropy_gradient); enables the B3/B4 cells")
+                    help="the BANKED transported bank; must hold the transported "
+                         "and naive keys DERIVED from the native object's stem "
+                         "(gentropy_gradient / naive_entropy_gradient by default, "
+                         "gcaa_<axis> / naive_caa_<axis> under a class spec). "
+                         "Enables the B3/B4 cells.")
     ap.add_argument("--source-key", default=None,
                     help="the hub/source node key — gRband draws in ITS space")
     ap.add_argument("--prompt-pool", type=Path, required=True)
@@ -731,6 +1319,19 @@ def build_arg_parser() -> argparse.ArgumentParser:
                          "set and non-empty; EMPTY (the default) imposes none. "
                          "The node runners pass their scheduler's job-id "
                          "variable here.")
+    # THE CLASS PORT'S ONE NEW OPTION (2026-08-22). Optional by construction:
+    # absent, `load_class_spec(None)` is the entropy gradient and every key, cell
+    # id and emitted field is what this tool produced before the port, so no
+    # existing runner invocation changes meaning.
+    ap.add_argument("--class-spec", type=Path, default=None,
+                    help="a `vllm-lane-class-spec/1` document (JSON: "
+                         "vector_class, axis, fd_gate_not_applicable, "
+                         "vector_basis, generation_basis). ABSENT = the "
+                         "entropy-gradient family, which is what every flag here "
+                         "meant before the class column existed. With "
+                         "vector_class=caa the keys become caa_<axis>_L<site> / "
+                         "gcaa_<axis> / naive_caa_<axis>, and HALT D's two-bases "
+                         "contract rides into the column artifact.")
     ap.add_argument("--code-root", type=Path, default=None,
                     help="directory prepended to sys.path so `metabasis` "
                          "imports; falls back to $MB_CODE. Neither is required "
@@ -839,17 +1440,49 @@ def main(argv: Optional[list[str]] = None) -> int:                # noqa: C901
               file=sys.stderr)
         return 2
 
+    # ---- the class spec, and the keys it resolves (the class port) -----------
+    # Loaded BEFORE the bank so a malformed contract costs no I/O, and resolved
+    # AGAINST the bank below so the stem of record is the bank's own spelling.
+    try:
+        class_spec = load_class_spec(args.class_spec)
+    except LaneColumnRefused as exc:
+        print(f"BLOCKED: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 2
+    doc["class_spec_path"] = (str(args.class_spec) if args.class_spec else None)
+    doc["class_spec_sha256"] = (sha256_file(args.class_spec)
+                                if args.class_spec else None)
+
     # ---- vectors -------------------------------------------------------------
     doc["vectors_npz"] = str(args.vectors_npz)
     doc["vectors_npz_sha256"] = sha256_file(args.vectors_npz)
     with np.load(args.vectors_npz, allow_pickle=True) as z:
         vecs = {k: np.asarray(z[k]).reshape(-1).astype(np.float32) for k in z.files}
-    native_key = f"entropy_gradient_L{site}"
-    if native_key not in vecs:
-        print(f"BLOCKED: {args.vectors_npz} has no {native_key!r} (keys "
-              f"{sorted(vecs)}) — the lane column writes the SAME banked vector "
-              "the byte-exact column wrote, never a re-derived one", file=sys.stderr)
+    try:
+        keys = resolve_keys_from_bank(list(vecs), site=site, spec=class_spec,
+                                      where=str(args.vectors_npz))
+        doc["vector_class_contract"] = class_contract_block(
+            class_spec, keys=keys, corpus_sha=args.corpus_sha)
+    except LaneColumnRefused as exc:
+        print(f"BLOCKED: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 2
+    native_key = keys.native
+    transported_key = keys.transported
+    naive_key = keys.naive
+    doc["vector_keys"] = {
+        "native": keys.native, "transported": keys.transported,
+        "naive": keys.naive, "stem": keys.stem,
+        "stem_source": keys.stem_source,
+        "band_native": list(keys.band_native),
+        "band_transported": list(keys.band_transported),
+        "derivation": ("HALT E (2026-08-05): the transported and naive keys come "
+                       "from the OBJECT — `g` + the native object's own stem, "
+                       "`naive_` + the same stem — never from the campaign's "
+                       "object of record. An EGV column's three keys are therefore "
+                       "the banked literals; a class column's carry the axis. The "
+                       "stem is the BANK's own spelling of the native key, which "
+                       "the resolver proved equal to the template rendering for "
+                       "this column rather than assuming."),
+    }
     dim = int(vecs[native_key].size)
     doc["hidden_dim_from_vector"] = dim
 
@@ -866,11 +1499,16 @@ def main(argv: Optional[list[str]] = None) -> int:                # noqa: C901
         with np.load(args.transported_npz, allow_pickle=True) as z:
             tvecs = {k: np.asarray(z[k]).reshape(-1).astype(np.float32)
                      for k in z.files}
-        for need in ("gentropy_gradient", "naive_entropy_gradient"):
-            if need not in tvecs:
-                print(f"BLOCKED: transported bank has no {need!r} (keys "
-                      f"{sorted(tvecs)})", file=sys.stderr)
-                return 2
+        # The two keys asked for are DERIVED from the native object's own stem,
+        # never retyped: for an EGV column they are `gentropy_gradient` and
+        # `naive_entropy_gradient`, the very literals this block used to spell.
+        try:
+            for need in (transported_key, naive_key):
+                assert_key_present(list(tvecs), need, site=site,
+                                   where=f"transported bank {args.transported_npz}")
+        except LaneColumnRefused as exc:
+            print(f"BLOCKED: {type(exc).__name__}: {exc}", file=sys.stderr)
+            return 2
 
     # ---- the LANE-TAGGED bands (ruled recipe, unedited) ----------------------
     lane_native_band_vector_key = f"{native_key}{args.lane_tag}"
@@ -951,10 +1589,10 @@ def main(argv: Optional[list[str]] = None) -> int:                # noqa: C901
                              "vector": rband[f"Rband{i}"], "alpha_mode": "frac"})
     if "transported" in blocks:
         for frac in DOSE_LADDER:
-            plan.append({"cell_id": f"gentropy_gradient_L{site}_a{frac:+.2f}",
-                         "kind": "transported", "vector_key": "gentropy_gradient",
+            plan.append({"cell_id": f"{transported_key}_L{site}_a{frac:+.2f}",
+                         "kind": "transported", "vector_key": transported_key,
                          "alpha_frac": float(frac), "band_family": None,
-                         "vector": tvecs["gentropy_gradient"], "alpha_mode": "frac"})
+                         "vector": tvecs[transported_key], "alpha_mode": "frac"})
         for i in (1, 2, 3):
             for frac in DOSE_LADDER:
                 plan.append({"cell_id": f"gRband{i}_L{site}_a{frac:+.2f}",
@@ -962,10 +1600,10 @@ def main(argv: Optional[list[str]] = None) -> int:                # noqa: C901
                              "alpha_frac": float(frac), "band_family": "gRband",
                              "vector": gband[f"gRband{i}"], "alpha_mode": "frac"})
         for frac in SCORING_DOSES:
-            plan.append({"cell_id": f"naive_entropy_gradient_L{site}_a{frac:+.2f}",
-                         "kind": "naive", "vector_key": "naive_entropy_gradient",
+            plan.append({"cell_id": f"{naive_key}_L{site}_a{frac:+.2f}",
+                         "kind": "naive", "vector_key": naive_key,
                          "alpha_frac": float(frac), "band_family": None,
-                         "vector": tvecs["naive_entropy_gradient"],
+                         "vector": tvecs[naive_key],
                          "alpha_mode": "frac"})
     if "absbeside" in blocks:
         if args.matched_absolute_alpha is None:
@@ -1503,7 +2141,7 @@ def main(argv: Optional[list[str]] = None) -> int:                # noqa: C901
         }
 
     if "transported" in blocks:
-        trises = ladder(lambda f: f"gentropy_gradient_L{site}_a{f:+.2f}")
+        trises = ladder(lambda f: f"{transported_key}_L{site}_a{f:+.2f}")
         gbands = {}
         for f in DOSE_LADDER:
             members = [rise_of(f"gRband{i}_L{site}_a{f:+.2f}") for i in (1, 2, 3)]
@@ -1528,10 +2166,10 @@ def main(argv: Optional[list[str]] = None) -> int:                # noqa: C901
         }
         ing["b4_naive"] = {
             f"{d:+g}": {
-                "cell_id": f"naive_entropy_gradient_L{site}_a{d:+.2f}",
-                "entropy_rise": rise_of(f"naive_entropy_gradient_L{site}_a{d:+.2f}"),
+                "cell_id": f"{naive_key}_L{site}_a{d:+.2f}",
+                "entropy_rise": rise_of(f"{naive_key}_L{site}_a{d:+.2f}"),
                 "distinct_word_ratio": by_id.get(
-                    f"naive_entropy_gradient_L{site}_a{d:+.2f}", {})
+                    f"{naive_key}_L{site}_a{d:+.2f}", {})
                     .get("coherence", {}).get("distinct_word_ratio"),
                 "lane_gRband_min": gbands[f"{d:+g}"]["gRband_min"],
                 "lane_gRband_max": gbands[f"{d:+g}"]["gRband_max"],
@@ -1582,12 +2220,24 @@ def main(argv: Optional[list[str]] = None) -> int:                # noqa: C901
 def selftest() -> int:                                            # noqa: C901
     checks = 0
     fails: list[str] = []
+    # HOISTED to the top of the suite, 2026-08-22. `skip` was defined halfway
+    # down, so the ONE optional block above it — the scipy cross-check — degraded
+    # to a bare `print` and six checks simply VANISHED from the count. That is
+    # the shape rake M44 is named for: an unqualified count that silently vouches
+    # for less than it says, and it is why the recorded floor could not be met in
+    # the lane venv (which has no scipy) even before this port.
+    skips: list[str] = []
 
     def ok(cond: bool, name: str, detail: str = "") -> None:
         nonlocal checks
         checks += 1
         if not cond:
             fails.append(f"{name}{(' — ' + detail) if detail else ''}")
+
+    def skip(name: str, why: str) -> None:
+        nonlocal checks
+        checks += 1
+        skips.append(f"{name} — {why}")
 
     import numpy as np
 
@@ -1726,7 +2376,12 @@ def selftest() -> int:                                            # noqa: C901
     try:
         from scipy.stats import spearmanr                      # type: ignore
     except ImportError:
-        print("  (scipy absent — the scipy cross-check is SKIPPED, not passed)")
+        skip("the scipy cross-check on `spearman_rho`",
+             "scipy is not importable here; evidence MISSING: that this lane's "
+             "transcribed rank correlation gives the same number as the frozen "
+             "reader's `scipy.stats.spearmanr` on the six pinned cases. The lane "
+             "venv has no scipy BY DESIGN (verified 2026-08-08), so this skip is "
+             "the normal state on the node and is NAMED rather than printed")
     else:
         cases = [
             ([-.3, -.1, -.03, .03, .1, .3], [-.5283, -.2924, -.1087, .1244, .4819, 1.1399]),
@@ -1765,12 +2420,9 @@ def selftest() -> int:                                            # noqa: C901
     import inspect
     import re as _re
 
-    skips: list[str] = []
-
-    def skip(name: str, why: str) -> None:
-        nonlocal checks
-        checks += 1
-        skips.append(f"{name} — {why}")
+    # (`skip` and `skips` are hoisted to the top of the suite — see the note
+    # there; they used to be declared at this point, which is what left the
+    # scipy block above unable to name its own skip.)
 
     # RAKE M59(2): the node runs this file as `python <code-root>/metabasis/
     # scripts/vllm_lane_column.py --selftest`, so `sys.path[0]` is the SCRIPTS
@@ -1843,16 +2495,83 @@ def selftest() -> int:                                            # noqa: C901
 
     _shared = {n.name: n for n in _tree.body
                if isinstance(n, (ast.FunctionDef, ast.ClassDef))}
+    _pep701_renderings: list[str] = []
     for hname, want in sorted(CERTIFIED_HELPER_DIGESTS.items()):
         node = _shared.get(hname)
         if node is None:
             ok(False, f"the shared helper `{hname}` still exists", "missing")
             continue
-        ok(_digest([node]) == want,
+        got = _digest([node])
+        alt = CERTIFIED_HELPER_DIGESTS_PEP701.get(hname)
+        if alt is not None and got == alt and got != want:
+            _pep701_renderings.append(hname)
+        ok(got == want or got == alt,
            f"the shared helper `{hname}` is AST-identical to the certified "
            "tool's — the pure arithmetic the whole lane rests on did not move "
-           "when the TP branch was added",
-           f"{_digest([node])} vs {want}")
+           "when the TP branch was added, nor when the class port was made. On "
+           "an interpreter that renders PEP 701 f-strings the other way the "
+           "MEASURED alternative digest is accepted and recorded; anything else "
+           "fails here",
+           f"{got} vs {want}" + (f" (pep701 alt {alt})" if alt else ""))
+    ok(len(_pep701_renderings) <= len(CERTIFIED_HELPER_DIGESTS_PEP701),
+       "…and no helper outside the NAMED PEP-701 set needed the alternative "
+       "digest — the alternative is one measured number per named helper, never "
+       "a wildcard", f"{_pep701_renderings}")
+    if _pep701_renderings:
+        print(f"  (PEP 701 rendering in use for {_pep701_renderings} — this "
+              f"interpreter is CPython {sys.version_info.major}."
+              f"{sys.version_info.minor}; the digest of record was taken on 3.13)")
+
+    # THE ROUND-TRIP, which is what keeps the alternative from being a hole. On
+    # ANY interpreter, unparsing a helper and re-parsing it must give back THE
+    # TREE IT CAME FROM — so a digest admitted from the alternative map cannot
+    # stand for a function that is merely spelled differently. `ast.dump` is the
+    # comparison because it prints a constant's VALUE and never its quoting,
+    # which is precisely the axis the PEP-701 variance lives on. A FRESH parse is
+    # used because `_strip_docstrings` mutates in place and `_tree` is still
+    # wanted intact by the checks above.
+    #
+    # `ast.dump` ITSELF IS NOT PORTABLE — measured, not assumed. 3.13 added
+    # `show_empty` and defaults it False, so 3.12 prints `type_params=[]` where
+    # 3.13 prints nothing, and the two dumps of one tree differ. So the canonical
+    # form below is hand-rolled over `_fields`: node type, then every declared
+    # field in the class's own order, recursively, with leaves as `repr`. It
+    # names no default and omits nothing, so it says the same thing on both.
+    def _canon(node: Any) -> str:
+        if isinstance(node, ast.AST):
+            return ("(" + type(node).__name__ + ","
+                    + ",".join(f"{f}={_canon(getattr(node, f, None))}"
+                               for f in node._fields) + ")")
+        if isinstance(node, list):
+            return "[" + ",".join(_canon(x) for x in node) + "]"
+        return repr(node)
+
+    _fresh = {n.name: n for n in ast.parse(_src).body
+              if isinstance(n, (ast.FunctionDef, ast.ClassDef))}
+    _dumps: dict[str, str] = {}
+    for hname in sorted(CERTIFIED_HELPER_DIGESTS):
+        node = _fresh.get(hname)
+        if node is None:
+            continue
+        before = _strip_docstrings(ast.Module(body=[node], type_ignores=[]))
+        _dumps[hname] = _canon(before)
+        after = _strip_docstrings(ast.parse(ast.unparse(before)))
+        ok(_dumps[hname] == _canon(after),
+           f"`{hname}` round-trips through `ast.unparse` back to the same tree — "
+           "the RENDERING may vary by interpreter, the CODE may not, and that is "
+           "what makes the named PEP-701 alternative safe to accept")
+
+    # THE PORTABLE PIN the desk may promote: one aggregate over those canonical
+    # forms. VERIFIED equal on CPython 3.12.3 (the lane node) and 3.13.9 (the
+    # desk) on 2026-08-22 — that equality is the whole claim, and it is a
+    # measurement, not a property of `ast`.
+    _dump_digest = hashlib.sha256(
+        "\n".join(_dumps[h] for h in sorted(_dumps)).encode()).hexdigest()
+    ok(_dump_digest == CERTIFIED_HELPER_AST_DUMP_DIGEST,
+       "the INTERPRETER-INDEPENDENT aggregate pin over the twelve helpers' "
+       "`ast.dump` is the recorded one — this is the pin the desk may promote to "
+       "retire the PEP-701 variance, and it is asserted here rather than merely "
+       "proposed", f"{_dump_digest} vs {CERTIFIED_HELPER_AST_DUMP_DIGEST}")
 
     _llm_calls = [n for n in ast.walk(_main)
                   if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
@@ -2203,9 +2922,390 @@ def selftest() -> int:                                            # noqa: C901
            "…whose every public attribute is `mb_`-prefixed (vLLM aborts engine "
            "construction on a Worker attribute collision, worker_base.py:269-275)")
 
-    # ── 12. M59: the suite's own arithmetic ──────────────────────────────────
-    SELFTEST_CHECK_FLOOR = 133
-    KNOWN_SKIP_CEILING = 4
+    # ══ the class port (2026-08-22): BOTH vector families, at any TP ════════
+    #
+    # Everything below is new at the class×TP merge. It is CPU-only and
+    # data-independent; the one block that needs the campaign package degrades
+    # to a NAMED SKIP that says what evidence is missing (rakes M44 + M59(3)).
+
+    # ── 12. the closed vocabulary and HALT E's key derivation ────────────────
+    _egv = resolve_vector_keys(site=26)
+    ok((_egv.native, _egv.transported, _egv.naive, _egv.stem)
+       == ("entropy_gradient_L26", "gentropy_gradient",
+           "naive_entropy_gradient", "entropy_gradient"),
+       "with NO class spec the three keys are the literals the pre-port tool "
+       "spelled — the default IS the backward compatibility, and it is checked "
+       "by value rather than promised",
+       f"{_egv.native} / {_egv.transported} / {_egv.naive}")
+    _caa = resolve_vector_keys(site=26, vector_class="caa", axis="sentiment")
+    ok((_caa.native, _caa.transported, _caa.naive)
+       == ("caa_sentiment_L26", "gcaa_sentiment", "naive_caa_sentiment"),
+       "HALT E: a CAA object's transported and naive keys come from ITS OWN "
+       "stem, so four axes are four columns and not four names for one",
+       f"{_caa.native} / {_caa.transported} / {_caa.naive}")
+    _rp = resolve_vector_keys(site=26, vector_class="repeng_pca", axis="sentiment")
+    ok((_rp.native, _rp.transported, _rp.naive)
+       == ("repengpca_sentiment_L26", "grepengpca_sentiment",
+           "naive_repengpca_sentiment"),
+       "…and the repeng method row rides the SAME derivation, because the "
+       "derivation is the object's and not the class's",
+       f"{_rp.native} / {_rp.transported} / {_rp.naive}")
+    _other = resolve_vector_keys(site=26, vector_class="caa", axis="formality")
+    ok(not ({_caa.native, _caa.transported, _caa.naive}
+            & {_other.native, _other.transported, _other.naive}),
+       "two axes of one class share NO key — the collision HALT E exists to "
+       "prevent cannot be spelled")
+    ok(_egv.band_native == ("Rband1", "Rband2", "Rband3")
+       and _egv.band_transported == ("gRband1", "gRband2", "gRband3"),
+       "the two band families are unchanged by the port")
+    ok(_egv.stem_source == "template",
+       "a template-resolved key SAYS it was template-resolved — a column's keys "
+       "come from the bank and the stamp must be able to tell the two apart")
+    try:
+        resolve_vector_keys(site=26, vector_class="lda", axis="x")
+        ok(False, "an UNKNOWN vector class is REFUSED")
+    except VectorClassRefused as exc:
+        ok("CLOSED" in str(exc),
+           "an UNKNOWN vector class is REFUSED, and the refusal says the "
+           "vocabulary is closed rather than defaulting to the object of record",
+           str(exc)[:80])
+    ok(LaneVectorKeys.model_config.get("frozen") is True
+       and LaneVectorKeys.model_config.get("extra") == "forbid",
+       "the resolved keys are frozen and forbid unknown fields — the plan block "
+       "and the ingredients block read ONE object, so they cannot drift")
+    for vc in sorted(NATIVE_KEY_TEMPLATES):
+        ok(NATIVE_KEY_TEMPLATES[vc].endswith(NATIVE_SITE_SUFFIX),
+           f"the native template for `{vc}` ends in the site suffix, so its "
+           "transported stem is decidable rather than guessed",
+           NATIVE_KEY_TEMPLATES[vc])
+
+    # ── 13. resolution against a BANK, which is where the stem comes from ────
+    _bank_caa = ["caa_sentiment_L26", "Rband1", "Rband2", "Rband3"]
+    _spec_caa = LaneClassSpec(
+        vector_class="caa", axis="sentiment", fd_gate_not_applicable=True,
+        vector_basis=LaneVectorBasis(kind="contrast-set", sha256="a" * 64))
+    _rk = resolve_keys_from_bank(_bank_caa, site=26, spec=_spec_caa, where="a bank")
+    ok(_rk.native == "caa_sentiment_L26" and _rk.stem == "caa_sentiment"
+       and _rk.stem_source == "bank",
+       "the stem of record is the BANK's own spelling of the native key, and the "
+       "keys say so — the template rendering is what we LOOK FOR, not what we "
+       "then derive from", f"{_rk.stem} ({_rk.stem_source})")
+    try:
+        resolve_keys_from_bank(["entropy_gradient_L26"], site=26, spec=_spec_caa,
+                               where="an EGV bank")
+        ok(False, "a bank holding ANOTHER class's object at this site REFUSES")
+    except VectorKeyUnresolvable as exc:
+        ok("entropy_gradient_L26" in str(exc) and "not substitute" in str(exc),
+           "a bank holding ANOTHER class's object at this site REFUSES, and the "
+           "refusal NAMES what it found instead — that is what stops a lane run "
+           "silently becoming a run of a different experiment", str(exc)[:110])
+    try:
+        resolve_keys_from_bank(["entropy_gradient_L26", "caa_sentiment_L26"],
+                               site=26, spec=LaneClassSpec(), where="a mixed bank")
+        ok(False, "an UNDECLARED class over a two-family bank REFUSES")
+    except VectorKeyUnresolvable as exc:
+        ok("DECLARED" in str(exc),
+           "an UNDECLARED class over a bank carrying two families at this site "
+           "REFUSES rather than silently taking the object of record",
+           str(exc)[:110])
+    ok(resolve_keys_from_bank(["entropy_gradient_L26", "caa_sentiment_L26"],
+                              site=26, spec=_spec_caa,
+                              where="a mixed bank").native == "caa_sentiment_L26",
+       "…and the SAME bank is fine once the class is declared — the refusal is "
+       "about the ambiguity, never about the bank")
+    try:
+        resolve_keys_from_bank([], site=26, spec=LaneClassSpec(), where="an empty bank")
+        ok(False, "an EMPTY bank REFUSES")
+    except VectorKeyUnresolvable:
+        ok(True, "an EMPTY bank REFUSES — an absent key is a hole, never a pass")
+    ok(native_key_family("caa_sentiment_L26", site=26) == "caa"
+       and native_key_family("entropy_gradient_L26", site=26) == "entropy_gradient"
+       and native_key_family("caa_sentiment_L21", site=26) is None
+       and native_key_family("gcaa_sentiment", site=26) is None
+       and native_key_family("Rband1", site=26) is None,
+       "family detection reads the campaign's OWN templates plus the site suffix "
+       "— a band, a transported object, and an object at another site are all "
+       "correctly not-a-native-key-here")
+
+    # ── 14. HALT D's four contract refusals ──────────────────────────────────
+    _basis = LaneVectorBasis(kind="contrast-set", sha256="a" * 64)
+    _good = LaneClassSpec(vector_class="caa", axis="sentiment",
+                          fd_gate_not_applicable=True, vector_basis=_basis)
+    ok(_good.is_class_vector and LaneClassSpec().is_class_vector is False,
+       "`is_class_vector` is decided by the class, not by whether a spec exists")
+    for bad, why in (
+            (dict(vector_class="caa", vector_basis=_basis), "a class with no axis"),
+            (dict(axis="sentiment"), "an EGV that named an axis"),
+            (dict(fd_gate_not_applicable=True), "an EGV waiving its FD gate"),
+            (dict(vector_class="caa", axis="s"), "a class with no vector basis"),
+            (dict(vector_class="caa", axis="s",
+                  vector_basis={"kind": "corpus-manifest", "sha256": "a" * 64}),
+             "a class whose VECTOR basis is the corpus manifest"),
+            (dict(vector_basis=_basis), "an EGV naming a vector basis"),
+            (dict(generation_basis=_basis),
+             "a GENERATION basis that is not a corpus manifest")):
+        try:
+            LaneClassSpec(**bad)                          # type: ignore[arg-type]
+            ok(False, f"HALT D REFUSES: {why}")
+        except VectorClassRefused:
+            ok(True, f"HALT D REFUSES: {why}")
+    try:
+        LaneVectorBasis(kind="contrast-set", sha256="z" * 64)
+        ok(False, "a NON-HEX basis digest is a refusal")
+    except Exception:                                          # noqa: BLE001
+        ok(True, "a NON-HEX basis digest is a refusal, not a basis")
+    try:
+        LaneVectorBasis(kind="contrast-set", sha256="a" * 63)
+        ok(False, "a SHORT basis digest is a refusal")
+    except Exception:                                          # noqa: BLE001
+        ok(True, "a SHORT basis digest is a refusal (rake M40: a truncated digest "
+                 "padded to width is not the digest)")
+    ok(LaneClassSpec.model_config.get("frozen") is True
+       and LaneClassSpec.model_config.get("extra") == "forbid",
+       "the class spec is frozen and forbids unknown keys — a typo'd contract "
+       "field is a refusal, never a silently dropped clause")
+    _contract = class_contract_block(_good, keys=_caa, corpus_sha="b" * 64)
+    ok(_contract["vector_basis"]["kind"] == "contrast-set"
+       and _contract["generation_basis"]["kind"] == "corpus-manifest"
+       and _contract["generation_basis"]["sha256"] == "b" * 64
+       and _contract["fd_gate_not_applicable"] is True
+       and _contract["native_key"] == "caa_sentiment_L26"
+       and _contract["transported_key"] == "gcaa_sentiment"
+       and _contract["naive_key"] == "naive_caa_sentiment",
+       "the contract block names BOTH bases and all three keys — HALT D's rule "
+       "is that both are named or neither is trustworthy")
+    _egv_contract = class_contract_block(LaneClassSpec(), keys=_egv,
+                                         corpus_sha="b" * 64)
+    ok(_egv_contract["vector_basis"] is None
+       and _egv_contract["is_class_vector"] is False
+       and _egv_contract["fd_gate_not_applicable"] is False
+       and _egv_contract["generation_basis"]["sha256"] == "b" * 64,
+       "an EGV column still carries a GENERATION basis and no VECTOR basis — its "
+       "basis IS the corpus manifest")
+    try:
+        class_contract_block(
+            LaneClassSpec(generation_basis=LaneVectorBasis(
+                kind="corpus-manifest", sha256="c" * 64)),
+            keys=_egv, corpus_sha="b" * 64)
+        ok(False, "a generation basis that is not THIS column's corpus REFUSES")
+    except VectorClassRefused:
+        ok(True, "a generation basis that is not THIS column's corpus REFUSES — "
+                 "two answers is not a basis")
+
+    # ── 15. `load_class_spec`: the document, and every way it can be wrong ───
+    import tempfile as _tempfile
+    with _tempfile.TemporaryDirectory() as _td:
+        _tdp = Path(_td)
+        ok(load_class_spec(None).vector_class == EGV_VECTOR_CLASS
+           and load_class_spec(None).axis is None,
+           "NO path is the entropy-gradient default, which is the whole of the "
+           "backward-compatibility story")
+        _p = _tdp / "spec.json"
+        _p.write_text(json.dumps({
+            "schema_version": "vllm-lane-class-spec/1", "vector_class": "caa",
+            "axis": "language", "fd_gate_not_applicable": True,
+            "generation_basis": None,
+            "vector_basis": {"kind": "contrast-set", "sha256": "b" * 64}}))
+        _loaded = load_class_spec(_p)
+        ok(_loaded.vector_class == "caa" and _loaded.axis == "language"
+           and _loaded.vector_basis is not None
+           and _loaded.generation_basis is None,
+           "a well-formed /1 document loads, `generation_basis: null` included — "
+           "the runner takes it from --corpus-sha, which is the banked pattern")
+        for body, why in (
+                ({"schema_version": "vllm-lane-class-spec/2"}, "a /2 schema"),
+                ({"vector_class": "caa"}, "a class with no axis"),
+                ({"surprise": 1}, "an unknown field")):
+            _bp = _tdp / "bad.json"
+            _bp.write_text(json.dumps(body))
+            try:
+                load_class_spec(_bp)
+                ok(False, f"the loader REFUSES: {why}")
+            except VectorClassRefused:
+                ok(True, f"the loader REFUSES: {why}")
+        _bp = _tdp / "notjson.json"
+        _bp.write_text("{ not json")
+        try:
+            load_class_spec(_bp)
+            ok(False, "the loader REFUSES unreadable JSON")
+        except VectorClassRefused as exc:
+            ok("unreadable" in str(exc),
+               "the loader REFUSES unreadable JSON and says so", str(exc)[:70])
+        _bp = _tdp / "list.json"
+        _bp.write_text("[1, 2]")
+        try:
+            load_class_spec(_bp)
+            ok(False, "the loader REFUSES a JSON array")
+        except VectorClassRefused:
+            ok(True, "the loader REFUSES a JSON array — a spec is an object")
+        try:
+            load_class_spec(_tdp / "absent.json")
+            ok(False, "the loader REFUSES a path that is not there")
+        except VectorClassRefused:
+            ok(True, "the loader REFUSES a path that is not there, rather than "
+                     "falling back to the EGV default — an unreadable spec is a "
+                     "hole, and a hole must not read as 'no spec was asked for'")
+
+    # ── 16. the grammar admits the class family and is STILL a guard ─────────
+    _cg = _re.compile(CELL_ID_GRAMMAR)
+    for ex in ("caa_language_L21_L21_a-0.30", "caa_language_L21_L21_a+0.30@absalpha",
+               "gcaa_language_L21_a+0.03", "naive_caa_language_L21_a-0.30",
+               "repengpca_sentiment_L26_L26_a+0.10",
+               "grepengpca_sentiment_L26_a-0.10",
+               "naive_repengpca_sentiment_L26_a+0.30"):
+        ok(bool(_cg.fullmatch(ex)), f"the grammar accepts the class id {ex!r}")
+    for bad, why in (
+            ("caa__L21_a+0.30", "an EMPTY axis"),
+            ("caa_Language_L21_L21_a+0.30", "an UPPER-CASE axis"),
+            ("caa_two_words_L21_L21_a+0.30", "an axis carrying a separator"),
+            ("caa_language_a+0.30", "a native id with no site suffix"),
+            ("lda_language_L21_L21_a+0.30", "an object of an unknown class"),
+            ("xcaa_language_L21_a+0.30", "a near-miss on the transported prefix"),
+            ("gcaa_language_L21_a+0.3", "a dose that is not two decimal places")):
+        ok(not _cg.fullmatch(bad),
+           f"the grammar REJECTS {bad!r} — {why}; widening it to anything-goes "
+           "would retire the join key against the banked columns")
+    # …and the EGV SUBLANGUAGE is exactly what re-freeze #4 pinned by hand. Not
+    # string equality (the generator sorts and spells `Rband1|Rband2|Rband3`
+    # where the pin spells `Rband[123]`) — LANGUAGE equality, decided over a
+    # corpus the two must agree on id by id.
+    _egv_gen = _re.compile(build_cell_id_grammar(
+        {EGV_VECTOR_CLASS: NATIVE_KEY_TEMPLATES[EGV_VECTOR_CLASS]}))
+    _pin = _re.compile(CELL_ID_GRAMMAR_EGV_PIN)
+    _corpus: list[str] = []
+    for _obj in ("baseline", "entropy_gradient_L26", "gentropy_gradient",
+                 "naive_entropy_gradient", "Rband1", "Rband2", "Rband3",
+                 "gRband1", "gRband2", "gRband3", "Rband4", "gRband0",
+                 "caa_language_L26", "gcaa_language", "entropy_gradient",
+                 "entropy_gradient_L26_L26", ""):
+        for _d in list(DOSE_LADDER_FOR_GRAMMAR) + [0.0]:
+            for _suffix in ("", "@absalpha", "@absolute"):
+                _corpus.append(f"{_obj}_L26_a{_d:+.2f}{_suffix}")
+                _corpus.append(f"{_obj}_L26_a{_d:+.1f}{_suffix}")
+    _disagree = [c for c in _corpus
+                 if bool(_egv_gen.fullmatch(c)) != bool(_pin.fullmatch(c))]
+    ok(not _disagree,
+       "the GENERATED entropy-only grammar accepts and rejects exactly what "
+       f"re-freeze #4's hand-written alternation does, over {len(_corpus)} ids — "
+       "the generation is checked against the pin it replaced, not only against "
+       "itself (rake M40's family: a generated pin that vouches for itself is "
+       "not a pin)", f"{_disagree[:4]}")
+    ok(sum(1 for c in _corpus if _pin.fullmatch(c)) > 0,
+       "…and that corpus actually contains ids the pin ACCEPTS, so the agreement "
+       "is not two regexes agreeing that everything is rejected",
+       f"{sum(1 for c in _corpus if _pin.fullmatch(c))} accepted")
+
+    # ── 17. the EGV plan is BYTE-IDENTICAL to the pre-port tool's ────────────
+    # The witness is rendered THROUGH the same templates `main` uses, from the
+    # keys the default spec resolves — so if the port had changed any of the
+    # three moved templates, or the default, this fails with the id it produced.
+    def _render_plan_ids(keys: LaneVectorKeys, site: int) -> list[str]:
+        native_key, transported_key, naive_key = (keys.native, keys.transported,
+                                                  keys.naive)
+        ids = [f"baseline_L{site}_a+0.00"]
+        for frac in DOSE_LADDER_FOR_GRAMMAR:
+            ids.append(f"{native_key}_L{site}_a{frac:+.2f}")
+        for i in BAND_MEMBER_INDICES:
+            for frac in DOSE_LADDER_FOR_GRAMMAR:
+                ids.append(f"Rband{i}_L{site}_a{frac:+.2f}")
+        for frac in DOSE_LADDER_FOR_GRAMMAR:
+            ids.append(f"{transported_key}_L{site}_a{frac:+.2f}")
+        for i in BAND_MEMBER_INDICES:
+            for frac in DOSE_LADDER_FOR_GRAMMAR:
+                ids.append(f"gRband{i}_L{site}_a{frac:+.2f}")
+        for d in (-0.3, 0.3):
+            ids.append(f"{naive_key}_L{site}_a{d:+.2f}")
+        return ids
+
+    _egv_ids = _render_plan_ids(_egv, 26)
+    ok(len(_egv_ids) == 51,
+       "the rendered plan is the banked 51-cell shape (1 + 6 + 18 + 6 + 18 + 2)",
+       f"{len(_egv_ids)}")
+    _missing_witness = [w for w in EGV_CELL_ID_WITNESS if w not in _egv_ids]
+    ok(not _missing_witness,
+       "every id the pre-port tool spelled as a LITERAL is still produced, "
+       "character for character, by the ported templates under the default "
+       "(entropy-gradient) spec — the EGV path is unchanged as a PROPERTY",
+       f"missing: {_missing_witness}")
+    ok(all(_cg.fullmatch(i) for i in _egv_ids),
+       "…and every rendered EGV id is legal under the generated grammar")
+    _caa_ids = _render_plan_ids(_caa, 26)
+    ok(len(_caa_ids) == len(_egv_ids)
+       and all(_cg.fullmatch(i) for i in _caa_ids)
+       and not any("entropy_gradient" in i for i in _caa_ids),
+       "a CAA column has the SAME cell arity, every id legal, and not one of "
+       "them wearing the entropy gradient's name (HALT E's whole point)",
+       f"{_caa_ids[1]} … {_caa_ids[-1]}")
+    ok(not (set(_egv_ids) & set(_render_plan_ids(_other, 26)) - {
+            f"baseline_L26_a+0.00"} - {i for i in _egv_ids if "band" in i.lower()}),
+       "an EGV column and a CAA column share only the baseline and the bands — "
+       "the two families' SIGNAL cells cannot collide")
+
+    # ── 18. the naming constants are the CAMPAIGN's, proven not retyped ──────
+    try:
+        from metabasis.scripts.build_behavioral_banks import (      # type: ignore
+            EGV_OBJECT_KEY, NAIVE_KEY_PREFIX,
+            SITE_SUFFIX_RE as _CAMPAIGN_SUFFIX_RE)
+        from metabasis.scripts.build_contrast_vectors import (      # type: ignore
+            CAA_KEY_TEMPLATE, REPENG_KEY_TEMPLATE)
+    except ImportError as exc:
+        skip("the class naming constants are the CAMPAIGN's own",
+             f"the metabasis package is not importable here ({exc}); evidence "
+             "MISSING: that `caa_{axis}_L{site}`, `repengpca_{axis}_L{site}`, "
+             "the `naive` prefix and the site-suffix regex here are the "
+             "campaign's definitions rather than this file's transcription")
+    else:
+        ok(NATIVE_KEY_TEMPLATES["caa"] == CAA_KEY_TEMPLATE
+           and NATIVE_KEY_TEMPLATES["repeng_pca"] == REPENG_KEY_TEMPLATE
+           and NATIVE_KEY_TEMPLATES["entropy_gradient"]
+           == EGV_OBJECT_KEY + NATIVE_SITE_SUFFIX
+           and NAIVE_PREFIX == NAIVE_KEY_PREFIX
+           and SITE_SUFFIX_RE.pattern == _CAMPAIGN_SUFFIX_RE.pattern,
+           "every key convention transcribed at the top of this module is the "
+           "CAMPAIGN's own, proven equal rather than retyped on trust — the same "
+           "pattern the scipy cross-check uses",
+           f"{sorted(NATIVE_KEY_TEMPLATES.values())}")
+        ok(EGV_VECTOR_CLASS == EGV_OBJECT_KEY,
+           "…and the EGV class name IS the campaign's object key, so the default "
+           "spec names the object of record and not a lookalike")
+
+    # ── 19. the TP path is untouched by the class port ───────────────────────
+    # PROPERTY, NOT PROSE. The three TP forks and every shared helper are pinned
+    # by AST digest in blocks 1 above and did not move; what remains to show is
+    # that the TP>1 arm never reads a class name — it takes a SITE and a WIDTH,
+    # which is why the class path reaches TP>1 through certified code.
+    _class_names = {"class_spec", "keys", "native_key", "transported_key",
+                    "naive_key", "vecs", "tvecs"}
+    _tp_arm_names: set[str] = set()
+    for n in ast.walk(_main):
+        if _is_tp_gt_1(n):
+            for sub in n.body:
+                for m in ast.walk(sub):
+                    if isinstance(m, ast.Name):
+                        _tp_arm_names.add(m.id)
+    ok(bool(_tp_arm_names) and not (_tp_arm_names & _class_names),
+       "no TP>1 arm reads any class-resolution name — the attachment takes a "
+       "site and a width and knows nothing about which object is injected, so "
+       "the class path reaches TP>1 through exactly the code re-freeze #4 "
+       "certified", f"overlap: {sorted(_tp_arm_names & _class_names)}")
+
+    # ── 20. M59: the suite's own arithmetic ──────────────────────────────────
+    # RAKE M44: the count is QUALIFIED, not a bare number, and it is qualified BY
+    # ENVIRONMENT because this suite legitimately runs a different number of
+    # checks in the two places it runs.
+    #
+    #   desk  — CPython 3.13.9, scipy present : 211 checks, 0 named skips
+    #   lane  — CPython 3.12.3, no scipy      : 206 checks, 1 named skip
+    #           (the scipy cross-check; the lane venv has no scipy by design)
+    #
+    # THE FLOOR IS THE NODE'S, because the node is where columns are actually
+    # fired and a floor the node cannot meet is a gate that blocks the science —
+    # which is exactly what the previous floor of 133 did: `bb5f1d1` scored
+    # 126/128 in the lane venv and every runner gates on `--selftest || exit 2`.
+    # It sits one below the node's count because this check has not been counted
+    # yet when it reads `checks`.
+    SELFTEST_CHECK_FLOOR = 205
+    KNOWN_SKIP_CEILING = 6
     ok(checks >= SELFTEST_CHECK_FLOOR and len(skips) <= KNOWN_SKIP_CEILING,
        f"(M59) the suite ran at least its recorded floor of "
        f"{SELFTEST_CHECK_FLOOR} checks and named no more than "
