@@ -1917,7 +1917,7 @@ def _pinned_path(kind: ResolutionKind, key: str, model: str,
                 + f".\nThe strict pin refuses to probe for an unfiled key on "
                   f"purpose: probing answers from the frozen collection tree "
                   f"first, which is exactly how 0/24 filed batch-4 legs missed "
-                  f"the corpus-v2.1 maps of record (E4 anomaly A1). Score the "
+                  f"the corpus-v2.1 maps of record. Score the "
                   f"record's own slots, or pass allow_unpinned=True "
                   f"(--filed-paths-allow-unpinned) to let unfiled keys probe "
                   f"— WARNED and recorded, never silent.")
@@ -1931,7 +1931,7 @@ def _pinned_path(kind: ResolutionKind, key: str, model: str,
             f"the probe order answers from the frozen collection tree and would "
             f"substitute a different corpus vintage for the artifact the record "
             f"was filed from — a number that is individually valid and "
-            f"collectively meaningless (rake M21b at map grain). Restore the "
+            f"collectively meaningless (a vintage mix at map grain). Restore the "
             f"artifact, or re-file the record against what is banked.")
     return filed
 
@@ -4670,7 +4670,7 @@ def parse_sha256_manifest(path: Path) -> ManifestListing:
         if name in seen:
             raise ArchiveIntegrityError(
                 f"{path}: duplicate manifest row for {name!r} (lines "
-                f"{seen[name]} and {number}) — rake M18: which digest is of "
+                f"{seen[name]} and {number}) — a duplicate HALTs: which digest is of "
                 f"record cannot be guessed, and a comparison dict that can "
                 f"collapse two rows reports a false pass at n−1")
         seen[name] = number
@@ -6661,7 +6661,7 @@ def _slate_rows(slate: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         if rank in by_rank:
             raise RecordEmissionError(
                 f"{slate}: duplicate rank {rank} in the remaining population "
-                f"({by_rank[rank]['pair_id']} and {row['pair_id']}) — rake M18: "
+                f"({by_rank[rank]['pair_id']} and {row['pair_id']}) — a duplicate HALTs: "
                 f"which pair holds that rank cannot be guessed, and the spread "
                 f"rule would place two slots on one row")
         by_rank[rank] = row
@@ -10117,7 +10117,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                 resolve_hub_map("gamma", 3, "native", FAMILY_OF_RECORD)
                 check(False, "a strict pin must refuse an unfiled key")
             except FiledPathsError as exc:
-                check("STRICT" in str(exc) and "A1" in str(exc),
+                check("STRICT" in str(exc) and "maps of record" in str(exc),
                       f"an unfiled key under a STRICT pin HALTs, naming the "
                       f"gap it exists to prevent: {exc!s:.60}")
             try:
@@ -10177,7 +10177,8 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                 resolve_hub_map("alpha", 1, "native", FAMILY_OF_RECORD)
                 check(False, "a vanished pinned artifact must HALT")
             except FiledPathsError as exc:
-                check("will NOT fall back" in str(exc) and "M21b" in str(exc),
+                check("will NOT fall back" in str(exc)
+                      and "collectively meaningless" in str(exc),
                       f"a pinned artifact that is gone HALTs and REFUSES the "
                       f"probe-order fallback: {exc!s:.60}")
 
@@ -10912,9 +10913,9 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                 _slate_rows(dup_slate26)
                 check(False, "a duplicated slate rank must HALT")
             except RecordEmissionError as exc:
-                check("duplicate rank" in str(exc) and "M18" in str(exc),
-                      "a duplicated rank in the ranked population HALTs (rake "
-                      "M18) — the spread rule would place two slots on one row")
+                check("duplicate rank" in str(exc) and "cannot be guessed" in str(exc),
+                      "a duplicated rank in the ranked population HALTs — the "
+                      "spread rule would place two slots on one row")
             no_gate26 = root26 / "gate-empty.json"
             no_gate26.write_text(json.dumps({"rows": [
                 {"model_a": "3b", "model_b": "qwen-7b",
@@ -11124,9 +11125,9 @@ def selftest() -> int:                                   # noqa: C901 — a chec
             parse_sha256_manifest(dupe29)
             check(False, "a duplicate manifest row must HALT")
         except ArchiveIntegrityError as exc:
-            check("M18" in str(exc) and "duplicate manifest row" in str(exc),
+            check("cannot be guessed" in str(exc) and "duplicate manifest row" in str(exc),
                   "the SAME artifact listed once bare and once ./-prefixed is a "
-                  "DUPLICATE after normalization and HALTs (rake M18) — which is "
+                  "DUPLICATE after normalization and HALTs — which is "
                   "only visible to a parser that normalizes both dialects")
         junk29 = root29 / "MANIFEST-junk.sha256"
         junk29.write_text(f"{sha_py}  wp_composition.py\n"

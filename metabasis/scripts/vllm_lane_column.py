@@ -2590,9 +2590,8 @@ def selftest() -> int:                                            # noqa: C901
        "that silently stops passing it",
        f"missing={sorted(ARGPARSE_CONTRACT - _opts)} extra={sorted(_opts - ARGPARSE_CONTRACT)}")
     ok("--allow-any-host" not in _opts,
-       "`--allow-any-host` is RETIRED (Luxia's ruling §6(b)) — it existed only "
-       "to escape a hostname compiled into the tool, and the tool no longer "
-       "carries one")
+       "`--allow-any-host` is absent — its only use is to escape a hostname "
+       "compiled into the tool, and the tool carries none")
     _by_dest = {a.dest: a for a in _p._actions}
     for dest in ("allowed_host", "require_env"):
         ok(_by_dest[dest].default == [] and _by_dest[dest].nargs is None,
