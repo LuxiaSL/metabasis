@@ -61,7 +61,7 @@ TWO LANES, ONE OF WHICH NEEDS NO GPU
   * **construction lane (CPU, pure numpy):** paired states in → direction out.
     Everything gate-bearing lives here, so the whole contract is selftestable on
     synthetic states with no weights, no torch, and no data tree.
-  * **extraction lane (`--extract`, GPU, node):** contrast set + model →
+  * **extraction lane (`--extract`, needs torch + transformers):** contrast set + model →
     paired states. It does NOT re-implement state capture: it builds
     collector-shaped entries and calls `collect_mean_states.compute_means`
     VERBATIM, so "the vector lives in the residual space the transport maps were
@@ -91,6 +91,9 @@ Typical use (repo root):
 
     python -m metabasis.scripts.build_contrast_vectors --example-pins > pins.json
     python -m metabasis.scripts.build_contrast_vectors --verify-set SET.json
+    python -m metabasis.scripts.build_contrast_vectors --extract \\
+        --set SET.json --model-path <WEIGHTS_DIR> --node-key <MODEL_KEY> \\
+        --arm native --sites 26 --states STATES.npz
     python -m metabasis.scripts.build_contrast_vectors \\
         --set SET.json --pins pins.json --states STATES.npz \\
         --construction caa --sites 26 --out-dir <VECTORS_DIR>
@@ -1224,15 +1227,21 @@ def extract_paired_states(model: Any, tok: Any, cset: ContrastSet, *,
                           node_key: str, device: str,
                           set_sha256: Optional[str] = None,
                           carrier_prompt: str = NATIVE_CARRIER_PROMPT,
-                          max_length: Optional[int] = None) -> PairedStates:
+                          max_length: Optional[int] = None,
+                          means_fn: Optional[Callable[..., Any]] = None
+                          ) -> PairedStates:
     """GPU lane: contrast set + model -> paired mean residual states.
 
     Delegates to `collect_mean_states.compute_means` VERBATIM. That is the whole
     design: the capture point, the fp32 mean, the position convention and the
     truncation deviation are the collector's, not a second implementation that might
-    drift from it.
+    drift from it. `means_fn` exists only so the CPU self-test can drive the CLI
+    plumbing with a stand-in; every real run leaves it `None`.
     """
-    from metabasis.scripts.collect_mean_states import compute_means
+    if means_fn is None:
+        from metabasis.scripts.collect_mean_states import compute_means
+    else:
+        compute_means = means_fn
 
     site_tuple = tuple(int(s) for s in sites)
     pos_means, _pn, _sl, pos_trunc = compute_means(
@@ -1251,6 +1260,96 @@ def extract_paired_states(model: Any, tok: Any, cset: ContrastSet, *,
         pair_ids=tuple(p.pair_id for p in cset.pairs),
         positive={s: np.asarray(v, dtype=np.float64) for s, v in pos_means.items()},
         negative={s: np.asarray(v, dtype=np.float64) for s, v in neg_means.items()})
+
+
+class ExtractionError(ContrastBuildError):
+    """The extraction lane was asked for something it cannot do safely."""
+
+
+class ExtractResult(BaseModel):
+    """What `--extract` wrote, printed as JSON on success."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    set_id: str
+    axis: str
+    set_sha256: str
+    node_key: str
+    arm: Literal["native", "raw"]
+    sites: list[int]
+    n_pairs: int
+    dim: int
+    states_path: str
+    sidecar_path: str
+
+
+def extract_to_disk(set_path: Path, states_out: Path, *, model_path: str,
+                    sites: Sequence[int], arm: Literal["native", "raw"],
+                    node_key: str, device: str,
+                    max_length: Optional[int] = None,
+                    loader: Optional[Callable[[str, str], tuple[Any, Any]]] = None,
+                    means_fn: Optional[Callable[..., Any]] = None) -> ExtractResult:
+    """The whole `--extract` lane: set + model -> a states bundle `--build` accepts.
+
+    The set is loaded and every per-pair digest verified before any weights are
+    touched, the set file's sha256 is written into the bundle (so `--build` can
+    refuse states whose set changed underneath them), and an existing output is
+    refused rather than overwritten. A JSON sidecar beside the bundle records the
+    extraction parameters. `loader` defaults to `collect_mean_states.
+    load_model_and_tok`; `loader` and `means_fn` are overridden only by the
+    self-test.
+    """
+    if states_out.suffix != ".npz":
+        raise ExtractionError(
+            f"--states {states_out}: the states bundle must end in `.npz` (numpy "
+            "appends the suffix otherwise, and `--build` would then read a "
+            "different path than the one named here)")
+    sidecar = states_out.with_name(states_out.stem + "_extract.json")
+    for p in (states_out, sidecar):
+        if p.exists():
+            raise ExtractionError(
+                f"{p} already exists — the extraction lane never overwrites a states "
+                "bundle; choose a new path or remove the old one deliberately")
+    site_tuple = tuple(int(s) for s in sites)
+    if not site_tuple:
+        raise ExtractionError("--sites is required for --extract (at least one site)")
+    if len(set(site_tuple)) != len(site_tuple) or min(site_tuple) < 0:
+        raise ExtractionError(f"--sites {list(site_tuple)}: sites must be distinct "
+                              "non-negative decoder-layer indices")
+    if max_length is not None and max_length < 2:
+        raise ExtractionError(f"--max-seq-len {max_length}: need at least 2 positions")
+    cset = load_contrast_set(set_path)
+    cset.pair_manifest()                               # verifies every pair digest
+    set_sha = sha256_file(set_path)
+
+    if loader is None:
+        from metabasis.scripts.collect_mean_states import load_model_and_tok
+        loader = load_model_and_tok
+    model, tok = loader(model_path, device)
+    states = extract_paired_states(
+        model, tok, cset, sites=site_tuple, arm=arm, node_key=node_key,
+        device=device, set_sha256=set_sha, max_length=max_length, means_fn=means_fn)
+    assert_states_match_set(states, cset, set_sha)
+
+    save_paired_states(states_out, states)
+    sidecar.write_text(json.dumps({
+        "schema_version": "contrast-states-extract/1",
+        "set_id": cset.set_id, "axis": cset.axis, "set_sha256": set_sha,
+        "node_key": node_key, "arm": arm, "sites": list(site_tuple),
+        "device": device, "max_seq_len": max_length,
+        "n_pairs": states.n_pairs, "dim": states.dim,
+        "native_carrier_prompt": NATIVE_CARRIER_PROMPT,
+        "date_string_pin": DATE_STRING_PIN,
+        "state_convention": (
+            "residual stream entering decoder layer `site`, per-text fp32 mean over "
+            "the text's own token positions, via collect_mean_states.compute_means"),
+        "states_sha256": sha256_file(states_out),
+        "extracted_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }, indent=1, sort_keys=True))
+    return ExtractResult(
+        set_id=cset.set_id, axis=cset.axis, set_sha256=set_sha, node_key=node_key,
+        arm=arm, sites=list(site_tuple), n_pairs=states.n_pairs, dim=states.dim,
+        states_path=str(states_out), sidecar_path=str(sidecar))
 
 
 # ---------------------------------------------------------------- example pin file
@@ -1844,6 +1943,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
             from metabasis.scripts.collect_mean_states import compute_means as _cm
             check("compute_means is importable and is what the lane calls",
                   callable(_cm), f"torch {torch_note}")
+        _selftest_extract(root, check, skip)
 
         # ---- 12. M44's configuration matrix, asserted vacuous where it is -----
         print("== selftest 12: the configuration matrix (M44) ==")
@@ -1900,10 +2000,53 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--build", action="store_true",
                     help="build and bank (guard first)")
     ap.add_argument("--dry-run", action="store_true", help="plan without writing")
+    ex = ap.add_argument_group(
+        "extraction lane (--extract; needs torch + transformers and the weights)")
+    ex.add_argument("--extract", action="store_true",
+                    help="run the model over both sides of every pair of --set and "
+                         "write the paired states to --states (a new .npz; an "
+                         "existing file is refused). Needs --model-path, --node-key, "
+                         "--arm and --sites.")
+    ex.add_argument("--model-path", type=str, default=None,
+                    help="local weights directory for --extract")
+    ex.add_argument("--node-key", type=str, default=None,
+                    help="the model's roster key, recorded in the states bundle")
+    ex.add_argument("--arm", choices=("native", "raw"), default=None,
+                    help="template arm for --extract: native wraps each text in the "
+                         "chat template under the fixed carrier prompt, raw is the "
+                         "bare text")
+    ex.add_argument("--device", type=str, default="cuda")
+    ex.add_argument("--max-seq-len", type=int, default=None, metavar="N",
+                    help="per-text truncation for models with a learned position "
+                         "ceiling (the collector's convention); default: none")
     args = ap.parse_args(argv)
 
     if args.selftest:
         return selftest()
+    if args.extract:
+        if args.build:
+            ap.error("--extract and --build are separate acts: extract the states, "
+                     "then build from them in a second invocation")
+        for flag, val in (("--set", args.set), ("--states", args.states),
+                          ("--model-path", args.model_path),
+                          ("--node-key", args.node_key), ("--arm", args.arm),
+                          ("--sites", args.sites)):
+            if val is None:
+                ap.error(f"{flag} is required for --extract")
+        try:
+            ex_sites = [int(s) for s in args.sites.split(",") if s.strip()]
+        except ValueError:
+            ap.error(f"--sites {args.sites!r}: expected comma-separated integers")
+        try:
+            ex_result = extract_to_disk(
+                args.set, args.states, model_path=args.model_path, sites=ex_sites,
+                arm=args.arm, node_key=args.node_key, device=args.device,
+                max_length=args.max_seq_len)
+        except ContrastBuildError as exc:
+            logger.error("HALT: %s", exc)
+            return 2
+        print(json.dumps(json.loads(ex_result.model_dump_json()), indent=1))
+        return 0
     if args.example_pins:
         print(json.dumps(example_pin_file(), indent=1))
         return 0
@@ -1925,8 +2068,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         }, indent=1))
         return 0
     if not args.build:
-        ap.error("nothing to do: pass --selftest, --example-pins, --verify-set "
-                 "or --build")
+        ap.error("nothing to do: pass --selftest, --example-pins, --verify-set, "
+                 "--extract or --build")
     for flag, val in (("--set", args.set), ("--states", args.states)):
         if val is None:
             ap.error(f"{flag} is required for --build")
@@ -1941,6 +2084,151 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 2
     print(json.dumps(json.loads(result.model_dump_json()), indent=1))
     return 0
+
+
+def _exits_with_usage_error(argv: list[str]) -> bool:
+    """True when `main(argv)` is refused by argparse (exit status 2)."""
+    import contextlib
+    import io
+
+    try:
+        with contextlib.redirect_stderr(io.StringIO()):
+            main(argv)
+    except SystemExit as exc:
+        return exc.code == 2
+    return False
+
+
+class _StubTokenizer:
+    """A byte-level tokenizer with a fixed chat prefix, for the tiny-model check."""
+
+    bos_token_id = 1
+
+    def __init__(self, vocab_size: int) -> None:
+        self.vocab_size = vocab_size
+
+    def encode(self, text: str, add_special_tokens: bool = False) -> list[int]:
+        ids = [4 + (b % (self.vocab_size - 4)) for b in text.encode("utf-8")]
+        return ([self.bos_token_id] + ids) if add_special_tokens else ids
+
+    def apply_chat_template(self, msgs: list[dict], add_generation_prompt: bool = True,
+                            **_kw: Any) -> list[int]:
+        body: list[int] = [self.bos_token_id]
+        for m in msgs:
+            body += [2] + self.encode(m["content"]) + [3]
+        return body
+
+
+def _selftest_extract(root: Path, check: Callable[..., None],
+                      skip: Callable[[str, str], None]) -> None:
+    """The `--extract` lane: CLI refusals, CPU plumbing, and a tiny real model."""
+    cset = _toy_set(n_pairs=6, set_id="extract-set")
+    set_path = _write_set(root / "extract" / "set.json", cset)
+    set_sha = sha256_file(set_path)
+    dim = 8
+
+    def fake_means(model: Any, tok: Any, entries: list[dict], sites: tuple[int, ...],
+                   arm: str, date_string: str, device: str,
+                   max_length: Optional[int] = None) -> tuple[Any, Any, Any, Any]:
+        rng = np.random.default_rng(len(entries) + sum(sites))
+        shift = 1.0 if entries[0]["text_id"].endswith(":positive") else 0.0
+        return ({s: rng.standard_normal((len(entries), dim)) + shift for s in sites},
+                {}, [], [])
+
+    def fake_loader(model_path: str, device: str) -> tuple[Any, Any]:
+        return object(), object()
+
+    out = root / "extract" / "states.npz"
+    res = extract_to_disk(set_path, out, model_path="unused", sites=[3, 5],
+                          arm="raw", node_key="toy-node", device="cpu",
+                          loader=fake_loader, means_fn=fake_means)
+    back = load_paired_states(out)
+    check("--extract plumbing writes a states bundle that round-trips with the set",
+          back.sites == (3, 5) and back.n_pairs == cset.n_pairs
+          and back.set_sha256 == set_sha and res.set_sha256 == set_sha
+          and Path(res.sidecar_path).exists(),
+          f"{out.name} + {Path(res.sidecar_path).name}")
+    check("the extracted bundle carries the set's pair order",
+          back.pair_ids == tuple(p.pair_id for p in cset.pairs))
+    pins = _write_pins(root / "extract" / "pins.json", [
+        {"set_id": cset.set_id, "axis": cset.axis, "sha256": set_sha,
+         "status": "RULED", "ruled_by": "selftest", "ruled_on": "2026-01-01"}])
+    check("--build accepts what --extract wrote (the two lanes meet)",
+          _ok(lambda: build_from_disk(set_path, pins, out, construction="caa",
+                                      out_dir=root / "extract" / "vec")))
+    check("--extract REFUSES to overwrite an existing states bundle",
+          _raises(lambda: extract_to_disk(
+              set_path, out, model_path="unused", sites=[3], arm="raw",
+              node_key="toy-node", device="cpu", loader=fake_loader,
+              means_fn=fake_means), ExtractionError))
+    check("--extract REFUSES an output path that does not end in .npz",
+          _raises(lambda: extract_to_disk(
+              set_path, root / "extract" / "states.bin", model_path="unused",
+              sites=[3], arm="raw", node_key="toy-node", device="cpu",
+              loader=fake_loader, means_fn=fake_means), ExtractionError))
+    check("--extract REFUSES duplicate or negative sites",
+          _raises(lambda: extract_to_disk(
+              set_path, root / "extract" / "dup.npz", model_path="unused",
+              sites=[3, 3], arm="raw", node_key="toy-node", device="cpu",
+              loader=fake_loader, means_fn=fake_means), ExtractionError)
+          and _raises(lambda: extract_to_disk(
+              set_path, root / "extract" / "neg.npz", model_path="unused",
+              sites=[-1], arm="raw", node_key="toy-node", device="cpu",
+              loader=fake_loader, means_fn=fake_means), ExtractionError))
+    drifted = root / "extract" / "drifted.json"
+    doc = json.loads(set_path.read_text())
+    doc["pairs"][0]["positive_text"] = "a drifted body"
+    drifted.write_text(json.dumps(doc))
+    check("--extract verifies every pair digest BEFORE loading any weights",
+          _raises(lambda: extract_to_disk(
+              drifted, root / "extract" / "drift.npz", model_path="unused",
+              sites=[3], arm="raw", node_key="toy-node", device="cpu",
+              loader=lambda *_a: (_ for _ in ()).throw(AssertionError("loaded")),
+              means_fn=fake_means), ContrastSetError))
+    base = ["--extract", "--set", str(set_path), "--states",
+            str(root / "extract" / "cli.npz"), "--model-path", "m",
+            "--node-key", "k", "--arm", "raw", "--sites", "3"]
+    for missing in ("--model-path", "--node-key", "--arm", "--sites", "--states"):
+        i = base.index(missing)
+        check(f"--extract without {missing} is a usage error",
+              _exits_with_usage_error(base[:i] + base[i + 2:]))
+    check("--extract together with --build is a usage error",
+          _exits_with_usage_error(base + ["--build"]))
+    check("an unknown flag is a usage error, never ignored",
+          _exits_with_usage_error(["--selftest", "--no-such-flag"]))
+    check("the CLI refusals wrote nothing",
+          not (root / "extract" / "cli.npz").exists())
+
+    torch_ok, torch_note = _torch_available()
+    if not torch_ok:
+        skip("--extract end to end on a tiny random Llama", torch_note)
+        return
+    try:                                                          # pragma: no cover
+        import torch
+        from transformers import LlamaConfig, LlamaForCausalLM
+    except Exception as exc:                                      # noqa: BLE001
+        skip("--extract end to end on a tiny random Llama",
+             f"transformers unavailable: {type(exc).__name__}: {exc}")
+        return
+    torch.manual_seed(0)                                          # pragma: no cover
+    cfg = LlamaConfig(vocab_size=64, hidden_size=16, intermediate_size=32,
+                      num_hidden_layers=4, num_attention_heads=2,
+                      num_key_value_heads=1, max_position_embeddings=512,
+                      tie_word_embeddings=False)
+    model = LlamaForCausalLM(cfg).to(torch.float32).eval()
+    tok = _StubTokenizer(cfg.vocab_size)
+    for arm in ("raw", "native"):
+        tiny_out = root / "extract" / f"tiny_{arm}.npz"
+        tres = extract_to_disk(set_path, tiny_out, model_path="tiny", sites=[1, 3],
+                               arm=arm, node_key="tiny", device="cpu",
+                               loader=lambda *_a: (model, tok))
+        tb = load_paired_states(tiny_out)
+        check(f"--extract on a tiny random Llama ({arm} arm): real states, "
+              "hidden width, both sites",
+              tb.dim == cfg.hidden_size and tb.sites == (1, 3)
+              and tres.n_pairs == cset.n_pairs
+              and not np.allclose(tb.positive[1], tb.negative[1]),
+              f"dim={tb.dim}, n_pairs={tb.n_pairs}")
 
 
 if __name__ == "__main__":
