@@ -1,46 +1,51 @@
-"""webtext-v3 — the freeze-time deterministic draws (PREREG §2 / §6-I1 / §9 / §13).
+"""webtext-v3 — the freeze-time deterministic draws.
+
+Section numbers below refer to the frozen webtext-v3 pre-registration in
+`docs/planning/` (tag `freeze/webtext-v3`), which this module implements.
 
 Three artifacts, every one a deterministic function of frozen inputs, computed
-once at freeze and sha-recorded in the freeze act (§13):
+once at freeze and sha-recorded in the freeze act (section 13):
 
-  splits.json        the realized train/test membership — holdout 280/1200 by
+  splits             the realized train/test membership — holdout 280/1200 by
                      count (70 per stratum), per-stratum, GROUPED, seed 80.
-  halves.json        the §6-I1 half-split — two disjoint, exhaustive 600-text
+  halves             the section 6 (I1) half-split — two disjoint, exhaustive 600-text
                      halves (150 per stratum), same grouping keys, seed 80 on a
                      NAMED substream `halfsplit-v3`; each half then carries its
-                     own internal §2-rule train/test split.
-  ablation_ids.json  the §9 authored-stratum ablation sample — n=100, seed 80,
+                     own internal section-2-rule train/test split.
+  ablation_ids       the section 9 authored-stratum ablation sample — n=100, seed 80,
                      uniform over v2.1's S1/S3 entries in text_id order.
 
-plus the §2 census-at-freeze addendum: the enumeration, by `text_sha256`, of the
-wikitext chunks byte-identical to v2.1 S2 entries (the ledgered figure is 59; a
-re-derivation that disagrees HALTS rather than adopting either number).
+(each written as a JSON file of that name), plus the section 2 census-at-freeze
+block: the enumeration, by `text_sha256`, of the wikitext chunks byte-identical to
+v2.1 S2 entries (the recorded figure is 59, `LEDGERED_OVERLAP`; a re-derivation that
+disagrees HALTS rather than adopting either number).
 
-THE BINDING RULES, restated from the prereg because this file implements them:
+THE BINDING RULES, restated from the pre-registration because this file implements them:
 
-  Grouping keys (§2).  c4 / stackexchange = the source row · pg19 = the book ·
+  Grouping keys (section 2).  c4 / stackexchange = the source row · pg19 = the book ·
   wikitext = the individual chunk (the NAMED LIMITATION: the v2.1 S2 pool
   carries no article identity, so wikitext holdout chunks are not
   article-independent — disclosed, not papered over). Grouping is binding: a
   group never straddles train and test.
 
-  The v2.1-overlap rule (§2).  The wikitext chunks byte-identical to v2.1 S2
+  The v2.1-overlap rule (section 2).  The wikitext chunks byte-identical to v2.1 S2
   entries are assigned to the TRAIN side BY RULE — no held-out, race-scored or
   gate quantity is ever computed on a text a prior result touched. Implemented
   generically: any group containing an overlapping text is INELIGIBLE for test
   membership anywhere — the main split and each half's internal split alike.
 
-  Seed 80 throughout (§2), on named substreams so no draw can move another.
+  Seed 80 throughout (section 2), on named substreams so no draw can move another.
 
-Inputs are READ-ONLY: the desk-side full manifests (bodies present — never git).
+Inputs are READ-ONLY: the full local manifests (text bodies present, so they
+are never committed).
 
-Run (repo root, the no-torch venv; --out-dir is desk-side staging, never git):
+Run (repo root, the no-torch venv; --out-dir is a local directory, never committed):
   python -m metabasis.scripts.derive_webtext_splits \\
-      --v3-manifest staging/webtext-v3-draft/corpus_manifest.json \\
-      --v21-manifest staging/corpus-v21-manifest-full-DESKONLY.json \\
-      --out-dir staging/webtext-v3-draft \\
-      --census staging/webtext-v3-draft/COMPOSITION-CENSUS.md
-Selftest (rake M44; no manifests, no network, no torch needed):
+      --v3-manifest <full webtext-v3 corpus manifest> \\
+      --v21-manifest <full v2.1 corpus manifest> \\
+      --out-dir <local output dir> \\
+      --census <the composition census markdown>
+Selftest (no manifests, no network, no torch needed):
   python -m metabasis.scripts.derive_webtext_splits --selftest
 """
 from __future__ import annotations
@@ -126,8 +131,8 @@ OVERLAP_RULE = (
 class SplitDerivationError(RuntimeError):
     """A HALT: something the derivation refuses to guess about.
 
-    Rake M45 rule (c): an exception, never sys.exit, so an all-module selftest
-    sweep survives it and still prints its terminal TOTAL line.
+    An exception, never sys.exit, so an all-module selftest sweep survives it
+    and still prints its terminal TOTAL line.
     """
 
 
@@ -225,7 +230,7 @@ def stratum_ordinal(stratum: str) -> int:
 
 
 def grouping_key(entry: ManifestEntry) -> str:
-    """The PREREG §2 grouping key of one webtext-v3 text.
+    """The pre-registered (section 2) grouping key of one webtext-v3 text.
 
     wikitext            the individual chunk — its text_id (the named limitation)
     c4, stackexchange   the source row  — "<source_run>::<row id>"
@@ -308,7 +313,7 @@ def build_groups(texts: Sequence[CorpusText], stratum: str,
         for k, v in sorted(by_key.items()))
     if stratum == "wikitext" and any(g.size != 1 for g in groups):
         raise SplitDerivationError(
-            "wikitext groups must be single chunks (PREREG §2's named "
+            "wikitext groups must be single chunks (the pre-registration's named "
             "limitation) — a multi-text wikitext group means the key changed")
     return groups
 
@@ -374,7 +379,7 @@ def split_stratum(groups: Sequence[Group], stratum: str, quota: int,
 def derive_split(texts: Sequence[CorpusText], ineligible_ids: frozenset[str],
                  stream: str, quota_per_stratum: dict[str, int],
                  strata: Sequence[str] = STRATA) -> dict[str, Any]:
-    """The §2 split rule over a text set: per-stratum, grouped, exact quotas."""
+    """The section 2 split rule over a text set: per-stratum, grouped, exact quotas."""
     per_stratum: dict[str, Any] = {}
     test_ids: list[str] = []
     for st in strata:
@@ -415,7 +420,7 @@ def derive_split(texts: Sequence[CorpusText], ineligible_ids: frozenset[str],
 
 def derive_halving(texts: Sequence[CorpusText],
                    strata: Sequence[str] = STRATA) -> dict[str, list[str]]:
-    """The §6-I1 halving: per-stratum, grouped, on the named `halfsplit-v3` stream.
+    """The section 6 (I1) halving: per-stratum, grouped, on the named `halfsplit-v3` stream.
 
     Half A is the exact-quota draw of n/2 texts per stratum; half B is the
     complement — disjoint and exhaustive by construction, groups intact.
@@ -463,7 +468,7 @@ class OverlapRow(BaseModel, frozen=True):
 def enumerate_overlap(v3: Sequence[ManifestEntry], v21: Sequence[ManifestEntry],
                       v3_stratum: str = "wikitext",
                       v21_stratum: str = "S2") -> tuple[OverlapRow, ...]:
-    """The §2 census cross-join: byte-identical bodies, by sha256, both ways.
+    """The section 2 census cross-join: byte-identical bodies, by sha256, both ways.
 
     A repeated body on either side HALTS: the pairing would be ambiguous and a
     census that quotes an ambiguous pairing is worse than no census.
@@ -494,7 +499,7 @@ def enumerate_overlap(v3: Sequence[ManifestEntry], v21: Sequence[ManifestEntry],
 # ---------------------------------------------------------------- the ablation
 def derive_ablation(v21: Sequence[ManifestEntry], n: int = ABLATION_N,
                     strata: Sequence[str] = ABLATION_STRATA) -> dict[str, Any]:
-    """§9: n=100, seed 80, uniform over v2.1's S1/S3 entries IN TEXT_ID ORDER."""
+    """Section 9: n=100, seed 80, uniform over v2.1's S1/S3 entries IN TEXT_ID ORDER."""
     pool = sorted((e for e in v21 if e.stratum in strata),
                   key=lambda e: e.text_id)
     if len(pool) < n:
@@ -679,7 +684,7 @@ def build_ablation_artifact(ab: dict[str, Any],
 def render_overlap_addendum(overlap: Sequence[OverlapRow],
                             n_v3_wikitext: int, n_v21_s2: int,
                             v3_manifest_sha: str, v21_manifest_sha: str) -> str:
-    """The §2 census-at-freeze addendum, dated. Deterministic: no clock read."""
+    """The section 2 census-at-freeze block, dated. Deterministic: no clock read."""
     lines = [
         ADDENDUM_MARKER,
         "",
@@ -727,7 +732,7 @@ ADDENDUM_MARKER = "<!-- overlap-addendum: derive_webtext_splits -->"
 
 
 def append_addendum(census_path: Path, addendum: str) -> str:
-    """Append the addendum IDEMPOTENTLY: re-running replaces, never duplicates."""
+    """Append the census block IDEMPOTENTLY: re-running replaces, never duplicates."""
     if not census_path.exists():
         raise SplitDerivationError(f"census not found: {census_path}")
     body = census_path.read_text(encoding="utf-8")
@@ -833,7 +838,7 @@ def derive_all(v3_path: Path, v21_path: Path) -> dict[str, Any]:
     v21 = load_manifest(v21_path)
     input_shas = {v3_path.name: _sha_file(v3_path), v21_path.name: _sha_file(v21_path)}
     if input_shas[v3_path.name] != V3_MANIFEST_SHA:
-        logger.warning("the v3 manifest sha is %s, the prereg's basis identity is "
+        logger.warning("the v3 manifest sha is %s, the frozen basis identity is "
                        "%s — derivation continues, but the artifacts will name "
                        "the sha they were actually computed from",
                        input_shas[v3_path.name], V3_MANIFEST_SHA)
@@ -842,8 +847,8 @@ def derive_all(v3_path: Path, v21_path: Path) -> dict[str, Any]:
     if len(overlap) != LEDGERED_OVERLAP:
         raise SplitDerivationError(
             f"OVERLAP DISAGREEMENT: re-derivation counts {len(overlap)} shared "
-            f"wikitext/S2 bodies, the ledger records {LEDGERED_OVERLAP}. HALT — "
-            "neither number is adopted; the desk resolves this before freeze.")
+            f"wikitext/S2 bodies, the recorded figure is {LEDGERED_OVERLAP}. HALT — "
+            "neither number is adopted; the disagreement must be resolved before freeze.")
     ineligible = frozenset(r.v3_text_id for r in overlap)
 
     texts = corpus_texts(v3)
@@ -861,7 +866,7 @@ def derive_all(v3_path: Path, v21_path: Path) -> dict[str, Any]:
             q, rem = divmod(HOLDOUT_PER_STRATUM * n_half, N_PER_STRATUM)
             if rem:
                 raise SplitDerivationError(
-                    f"{h}/{st}: the §2 holdout rate {HOLDOUT_PER_STRATUM}/"
+                    f"{h}/{st}: the section 2 holdout rate {HOLDOUT_PER_STRATUM}/"
                     f"{N_PER_STRATUM} on {n_half} texts is not a whole number "
                     "— the internal quota would have to be rounded, which the "
                     "rule does not authorize")
@@ -892,7 +897,7 @@ def _fixture_manifest(n_wikitext: int = 12, n_c4: int = 12, n_pg19: int = 12,
                       n_se: int = 12) -> list[ManifestEntry]:
     """A synthetic corpus with the real grouping shapes, no data tree needed.
 
-    Rake M44 rule (c): the fixture resolves nothing relative to cwd, so the
+    The fixture resolves nothing relative to cwd, so the
     selftest count means the same thing from a worktree as from main.
     """
     rows: list[ManifestEntry] = []
@@ -949,9 +954,9 @@ def _ok(fn: Callable[[], Any]) -> bool:
 
 def selftest(v3_path: Optional[Path] = None,
              v21_path: Optional[Path] = None) -> int:  # noqa: C901 — a checklist
-    """Named-configuration selftest (rake M44): no network, no torch, no data tree.
+    """Named-configuration selftest: no network, no torch, no data tree.
 
-    Blocks that need the desk-side manifests are NAMED SKIPS unless the paths
+    Blocks that need the full local manifests are NAMED SKIPS unless the paths
     are handed in, and the tail states the configuration the counts were
     measured in.
     """
@@ -1160,7 +1165,7 @@ def selftest(v3_path: Optional[Path] = None,
     check("the internal split uses the half's own stream, not the main one",
           isp["stream"] == STREAM_HALF_INTERNAL["half_a"] != STREAM_SPLIT)
 
-    # ---- 7. the §9 ablation --------------------------------------------------
+    # ---- 7. the section 9 ablation -------------------------------------------
     print("== selftest 7: the §9 ablation draw ==")
     v21_big = ([ManifestEntry(text_id=f"S1-{i:03d}", stratum="S1", text=f"a{i}")
                 for i in range(40)] +
@@ -1211,7 +1216,7 @@ def selftest(v3_path: Optional[Path] = None,
     check("the derivation date is a constant, not a clock read",
           DERIVATION_DATE == art["basis"]["derivation_date"] == "2026-08-03")
 
-    # ---- 9. the census addendum ----------------------------------------------
+    # ---- 9. the census block -------------------------------------------------
     print("== selftest 9: the census addendum is dated, tabular and idempotent ==")
     add = render_overlap_addendum(ov, 300, 160, "a" * 64, "b" * 64)
     check("the addendum renders deterministically",
@@ -1274,7 +1279,8 @@ def selftest(v3_path: Optional[Path] = None,
     print(f"\nselftest: {len(failures)} failure(s)")
     for name, _, detail in failures:
         print(f"  MISS {name} {detail}")
-    # RAKE M44: the count names the configuration it was measured in.
+    # The count names the configuration it was measured in, so a count from a
+    # tree without the manifests is never mistaken for a full run.
     print(f"selftest checks run: {len(checks)} ({len(skips)} named skip(s)) "
           f"in configuration [{config}]")
     for name in skips:
@@ -1287,16 +1293,16 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--v3-manifest", type=Path,
                     default=Path("staging/webtext-v3-draft/corpus_manifest.json"),
-                    help="the desk-side webtext-v3 FULL manifest (read-only)")
+                    help="the local webtext-v3 FULL manifest, bodies present (read-only)")
     ap.add_argument("--v21-manifest", type=Path,
                     default=Path("staging/corpus-v21-manifest-full-DESKONLY.json"),
-                    help="the desk-side v2.1 FULL manifest (read-only)")
+                    help="the local v2.1 FULL manifest, bodies present (read-only)")
     ap.add_argument("--out-dir", type=Path,
                     default=Path("staging/webtext-v3-draft"),
-                    help="where the three draw artifacts land (never git)")
+                    help="where the three draw artifacts land (never committed)")
     ap.add_argument("--census", type=Path, default=None,
-                    help="COMPOSITION-CENSUS.md to append the dated overlap "
-                         "addendum to (idempotent: re-running replaces)")
+                    help="the composition census markdown to append the dated "
+                         "overlap block to (idempotent: re-running replaces)")
     ap.add_argument("--dry-run", action="store_true",
                     help="derive and check, write nothing")
     ap.add_argument("--selftest", action="store_true")
@@ -1318,7 +1324,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                  if second["artifact_sha256"].get(k) != v}
         if diffs or first["addendum"] != second["addendum"]:
             raise SplitDerivationError(f"DERIVATION IS NOT DETERMINISTIC: {diffs}")
-        logger.info("derive-twice: PASS — %d artifacts + addendum byte-identical",
+        logger.info("derive-twice: PASS — %d artifacts + census block byte-identical",
                     len(first["artifact_sha256"]))
 
         misses = [(n, d) for n, ok, d in first["checks"] if not ok]

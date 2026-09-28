@@ -1,12 +1,12 @@
-"""A8 smalls close-out — build OLMo-2-1124-7B's V7 (the missing target for the sixth node).
+"""Build OLMo-2-1124-7B's entropy-gradient vector (the missing target for OLMo).
 
-OLMo entered the battery for A1/A4 only, so no a5 §B.7 vector was ever banked for it, so
-â(·->OLMo) had no target. This builds V7 by the SAME construction the reference banks use
-(a5_vectors_8b_b7, a5_vectors_qwen-7b_b7), so the â comparison is construction-matched
-rather than a mixed-construction cosine (the arm's whole rake-33/rake-40 discipline, one
-level down):
+OLMo has no banked entropy-gradient vector, so â(·->OLMo) has no target without this
+build. It uses the SAME construction the reference banks use (a5_vectors_8b_b7,
+a5_vectors_qwen-7b_b7), so the â comparison is construction-matched rather than a
+mixed-construction cosine (a cosine between vectors built two different ways measures the
+construction difference as much as the transport):
 
-    §B.7 V7 = unit( P_[16:256](Σ_site) . mean_gid( ∇_state S_entropy ) )
+    entropy gradient = unit( P_[16:256](Σ_site) . mean_gid( ∇_state S_entropy ) )
 
 where the band [16:256] is the descending-eigenvalue slice of the site's residual
 covariance Σ (the same [16,256] recipe stamped on every reference b7 bank), and
@@ -14,7 +14,7 @@ S_entropy is the mean token-entropy over generated positions, teacher-forced on 
 banked stage-0 continuations (NOT fresh generation — the reference replays stage-0 gens
 too, so the stage-0 512-cap is the only cap and it censors nothing the reference did not).
 
-Σ rides free on the SAME forward passes (baton directive): the entropy-gradient replay
+Σ rides free on the SAME forward passes: the entropy-gradient replay
 already materialises the L{site} residual at every gen position, so accumulating their
 covariance costs no extra passes. Σ is captured over N_SIGMA gens (position budget matched
 to the reference ~30k positions) and the gradient over N_GRAD fresh gens (matched to the
@@ -22,20 +22,22 @@ reference n_gens=20).
 
 Base-model cautions honoured: OLMo-2-1124-7B has NO chat template — the stage-0 manifest
 already holds raw-prompted input_ids, which we replay verbatim (no template applied). OLMo
-applies q/k RMSNorm between projection and RoPE, but V7 reads the RESIDUAL ENTERING the
+applies q/k RMSNorm between projection and RoPE, but the vector reads the RESIDUAL ENTERING the
 layer (the pre-hook hidden_states), not keys, so that caveat does not touch this build.
 
-What is NOT run and why (rake 43 — say it, don't stretch): the §B.7 band-alignment
-z-gate is measured against the model's banked V3 (mode-dir0). OLMo has no banked V3, so
-that gate is N/A here; the construction-internal diagnostics that need no V3 (per-gen
+What is NOT run and why (a gate that cannot run is named, not stretched): the reference
+construction's band-alignment z-gate is measured against the model's banked mode contrast
+vector (mode-dir0). OLMo has no banked mode contrast vector, so that gate is N/A here; the
+construction-internal diagnostics that need none (per-gen
 sign-consistency and pairwise coherence of the band-projected gradient) ARE reported, and
 they are what tell you the gradient is a coherent direction rather than noise.
 
 Output (matched to vmb_b7_stage2_vectors so solve_star_systems reads it unchanged):
-  a5_vectors_olmo2-7b_b7/a5_vectors.npz : V7_L{site} + 3 matched-support band randoms
-  a5_vectors_olmo2-7b_b7/a5_vectors_stamps.json : honest provenance (rake 34)
+  <out-dir>/a5_vectors.npz : V7_L{site} + 3 matched-support band randoms
+  <out-dir>/a5_vectors_stamps.json : provenance, including every caveat that applies
 
-UNSTAMPED (C section 8). Scores nothing. NEEDS GPU (one card, eager). Node-side run:
+UNSTAMPED: nothing here is a scored result. Scores nothing. NEEDS GPU (one card, eager).
+Run on the GPU machine:
   OMP_NUM_THREADS=8 python -m metabasis.scripts.build_olmo_entropy_gradient \
     --model-path <olmo snapshot> --stage0-run <vmb_stage0_olmo2_7b> \
     --out-dir <battery>/a5_vectors_olmo2-7b_b7 --site 16 --n-sigma 60 --n-grad 20
@@ -44,8 +46,8 @@ from __future__ import annotations
 
 import os
 
-#  THE RULED DEFAULT (Luxia 2026-08-01): OMP_NUM_THREADS=8 everywhere, and the
-#  EFFECTIVE count recorded in the stamp. This builder's V7 comes off
+#  THE STANDING DEFAULT: OMP_NUM_THREADS=8 everywhere, and the EFFECTIVE count
+#  recorded in the stamp. This builder's entropy-gradient vector comes off
 #  `np.linalg.eigh(Sigma)` exactly as the reference builder's does, so it is
 #  thread-sensitive in exactly the same way and carries the same field. A FLOOR,
 #  not an override — the job script's own export wins — and it must sit above
@@ -65,11 +67,11 @@ import numpy as np
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("build_olmo_entropy_gradient")
 
-BAND = (16, 256)               # the frozen §B.7 band recipe, descending Σ rank
+BAND = (16, 256)               # the frozen band recipe, descending Σ rank
 NULL_SEED = 20260714           # matched-support randoms (vmb_b7_stage2 convention)
 SITE = 16                      # OLMo site of record — L16, from the smalls alignment curve
 N_SIGMA = 60                   # Σ position budget (reference 8b Σ used ~30k positions)
-N_GRAD = 20                    # entropy-gradient gens (reference §B.7 n_gens)
+N_GRAD = 20                    # entropy-gradient gens (the reference build's n_gens)
 
 
 def _sigma_gids(all_ids: list[int], n: int) -> list[int]:
@@ -107,7 +109,7 @@ def main() -> int:
     # tensor made in the hook), never w.r.t. the weights. Freezing the parameters means
     # backward allocates NO 7B-param grad buffers — the difference between ~18GB peak
     # (fits beside a co-tenant vLLM job) and OOM. Grad still flows THROUGH the frozen
-    # weights to reach the leaf; the numerical V7 is unchanged.
+    # weights to reach the leaf; the numerical vector is unchanged.
     model.requires_grad_(False)
     tok = AutoTokenizer.from_pretrained(args.model_path)
     has_template = bool(getattr(tok, "chat_template", None))
@@ -123,7 +125,7 @@ def main() -> int:
 
     def hook(module, a, kw):
         # substitute a requires_grad LEAF for the residual entering layer{site}, so the
-        # entropy at the head has a grad path back to it (reference §B.7 hook). Under
+        # entropy at the head has a grad path back to it (as the reference hook does). Under
         # no_grad (the Σ loop) this is a value-identical passthrough; under enable_grad
         # (the gradient loop) it is what makes autograd.grad(S, leaf) well-defined.
         hs = a[0] if a else kw.get("hidden_states")
@@ -154,7 +156,7 @@ def main() -> int:
     mu = R.mean(0)
     Rc = R - mu
     Sigma = (Rc.T @ Rc) / (Rc.shape[0] - 1)
-    #  THE THREAD-SENSITIVE STEP (Luxia ruling 2026-08-01): Sigma above is
+    #  THE THREAD-SENSITIVE STEP: Sigma above is
     #  bitwise stable at any thread count, this decomposition is not — eigh is
     #  bitwise-deterministic at a FIXED count and its bytes differ across
     #  counts, and the band basis Ub below is built from these evecs. The
@@ -187,12 +189,12 @@ def main() -> int:
     Ge = np.stack(Ge)
     mean_e = Ge.mean(0)
 
-    # band-projected V7 (identical algebra to vmb_v4_b7b4_stage1 §B.7)
+    # band-projected entropy gradient (identical algebra to the reference builder)
     cg = Ub.T @ mean_e
     v7 = Ub @ cg
     v7 = (v7 / np.linalg.norm(v7)).astype(np.float32)
 
-    # construction-internal diagnostics (need no V3)
+    # construction-internal diagnostics (need no mode contrast vector)
     bandproj = (Ub.T @ Ge.T).T                             # (n_grad, 240)
     bu = bandproj / np.clip(np.linalg.norm(bandproj, axis=1, keepdims=True), 1e-12, None)
     iu = np.triu_indices(len(Ge), k=1)
@@ -252,7 +254,7 @@ def main() -> int:
         "sites": [site],
         # The effective thread configuration, read from the THREADPOOL at stamp
         # time (after the eigh), not from the request. Unconditional: an absent
-        # key means the stamp predates the 2026-08-01 ruling and nothing else.
+        # key means the stamp was written before thread stamping existed, nothing else.
         THREAD_STAMP_KEY: thread_config_stamp(),
     }
     (args.out_dir / "a5_vectors_stamps.json").write_text(json.dumps(stamps, indent=1))

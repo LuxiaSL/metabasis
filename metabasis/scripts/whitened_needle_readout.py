@@ -1,33 +1,33 @@
-"""A8 Leg-4F / L4-c — whitened-target needle read: PARK RECORD + labelled exploratory beside.
+"""Whitened-target needle read: PARK RECORD + labelled exploratory beside.
 
-The letter (A8-add-2 P8-L4c) asks for V3w(DSV2-L22) = unit(Sigma^-1 Delta-mu) rebuilt
+The frozen bar's letter asks for V3w(DSV2-L22) = unit(Sigma^-1 Delta-mu) rebuilt
 FROM THE STAMPED RECIPE (banked Sigma npz + the banked class means), identity-checked
 against the whiten-stamps' recorded diagnostics, then cos(g.dir0_8B, V3w_dsv2) vs a fresh
 transported-null envelope.
 
 INVENTORY RESULT — the letter's object cannot be built from banked inputs:
   1. No banked V3raw at DSV2 L22 (a5_vectors_dsv2_lite carries V3_L9/L11/L15/L18 only).
-  2. No banked class means: the 2026-07-19 whiten build wrote STAMPS ONLY (no vectors npz)
-     — the same fact the Leg-3 curve rows already flagged.
+  2. No banked class means: the whiten build wrote STAMPS ONLY (no vectors npz)
+     — the same fact the DSV2 curve rows flag.
   3. Sigma is banked at L22 only; Sigma@L18 (where V3raw IS banked) is NOT banked, and the
-     pre-ruled fork forbids re-deriving Sigma.
+     fork fixed before this read forbids re-deriving Sigma.
   4. Two whiten vintages carry the same recipe name with different diagnostics:
-     whiten/v3whiten_stamps.json (lw_shrinkage .2576) cos_delta_whitened L22 = .1273
-     (the baton's ~.06-.13 reproduction target) vs whiten_dir0_stamps.json
-     (lw_shrinkage .0611) = .3257. Recorded as a rake.
-  => L4-c PARKS at the letter (park-don't-amend). The missing input is named precisely:
+     the v3whiten stamps (lw_shrinkage .2576) give cos_delta_whitened L22 = .1273
+     (inside the ~.06-.13 reproduction target) vs the whiten_dir0 stamps
+     (lw_shrinkage .0611) = .3257.
+  => this read PARKS at the letter (park-don't-amend). The missing input is named precisely:
      either Sigma@L18, or the L22 class means / V3raw_L22.
 
 EXPLORATORY BESIDE (this file's numbers; NOT the letter's object, scores NOTHING):
-a whitened dsv2 needle target built from the A8 arm's OWN banked material —
-Delta-mu = mean(S3 analogical) - mean(S3 contrastive) over the Leg-2 dsv2 state bank at
+a whitened dsv2 needle target built from this arm's OWN banked material —
+Delta-mu = mean(S3 analogical) - mean(S3 contrastive) over the dsv2 state bank at
 L22 (own-voice primary, pooled beside), whitened with the BANKED Sigma. Different capture
-(per-text mean states, A8 corpus, n=30/pole) from the stamped recipe (per-token positions,
+(per-text mean states, this arm's corpus, n=30/pole) from the stamped recipe (per-token positions,
 pole runs, n=160/class), so its diagnostics are reported next to both stamp vintages and
 the reader can see the distance. The needle read is then run against it exactly as the
 letter would have: transported-null envelope, sign-anchored, both target variants.
 
-UNSTAMPED (C§8). Run: PYTHONPATH=pipeline python -m metabasis.scripts.whitened_needle_readout
+UNSTAMPED: nothing here is a scored result. Run: PYTHONPATH=pipeline python -m metabasis.scripts.whitened_needle_readout
 """
 from __future__ import annotations
 

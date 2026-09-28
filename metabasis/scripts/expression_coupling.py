@@ -1,4 +1,4 @@
-"""A8 Leg-4 / L4-a — expression-coupling regression (CPU; frozen bar P8-L4a .60).
+"""Expression-coupling regression (CPU; mechanics for a frozen bar, clauses below).
 
 The computational-mechanics frame's entry test: g is fit on paired OBSERVATIONS, so it
 can only align the observation-coupled subspace; crypticity (state structure that the
@@ -12,19 +12,21 @@ axis-instance:
                      below, stamped BEFORE any coupling is computed).
     fidelity  := the axis's banked transport read (primary native proc_k512 cos).
 
-Then Spearman(coupling, fidelity) over the pooled instance table (add-2: the bar binds
+Then Spearman(coupling, fidelity) over the pooled instance table (the bar binds
 the single POOLED regression; no per-pair split scoring).
 
-Discipline (baton §L4-a):
+Discipline:
   * phase order is enforced by --phase: `functionals` writes the definition stamp;
     `couplings` computes couplings (and refuses to run without that stamp);
     `join` merges the banked fidelity table in LAST.  No functional definition is ever
     revised after a coupling or a fidelity value has been seen (the definitions are
     fixed by each axis's CONSTRUCTION semantics, not tuned).
   * an axis with no honest text observable is EXCLUDED with a named reason in the
-    stamp (pre-ruled fork); n must stay >= 10 or the leg parks.
+    stamp (a fork decided before any coupling is computed); n must stay >= 10 or the
+    readout parks.
 
-Everything UNSTAMPED (C§8).  No P is scored here — the desk scores.
+Everything UNSTAMPED: nothing here is a scored result.  No prediction is scored here;
+the clause facts are written for a separate scoring step.
 
 Usage:
   python -m metabasis.scripts.expression_coupling --phase functionals
@@ -346,7 +348,7 @@ def _banked_fidelity() -> dict:
                   "8bL16->qwen-7bL21", "")
     _from_rosetta(ARM / "leg1/readouts_modefree/rosetta_readout.json", "8b->qwen",
                   "8bL16->qwen-7bL21", "_modefree")
-    # Leg-2 (DSV2) has no full rosetta pass — its reads are the prep/curve-row artifacts
+    # The DSV2 pair has no full rosetta pass — its reads are the prep/curve-row artifacts
     cur = ARM / "leg3/readouts_cpu/dsv2_curverows.json"
     if cur.exists():
         d = json.loads(cur.read_text())
@@ -457,7 +459,7 @@ def phase_join(fidelity_manual: dict | None = None) -> dict:
                                    "(rake-14 forbids it for needle rows).")
     res["beside_variants"] = besides
 
-    # ---- the add-2 clause facts, stated mechanically (the desk scores)
+    # ---- the bar's clause facts, stated mechanically (scoring happens elsewhere)
     order = sorted(joined, key=lambda r: r["coupling_pearson_abs"])
     n = len(order)
     res["add2_clause_facts"] = {

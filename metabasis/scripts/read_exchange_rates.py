@@ -11,8 +11,9 @@ the target site.
 
 `g` is `fit_transport_maps.TransportMap.transport(..., direction="fwd")` — the
 DIRECTION map, not the state predictor. This module fits nothing and writes no
-map; the ceremony (prereg §3) is that predictions are filed BEFORE pair fits, so
-readout code must never be able to create a fit.
+map; predictions are filed BEFORE pair fits (the ceremony the transport-campaign
+pre-registration in `docs/planning/` fixes), so readout code must never be able to
+create a fit.
 
 ────────────────────────────────────────────────────────────────────────────────
 THE NORMALIZATION PATH — spelled out, because getting it wrong is silent
@@ -68,11 +69,11 @@ arithmetic one: the `src_norm`/`tgt_norm` stamped in the fit npz must equal the
 fit-time `norms_{model}_{arm}.json` entries at the sites named in the filename.
 If they disagree, the map was fit against a different state bank than the one you
 think you are reading (wave-1's hub bank is the SMALLS 8B bank, whose L14 native
-norm is 5.2234 — the A8 trunk bank's is 5.6915: two different banks, same model,
+norm is 5.2234 — the conjugation arm's trunk bank's is 5.6915: two different banks, same model,
 same site). That mismatch is exactly the failure this audit catches.
 
 WHERE the norms file comes from is part of the guard, not an implementation
-detail (rake M21b). `resolve_norms` probes in TIERS — an explicitly-passed path,
+detail. `resolve_norms` probes in TIERS — an explicitly-passed path,
 then caller-supplied roots, then the fit's OWN tree (`fits_dir.parent/states`),
 and only then the two GLOBAL trees that resolve by model key alone. With three
 corpus vintages live, a global hit can be a different vintage wearing the same
@@ -81,7 +82,7 @@ every `NormAudit` (`norms_tier`, `global_fallback`), the resolver logs a warning
 naming both, and `--strict-norms` turns the fallback into a refusal outright.
 
 ────────────────────────────────────────────────────────────────────────────────
-Arm and family discipline (prereg §2, and the arm-consistency rule)
+Arm and family discipline (the pre-registered arm-consistency rule)
 ────────────────────────────────────────────────────────────────────────────────
 The entropy-gradient vector is ARM-AGNOSTIC (one vector per model per site; the
 banked system uses the same 8B vector for both the native and raw rows). The MAP
@@ -89,7 +90,7 @@ is arm-specific, so â is arm-labeled by its map. Family of record is `proc_k128
 k32/ridge ride beside, never mixed inside one star equation.
 
 Map consumption: every map passes `fit_transport_maps.check_map_for_consumption`
-before an â is read through it. A map whose fit record in `cp2_summary.json`
+before an â is read through it. A map whose fit record in the run summary
 says the null gate failed, or whose Procrustes rank exceeds n_train / 1.2, or
 that has no complete record, is listed under `refused` with the reason and no â
 (the command exits 1). `--allow-failed-gate-map` / `--allow-over-rank-map` read
@@ -104,7 +105,7 @@ below its own null floor is not a transport fact.
 Run (repo root, PYTHONPATH=. or installed):
   python -m metabasis.scripts.read_exchange_rates --selftest
   python -m metabasis.scripts.read_exchange_rates --preset banked-precedent \
-      --out /tmp/claude-output/ahat_precedent.json
+      --out /tmp/ahat_precedent.json
   python -m metabasis.scripts.read_exchange_rates --preset wave1 \
       --out outputs/collection/readouts/exchange_rates_hub8b_native_k128.json
 """
@@ -130,9 +131,9 @@ logger = logging.getLogger("read_exchange_rates")
 
 # ---------------------------------------------------------------- constants
 #: npz key conventions for the entropy-gradient vector, canonical FIRST. New banks
-#: write `entropy_gradient_L{site}` (naming conventions §6); banked anamnesis
-#: artifacts carry the frozen legacy key `V7_L{site}` and are never rewritten
-#: (naming conventions §1 rule 6).
+#: write `entropy_gradient_L{site}`; banked anamnesis artifacts carry the
+#: frozen legacy key `V7_L{site}` and are never rewritten, because a rewrite
+#: would break every sha that pins them.
 ENTROPY_GRADIENT_KEY_PATTERNS: tuple[str, ...] = (
     "entropy_gradient_L{site}", "V7_L{site}")
 #: matched-support random band, same convention split.
@@ -142,8 +143,8 @@ RANDOM_BAND_MAX_MEMBERS = 8
 
 N_RANDOM_UNIT_NULLS = 100          # matched to read_transported_axes' envelope n
 NULL_QUANTILE = 0.95
-RANK_GUARD_DIVISOR = 1.2           # prereg §2: k <= n_train / 1.2
-NEAR_ZERO_CARVE_OUT = 0.08         # prereg §3: |c_A·c_B| < .08 scored magnitude-only
+RANK_GUARD_DIVISOR = 1.2           # pre-registered rank guard: k <= n_train / 1.2
+NEAR_ZERO_CARVE_OUT = 0.08         # pre-registered: |c_A·c_B| < .08 is scored magnitude-only
 NORM_AUDIT_RTOL = 1e-6
 
 FAMILY_OF_RECORD = "proc_k128"
@@ -154,16 +155,16 @@ BANK_ROOT = REPO_OUTPUTS / "battery"
 COLLECTION_ROOT = REPO_OUTPUTS / "collection"
 SMALLS_STATES = BANK_ROOT / "arms" / "A8_conjugation" / "smalls" / "states"
 
-#: The hub. Universal source for the collection phase (ratified 2026-07-27).
+#: The hub. Universal source for the collection phase.
 HUB_MODEL = "8b"
 #: Sites at which a hub entropy-gradient vector is actually BANKED. L16 is the
 #: only one — there is no 8B vector at L14 anywhere in the tree (verified by an
-#: exhaustive npz key scan, 2026-07-27). A hub-source site outside this set needs
+#: exhaustive npz key scan). A hub-source site outside this set needs
 #: a GPU build before any â at that site can be read.
 HUB_BANKED_SITES: tuple[int, ...] = (16,)
 HUB_VECTORS_PATH = BANK_ROOT / "a5_vectors_8b_b7" / "a5_vectors.npz"
 
-#: Wave-1 record sites, ratified 2026-07-27. model key -> target site.
+#: Wave-1 record sites. model key -> target site.
 WAVE1_RECORD_SITES: dict[str, int] = {
     "qwen2.5-3b-instruct": 26,
     "qwen2.5-14b-instruct": 29,
@@ -176,8 +177,8 @@ WAVE1_RECORD_SITES: dict[str, int] = {
 
 #: The banked precedent: the only hub→node pair whose BOTH endpoints already have
 #: banked entropy-gradient vectors AND a banked fit. Used as the end-to-end
-#: regression: the readout must reproduce â = 0.1278 (filed in
-#: smalls/readouts_cpu/star_predictions_A8-add-8.json).
+#: regression: the readout must reproduce â = 0.1278 (filed with the banked
+#: star predictions under outputs/battery/arms/A8_conjugation/smalls/readouts_cpu/).
 BANKED_PRECEDENT_A_HAT = 0.1278
 
 
@@ -206,7 +207,7 @@ class NormAudit(BaseModel):
     bank_norms_path: Optional[str] = None
     #: WHERE the norms came from. `global_fallback=True` means they were found
     #: by model key outside the fit's own tree — a possible corpus-vintage
-    #: mismatch, so `match` means less than usual either way (rake M21b).
+    #: mismatch, so `match` means less than usual either way.
     norms_tier: Optional[str] = None
     global_fallback: bool = False
     match: Optional[bool] = None
@@ -387,7 +388,7 @@ def load_random_band(path: Path, site: int) -> list[np.ndarray]:
 
 
 def n_train_of(fits_dir: Path) -> Optional[int]:
-    """n_train from the fit dir's cp2_summary.json, or None if unavailable."""
+    """n_train from the fit dir's run summary, or None if unavailable."""
     p = fits_dir / "cp2_summary.json"
     if not p.exists():
         return None
@@ -426,7 +427,7 @@ class NormsProvenanceError(RuntimeError):
 
 #: Where a norms file was found, in the order the resolver prefers. The first
 #: three are TIED TO THE CALLER'S OWN TREE; the last two are GLOBAL — they
-#: resolve by MODEL KEY alone, which is the whole hazard (rake M21b).
+#: resolve by MODEL KEY alone, which is the whole hazard: a norms file found by model key alone can belong to a different corpus vintage of the same model.
 NormsTier = Literal["explicit", "extra-root", "fit-local",
                     "global-collection", "global-smalls"]
 GLOBAL_NORMS_TIERS: tuple[NormsTier, ...] = ("global-collection", "global-smalls")
@@ -449,8 +450,8 @@ class NormsResolution(BaseModel):
     """Which `norms_{model}_{arm}.json` was used, from which tier, and why it
     might be the wrong one.
 
-    RAKE M21b, and it is no longer hypothetical with three corpus vintages
-    live: the global tiers resolve by MODEL KEY alone. A fit made in a battery
+    With three corpus vintages live, the global tiers are a real hazard:
+    they resolve by MODEL KEY alone. A fit made in a battery
     leg (or against any older bank) whose own `states/` lacks the norms file
     would otherwise resolve, silently, against whatever the collection tree
     holds for the same model today — a different corpus vintage wearing the
@@ -764,7 +765,7 @@ def resolve_target_vectors(model: str, site: int, collection_root: Path
 
 def preset_wave1(arm: str, family: str, collection_root: Path, hub_site: int,
                  hub_vectors: Optional[Path] = None) -> list[PairRequest]:
-    """Hub 8B → each wave-1 node at its ratified record site."""
+    """Hub 8B → each wave-1 model at its record site."""
     reqs: list[PairRequest] = []
     for model, site in sorted(WAVE1_RECORD_SITES.items()):
         tgt_path, _ = resolve_target_vectors(model, site, collection_root)
@@ -1009,7 +1010,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
               "a fallback")
 
         print("== selftest 10: the global norms fallback is LOUD, never silent ==")
-        #  Rake M21b: resolving by MODEL KEY outside the fit's own tree is a
+        #  Resolving by MODEL KEY outside the fit's own tree is a
         #  corpus-vintage cross-contamination path. Simulated by pointing the
         #  global tier at a temp tree, so the check needs no data tree.
         global_states = root / "global" / "someM" / "states"
@@ -1121,7 +1122,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--selftest", action="store_true",
                     help="synthetic validation of the readout algebra; no data needed")
     ap.add_argument("--preset", choices=("wave1", "banked-precedent"),
-                    help="wave1: hub 8B → the seven wave-1 nodes at their ratified "
+                    help="wave1: hub 8B → the seven wave-1 models at their "
                          "record sites. banked-precedent: 8bL16→olmo2-7bL16 raw "
                          "(the only fully-banked hub pair; regression target "
                          f"â={BANKED_PRECEDENT_A_HAT})")
@@ -1141,7 +1142,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                          "is then unknown and clears_null_floor is meaningless)")
     ap.add_argument("--strict-norms", action="store_true",
                     help="REFUSE to resolve norms_{model}_{arm}.json outside the "
-                         "fit's own tree (rake M21b). Default is to resolve, warn "
+                         "fit's own tree (a model-key match can be another corpus "
+                         "vintage). Default is to resolve, warn "
                          "loudly, and record the tier + resolved path in every "
                          "norm_audit entry; this flag makes it fatal instead.")
     ap.add_argument("--out", type=Path, default=None,

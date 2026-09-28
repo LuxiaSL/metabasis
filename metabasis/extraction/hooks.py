@@ -1,8 +1,8 @@
 """Minimal model-hook machinery for the transport program.
 
-Vendored verbatim from the anamnesis extraction stack (`model_loader.py`,
-public `anamnesis-pl` repo) at metabasis bootstrap, 2026-07-26 — the ONLY two
-pieces of that 937-line module the transport program needs:
+Vendored from `model_loader.py` in the public `anamnesis-pl` repository,
+verbatim — the ONLY two pieces of that 937-line module the transport program
+needs:
 
   * `decoder_layers()` — architecture-resolution helper (Llama/Qwen/OLMo-2
     direct, Gemma-3 multimodal wrapper via `language_model`).
@@ -11,8 +11,8 @@ pieces of that 937-line module the transport program needs:
     (`entropy_write_probe`, the owl/needle probes).
 
 Nothing else travels: no k_proj/gate_proj pre-RoPE capture, no HookState, no
-LoadedModel, no eager-attention plumbing (charter §2f: "none of the anamnesis
-extraction stack"). The slim state collector hand-rolls its own read-side
+LoadedModel, no eager-attention plumbing: this package carries no more of the
+anamnesis extraction stack than these two pieces. The slim state collector hand-rolls its own read-side
 capture hook and imports only `decoder_layers` from here.
 """
 from __future__ import annotations
@@ -41,17 +41,16 @@ def decoder_layers(model):
     nests under `language_model`; hook paths must resolve through it.
 
     Older lineages do NOT nest their base model under `.model` and do not
-    always call the list `layers` (verified on transformers 5.3.0, 2026-07-27):
+    always call the list `layers` (verified on transformers 5.3.0):
     GPTNeoXForCausalLM is `.gpt_neox.layers`, GPT2LMHeadModel is
     `.transformer.h`. Those resolve through HF's own `base_model_prefix`, which
     is the version-robust accessor (`PreTrainedModel.base_model` uses it) and
     beats hardcoding attribute names per architecture.
 
-    ORDERING IS LOAD-BEARING: the two original checks run FIRST and are
-    untouched, so every architecture that already resolved still resolves via
-    the identical branch to the identical object. The fallback below is
-    reached ONLY where this function previously raised AttributeError — it can
-    therefore add support but can never change an existing result. (This
+    ORDERING IS LOAD-BEARING: the two direct checks run FIRST, so every
+    architecture they resolve goes through that branch to that object. The
+    fallback below is reached ONLY where both direct checks miss — it can add
+    support but can never change what the direct checks return. (This
     function is pure resolution with no side effects, so "same object returned"
     is a complete byte-stability argument for everything downstream.)
     """
@@ -64,7 +63,7 @@ def decoder_layers(model):
         if hasattr(lm_inner, "layers"):
             return lm_inner.layers
 
-    # --- fallback: previously an unconditional AttributeError ------------------
+    # --- fallback: reached only when both direct checks miss --------------------
     prefix = getattr(model, "base_model_prefix", "") or ""
     for base in ((getattr(model, prefix, None) if prefix else None), inner, model):
         if base is None:

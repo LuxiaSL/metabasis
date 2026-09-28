@@ -1,22 +1,23 @@
-"""A8 Leg-6 / Item 5 — reverse behavioral certification (P8-REV .75): injection bank.
+"""Reverse behavioral certification: injection bank.
 
-The arm has never steered the SOURCE-side model. Every behavioral leg so far pushed a
-vector FORWARD (3B->8B, 8B->Qwen, 8B->DSV2, and the owl's Qwen->8B which is reverse but
-into a target that had also been a forward target). This leg carries 8B's V7 BACK into
-3B through the transpose of the banked Leg-0 anchor Procrustes and asks whether it
-writes 3B's entropy on the standard frame.
+Every other behavioral read in this arm pushes a vector FORWARD (3B->8B, 8B->Qwen,
+8B->DSV2, and the owl's Qwen->8B which is reverse but into a target that is also a
+forward target), so none of them steers the SOURCE-side model. This one carries 8B's
+entropy-gradient vector BACK into 3B through the transpose of the banked 3B/8B anchor
+Procrustes and asks whether it writes 3B's entropy on the standard frame.
 
-CONSTRUCTION (add-5, frozen):
-  * map        = REVERSE of the Leg-0 anchor fit fit_3bL14__8bL16_native_proc_k512
+CONSTRUCTION (frozen):
+  * map        = REVERSE of the 3B/8B anchor fit fit_3bL14__8bL16_native_proc_k512
                  (TransportMap.transport(..., direction="rev") — the adjoint; for
                  Procrustes this is the exact inverse of the orthogonal part).
-                 Procrustes is the family of record for reverse-direction claims (rake-15).
+                 Procrustes is the family of record for reverse-direction claims: the
+                 other fit families have no exact adjoint.
   * vector     = 8B V7_L16 (a5_vectors_8b_b7), sign-anchored through read_transported_axes.load_axes
                  BEFORE transport (standing rule: sign-anchor before ANY banked vector use).
   * controls   = the REVERSE-TRANSPORTED R band: 8B's own banked Rband1-3 carried back
                  through the SAME map. Native 3B R cells would not be the right control —
                  the question is whether the TRANSPORT carries signal, so the control must
-                 travel the same road. add-5 pre-authorises fresh cells for exactly this.
+                 travel the same road, which is why these cells are generated fresh.
   * doses      = +-{.03, .1, .3} x 3B's per-token median residual norm at L14, plus an
                  alpha=0 baseline. Full signed ladder (the SCOPE clause: monotone across
                  the whole signed ladder, sign flipping through zero).
@@ -24,15 +25,15 @@ CONSTRUCTION (add-5, frozen):
                  attn eager, bare system prompt — the standard entropy frame.
 
 NORM CONVENTION, NAMED: alpha uses the a5 stamps' per-token median residual norm
-(L14 = 12.2391), which is the convention every prior behavioral leg used. The A8 leg-0
+(L14 = 12.2391), which is the convention every other behavioral read uses. This arm's
 collection stamp carries a slightly different number for the same site (12.1125) because
-it is measured over the A8 corpus rather than the a5 stage-0 pool. The a5 number is used;
+it is measured over this arm's paired corpus rather than the a5 stage-0 pool. The a5 number is used;
 the other is recorded beside so the difference is visible rather than silent.
 
 IDENTITY CHECK before anything is written: cos(g_rev . V7_8B, V7_3B) must reproduce the
-banked Leg-0 REVERSE read (+.531). If it does not, the leg parks with the trace.
+banked 3B/8B REVERSE read (+.531). If it does not, the run parks with the trace.
 
-UNSTAMPED (C section 8). No P self-scored. Run (repo root):
+UNSTAMPED: nothing here is a scored result, and no prediction is self-scored. Run (repo root):
   PYTHONPATH=pipeline python -m metabasis.scripts.build_reverse_banks
 """
 from __future__ import annotations
@@ -67,9 +68,9 @@ FIT = ARM / "fits" / "fit_3bL14__8bL16_native_proc_k512.npz"
 THREEB_STAMPS = Path("outputs/battery/a5_vectors_3b/a5_vectors_stamps.json")
 SITE = 14
 DOSES = (0.03, 0.1, 0.3, -0.03, -0.1, -0.3)
-LEG0_REVERSE_READ = 0.531          # banked Leg-0 reverse V7 read; the identity target
+LEG0_REVERSE_READ = 0.531          # banked 3B/8B reverse entropy-gradient read; the identity target
 IDENT_TOL = 0.02
-A8_CORPUS_NORM_BESIDE = 12.1125    # A8 leg-0 collection stamp, same site, other pool
+A8_CORPUS_NORM_BESIDE = 12.1125    # this arm's collection stamp, same site, other pool
 
 
 def _sha(p: Path) -> str:
@@ -79,7 +80,7 @@ def _sha(p: Path) -> str:
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parse_no_arguments(__doc__, argv)
     if not FIT.exists():
-        raise SystemExit(f"leg-0 anchor fit missing: {FIT}")
+        raise SystemExit(f"3B/8B anchor fit missing: {FIT}")
     tm = load_transport_map(FIT)
 
     src_axes, _, src_pool = load_axes("8b")        # 8B: the vector's home
@@ -168,7 +169,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     (LEG6 / "cells/l6rev_cells_3b.json").write_text(
         json.dumps({"cells": cells, "_stamp": stamp}, indent=1))
 
-    logger.info("identity: cos(g_rev.V7_8B, V7_3B) = %+.4f (banked leg-0 reverse %.3f) -> %s",
+    logger.info("identity: cos(g_rev.V7_8B, V7_3B) = %+.4f (banked 3B/8B reverse %.3f) -> %s",
                 identity["cos_grev_V7_8b_vs_V7_3b"], LEG0_REVERSE_READ,
                 "PASS" if identity["PASS"] else "FAIL")
     logger.info("bank: %s (%d vectors); %d cells x 80 gens; alpha norm L%d = %.4f",

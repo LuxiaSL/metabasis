@@ -1,6 +1,6 @@
-"""A8 Leg-4F / L4-d — termination-stratum rescue readout (CPU; frozen bar P8-L4d .55).
+"""Termination-stratum rescue readout (CPU; mechanics for a frozen bar).
 
-The desk's interim-note-2 diagnosis: the Leg-0/1 fit corpora are TERMINATION-CENSORED
+The diagnosis under test: the base fit corpora are TERMINATION-CENSORED
 (~90% of S1/S3 sit at the 512 cap), so eos-perp-relevant covariance was censored out of the
 data g was fit on — which would explain why Veos-perp is the one axis whose commutation sits
 AT NULL cross-family (.0558 vs q95 .0638) while its field siblings hold.
@@ -8,20 +8,21 @@ AT NULL cross-family (.0558 vs q95 .0638) while its field siblings hold.
 S5 (uncapped, natural terminations, 160/voice, 100% natural-EOS) was added to the fit.  This
 reads:
 
-  BAR (add-2 P8-L4d): Veos-perp commutation 8b->qwen rises from at-null (.056) to
+  BAR: Veos-perp commutation 8b->qwen rises from at-null (.056) to
                       > 2x its envelope q95 under the S5-augmented fit.
   FREE COLUMN (no bar): the full axis panel under all three fits — do the OTHER axes move
                       when S5 enters?
-  L4-a RIDER (reported, unscored): eos-perp expression-coupling recomputed on the
+  COUPLING RIDER (reported, unscored): eos-perp expression-coupling recomputed on the
                       S5-AUGMENTED corpus — the frame's cleanest internal check, since the
                       capped-corpus coupling was measured on censored data.
 
 Three maps compared, all native proc_k512 at the 8bL16->qwen-7bL21 anchor:
-  baseline   = Leg-1 fits/            (S1+S2+S3, 780 texts — the fit the .056 came from)
-  s5aug      = leg4/fits_s5aug/       (S1+S2+S3+S5, 1100)
-  s5aug_mf   = leg4/fits_s5aug_modefree/ (S1+S2+S5 — mode-free variant, rides free)
+  baseline   = the base-corpus fits   (S1+S2+S3, 780 texts — the fit the .056 came from)
+  s5aug      = the S5-augmented fits  (S1+S2+S3+S5, 1100)
+  s5aug_mf   = the mode-free variant  (S1+S2+S5 — rides free)
+(the directories are the values of `MAPS` below).
 
-UNSTAMPED (C§8).  Mechanics only — the desk scores P8-L4d.
+UNSTAMPED: nothing here is a scored result.  Mechanics only — scoring is a separate step.
 
 Run (repo root): PYTHONPATH=pipeline python -m metabasis.scripts.termination_stratum_readout
 """
