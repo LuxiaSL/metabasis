@@ -1,39 +1,38 @@
-"""The node-side behavioral engine — one load, all cells, batched (BRIEF §2).
+"""The behavioral engine — one model load, all cells, batched.
 
-The generation/injection harness of the behavioral phase. `BRIEF-behavioral-phase-
-2026-07-29.md` (sha `475bc2a8…`) §2 is this module's specification verbatim and §13
-holds the ten rulings that freeze its design choices; §9 is its HALT list, encoded
-here as the named exceptions of `BehavioralHarnessError` rather than as warnings,
-because an enactor never adjudicates a live HALT.
+The generation/injection harness of the behavioral phase. Its design choices are
+frozen, and each one is stated where the code enforces it. Every condition that must
+stop a run is a named subclass of `BehavioralHarnessError` rather than a warning,
+because a live HALT is not something the running code is allowed to adjudicate.
 
-WHAT THIS MODULE IS. §2.1's one-load-per-node job: preflight → norm calibration →
+WHAT THIS MODULE IS. The one-load-per-node column job: preflight → norm calibration →
 canonical-layout determination → all calibration cells → all transported cells →
 battery → entropy probe → in-job replay gate → stamps → manifest, with the model
 loaded exactly once. This file owns the generation/injection/probe/replay mechanics
-and the stamp. The §4 verdict logic lives in `actuation_calibration.py`; the §6
-battery and coherence panel live in `capability_battery.py`; §2's CPU staging is
-`build_behavioral_banks.py` (whose `CellsDocument` is this module's `--run` input) and
-scoring is `score_behavioral_column.py`, which is NOT in this batch — the desk scores
-and this module never self-scores (C§8).
+and the stamp. The actuation-calibration verdict logic lives in
+`actuation_calibration.py`; the capability battery and coherence panel live in
+`capability_battery.py`; CPU staging is `build_behavioral_banks.py` (whose
+`CellsDocument` is this module's `--run` input). Scoring happens outside this module,
+which never scores its own output: every stamp it writes is UNSTAMPED.
 
 THE JOB IS WIRED, AND ITS ORCHESTRATION IS PROVED WITHOUT A GPU. `run_column` is the
-§2.1 job; it is written against the narrow `NodeRuntime` surface so the SAME
-orchestration runs under `HFNodeRuntime` on a node and under a numpy-only stub in
+column job; it is written against the narrow `NodeRuntime` surface so the SAME
+orchestration runs under `HFNodeRuntime` on a GPU and under a numpy-only stub in
 `--selftest`. That is what keeps the fire ORDER (calibration before transported,
-because §4 is a gate), the per-cell §2.8 stamps, the completeness guard and the replay
-gate proven in a configuration with no deep-learning stack — while the torch block
-additionally drives the REAL runtime end to end on a tiny CPU Llama, so the hook, the
-two-forward probe, the in-job norm measurement and the battery-under-injection are
-exercised against a genuine forward rather than described.
+because the actuation verdict is a gate), the per-cell stamps, the completeness guard
+and the replay gate proven in a configuration with no deep-learning stack — while the
+torch block additionally drives the REAL runtime end to end on a tiny CPU Llama, so
+the hook, the two-forward probe, the in-job norm measurement and the
+battery-under-injection are exercised against a genuine forward rather than described.
 
 BASIS-AGNOSTIC AT RUN TIME. `CORPUS_SHA_V21` is this module's DEFAULT expectation and
 nothing more: `run_column` takes `corpus_sha_of_record` as a parameter and the CLI
 defaults it to the cells document's own basis, so re-pointing the harness at another
-corpus/basis is a staging act, never an edit here.
+corpus or basis is a staging act, never an edit here.
 
 THE FOUR PROPERTIES THAT MAKE THE FAST PATH LEGITIMATE, and where each is proved:
 
-  1. **Layout invariance** (§2.2). A cell is 80 generations sharing ONE injection
+  1. **Layout invariance.** A cell is 80 generations sharing ONE injection
      spec, so batching is legitimate — but only if a generation's token sequence is
      a function of the generation, never of the batch it rode in. Both halves of
      that are constructive here: the randomness is per-(cell, gen_id) pre-drawn
@@ -43,32 +42,31 @@ THE FOUR PROPERTIES THAT MAKE THE FAST PATH LEGITIMATE, and where each is proved
      B ∈ {80, 40, 20, 10, 1} on a deterministic stub stepper; CHARACTERIZED (never
      asserted) on a real tiny Llama, because GPU — and, as the selftest measures,
      sometimes CPU — reductions are not batch-size invariant, which is exactly why
-     §2.7 defines replay IN THE CANONICAL LAYOUT.
+     the replay gate compares IN THE CANONICAL LAYOUT.
 
-     TWO KERNELS, ONE STEP (2026-08-01). The per-generation python step is also the
-     harness's hot path, so a VECTORIZED kernel computes the same step for a whole
-     sub-batch at once (`sample_tokens`). `sample_token` remains in the module as the
-     path of reference and the definition of the step; the vectorized kernel may not
-     draw a token at a (batch, vocab) shape until it has been certified BYTE-identical
-     to the reference at that shape, on that machine, in that process
-     (`assert_batched_sampler_identity`). Every subcase whose batched spelling would
-     be a different computation rather than a faster one — greedy, top-k, top-p, any
-     degenerate row — is REFUSED back to the reference rather than approximated.
+     TWO KERNELS, ONE STEP. The per-generation python step is also the harness's hot
+     path, so a VECTORIZED kernel computes the same step for a whole sub-batch at once
+     (`sample_tokens`). `sample_token` is the path of reference and the definition of
+     the step; the vectorized kernel may not draw a token at a (batch, vocab) shape
+     until it has been certified BYTE-identical to the reference at that shape, on
+     that machine, in that process (`assert_batched_sampler_identity`). Every subcase
+     whose batched spelling would be a different computation rather than a faster one
+     — greedy, top-k, top-p, any degenerate row — is REFUSED back to the reference
+     rather than approximated.
 
-  2. **M5-safety by construction** (§2.3, ruling 8). Every generation's uniforms
+  2. **Safe under partial re-runs, by construction.** Every generation's uniforms
      derive from its OWN sha256 digest over
      `{corpus_sha}|{node_key}|{arm}|L{site}|{cell_id}|{gen_id:03d}`, so a partial
-     re-run of any subset of cells keeps every other cell in phase. M5's rake is a
-     single stream that shifted phase when records were filtered (up to .0459 drift
-     on q95s); this column WILL be re-run in parts. `hash()` appears nowhere (M25:
-     PYTHONHASHSEED salts it, and the archived preview's nulls are irreproducible
-     for exactly that reason).
+     re-run of any subset of cells keeps every other cell in phase. A single RNG
+     stream shifts phase when records are filtered (drift up to .0459 on q95s), and
+     a column is routinely re-run in parts. `hash()` appears nowhere: PYTHONHASHSEED
+     salts it, so anything seeded from it is irreproducible across processes.
 
-  3. **α = 0 is bitwise no-hook** (§2.4). The hook short-circuits on `alpha == 0.0`
+  3. **α = 0 is bitwise no-hook.** The hook short-circuits on `alpha == 0.0`
      and returns its args untouched, so the baseline cell with the hook attached is
      the unperturbed forward. Asserted once per node, cheaply, rather than trusted.
 
-  4. **The in-job replay gate** (§2.7). After all cells complete, in the SAME
+  4. **The in-job replay gate.** After all cells complete, in the SAME
      process and the SAME canonical layout, K = 3 cells re-generate — selection
      deterministic from `sha256(node_key|corpus_sha)`, constrained to one signal
      cell at |0.3|, one random-band cell and one calibration cell — and both the
@@ -77,102 +75,97 @@ THE FOUR PROPERTIES THAT MAKE THE FAST PATH LEGITIMATE, and where each is proved
 
 TWO SPEC AMBIGUITIES, RESOLVED EXPLICITLY AND REPORTED (never improvised silently):
 
-  * **§2.6's probe batching.** The probe is specified right-padded with "per-row
-    spans sliced by that row's own `prompt_length`", but the injection hook gates on
-    ABSOLUTE positions with one `[seq_len]` mask per forward (`hooks.py` L181), so a
-    right-padded batch of rows with DIFFERENT prompt lengths has no single valid
-    mask — the steered probe would inject over prompt positions of the shorter rows.
-    Resolution of necessity: probe batches group rows of EQUAL `prompt_length`
-    (deterministic — ascending length, gen_id order within a length), which
-    satisfies every literal §2.6 requirement and adds only the grouping. The
-    realized grouping is recorded in the cell record and the stamp
-    (`probe_grouping`), and `PROBE_GROUPING_READING` names it as a desk-owed
-    reading rather than a frozen one. The named alternative — extending `hooks.py`
-    to accept a per-row `[batch, seq]` mask — is a change to a frozen surface and
-    is deliberately NOT taken here.
-  * **§2.6's batch-1-vs-batch-32 sentence** both "asserts ... bit-exactness" and
-    says the delta is "instrumentation and cannot fail the gate" (M19). M19 wins:
-    `characterize_probe_batch_invariance` is descriptive-only and returns a record,
-    and only the §2.7 replay gate — same layout, same process — can HALT.
+  * **The probe's batching.** The probe is specified right-padded with "per-row
+    spans sliced by that row's own `prompt_length`", but the residual-write hook in
+    `metabasis.extraction.hooks` gates on ABSOLUTE positions with one `[seq_len]`
+    mask per forward, so a right-padded batch of rows with DIFFERENT prompt lengths
+    has no single valid mask — the steered probe would inject over prompt positions
+    of the shorter rows. Resolution of necessity: probe batches group rows of EQUAL
+    `prompt_length` (deterministic — ascending length, gen_id order within a length),
+    which satisfies every literal requirement of the probe spec and adds only the
+    grouping. The realized grouping is recorded in the cell record and the stamp
+    (`probe_grouping`), and `PROBE_GROUPING_READING` names it as a reading made here,
+    open to review, rather than a frozen one. The named alternative — extending the
+    hook to accept a per-row `[batch, seq]` mask — is a change to a frozen surface
+    and is deliberately NOT taken here.
+  * **The batch-1-vs-batch-32 sentence** of the probe spec both "asserts ...
+    bit-exactness" and says the delta is "instrumentation and cannot fail the gate".
+    Instrumentation wins: `characterize_probe_batch_invariance` is descriptive-only
+    and returns a record, and only the replay gate — same layout, same process — can
+    HALT.
 
 CPU self-test (no weights, no GPU, no data tree):
 
     python -m metabasis.scripts.run_behavioral_cells --selftest
 
-RAKE M44 — THE CONFIGURATION MATRIX IS THE MERGE BAR. This selftest is verified in
-all four cells of {torch, no torch} x {data tree, no data tree} and every cell
-must exit 0 with either real passes or NAMED skips. Two environments differ in ways
-a single run cannot see: the repo `.venv` has NO torch (numpy/pydantic/scipy only)
-while `/usr/bin/python` has torch + transformers, and the data tree is gitignored so
-a fresh worktree has none. A bare `import torch` at a point of use passes in one
-environment and CRASHES in another, and a crash is indistinguishable from a failure
-while saying less. Every torch-dependent BLOCK here therefore branches on one
-availability probe and degrades to a named skip, counted in the tail so coverage is
-reported per configuration rather than inferred.
+THE CONFIGURATION MATRIX IS THE MERGE BAR. This selftest is verified in all four cells
+of {torch, no torch} x {data tree, no data tree} and every cell must exit 0 with either
+real passes or NAMED skips. Two environments differ in ways a single run cannot see: the
+repo `.venv` has NO torch (numpy/pydantic/scipy only) while a GPU environment has torch
++ transformers, and the data tree is gitignored so a fresh worktree has none. A bare
+`import torch` at a point of use passes in one environment and CRASHES in another, and
+a crash is indistinguishable from a failure while saying less. Every torch-dependent
+BLOCK here therefore branches on one availability probe and degrades to a named skip,
+counted in the tail so coverage is reported per configuration rather than inferred.
 
-Node-side run (§2.1; Heimdall CLI only, the HTTP API is read-only verification):
+GPU run (one card, one model load):
 
     OMP_NUM_THREADS=1 CUDA_VISIBLE_DEVICES=3 \
     python -m metabasis.scripts.run_behavioral_cells --run \
         --node-key qwen2.5-3b-instruct --model-path <LOCAL_WEIGHTS_DIR> \
-        --arm-root <ARM_ROOT> --work-root <NODE_DATA_ROOT>/metabasis-behavioral/<node> \
+        --arm-root <ARM_ROOT> --work-root <DATA_ROOT>/metabasis-behavioral/<node> \
         --cells-json <STAGED_CELLS>.json --prompt-pool <POOL>.json --arm native \
-        --actuation-calibration <VERDICT>.json    # §4.2, see below
+        --actuation-calibration <VERDICT>.json    # see below
 
-§4.2'S VERDICT ON THE STAMP (2026-08-05, Luxia's ruling ①). §4.2 closes by requiring
-every §5 cell to NAME its site's actuation calibration by job id + verdict + the three
-criterion values. `run_column` has always accepted that block as the
-`actuation_calibration_stamp` kwarg, but nothing on the CLI could fill it, so a
-CLI-fired column stamped OWED — TRUE while no verdict existed (batch A/B), a FALSE
-provenance statement the moment the desk filed one. `--actuation-calibration` takes
-the desk's typed verdict document, refuses it if it names another (node, site, arm)
-or is not a §4.2 document at all, and transcribes it. WITHOUT the flag nothing about
-this module changes: the OWED default and its honest note stand, byte for byte. The
-verdict is never derived here — the desk scores, this module transcribes (C§8).
+THE ACTUATION VERDICT ON THE STAMP. Every transported cell must NAME its site's
+actuation calibration by job id + verdict + the three criterion values.
+`run_column` accepts that block as the `actuation_calibration_stamp` kwarg, and
+`--actuation-calibration` fills it from the CLI: it takes the typed verdict document,
+refuses it if it names another (node, site, arm) or is not an actuation-verdict
+document at all, and transcribes it. WITHOUT the flag the stamp says the verdict is
+OWED, with a note saying so — true while no verdict exists, and never a false
+provenance statement. The verdict is never derived here: it is scored elsewhere and
+this module transcribes it.
 
-THE MAPPING MODE (2026-08-08, Luxia's ratification of the desk's proposal on
-`PRESTATEMENT-moe-dose-window-mixtral-2026-08-08.md`). A dose-WINDOW mapping is not a
-science read: it asks where a model's response window ends, at doses the frozen ladder
-does not carry. `DOSE_LADDER` is untouched — every science cell validates against it
-exactly as before — and the mapping doses arrive instead on a SPEC DOCUMENT, admitted
-only when BOTH an explicit spec file AND the explicit `--mapping-mode` flag are given.
-Absent either, this module's behavior is unchanged in every byte.
+THE MAPPING MODE. A dose-WINDOW mapping is not a science read: it asks where a model's
+response window ends, at doses the frozen ladder does not carry. `DOSE_LADDER` is
+untouched — every science cell validates against it — and the mapping doses arrive
+instead on a SPEC DOCUMENT, admitted only when BOTH an explicit spec file AND the
+explicit `--mapping-mode` flag are given. Absent either, the mapping machinery is inert.
 
   * Mapping cells wear `kind="mapping"` and carry the spec's `MappingAuthorization`
     (its id, its sha256, its dose tuple). A science cell carrying one is refused; a
     mapping cell without one is refused; a mapping cell whose dose is ON the frozen
     ladder is refused. That last refusal is the load-bearing one: mapping doses are
     provably DISJOINT from `DOSE_LADDER`, so a mapping cell's rise cannot occupy a
-    dose any §4.2 arithmetic reads, and `actuation_calibration` refuses an off-ladder
-    dose key besides.
+    dose any actuation-verdict arithmetic reads, and `actuation_calibration` refuses
+    an off-ladder dose key besides.
   * A mapping column is PURE (`assert_mapping_column`): mapping cells never share a
-    column with science cells, so a §4.2-scorable column holds zero mapping cells by
-    construction rather than by care. §2.7's gate still fires, under a third role
-    mapping (`MAPPING_ONLY_ROLE_READING`) built exactly as B-1 built the second.
+    column with science cells, so a scorable column holds zero mapping cells by
+    construction rather than by care. The replay gate still fires, under a third role
+    mapping (`MAPPING_ONLY_ROLE_READING`) built on the same principle as the
+    calibration-only mapping (`CALIBRATION_ONLY_ROLE_READING`).
   * A mapping cell LICENSES NOTHING and says so on its own stamp
     (`mapping_mode.licenses_nothing`), and its `actuation_calibration` block is
     replaced by a NON-VERDICT — any verdict handed to the run rides beside, quoted,
     where nothing can read it as this cell's license.
 
-THE AMENDED LADDER (2026-08-09, re-freeze #2 — Luxia's close-out ruling "Push for
-re-cal this program", on the ratified `LADDER-SPEC-*.json`). Where the mapping mode
-measures a window BESIDE the science, this mechanism RE-CALIBRATES the science itself:
-once a node's window has been mapped and a ladder ratified for it, that node's science
-column runs the ratified ladder instead of the frozen one. The encumbrance ruling is
-what shapes it — POLICY LIVES IN DOCUMENTS, NOT IN ENGINE CONSTANTS — so this module
+THE AMENDED LADDER. Where the mapping mode measures a window BESIDE the science, this
+mechanism RE-CALIBRATES the science itself: once a node's window has been mapped and a
+ladder approved for it in a ladder spec, that node's science column runs that ladder
+instead of the frozen one. POLICY LIVES IN DOCUMENTS, NOT IN ENGINE CONSTANTS — so this module
 carries no per-node ladder, only the machinery to validate a document and record it.
 
-  * The two keys again, by the mapping mode's pattern: `--ladder-spec PATH` (the
-    CONTENT — schema `behavioral-ladder-spec/1`, naming this run's node and site) and
+  * Two keys, by the mapping mode's pattern: `--ladder-spec PATH` (the CONTENT —
+    schema `behavioral-ladder-spec/1`, naming this run's node and site) and
     `--amended-ladder` (the AUTHORIZATION — this operator, this invocation, meant it).
-    Either alone is refused by name. ABSENT BOTH, this module is byte-for-byte what it
-    was: `DOSE_LADDER` is untouched and remains every node's default.
+    Either alone is refused by name. ABSENT BOTH, `DOSE_LADDER` is every node's ladder.
   * WHOLE-COLUMN REPLACEMENT. An amended ladder replaces the ladder for the entire
     science column at that (node, site) — every arm, every lever, every band; the α=0
     baseline is unchanged because α=0 is α=0 under any ladder. Science cells carry the
     spec's `LadderAuthorization` and are validated against THE LADDER IN FORCE; a
     column mixing spec-ladder and frozen-ladder science cells is REFUSED, because a
-    half-amended column is a column whose §4.2 arithmetic has two denominators.
+    half-amended column is a column whose verdict arithmetic has two denominators.
   * UNLIKE the mapping mode, amended doses MAY coincide with frozen ones. Replacement
     is the contract, not disjointness: a re-calibrated ladder that keeps ±0.03 and
     ±0.10 and moves only its extremes is the ordinary case, and a disjointness law here
@@ -181,37 +174,33 @@ carries no per-node ladder, only the machinery to validate a document and record
     it (`amended_ladder`), and `dose_ladder` states the ladder actually run — so an
     amended-ladder column can never present as a frozen-ladder one, and the
     comparability rider (never pooled without the ladder quoted) has something to read.
-  * §4.2 STAYS DESK-SIDE. This module runs and records; it never scores. The amendment
-    reaches engine machinery in exactly TWO places, and nowhere else: §2.7's signal
-    role, which reads "the extreme dose" — of the ladder in force,
-    `AMENDED_LADDER_SIGNAL_ROLE_READING` — and the verdict document's ladder pair
-    below (re-freeze #3).
+  * THE VERDICT IS SCORED ELSEWHERE. This module runs and records; it never scores.
+    The amendment reaches engine machinery in exactly TWO places, and nowhere else: the
+    replay gate's signal role, which reads "the extreme dose" — of the ladder in force,
+    `AMENDED_LADDER_SIGNAL_ROLE_READING` — and the verdict document's ladder pair below.
 
-THE LADDER IN FORCE REACHES THE §4.2 VERDICT DOCUMENT (re-freeze #3, 2026-08-13; Luxia's
-ruling "we need more flexibility here and to rely on documentation around it to proof and
-replicate"). `ActuationCalibrationVerdict` gained an optional `dose_ladder` /
-`scoring_doses` pair, and `stamp_block` emits the document's values when it states them.
+THE LADDER IN FORCE REACHES THE ACTUATION VERDICT DOCUMENT. `ActuationCalibrationVerdict`
+carries an optional `dose_ladder` / `scoring_doses` pair, and `stamp_block` emits the
+document's values when it states them.
 
-  * WHY IT HAD TO MOVE. Those two stamp keys were module constants, so every §5 cell
-    naming an amended column's calibration would have stamped `±0.3` for a column that
-    ran `±0.15` — the false-provenance failure the `--actuation-calibration` flag was
-    ruled into existence to prevent. The desk could not fix it from its side: the
-    document model is `extra="forbid"`, so the desk could not add the fields, and the
-    scorer cannot reach a module constant. It was the last place the amendment did not
-    propagate.
-  * POLICY STILL LIVES IN DOCUMENTS. This module still carries no per-node ladder. It
-    validates a pair and records it; which ladder is right for a node is the ladder
-    spec's ruling and Luxia's, never this file's.
+  * WHY THE DOCUMENT CARRIES IT. If those two stamp keys were module constants, every
+    transported cell naming an amended column's calibration would stamp `±0.3` for a
+    column that ran `±0.15` — the false-provenance failure the `--actuation-calibration`
+    flag exists to prevent. The document model is `extra="forbid"`, and a scorer cannot
+    reach a module constant, so the document is the only place the pair can live.
+  * POLICY STILL LIVES IN DOCUMENTS. This module carries no per-node ladder. It
+    validates a pair and records it; which ladder is right for a node is decided in
+    the ladder spec, never in this file.
   * ABSENT THE PAIR, BYTE-IDENTICAL. The fallback is the frozen constants, and no key
     marks which branch produced them — a frozen ladder stated and a frozen ladder
-    defaulted are the same claim. Every document filed before this field existed stamps
-    exactly as it did.
+    defaulted are the same claim. A document that omits the pair stamps exactly as the
+    frozen constants dictate.
   * BOTH OR NEITHER, AND THE PAIR IS `(min, max)`. Not ±magnitude: an asymmetric
-    ratified ladder must read correctly, and every symmetric one is unchanged by the
-    choice. The same reading the ladder spec's `gate_reading_rule` ratifies.
+    ladder spec must read correctly, and every symmetric one is unchanged by the
+    choice. The same reading the ladder spec's `gate_reading_rule` states.
 
-    python -m metabasis.scripts.run_behavioral_cells --preflight ...   # M10: a
-        first-class exit-early mode, never output truncation.
+    python -m metabasis.scripts.run_behavioral_cells --preflight ...   # a first-class
+        exit-early mode, never output truncation.
 """
 from __future__ import annotations
 
@@ -242,32 +231,30 @@ BRIEF_OF_RECORD = "BRIEF-behavioral-phase-2026-07-29.md"
 BRIEF_SHA256 = "475bc2a8ce767f70890837129644917f17094734b70bb510524be4aa0ecdcea4"
 
 # ---------------------------------------------------------------- frozen constants
-#: §2.5 / §11: the signed dose ladder is FROZEN. No extension, no interpolation, no
-#: per-node tuning. The α=0 baseline is a separate cell and is deliberately NOT a
-#: member of the ladder, so `len(DOSE_LADDER) == 6` is the ladder's own arity
-#: everywhere (the §4.2 "4/6 doses" criterion counts against exactly this tuple).
+#: The signed dose ladder is FROZEN. No extension, no interpolation, no per-node
+#: tuning. The α=0 baseline is a separate cell and is deliberately NOT a member of
+#: the ladder, so `len(DOSE_LADDER) == 6` is the ladder's own arity everywhere (the
+#: actuation verdict's "4/6 doses" criterion counts against exactly this tuple).
 #:
-#: DATED AMENDMENT (2026-08-09, re-freeze #2 — Luxia's close-out ruling, on the
-#: ratified `LADDER-SPEC-*.json`). The rule above is now stated at the layer it was
-#: always about: NO LADDER WITHOUT A RATIFIED DOCUMENT. "No per-node tuning" never
-#: meant that a model whose response window was measured to end at |0.15| must be
-#: dosed at |0.3| forever; it meant that no ladder may be chosen at the console, in a
+#: The rule is NO LADDER WITHOUT AN APPROVED DOCUMENT. "No per-node tuning" does not
+#: mean that a model whose response window was measured to end at |0.15| must be
+#: dosed at |0.3| forever; it means that no ladder may be chosen at the console, in a
 #: staging script, or by an engine constant edited between runs. A per-node ladder is
-#: admissible ONLY as `LadderSpec` — a desk document that names the node and site it
-#: amends, carries its ratification lineage, and becomes an authorization through its
-#: own sha256. This tuple is the DEFAULT and the fallback: it is untouched, it remains
-#: the ladder for every node with no ratified amendment, and a run given no document
-#: validates against it exactly as before. See `AMENDED_LADDER_NOTE`.
+#: admissible ONLY as `LadderSpec` — a document that names the node and site it
+#: amends, carries its approval lineage, and becomes an authorization through its
+#: own sha256. This tuple is the DEFAULT and the fallback: it remains the ladder for
+#: every node with no approved amendment, and a run given no document validates
+#: against it. See `AMENDED_LADDER_NOTE`.
 DOSE_LADDER: tuple[float, ...] = (-0.3, -0.1, -0.03, 0.03, 0.1, 0.3)
 BASELINE_DOSE = 0.0
-#: THE MAPPING MODE (Luxia's ratification, 2026-08-08). The one kind of cell whose dose
+#: THE MAPPING MODE. The one kind of cell whose dose
 #: does NOT come from `DOSE_LADDER`, admitted only through a spec document plus an
 #: explicit flag, and never able to license anything. See the module docstring.
 MAPPING_CELL_KIND = "mapping"
-#: Both are required. The spec is the CONTENT (which doses, whose ratification); the
+#: Both are required. The spec is the CONTENT (which doses, who approved them); the
 #: flag is the AUTHORIZATION (this operator, this invocation, meant it). Either alone
-#: leaves the engine byte-for-byte what it was — which is the property the re-freeze
-#: was ratified on, so the two are named as constants and quoted in every refusal.
+#: leaves the mapping machinery inert — the property the mode depends on, so the two
+#: are named as constants and quoted in every refusal.
 MAPPING_SPEC_FLAG = "--mapping-spec"
 MAPPING_MODE_FLAG = "--mapping-mode"
 MAPPING_SPEC_SCHEMA_VERSION = "behavioral-mapping-spec/1"
@@ -283,20 +270,22 @@ MAPPING_LICENSES_NOTHING = (
     "key. Ratified by Luxia 2026-08-08 as a dated, spec-scoped engine deviation "
     "(PRESTATEMENT-moe-dose-window-mixtral-2026-08-08.md, dated addendum); never a "
     "silent replacement for the ladder and never retroactive.")
-#: The mapping mode's own §2.7 role mapping is an ENACTOR READING, recorded here the
-#: way B-1's was so the desk can rule differently without hunting for the assumption.
+#: The mapping mode's own replay-gate role mapping is a reading made here, not a
+#: frozen rule, recorded the way `CALIBRATION_ONLY_ROLE_READING` is so a reviewer can
+#: overrule it without hunting for the assumption.
 #: A pure mapping column has no cell at |0.3| and no `calibration`-kind cell, so the
 #: two existing mappings cannot constitute the blocking gate and the column would HALT
 #: on `ExpectedNShortfall` after burning its whole budget. The roles map to the
-#: mapping column's OWN work-types on the same principle B-1 used: signal role = the
+#: mapping column's OWN work-types on the same principle as the calibration-only
+#: mapping: signal role = the
 #: mapping lever at the LARGEST mapped magnitude (the analogue of |0.3| — the edge the
 #: run exists to find) · band role = the column's own Rband · calibration role = the
 #: mapping lever at a SMALLER non-zero magnitude. Deterministic selection, bitwise
 #: replay and the blocking HALT are unchanged; K == 3 and `REPLAY_GATE_STRATA` are
 #: untouched; a science column can never reach this mapping (it has no mapping cell).
 #: The named alternative — leave the gate unfillable, so a mapping column cannot run
-#: at all — was NOT taken, because the ratified contract requires the mapping run to
-#: fire and an unrunnable mode is not a mode. DESK-OWED READING.
+#: at all — was NOT taken, because the mapping mode's contract requires the mapping
+#: run to fire and an unrunnable mode is not a mode. OPEN TO REVIEW.
 MAPPING_ONLY_ROLE_READING = (
     "enactor reading (delegated re-freeze, 2026-08-08), DESK-OWED: on a pure MAPPING "
     "column the three frozen §2.7 roles map to the column's own work-types — signal "
@@ -305,17 +294,17 @@ MAPPING_ONLY_ROLE_READING = (
     "Deterministic selection, bitwise replay and the blocking HALT are unchanged, and "
     "a column that cannot fill a mapped role still raises ExpectedNShortfall — "
     "incomplete, not exempt. A science column never reaches this mapping.")
-#: THE AMENDED LADDER (re-freeze #2, 2026-08-09). The same two-key shape as the
-#: mapping mode, and named as constants for the same reason: either flag alone leaves
-#: the engine byte-for-byte what it was, and both are quoted in every refusal.
+#: THE AMENDED LADDER. The same two-key shape as the mapping mode, and named as
+#: constants for the same reason: either flag alone leaves the amendment machinery
+#: inert, and both are quoted in every refusal.
 LADDER_SPEC_FLAG = "--ladder-spec"
 AMENDED_LADDER_FLAG = "--amended-ladder"
 LADDER_SPEC_SCHEMA_VERSION = "behavioral-ladder-spec/1"
 #: What an amended ladder IS, written onto every amended cell's stamp so a reader
 #: holding one cell's stamp and nothing else knows which ladder produced the number in
 #: front of them. Deliberately free of any node, any dose and any window: the doses are
-#: the DOCUMENT's, and an engine constant that named them would be the encumbrance the
-#: re-freeze was commissioned to remove.
+#: the DOCUMENT's, and an engine constant that named them would put ladder policy
+#: back into the engine.
 AMENDED_LADDER_NOTE = (
     "AMENDED LADDER — this cell ran a RE-CALIBRATED dose ladder, not the frozen one. "
     "The ladder in force is named beside the frozen ladder on this stamp, and the "
@@ -326,20 +315,22 @@ AMENDED_LADDER_NOTE = (
     "from an amended-ladder column never pool with frozen-ladder rows in a cross-node "
     "table without this ladder quoted beside them. Ratified per document (re-freeze "
     "#2, Luxia 2026-08-09); never a silent re-calibration and never retroactive.")
-#: §2.7's signal role under an amended ladder — an ENACTOR READING, recorded the way
-#: B-1's and the mapping mode's were so the desk can rule differently without hunting
-#: for the assumption. The frozen role mapping reads the signal role at |0.3| because
+#: The replay gate's signal role under an amended ladder — a reading made here, not a
+#: frozen rule, recorded the way the calibration-only and mapping-only readings are so
+#: a reviewer can overrule it without hunting for the assumption. The frozen role
+#: mapping reads the signal role at |0.3| because
 #: |0.3| is the frozen ladder's EXTREME, and a column re-calibrated to a narrower
 #: window has no cell there at all: read literally, an amended column would burn its
 #: whole budget and then HALT on `ExpectedNShortfall`, which is not a re-calibration
 #: mechanism. So "the extreme dose" is read on THE LADDER IN FORCE — which is the same
-#: generalization the ratified spec makes for §4.2(b) in its own `gate_reading_rule`,
+#: generalization the ladder spec makes for the actuation verdict's |0.3|-dose
+#: criterion in its own `gate_reading_rule`,
 #: applied at the one place it touches engine machinery. `REPLAY_GATE_STRATA`, K == 3,
 #: the deterministic selection, the bitwise comparison and the blocking HALT are all
 #: untouched; a frozen-ladder column's extreme IS |0.3|, so its selection, strata and
 #: digest are byte-identical. The named alternative — leave the signal role pinned to
 #: the literal 0.3, so an amended column cannot run — was NOT taken, because a ladder
-#: the engine refuses to run is not a ratified ladder. DESK-OWED READING.
+#: the engine refuses to run is not an approved ladder. OPEN TO REVIEW.
 AMENDED_LADDER_SIGNAL_ROLE_READING = (
     "enactor reading (re-freeze #2, 2026-08-09), DESK-OWED: on a column running a "
     "ratified AMENDED ladder, §2.7's signal role reads 'the extreme dose' on THE "
@@ -349,46 +340,48 @@ AMENDED_LADDER_SIGNAL_ROLE_READING = (
     "unchanged, and a column that cannot fill the role still raises ExpectedNShortfall "
     "— incomplete, not exempt. A frozen-ladder column's extreme is |0.3|, so nothing "
     "about its gate moves.")
-#: §4.2(a)/§5.5 read the ordering across the full SIGNED ladder, sign flipping
-#: through zero; §4.2(b)'s "both |0.3| doses" are these two.
+#: The actuation verdict's ordering criterion and the transported-cell readout read
+#: the ordering across the full SIGNED ladder, sign flipping through zero; the verdict's
+#: "both |0.3| doses" criterion reads these two.
 SCORING_DOSES: tuple[float, ...] = (-0.3, 0.3)
-#: §2.2: the fixed batch-size ladder. Preflight takes the LARGEST that fits with
+#: The fixed batch-size ladder. Preflight takes the LARGEST that fits with
 #: ≥15% VRAM headroom; B is then frozen in the node's stamp before any cell fires.
 BATCH_LADDER: tuple[int, ...] = (80, 40, 20, 10)
 VRAM_HEADROOM_FRACTION = 0.15
-#: §5.1: n stays 80/cell and max_new_tokens stays 512 (§11: no deviation).
+#: n stays 80/cell and max_new_tokens stays 512, with no deviation, so every cell's
+#: rise is measured over the same sample size and the same generation length.
 N_PER_CELL = 80
 MAX_NEW_TOKENS = 512
-#: §2.6's measured probe anchor (43.0 → 290.9 seq/s at len 273). The probe's realized
+#: The probe's measured throughput anchor (43.0 → 290.9 seq/s at len 273). The probe's realized
 #: batch size is min(this, the size of the equal-prompt-length group) — see
 #: `PROBE_GROUPING_READING`.
 PROBE_BATCH_SIZE = 32
-#: §2.3: the banked cell-id formatting, verbatim (precedent
+#: The banked cell-id formatting, verbatim (precedent
 #: `build_injection_banks.py`, parsed by `score_entropy_writes.parse_cell`).
 CELL_ID_TEMPLATE = "{vector_key}_L{site}_a{frac:+.2f}"
-#: §2.3: the seed-material template. Its own digest rides every stamp, so a stamp
+#: The seed-material template. Its own digest rides every stamp, so a stamp
 #: names the recipe it was produced under and a changed recipe cannot pass silently.
 SEED_MATERIAL_TEMPLATE = "{corpus_sha}|{node_key}|{arm}|L{site}|{cell_id}|{gen_id:03d}"
 SEED_MATERIAL_TEMPLATE_DIGEST = hashlib.sha256(
     SEED_MATERIAL_TEMPLATE.encode()).hexdigest()
-#: §2.7: K cells re-generate under the in-job gate, one from each required stratum.
+#: K cells re-generate under the in-job replay gate, one from each required stratum.
 REPLAY_GATE_K = 3
-#: §2.5 / §9 item 8: measured vs banked per-token median residual norm.
+#: HALT threshold (`ResidualNormDeltaError`): measured vs banked per-token median residual norm.
 NORM_DELTA_HALT_FRACTION = 0.10
-#: §2.5: the fixed sample the in-job norm measurement runs over.
+#: The fixed sample the in-job norm measurement runs over.
 NORM_SAMPLE_SIZE = 64
-#: §9 item 12 / Addendum B: GPT-2's learned absolute positions are a hard ceiling.
+#: GPT-2's learned absolute positions are a hard ceiling (`PositionCeilingExceeded`).
 GPT2_POSITION_CEILING = 1024
-#: ruling 10: the banked stage-0 pool, 20 topics × 4 strata × 1 seed.
+#: The banked stage-0 prompt pool is the pool of record: 20 topics × 4 strata × 1 seed.
 PROMPT_POOL_TOPICS = 20
 PROMPT_POOL_STRATA = 4
 PROMPT_POOL_SIZE = PROMPT_POOL_TOPICS * PROMPT_POOL_STRATA
-#: corpus of record (Addendum G1). Resolved from `read_composed_predictions` so the
-#: campaign holds ONE literal; the brief records only the `5ae355bc…` prefix.
+#: Corpus of record. The full digest is written here once and resolved from
+#: `read_composed_predictions`, so the campaign holds ONE literal.
 CORPUS_SHA_V21 = (
     "5ae355bc5d130f8e9c3ae426f5e71bf2b6e99c74b95369a874bec2abcd59b5d9")
-#: ruling 3, verbatim — written into every stamp so no behavioral row carries an
-#: unadjudicated §7 clause obligation.
+#: The envelope reading of record, verbatim — written into every stamp so no
+#: behavioral row carries an unresolved envelope obligation.
 ENVELOPE_RULING_OF_RECORD = (
     "envelope hygiene at behavioral grain (ruling 3, Luxia 2026-07-29): the §7 "
     "≥100-fresh-randoms envelope is satisfied at the COSINE/alignment read that "
@@ -397,8 +390,8 @@ ENVELOPE_RULING_OF_RECORD = (
     "BEHAVIORAL band is 3 transported members per the banked precedent. Ruled "
     "explicitly and recorded: this is the clause's reading of record, NOT a weakened "
     "clause.")
-#: §2.6's resolution of necessity — see the module docstring. Named so the desk can
-#: rule differently without hunting for the assumption.
+#: The probe-batching resolution of necessity — see the module docstring. Named so a
+#: reviewer can overrule it without hunting for the assumption.
 PROBE_GROUPING_READING = (
     "probe batches group rows of EQUAL prompt_length (ascending length, gen_id order "
     "within a length), because the injection hook gates on ABSOLUTE positions with "
@@ -408,27 +401,27 @@ PROBE_GROUPING_READING = (
     "prompt_length, padding never in a mean) and adds only the grouping. DESK-OWED "
     "READING, recorded in every stamp; the named alternative (a per-row [batch, seq] "
     "mask in hooks.py) is a change to a frozen surface and was not taken.")
-#: §11 / C§8: nothing behavioral is stamped.
+#: Nothing behavioral is stamped by this module: it never scores its own output.
 GRADE_LINE = "UNSTAMPED (C§8)"
-#: M10: a scheduler job carries a card index; a rogue carries the sentinel. The
-#: field that caught the rogue run, so it is never allowed to be absent (§9 item 9).
+#: A scheduled job carries a card index; a job launched outside the scheduler carries
+#: the sentinel. That field is how such a run is caught, so it is never allowed to be
+#: absent (`StampIncompleteError`).
 CVD_UNSET_SENTINEL = "(unset)"
 
 CellKind = Literal["baseline", "calibration", "calibration_band", "transported",
                    "transported_band", "naive", "bridge", "judged", "mapping"]
-#: The kinds that are SCIENCE — everything a §4.2 verdict, a §5 row or a stamp that
+#: The kinds that are SCIENCE — everything an actuation verdict, a transported row or a stamp that
 #: licenses anything may be built from. `mapping` is the complement, and the two are
 #: written as one partition so a kind added later must choose a side explicitly.
 SCIENCE_CELL_KINDS: tuple[str, ...] = ("baseline", "calibration", "calibration_band",
                                        "transported", "transported_band", "naive",
                                        "bridge", "judged")
 
-#: The band families that ARE the null of record — the two §4.1 keeps distinct, and the
+#: The band families that ARE the null of record — the two the actuation calibration keeps distinct, and the
 #: only two any gate population may contain.
 GATE_BAND_FAMILIES: tuple[str, ...] = ("Rband", "gRband")
-#: The BESIDE families (Luxia's B4 ruling, 2026-08-04, on the staging wave's blocker B4):
-#: a Σ-shaped band is a STRICTER null quoted BESIDE the null of record, on the two
-#: DESIGNATED cell tuples only (pre-statement §2 / open word O-2). Widening
+#: The BESIDE families: a Σ-shaped band is a STRICTER null quoted BESIDE the null of
+#: record, on the two DESIGNATED cell tuples only. Widening
 #: `CellSpec.band_family` to admit it is the whole of that authorization — it does NOT
 #: make a Σ cell a gate input. Every gate population in this file filters on
 #: `GATE_BAND_FAMILIES` rather than on `is_null`, precisely so "never the null of
@@ -437,33 +430,31 @@ GATE_BAND_FAMILIES: tuple[str, ...] = ("Rband", "gRband")
 BESIDE_BAND_FAMILIES: tuple[str, ...] = ("SigmaBand",)
 BAND_FAMILIES: tuple[str, ...] = GATE_BAND_FAMILIES + BESIDE_BAND_FAMILIES
 
-#: The strata the §2.7 gate must cover, in order. Each contributes exactly one cell,
+#: The strata the replay gate must cover, in order. Each contributes exactly one cell,
 #: so K == 3 is not a tunable but the arity of this tuple.
 REPLAY_GATE_STRATA: tuple[str, ...] = ("signal_at_0.3", "random_band", "calibration")
 
-#: B-1, RULED (Luxia, 2026-08-05 ~03:00, session 12), quoted verbatim from the ledger
-#: row: "**B-1 = the DESK READING RULED**: for a column with no transported cells the
-#: §2.7 replay strata map to the column's own work-types — signal role = native EGV at
-#: |0.3| · band role = the node's own Rband · calibration role = a small-dose cell;
-#: dated interpretation, quoted in the gate code + a pre-statement addendum; the gate's
-#: intent (one of each work-type, deterministic selection, bitwise replay) is
-#: preserved."
+#: The calibration-only role mapping: for a column with no transported cells the
+#: replay strata map to the column's own work-types — signal role = native EGV at
+#: |0.3| · band role = the node's own Rband · calibration role = a small-dose cell.
+#: The gate's intent (one of each work-type, deterministic selection, bitwise replay)
+#: is preserved.
 #:
-#: What the ruling is NOT: a second gate, a second stratum set, or a weaker gate.
+#: What the mapping is NOT: a second gate, a second stratum set, or a weaker gate.
 #: `REPLAY_GATE_STRATA` and K == 3 are untouched, so a calibration-only column's gate
 #: record has exactly the same shape and the same blocking force as a transported
 #: column's; only WHICH cells fill the three roles changes, and only on a column that
 #: has no transported cells at all. A column that cannot fill a mapped role still
-#: raises `ExpectedNShortfall` — "incomplete, not exempt" is unchanged.
+#: raises `ExpectedNShortfall` — incomplete, not exempt.
 REPLAY_ROLE_MAPPING_OF_RECORD = "of_record"
 REPLAY_ROLE_MAPPING_CALIBRATION_ONLY = "calibration_only"
-#: The mapping mode's third mapping (2026-08-08). See `MAPPING_ONLY_ROLE_READING` for
-#: what it maps and why it is an enactor reading rather than a ruling.
+#: The mapping mode's third mapping. See `MAPPING_ONLY_ROLE_READING` for what it maps
+#: and why it is a reading made here rather than a frozen rule.
 REPLAY_ROLE_MAPPING_MAPPING_ONLY = "mapping_only"
 #: The dose magnitude the |0.3| signal role reads at (`SCORING_DOSES` as a magnitude).
 SCORING_DOSE_MAGNITUDE = 0.3
-#: The enactor's reading of "a small-dose cell", recorded so the desk can rule
-#: differently without hunting for the assumption: the calibration ROLE is filled by a
+#: The reading of "a small-dose cell" made here, recorded so a reviewer can overrule
+#: it without hunting for the assumption: the calibration ROLE is filled by a
 #: native-lever cell at a NON-SCORING, non-zero dose — |0.03| or |0.10| on the frozen
 #: ladder. The named alternative (the ladder's SMALLEST magnitude, |0.03|, only) is
 #: narrower and was NOT taken, because the role's job is "the lever below the scoring
@@ -476,42 +467,38 @@ CALIBRATION_ONLY_ROLE_READING = (
     "role = a small-dose native-lever cell (non-scoring, non-zero: |0.03| or |0.10| "
     "on the frozen ladder). Deterministic selection, bitwise replay and the blocking "
     "HALT are unchanged; a transported column never reaches this mapping.")
-#: The kinds whose presence makes a column "transported" for B-1's trigger. `naive`
-#: is in the set BY CONSTRUCTION: a naive cell carries a SOURCE object into a target
-#: (ruling 5), so a column holding one is not a calibration-only column. `judged` is
+#: The kinds whose presence makes a column "transported" for the calibration-only
+#: mapping's trigger. `naive` is in the set BY CONSTRUCTION: a naive cell carries a
+#: SOURCE object into a target, so a column holding one is not a calibration-only
+#: column. `judged` is
 #: in the set conservatively — a judged cell's provenance is not decidable from its
-#: kind, and the conservative outcome is the of-record mapping's HALT (a report to the
-#: desk), never a silently substituted role.
+#: kind, and the conservative outcome is the of-record mapping's HALT (a report for a
+#: human to resolve), never a silently substituted role.
 TRANSPORTED_CELL_KINDS: tuple[str, ...] = ("transported", "transported_band", "bridge",
                                            "naive", "judged")
 
-#: §4.2's closing line — "Every behavioral cell in §5 NAMES its site's actuation
-#: calibration in its stamp, by job id + verdict + the three criterion values" — is a
-#: STATEMENT OF PROVENANCE the engine transcribes, never one it derives. C§8 and the
-#: overnight go both say the same thing from the other side: "the desk is the scorer
-#: (module never self-scores)". So the verdict arrives as a document the desk wrote,
-#: this module validates its SHAPE and its IDENTITY (does it name THIS column?), and
-#: it copies the numbers through verbatim. Nothing here re-applies a §4.2 threshold.
+#: Every transported cell NAMES its site's actuation calibration in its stamp, by job
+#: id + verdict + the three criterion values. That is a STATEMENT OF PROVENANCE the
+#: engine transcribes, never one it derives: the verdict is scored outside this module,
+#: which never scores its own output. So the verdict arrives as a document, this module
+#: validates its SHAPE and its IDENTITY (does it name THIS column?), and it copies the
+#: numbers through verbatim. Nothing here re-applies an actuation-verdict threshold.
 ACTUATION_CALIBRATION_SCORER_OF_RECORD = (
     "DESK-SCORED (C§8 unstamped arithmetic). The §4.2 verdict is the desk's act on "
     "the column's own ingredients; this engine transcribes it into the stamp and "
     "NEVER re-derives, re-scores or adjudicates it — including §4.2's consequence "
     "(only a PASS licenses transported-write cells at a site), which is asserted by "
     "actuation_calibration.gate_transported_cells at the desk, not here.")
-#: The kwarg has existed since the harness was frozen; before 2026-08-05 nothing on
-#: the CLI could fill it, so every CLI-fired column stamped OWED. That was TRUE for
-#: batch A/B (no verdict existed yet) and became a FALSE provenance statement the
-#: moment the desk filed verdicts — which is the gap `--actuation-calibration` closes
-#: (Luxia's ruling ① of the 2026-08-05 morning round). Absent the flag this module's
-#: behavior is unchanged in every byte: the OWED default below still applies.
+#: The CLI flag that fills the `actuation_calibration_stamp` kwarg. Without it a
+#: column stamps OWED, which is true only while no verdict exists; once one does,
+#: OWED would be a FALSE provenance statement, so a column with a verdict passes it
+#: here. Absent the flag, the OWED default below applies.
 ACTUATION_CALIBRATION_FLAG = "--actuation-calibration"
 #: sha256 over the canonical JSON of the OWED block `run_column` writes when no
-#: calibration stamp is handed in, taken from the FROZEN engine
-#: (`run_behavioral_cells.py` `85500d36196cbf15…`) BEFORE the flag existed. The
-#: selftest asserts a flag-absent column still stamps exactly this — a frozen
-#: pre-change digest, in the shape of B-1's `4115092e…` triple digest, so a future
-#: edit to the OWED text is a FAILING check rather than a quiet re-wording of a
-#: provenance statement that 100+ banked cells already carry.
+#: calibration stamp is handed in. The selftest asserts a flag-absent column stamps
+#: exactly this frozen digest, so an edit to the OWED text is a FAILING check rather
+#: than a quiet re-wording of a provenance statement that 100+ banked cells already
+#: carry.
 OWED_ACTUATION_BLOCK_DIGEST = (
     "117c51bbecf8e0d4024ce4d7c5d35229aadb0a4eb3e8fc08e6a97e80ab514b06")
 
@@ -520,9 +507,9 @@ OWED_ACTUATION_BLOCK_DIGEST = (
 class BesideCellInGatePopulation(RuntimeError):
     """A BESIDE cell (Σ-shaped band) reached a population a gate reads.
 
-    Not a §9 HALT of the brief's numbering — it is the mechanical expression of the
-    B4 ruling's own condition ("the engine's gates must never read them as gate
-    inputs"). It is an exception rather than a filter-and-continue because silently
+    Not one of the `BehavioralHarnessError` HALTs — it is the mechanical expression
+    of the BESIDE families' own condition: the engine's gates must never read them as
+    gate inputs. It is an exception rather than a filter-and-continue because silently
     dropping a cell from a gate population is how a gate quietly changes arity.
     """
 
@@ -530,26 +517,26 @@ class BesideCellInGatePopulation(RuntimeError):
 class BehavioralHarnessError(RuntimeError):
     """Base class for every failure specific to the behavioral harness.
 
-    Every subclass is one of the brief's §9 HALT conditions. They are exceptions
-    rather than warnings on purpose: §3 and §9 both say an enactor never adjudicates
-    a live HALT, and a warning is an invitation to adjudicate.
+    Every subclass is one of the harness's HALT conditions. They are exceptions
+    rather than warnings on purpose: a live HALT is resolved by a human, never by the
+    running code, and a warning is an invitation to adjudicate.
     """
 
 
 class ArtifactShaMismatch(BehavioralHarnessError):
-    """§9 item 1 (M4): a number-bearing artifact's sha is not the expected one."""
+    """A number-bearing artifact's sha is not the expected one: it is not the artifact of record."""
 
 
 class CorpusVintageError(BehavioralHarnessError):
-    """§9 item 2: the corpus is not v2.1, or the resolution chain is MIXED."""
+    """The corpus is not v2.1, or the resolution chain is MIXED."""
 
 
 class NativeVectorUnavailable(BehavioralHarnessError):
-    """§9 item 3: the node's native entropy-gradient vector is absent/not FD-gated/FD-FAIL."""
+    """The node's native entropy-gradient vector is absent/not FD-gated/FD-FAIL."""
 
 
 class SiteNotOfRecord(BehavioralHarnessError):
-    """§9 item 4: the injection site is not the registered site of record.
+    """The injection site is not the registered site of record.
 
     A RETIRED site (gemma L36, 70B L17) must never resolve by default, so this is
     raised on a site that a bank happens to hold but the registries do not carry.
@@ -557,38 +544,37 @@ class SiteNotOfRecord(BehavioralHarnessError):
 
 
 class ReplayGateNotBitwise(BehavioralHarnessError):
-    """§9 item 6 / §2.7: the in-job replay is not bitwise in the canonical layout."""
+    """The in-job replay gate: a replay is not bitwise in the canonical layout."""
 
 
 class NaiveTransplantRowMissing(BehavioralHarnessError):
-    """§9 item 7 / §5.3: no banked naive row for a pair whose cell is being built."""
+    """No banked naive-transplant row for a pair whose cell is being built."""
 
 
 class ResidualNormDeltaError(BehavioralHarnessError):
-    """§9 item 8 / §2.5: measured per-token median residual norm deviates >10%."""
+    """The in-job measured per-token median residual norm deviates >10% from the banked one."""
 
 
 class StampIncompleteError(BehavioralHarnessError):
-    """§9 item 9 / §2.8: a stamp is missing a required field, or CVD is unset.
+    """A stamp is missing a required field, or CVD is unset.
 
-    Absence is a FIRST-CLASS reportable state (OWED, §10) — never silently "absent".
+    Absence is a FIRST-CLASS reportable state (OWED) — never silently "absent".
     """
 
 
 class VectorClassContractError(BehavioralHarnessError):
-    """HALT D (Luxia's ruling 2, 2026-08-05): the vector-class declaration is unsound.
+    """The vector-class declaration is unsound.
 
-    The class-pilot HALT's root cause in one sentence: a CLASS column has TWO BASES —
-    the GENERATION basis (the corpus manifest the prompts and generations are of) and
-    the VECTOR basis (the RULED contrast set the class object was built from) — and
-    the harness was written when every object was an entropy-gradient vector, i.e.
-    when the two coincided. The engine now stamps both, each under its own key, and
+    A CLASS column has TWO BASES — the GENERATION basis (the corpus manifest the
+    prompts and generations are of) and the VECTOR basis (the frozen contrast set the
+    class object was built from). For an entropy-gradient vector the two coincide; for
+    a class object they do not. The engine stamps both, each under its own key, and
     refuses every way of blurring them.
     """
 
 
 class VectorBasisMissing(VectorClassContractError):
-    """A class cell reached the stamp without naming its RULED contrast-set basis."""
+    """A class cell reached the stamp without naming its frozen contrast-set basis."""
 
 
 class VectorClassMisdeclared(VectorClassContractError):
@@ -601,12 +587,11 @@ class VectorClassMisdeclared(VectorClassContractError):
 
 
 class MappingModeError(BehavioralHarnessError):
-    """The mapping mode's refusal family (2026-08-08, Luxia's ratified deviation).
+    """The mapping mode's refusal family.
 
     Every member is a REFUSAL, never a warning: the mode's whole authorization rests
     on mapping cells being unable to reach anything that licenses, and a mode that
-    warned and continued would be exactly the silent ladder replacement the
-    pre-statement forbids.
+    warned and continued would be exactly a silent ladder replacement.
     """
 
 
@@ -621,11 +606,11 @@ class MappingAuthorizationOnScienceCell(MappingModeError):
 class MappingDoseImpersonatesScience(MappingModeError):
     """A mapping dose sits ON the frozen ladder (or is the baseline).
 
-    Refused because DISJOINTNESS is what makes mapping cells invisible to §4.2: a
-    mapping rise at a ladder dose could be read into `rises_by_dose` and satisfy a
-    criterion. A mapping run that genuinely needs a ladder dose already has one — the
-    banked science column measured it — and reusing that measurement is the
-    shared-baseline design the pre-statement already uses for α=0.
+    Refused because DISJOINTNESS is what makes mapping cells invisible to the
+    actuation verdict: a mapping rise at a ladder dose could be read into
+    `rises_by_dose` and satisfy a criterion. A mapping run that genuinely needs a
+    ladder dose already has one — the banked science column measured it — and reusing
+    that measurement is the same shared-baseline design used for α=0.
     """
 
 
@@ -654,12 +639,12 @@ class MappingSpecError(MappingModeError):
 
 
 class AmendedLadderError(BehavioralHarnessError):
-    """The amended ladder's refusal family (re-freeze #2, 2026-08-09).
+    """The amended ladder's refusal family.
 
     Every member is a REFUSAL. The mechanism's whole authorization is that a ladder can
-    only be changed by a ratified document naming the column it changes; a member that
-    warned and continued would be the console-side per-node tuning §2.5 forbids,
-    wearing a document as cover.
+    only be changed by an approved document naming the column it changes; a member that
+    warned and continued would be the console-side per-node tuning the frozen ladder
+    forbids, wearing a document as cover.
     """
 
 
@@ -676,7 +661,7 @@ class LadderAuthorizationOnBaseline(AmendedLadderError):
     """The α=0 baseline carried a ladder authorization.
 
     Refused because the baseline is genuinely UNCHANGED by an amendment — α=0 is α=0
-    under any ladder, and §5.1's shared-baseline design has one baseline serve the
+    under any ladder, and the shared-baseline design has one baseline serve the
     column either way. A baseline that declared a ladder would invite the reading that
     there are two different α=0 cells, which there are not.
     """
@@ -707,30 +692,30 @@ class LadderSpecError(AmendedLadderError):
 
 
 class ExpectedNShortfall(BehavioralHarnessError):
-    """§9 item 10 / §7: a cell or column is short of its expected N.
+    """A cell or column is short of its expected N.
 
-    M23 discipline: a count one short is a rake, not a rounding.
+    A count one short is a defect to explain, not a rounding to ignore.
     """
 
 
 class HookAdmissibilityError(BehavioralHarnessError):
-    """§9 item 11 / §4.4: the SSM hook-admissibility preflight failed.
+    """The SSM hook-admissibility preflight failed.
 
     The remedy — a positional-gating shim for that architecture — is a code change
-    with its own gate, never something an enactor improvises mid-column.
+    with its own gate, never something improvised mid-column.
     """
 
 
 class PositionCeilingExceeded(BehavioralHarnessError):
-    """§9 item 12: max(prompt_tokens) + max_new_tokens > the node's position ceiling.
+    """max(prompt_tokens) + max_new_tokens > the node's position ceiling.
 
-    Addendum B's `truncation: first-1024` covers CORPUS texts, not behavioral
-    prompts; the extension is a desk ruling, not an enactor call.
+    The corpus's `truncation: first-1024` covers CORPUS texts, not behavioral
+    prompts; extending it to prompts is a design decision, never a run-time call.
     """
 
 
 class CanonicalLayoutInvalidated(BehavioralHarnessError):
-    """§9 item 13: an OOM/VRAM event mid-column, or B changed after freeze.
+    """An OOM/VRAM event mid-column, or B changed after freeze.
 
     A mid-column B change would silently split the layout of record, so the node
     restarts from preflight instead.
@@ -738,7 +723,7 @@ class CanonicalLayoutInvalidated(BehavioralHarnessError):
 
 
 class LesionRecipeViolation(BehavioralHarnessError):
-    """§5.4's lesion-recipe law, asserted in code.
+    """The lesion-recipe law, asserted in code.
 
     No object in this column is ever built by projecting out the direction known to
     produce the behavior. Re-asserted engine-side on every cell's vector provenance
@@ -748,24 +733,24 @@ class LesionRecipeViolation(BehavioralHarnessError):
 
 
 class PromptPoolError(BehavioralHarnessError):
-    """The behavioral prompt pool is not the banked stage-0 pool of record (ruling 10)."""
+    """The behavioral prompt pool is not the banked stage-0 pool of record."""
 
 
 class SamplingConfigError(BehavioralHarnessError):
-    """The sampling configuration is not resolvable to the config of record (ruling 4)."""
+    """The sampling configuration is not resolvable to the config of record (pure ancestral)."""
 
 
 class BatchLayoutError(BehavioralHarnessError):
-    """A batch layout was requested that is not on the frozen ladder (§2.2)."""
+    """A batch layout was requested that is not on the frozen batch-size ladder."""
 
 
 class VectorizedSamplerNotIdentical(BehavioralHarnessError):
-    """The batched sampling kernel is not byte-identical to ruling 8's reference step.
+    """The batched sampling kernel is not byte-identical to the reference step (`sample_token`).
 
     Not a tolerance and not a warning. The vectorized kernel exists ONLY as a faster
     spelling of `sample_token`; a platform on which it spells something else must not
     produce one token of record, so this fires BEFORE the first token of a sub-batch
-    shape is drawn (`assert_batched_sampler_identity`) and stops the run for the desk.
+    shape is drawn (`assert_batched_sampler_identity`) and stops the run for a human.
     """
 
 
@@ -773,8 +758,8 @@ class ActuationCalibrationNotFound(BehavioralHarnessError):
     """`--actuation-calibration` named a path that is not a readable file.
 
     Its own exception, deliberately not folded into the schema refusal, because the
-    two have different remedies: an absent document means the desk has not filed the
-    verdict (or the job script points at the wrong path), while a malformed one means
+    two have different remedies: an absent document means the verdict has not been
+    filed (or the job script points at the wrong path), while a malformed one means
     the document exists and is wrong. Never a fall-back to OWED — silently stamping
     OWED because the named verdict could not be read is exactly the false provenance
     statement the flag exists to end.
@@ -782,7 +767,7 @@ class ActuationCalibrationNotFound(BehavioralHarnessError):
 
 
 class ActuationCalibrationSchemaError(BehavioralHarnessError):
-    """The verdict document is not a valid §4.2 verdict document.
+    """The verdict document is not a valid actuation-calibration verdict document.
 
     Unreadable JSON, a non-object body, a missing field, an UNKNOWN field
     (`extra="forbid"`: a typo'd key is a refusal, never a silently dropped value) or
@@ -795,7 +780,7 @@ class ActuationCalibrationSchemaError(BehavioralHarnessError):
 class ActuationCalibrationMismatch(BehavioralHarnessError):
     """The verdict document names a different (node, site, arm) than this column.
 
-    §4 gates a SITE, so a verdict is a statement about exactly one (node, site, arm)
+    The actuation calibration gates a SITE, so a verdict is a statement about exactly one (node, site, arm)
     and about no other. Stamping this column with another column's verdict is the
     same class of error as running one column under another column's stamp — which
     the CLI's `--node-key/--arm/--site` cross-check already refuses. Every disagreeing
@@ -803,8 +788,8 @@ class ActuationCalibrationMismatch(BehavioralHarnessError):
     """
 
 
-# -------------------------------------------- resumption / residency (2026-08-05)
-# The COLUMN-RESUMABILITY + MODEL-RESIDENCY amendment's HALT list. Two families,
+# ---------------------------------------------------------- resumption / residency
+# The HALT list for column resumption and model residency. Two families,
 # kept apart because they demand different responses and a single `ResumeRefused`
 # would let the wrong one be swallowed:
 #
@@ -813,7 +798,7 @@ class ActuationCalibrationMismatch(BehavioralHarnessError):
 #     the name of the condition that differed. Never caught inside this module.
 #   * `ResumeCellUnusable` — one banked cell cannot be trusted as banked (no
 #     receipt, missing/short bytes, a stamp that fails the engine's own checker, a
-#     digest that no longer reproduces from its raw). That is a LOST CELL, not a
+#     digest that does not reproduce from its raw). That is a LOST CELL, not a
 #     different experiment: the cell is QUARANTINED under `resume/quarantine/` with
 #     its reason and re-run from scratch. Caught by `resume_preflight` and by
 #     nothing else.
@@ -834,15 +819,15 @@ class ResumeCellsDocumentMismatch(ResumeIdentityRefused):
 
 
 class ResumeCorpusVintageMismatch(ResumeIdentityRefused):
-    """The banked cells stand on a different corpus manifest (§9 item 2)."""
+    """The banked cells stand on a different corpus manifest."""
 
 
 class ResumePromptPoolMismatch(ResumeIdentityRefused):
-    """The banked cells were generated against a different prompt pool (ruling 10)."""
+    """The banked cells were generated against a different prompt pool."""
 
 
 class ResumeVerdictMismatch(ResumeIdentityRefused):
-    """The banked cells transcribe a different §4.2 actuation-calibration document."""
+    """The banked cells transcribe a different actuation-calibration document."""
 
 
 class ResumeEngineModuleMismatch(ResumeIdentityRefused):
@@ -854,18 +839,18 @@ class ResumeEngineModuleUnknown(ResumeIdentityRefused):
 
 
 class ResumeLayoutMismatch(ResumeIdentityRefused):
-    """The canonical layout differs (§2.2 / §9 item 13: a silent split)."""
+    """The canonical layout differs — resuming would silently split the layout of record."""
 
 
 class ResumeModelConfigMismatch(ResumeIdentityRefused):
-    """The M9 drift anchor moved: a different model config is loaded."""
+    """The model-config drift anchor moved: a different checkpoint is loaded."""
 
 
 class ResumeNormDrift(ResumeIdentityRefused):
     """The in-job measured per-token median residual norm is not the banked one.
 
     The one identity condition that is not a sha of an input: α is
-    `alpha_frac × measured_per_token_median` (§2.5), so a norm that moved by one
+    `alpha_frac × measured_per_token_median`, so a norm that moved by one
     ulp across the process seam would give every re-run cell a DIFFERENT dose from
     its banked siblings — an inhomogeneous column that every downstream read would
     treat as one. Refused rather than tolerated, and never rounded.
@@ -901,11 +886,11 @@ class BankedCellArtifactShaMismatch(ResumeCellUnusable):
 
 
 class BankedCellStampIncomplete(ResumeCellUnusable):
-    """The banked stamp fails the engine's own §2.8 checker on re-read."""
+    """The banked stamp fails the engine's own stamp checker on re-read."""
 
 
 class BankedCellDigestMismatch(ResumeCellUnusable):
-    """The banked raw no longer reproduces the digests its own stamp names."""
+    """The banked raw does not reproduce the digests its own stamp names."""
 
 
 class BankedCellReceiptUnreadable(ResumeCellUnusable):
@@ -913,7 +898,7 @@ class BankedCellReceiptUnreadable(ResumeCellUnusable):
 
 
 class AttemptLockError(BehavioralHarnessError):
-    """M55's handshake: an attempt directory has at most one live writer."""
+    """The attempt-lock handshake: an attempt directory has at most one live writer."""
 
 
 class AttemptLockHeld(AttemptLockError):
@@ -923,10 +908,11 @@ class AttemptLockHeld(AttemptLockError):
 class AttemptLockForeignHost(AttemptLockError):
     """The lock was taken on another host and cannot be adjudicated here.
 
-    `/models` is shared storage. A pid on THIS host says nothing about a pid on
-    another, so a foreign lock is refused rather than guessed at — the M55 incident
-    was untracked processes holding a shared resource, and a cross-host stale-lock
-    heuristic is exactly how that gets re-created quietly.
+    An attempt directory can live on storage shared between machines. A pid on THIS
+    host says nothing about a pid on another, so a foreign lock is refused rather than
+    guessed at — untracked processes holding a shared resource is the failure the lock
+    exists to prevent, and a cross-host stale-lock heuristic is exactly how that gets
+    re-created quietly.
     """
 
 
@@ -935,7 +921,7 @@ class AttemptLockUnreadable(AttemptLockError):
 
 
 class ResidencyRefused(BehavioralHarnessError):
-    """The model-residency driver's HALT family (Luxia's ruling, 2026-08-05)."""
+    """The model-residency driver's HALT family."""
 
 
 class ResidencyModelMismatch(ResidencyRefused):

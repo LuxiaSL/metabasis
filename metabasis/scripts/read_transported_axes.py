@@ -1,36 +1,39 @@
-"""A8 Leg-0 — T3: Phase C Rosetta + algebra suite (CPU, local). Session spec Phase C.
+"""The Rosetta + algebra suite: read every banked axis through every transport map (CPU, local).
 
-Runs on every VALID g from fit_transport_maps (cp2_summary.json). Instruments:
+Runs on every VALID g from fit_transport_maps (the fit grid's summary json). Instruments:
   1. Transported-null envelope — 100 seeded unit randoms + all banked R-band members
      (+ iso R members, labeled) through the SAME g; per-axis signed-cos q95, both
      directions.
   2. Axis reads — cos(g·v_src, v_tgt) and cos(g_rev·v_tgt, v_src), sign-anchored, for
-     {V7, Vrep⊥, Vconf, V_temp, dir0}. 3B Vrep⊥ is BUILT AT USE = unit(GS(Grep_L14,
-     V7_L14)) per the ferry note of 2026-07-22 (banked 3B object is raw, 45%
-     V7-aligned); the band-passed variant GS(Vrep_L14, V7_L14) rides as a robustness
+     {entropy gradient (`V7_*`), Vrep⊥, Vconf, V_temp, dir0}. 3B Vrep⊥ is BUILT AT USE
+     = unit(GS(Grep_L14, V7_L14)), because the banked 3B object is raw and ~45% aligned
+     with the entropy gradient; the band-passed variant GS(Vrep_L14, V7_L14) rides as a robustness
      row (the 8B side was band-passed before GS — asymmetry noted, not amended).
   3. Top-PC control — max_{j<=5} |cos(g·PC_j^src, v_tgt)| beside every axis read
      (source PCs recomputed from the state banks with the fit's own split — same code
      path as the fit, deterministic).
-  4. F-i   cos(g·Vconf_src, V7_tgt)  (target-frame collapse identity; reverse beside).
-  5. F-iii cos( g·(v ⊥ V7_src), (g·v) ⊥ V7_tgt ) for v in {Grep_raw, Geos_raw,
-     oblique}; oblique := unit(unit(V7_src) + unit(Grep_src)) (stamped formula).
+  4. F-i   cos(g·Vconf_src, E_tgt)  (target-frame collapse identity; reverse beside),
+     where E is the entropy-gradient vector.
+  5. F-iii cos( g·(v ⊥ E_src), (g·v) ⊥ E_tgt ) for v in {Grep_raw, Geos_raw,
+     oblique}; oblique := unit(unit(E_src) + unit(Grep_src)) (stamped formula).
   6. F-iv  mode-simplex — 5 mode centroid OFFSETS (from the S3 grand mean) per model,
      own-voice primary / pooled + held-out-rows robustness; identity assignment score
      vs the exact 5! = 120 permutation null.
   7. F-ii  PREDICTIONS ONLY — predicted target entropy rise per dose =
-     cos(g·v, V7_tgt) x target's banked V7 entropy law (arms/A5_matrix/<m>/entropy_*.json,
-     itself C§8-unstamped); filed to readouts/f2_predictions.json for Leg 3.
+     cos(g·v, E_tgt) x target's banked entropy-gradient entropy law
+     (outputs/battery/arms/A5_matrix/<m>/entropy_*.json, itself unstamped); filed to
+     the arm root's F-ii predictions json for the forward-injection test to score.
 
-Sign anchors (recipe-level; stamps carry no explicit sign field — rake note): all
+Sign anchors (recipe-level; stamps carry no explicit sign field): all
 gradient-family vectors point toward INCREASING functional (entropy / margin-confidence
 / repetition-mass); dir0 = mean(analogical) - mean(contrastive), same order both
-models; V7's + direction behaviorally confirmed by the target entropy law.
+models; the entropy gradient's + direction is behaviorally confirmed by the target
+entropy law.
 
-Readouts: numbers and mechanical booleans only — no verdict language on frozen P's
-(the desk scores). Artifacts under --arm-root/readouts/.
+Readouts: numbers and mechanical booleans only — no verdict language on frozen
+predictions, which are scored outside this code. Artifacts go to the arm root's readouts directory.
 
-Run (from pipeline/):
+Run (repo root):
   python -m metabasis.scripts.read_transported_axes --selftest     # synthetic mechanics
   python -m metabasis.scripts.read_transported_axes --inventory    # axis registry load check
   python -m metabasis.scripts.read_transported_axes                 # real suite (post CP-2)
@@ -60,8 +63,8 @@ N_RANDOM_NULLS = 100
 TOP_PC_J = 5
 MODES = ("linear", "socratic", "contrastive", "dialectical", "analogical")
 ANCHOR_SITE = {"3b": 14, "8b": 16, "qwen-7b": 21,
-               # extension pair (A8-add-7): L36 is where the whole gemma field
-               # roster is banked, so it is the anchor by construction, not choice.
+               # extension pair: L36 is where the whole gemma field roster is
+               # banked, so it is the anchor by construction, not choice.
                "gemma3-27b": 36}
 BANK = Path("outputs/battery")
 
@@ -269,24 +272,22 @@ def load_axes(model: str) -> tuple[dict[str, Axis], dict[str, Axis], list[Axis]]
         return reads, extras, pool
 
     if model == "gemma3-27b":
-        # EXTENSION PAIR (A8-add-7). Everything lives at L36 — the site is not a
-        # choice, it is where the whole banked field roster was built. Rake 26
-        # (a banked-vector site MUST be inside the fit grid) is what the
-        # {34,36,38} region was scanned for, and that region is now SCAN
-        # HISTORY: the REGISTERED grid is `fit_transport_maps.SITES
-        # ['gemma3-27b']` = (38, 41), ⋆ L38, ruled by Luxia 2026-07-29, and L36
-        # retired with the region. That is harmless HERE because this reader
-        # resolves banked artifacts BY PATH and never through the registered
-        # grid: the site pairs come from cp2_summary's own records, and the axis
-        # objects from the per-key paths spelled out below, each naming its own
-        # `_L36` key outright (never a glob, rake M35). The historical L36 reads
-        # therefore still resolve, unchanged. What the ruling DOES change is
-        # elsewhere: a REFIT at L36 now needs an explicit `--tgt-sites 36`,
-        # because a retired site never resolves by default again.
+        # EXTENSION PAIR. Everything lives at L36 — the site is not a choice, it
+        # is where the whole banked field roster was built. A banked-vector site
+        # MUST be inside the fit grid, which is why the {34,36,38} region was
+        # scanned; the REGISTERED grid is `fit_transport_maps.SITES['gemma3-27b']`
+        # = (38, 41), ⋆ L38, and L36 is a retired site. That is harmless HERE
+        # because this reader resolves banked artifacts BY PATH and never through
+        # the registered grid: the site pairs come from the fit summary's own
+        # records, and the axis objects from the per-key paths spelled out below,
+        # each naming its own `_L36` key outright (never a glob, so a key cannot
+        # silently match a neighbour). The banked L36 reads therefore resolve. A
+        # REFIT at L36 needs an explicit `--tgt-sites 36`, because a retired site
+        # never resolves by default.
         #
         # ⚠ TWO dir0 VINTAGES EXIST FOR THIS MODEL, UNDER DIFFERENT MODE PAIRS
-        # (rake 33, the Leg-6 lesson applied prospectively rather than
-        # retrospectively):
+        # (a dir0 read against a target built from another mode pair is a
+        # different contrast, so the pair is checked before the target is chosen):
         #   a5_vectors_gemma3_27b      L23/L35/L41  pair = [socratic, contrastive]
         #   a5_vectors_gemma3_27b_L36  L36          pair = [analogical, contrastive]
         # The arm's dir0 is [analogical, contrastive] on 3B and 8B, so the L36
@@ -355,17 +356,18 @@ def load_axes(model: str) -> tuple[dict[str, Axis], dict[str, Axis], list[Axis]]
         return reads, extras, pool
 
     if model == "olmo2-7b":
-        # EXTENSION PAIR (A8-add-7). OLMo has NO banked vectors of any kind — no
-        # V7, no field roster, no dir0 (it entered the battery for A1/A4 only).
-        # There is therefore nothing to read against and no â to measure; the OLMo
-        # leg is a FIT-VALIDITY row (P8-XO) and nothing more. Raised as an explicit
+        # EXTENSION PAIR. OLMo has NO banked vectors of any kind — no entropy
+        # gradient, no field roster, no dir0 (it entered the battery for the
+        # detector reads only). There is therefore nothing to read against and no â
+        # to measure; the OLMo pair is a FIT-VALIDITY row and nothing more. Raised as an explicit
         # error rather than an empty registry so no caller can quietly produce a
         # zero-axis "clean" readout for this model.
         raise ValueError(
-            "olmo2-7b has NO banked target vectors (no a5 §B.7 V7, no field roster, "
-            "no dir0) — every A8 read is undefined for it, and â(·→olmo) is not a "
-            "measurement that can be made. See A8-add-7's declared-in-advance ⚫. "
-            "Building an OLMo V7 is an a5 vector-build arc, not a state collection.")
+            "olmo2-7b has NO banked target vectors (no a5 entropy-gradient vector, no "
+            "field roster, no dir0) — every axis read is undefined for it, and "
+            "â(·→olmo) is not a measurement that can be made; the OLMo pair is a "
+            "fit-validity row only, declared so in advance. Building an OLMo entropy "
+            "gradient is an a5 vector-build arc, not a state collection.")
 
     raise ValueError(f"no axis registry for model {model!r}")
 
@@ -374,7 +376,7 @@ ENTROPY_TAG = {"3b": "3b", "8b": "8b", "qwen-7b": "qwen", "gemma3-27b": "gemma"}
 
 
 def load_entropy_law(model: str) -> dict:
-    """Target model's banked V7 entropy law: {alpha_frac: entropy_rise}."""
+    """Target model's banked entropy law for the entropy-gradient vector: {alpha_frac: entropy_rise}."""
     tag = ENTROPY_TAG[model]
     path = Path(f"outputs/battery/arms/A5_matrix/{tag}/entropy_{tag}.json")
     with open(path) as f:
@@ -382,7 +384,7 @@ def load_entropy_law(model: str) -> dict:
     law = {float(r["alpha_frac"]): float(r["entropy_rise"])
            for r in d["rows"] if r.get("vector") == "V7"}
     if not law:
-        raise RuntimeError(f"{path}: no V7 rows")
+        raise RuntimeError(f"{path}: no rows for the entropy-gradient vector")
     return {"law": law, "source": str(path),
             "source_status": d.get("STATUS", "unknown"),
             "n_per_cell": d["rows"][0].get("n")}
@@ -715,7 +717,7 @@ def run_suite(arm_root: Path, src_model: str, tgt_model: str,
           ]
     md_path = readouts / f"ROSETTA-READOUT-{date.today().isoformat()}.md"
     md_path.write_text("".join(md))
-    logger.info("readout: %s (+ rosetta_readout.json, f2_predictions.json)", md_path)
+    logger.info("readout: %s (+ the rosetta readout json and the F-ii predictions json)", md_path)
     return out
 
 
@@ -793,7 +795,7 @@ def selftest() -> int:
     check(c_rand < q95, f"random axis cos={c_rand:.3f} < q95 (no false exceed)")
 
     print("== rosetta selftest 2: F-i / F-iii mechanics ==")
-    # synthetic "Vconf" = anti-parallel to the planted "V7" axis
+    # synthetic "Vconf" = anti-parallel to the planted entropy-gradient axis
     f1c = cos(tm.transport(-_unit(v_a)), _unit(v_b))
     check(f1c < -0.9, f"F-i mechanics: anti-parallel planted cos={f1c:.3f} < -0.9")
     v_obl = _unit(_unit(v_a) + _unit(np.random.default_rng(3).standard_normal(d_a)))
