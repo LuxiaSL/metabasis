@@ -22,9 +22,12 @@ begins with the exact bytes tagged `freeze/transport-campaign`, followed by appe
 addenda. To check: `git show <tag>:<path>`.
 
 **What is and is not verifiable from this repository.** The code, the corpus reconstruction,
-the frozen contracts and the manifests are here. The state banks, fitted maps, prediction
-artifacts and scored outputs behind the numbers below are not; they are available on
-request. Hashes let an obtained copy be checked; they do not show when an artifact was
+the frozen contracts and the manifests are here. The webtext-v3 prediction artifact, its
+seal, the scored record and the star comparison are in
+[`evidence/webtext-v3/`](evidence/webtext-v3/), and
+`python -m metabasis.scripts.recompute_webtext_v3_evidence` rebuilds the headline counts
+from them. The state banks, fitted maps and other readouts behind the remaining numbers are
+not in the repository; they are available on request. Hashes let an obtained copy be checked; they do not show when an artifact was
 made. Pair predictions share models, hub legs and corpus rows, so hit counts are
 descriptive summaries, not independent trials.
 
@@ -36,9 +39,8 @@ Every model gets one linear map into a hub model. Any pair A→B is predicted by
 hub leg with B's, before the pair's own direct map is fit. The prediction already uses both
 models' native vectors and their fitted hub legs; what it predicts is the direct fit. On the
 clean web-text corpus (webtext-v3), 240 predictions (ordered pairs; 120 unordered) were
-filed and hashed before the direct fits. All 240 cleared the pre-registered |â| ≥ 0.08
-floor, so none fell back to magnitude-only scoring. Against the directly fitted exchange
-rates:
+filed and hashed before the direct fits, and the seal was published as a public gist at the
+same moment (link in the evidence README). Against the directly fitted exchange rates:
 
 | hub | within ±0.05 | within ±0.025 |
 |---|---|---|
@@ -50,7 +52,8 @@ rates:
 
 The one failure is the control failing the tight band, which the pre-registration named in
 advance. Of the 240, the 84 predictions involving at least one of the three models added
-last land 84/84 on every hub.
+last land 84/84 on every hub. How the 240 are counted, scored by arm, and treated near zero
+is set out under "Pre-registered obligations" below.
 
 **A descriptive comparison: the frame against a single number per model.** The
 pre-registration scores this comparison descriptively, not as a gate. The star factorization
@@ -58,8 +61,14 @@ predicts each pair as a product of one coefficient per model. It lands 163/240 i
 143/240 held out (leave one unordered pair out), against 240/240 for composition filed in
 advance. On identical
 predictions, 77 land for composition only and 0 for the star only. The star breaks
-one-sidedly on same-family pairs, which it under-predicts in 16/16 cases. Whether any
-scalar summary is adopted as the law is decided once the last model (DeepSeek-V3) is in.
+one-sidedly on same-family pairs, which it under-predicts in 16/16 cases.
+
+On the earlier corpus, the campaign contract made the star a gate: at least 80 % of 190
+pair predictions in band. **That gate failed:** 36 of 134 scored predictions landed, and at
+most 47 % is reachable whatever the remaining 54 do. The composed predictor, pre-registered
+as an addendum to the same contract, passed its gate (126 of 127 scored) and beat the star
+by more than the pre-registered margin. The scalar summary is not the law; the composed
+frame is what predicts.
 
 **Exchange rates decompose as overlap × ceiling:**
 
@@ -142,6 +151,81 @@ across 1 and 2 GPUs as follows:
 
 Behavioral results at 405B are therefore compared across GPU splits. Entropy magnitudes
 across split sizes are not.
+
+## Pre-registered obligations
+
+Every obligation in the two frozen contracts, with its status. Passed and failed are against
+the frozen criterion. Descriptive items have no pass state by design.
+
+**How the 240 web-text predictions are counted.** The core roster has 21 models:
+
+- the 17 non-hub models of the earlier roster that carry a registered layer (DeepSeek-V3,
+  GPT-2-XL and OLMo-2 base do not);
+- the hub Llama-3.1-8B;
+- three additions: Qwen2.5-72B-Instruct, Llama-3.1-8B base and Qwen2.5-7B base.
+
+Five core models serve as hubs and are never endpoints. That leaves 16 endpoints and
+16 × 15 = 240 ordered predictions, over 120 fitted pairs read in both directions.
+
+Each prediction is scored in exactly one template arm and never averaged across arms. There
+are 156 native predictions (both models instruction-tuned) and 84 raw (at least one base
+model). The gates are computed over the whole list, and each arm passes separately on every
+working hub:
+
+| arm | within ±0.05 | within ±0.025 |
+|---|---|---|
+| native | 156/156 | 90.4–96.2 % |
+| raw | 84/84 | 96.4–98.8 % |
+
+The control's tight-band failure is in the native arm (75.6 %).
+
+Two near-zero rules apply, and neither changes a count. The tight band is scored only where
+the observed exchange rate is at least 0.08; all 240 clear it (smallest 0.094). Predictions
+below 0.08 would be scored on magnitude alone; the smallest in any hub column is 0.083, so
+none is. The 84-prediction extension line is the subset touching one of the three additions
+(60 raw, 24 native). It is a different set from the 84 raw-arm predictions, which touch the
+base models.
+
+**Web-text contract**
+([`PREREG-webtext-v3-2026-08-03.md`](docs/planning/PREREG-webtext-v3-2026-08-03.md))
+
+| obligation | status | result |
+|---|---|---|
+| rank health at k = 256 | passed | all three clauses; k = 256 stays the rank of record |
+| fit validity against both nulls | passed | every fit the scoring uses clears both nulls |
+| rank guard k ≤ n_train / 1.2 | passed | 0 violations (applied by the readers) |
+| composed predictions, ±0.05 | passed | 240/240 on all four working hubs |
+| composed predictions, ±0.025 | passed | 92.9–96.3 %; the poor-hub control fails at 79.2 %, as pre-named |
+| extension line, ≥ 70 % | passed | 84/84 |
+| corpus half-split and rank-sweep invariance | passed at the tier level | the full hub ordering does not replicate (ρ .17, .61): order within a tier is noise |
+| quartile separation of hubs | failed | 3 of 25 top-versus-bottom pairs miss p < .01; the hub field is compressed. The contract names no consequence, so this stands as a scope finding |
+| corpus-indexing measurement | measured | structure ρ ≈ .67; level shifts small |
+| hub-quality predictors | not supported | no listed quantity predicts hub quality: hubness is real, but not predicted |
+| base-versus-instruct sibling read | not quotable | the collected sibling pairs sit at different layers, which the contract excludes |
+| scalar star beside composition | descriptive | 163/240 in-sample, 143/240 held out |
+| authored-stratum ablation | not run | |
+| behavioral tier contrast | pending | hub tiers and shared targets are fixed; no cell has run |
+
+**Campaign contract**
+([`PREREG-transport-campaign-2026-07-26.md`](docs/planning/PREREG-transport-campaign-2026-07-26.md),
+with its addenda)
+
+| obligation | status | result |
+|---|---|---|
+| scalar star, ≥ 80 % of 190 in band | failed | 36/134 scored; at most 47 % reachable |
+| composed predictor, ≥ 80 % in band | passed | 126/127 |
+| composed beats star by ≥ 15 points, sign-flip p ≤ .01 | passed | +77 points at the pre-registered read (66 predictions) |
+| rotation and map-permutation nulls for composition | passed at 66 predictions | not yet extended to all 127 |
+| directional star and its constant-α companion | failed | 52/115; its gain over a constant-α model is calibration, not per-model structure |
+| hub-invariance of per-model coefficients | failed | differences up to 0.40 against a 0.05 band |
+| forward/reverse asymmetry analysis | done | the two directions differ by a ratio of ceilings, an algebraic identity |
+| naive-transplant null | done | |
+| the 190-prediction enumeration | partial | 134 scored, 2 withdrawn, 54 open |
+| composition panel, mapping-flexibility benchmark, tokenizer-divergence regression | not run | |
+| family-residual regression, per-class star | not run | |
+| hub drop-out | partial | single instances only |
+| constant-mean and shuffled-star baselines | not run | moot once the star gate failed |
+| judged legs, class-split table, entropy-write column | partial | the behavioral design moved to the web-text basis; see "In progress" |
 
 ## Exploratory
 
@@ -271,5 +355,5 @@ would tie a map to the models that wrote its anchors.
 - **Multi-layer vectors.** Whether a multi-layer control vector's effect (as in
   [repeng](https://github.com/vgel/repeng)) survives reduction to one layer. This is measured
   natively before any transport of the family.
-- **The law.** Whether the star factorization, or a structure richer than one number per
-  model, is stated as the law once the last model is in.
+- **The last 54 campaign predictions.** All of them involve DeepSeek-V3, GPT-2-XL or
+  OLMo-2 base, which enter the atlas with the last collection.

@@ -35,8 +35,10 @@ exploratory, rejected, or in progress. In brief:
 - **Composed maps predict exchange rates ahead of the direct fit.** On each of four hubs,
   240/240 pre-filed predictions land within ±0.05 of the directly fitted exchange rate, and
   92.9–96.3 % within ±0.025. A designated poor-hub control fails the tight band, as
-  pre-registered. In a descriptive comparison, one coefficient per model lands 163/240
-  in-sample and 143/240 held out.
+  pre-registered. One coefficient per model lands 163/240 in-sample and 143/240 held out,
+  and on the earlier corpus that scalar model failed its pre-registered gate while the
+  composed predictor passed. [`evidence/webtext-v3/`](evidence/webtext-v3/) rebuilds these
+  counts from the filed predictions.
 - **The entropy-gradient vector steers from 3B to 405B.** It is dose-ordered and outside
   random controls in 20 of 21 models tested (Mixtral on a narrower dose ladder).
 - **Contrast vectors transfer visibly at small and mid scale.** At 70B, language behaves

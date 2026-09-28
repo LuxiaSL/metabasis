@@ -1,6 +1,7 @@
-# ── Repo policy: git tracks CODE ONLY (+ eventually paper/tex, by explicit
-# ── decision). Results, banks, docs, and research logs live in the working
-# ── tree but never on the remote.
+# ── Repo policy: git tracks code, the data manifests, the public docs at the
+# ── root, the frozen pre-registrations, and evidence/ (small sealed records a
+# ── reader needs to recompute the headline results). Banks, maps, working
+# ── docs and research logs live in the working tree but never on the remote.
 outputs/
 # Enactor pull-back landing zone: banks/stamps/fits/logs rsynced off the
 # collection node, staged for desk verification before it integrates them into
