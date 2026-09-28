@@ -4275,7 +4275,8 @@ def star_pair(source_model: str, target_model: str,
               ) -> StarPrediction | StarNotFilable:
     """â(A→B) = c_A · c_B for one slot, or its N/A-AT-FILING record.
 
-    `arm` defaults to the pair's applicable arm (prereg §3); overriding it is a
+    `arm` defaults to the pair's applicable arm (`applicable_arm`, the arm the
+    slot is filed under); overriding it is a
     diagnostic and is echoed into the record with a flag, exactly as
     `compose_pair` and `directional_pair` do. The filing path never overrides.
     """
@@ -4374,8 +4375,8 @@ class ResolutionRow(BaseModel):
 
     `on_disk_hub_maps` is found by SEARCHING the output tree for the hub-map
     filename rather than by asking the registry where it should be — the whole
-    point is to answer rake M3's question ("what has no record") in the
-    resolution direction: which banked charts exist that the registry cannot
+    point is to ask "what has no record" rather than to verify the records that
+    exist, here in the resolution direction: which banked charts exist that the registry cannot
     see. A hit the registry deliberately declines (a different fit lineage, e.g.
     the `*_modefree` trees) is listed under `not_of_record` and is not a gap.
     """
@@ -4427,7 +4428,7 @@ class ResolutionSweep(BaseModel):
 def find_following_symlinks(root: Path, name: str) -> list[Path]:
     """`find -L <root> -name <name>` — the symlink-FOLLOWING recursive search.
 
-    RAKE M38, at Python grain. `find . -type f` is blind to symlinked files and
+    A census over a tree that may hold symlinks must follow them. `find . -type f` is blind to symlinked files and
     never descends symlinked directories, and `Path.rglob` has EXACTLY the same
     blindness: it does not recurse through a symlinked directory (and the 3.13
     `recurse_symlinks=True` keyword is unavailable on the 3.11/3.12 floor this
@@ -4440,7 +4441,7 @@ def find_following_symlinks(root: Path, name: str) -> list[Path]:
     matching files, missing the one under the symlinked directory;
     `os.walk(followlinks=True)` found both (selftest 28).
 
-    LINK CYCLES are guarded, per M38(a): a followed symlink can point at an
+    LINK CYCLES are guarded, because following links invites them: a followed symlink can point at an
     ancestor, and `os.walk(followlinks=True)` will loop forever on one. Each
     directory's (st_dev, st_ino) is recorded and a second visit prunes that
     branch rather than raising — a cycle is a filesystem fact about someone
@@ -4477,10 +4478,10 @@ def registry_resolution_sweep(family: str = FAMILY_OF_RECORD,
                               search: bool = True) -> ResolutionSweep:
     """Resolve every registered model's hub map + vector bank, and name the gaps.
 
-    This is the guard the gemma3-27b gap slipped through: a banked, bit-identical
-    hub chart sat in the desk-smalls tree while `SITE_OF_RECORD` had no key for
-    the model at all, so nothing in the tool could even ASK for it — and no
-    existing check compared what is banked against what is reachable.
+    It exists because a model can have a banked, bit-identical hub chart on disk
+    while `SITE_OF_RECORD` has no key for it at all (gemma3-27b was that case):
+    then nothing in the tool can even ASK for the chart, and only a comparison of
+    what is banked against what is reachable finds it.
     """
     root = COLLECTION_ROOT.parent
     do_search = search and root.exists()
@@ -4493,7 +4494,7 @@ def registry_resolution_sweep(family: str = FAMILY_OF_RECORD,
         vectors = resolve_vector_bank(model, site)
         name = fit_path_for(Path(), HUB_MODEL, HUB_SITE_OF_RECORD, model, site,
                             arm, family).name
-        #  SYMLINK-FOLLOWING (rake M38): under the /models placement rule a
+        #  SYMLINK-FOLLOWING: under the /models placement rule a
         #  banked fits tree is reached through a symlink, and a walk that does not
         #  follow one would report the chart as absent — turning an UNREACHABLE
         #  finding into a silent "named gap", the exact reverse of the truth.
@@ -4536,15 +4537,15 @@ def sha256_of(path: Path) -> str:
     return h.hexdigest()
 
 
-# ---------------------------------------------- sha256 manifests (rake M42)
+# ------------------------------------------------------------ sha256 manifests
 #  A MANIFEST THAT LISTS ITSELF CAN NEVER VERIFY CLEAN. A file cannot contain its
 #  own hash, so every future checker reads a guaranteed mismatch on that row and
-#  has to adjudicate a false alarm — which the ρ-of-record run duly did, HALTing
-#  correctly on `MANIFEST-quadhub-qwen7b.sha256`'s self-row and paying for the
-#  diagnosis in a detour.
+#  has to adjudicate a false alarm: a correct HALT on a self-row costs a
+#  diagnosis that the checker could have made itself.
 #
-#  M42 has four parts and three of them are a PARSER's business, which is why this
-#  lives here rather than only in the shell that generates manifests:
+#  The self-listing hazard has four parts and three of them are a PARSER's
+#  business, which is why this lives here rather than only in the shell that
+#  generates manifests:
 #    (a) generators exclude their own name — the `-not -name "MANIFEST-*"`
 #        convention. A generator is a shell script and is not committable from
 #        here; what IS committable is the checker that DIAGNOSES a self-row instead
@@ -4553,19 +4554,20 @@ def sha256_of(path: Path) -> str:
 #        write. The observable symptom is an artifact whose mtime POSTDATES its
 #        manifest, which `audit_manifest` reports.
 #    (c) a checker hitting exactly one mismatch on a manifest-named row checks for
-#        this rake BEFORE suspecting the data. Implemented literally below: a
+#        a self-row BEFORE suspecting the data. Implemented literally below: a
 #        self-row is EXCLUDED from verification and reported as a generator defect,
 #        never as a digest failure — the artifacts are innocent.
 #    (d) TWO banked manifest dialects exist — bare (`<digest>  name`) and
 #        `./`-prefixed with `#` header lines — and "parsers accept both explicitly
-#        or a header line becomes a phantom missing artifact". The old parser here
-#        did neither: it keyed rows verbatim (so a `./`-dialect manifest made every
-#        lookup miss and read as "not listed") and it accepted any two-token line
-#        (so a two-word `# comment` became a phantom row named after its own second
-#        word). Both are fixed and both are selftested.
+#        or a header line becomes a phantom missing artifact". This parser strips
+#        the `./` prefix before keying rows (a verbatim key makes every lookup in a
+#        `./`-dialect manifest miss and read as "not listed") and counts `#` lines
+#        as comments (a two-word `# comment` read as a two-token row becomes a
+#        phantom row named after its own second word). Both are selftested.
 
 #: The name pattern a manifest generator must EXCLUDE from its own enumeration.
-#: Named per rake M26 so a sweep can find every consumer of the convention.
+#: Named, rather than written inline, so a sweep can find every consumer of the
+#: convention.
 MANIFEST_NAME_PREFIX = "MANIFEST-"
 
 
@@ -4578,17 +4580,17 @@ class ManifestRow(BaseModel):
     #: key any lookup must use, because the two dialects name the same artifact.
     name: str
     line_number: int
-    #: True when this row's path resolves to the manifest FILE ITSELF (rake M42).
+    #: True when this row's path resolves to the manifest FILE ITSELF.
     is_self_row: bool = False
 
 
 class ManifestListing(BaseModel):
-    """A parsed sha256 manifest, with every M42 hazard surfaced as data."""
+    """A parsed sha256 manifest, with every self-listing hazard surfaced as data."""
     path: str
     dialect: Literal["bare", "dot-prefixed", "mixed", "empty"]
     rows: list[ManifestRow] = []
     self_rows: list[str] = Field(
-        default=[], description="rows naming the manifest itself — rake M42. "
+        default=[], description="rows naming the manifest itself. "
                                 "EXCLUDED from `by_name`, because a file cannot "
                                 "contain its own hash and treating the row as a "
                                 "digest failure blames innocent artifacts")
@@ -4610,16 +4612,16 @@ class ManifestListing(BaseModel):
 
 
 class ManifestAudit(BaseModel):
-    """The M42 verdict for one manifest: does it list itself, and is it LAST?"""
+    """The self-listing verdict for one manifest: does it list itself, and is it LAST?"""
     listing: ManifestListing
     n_rows: int
     self_rows: list[str] = []
-    #: the directory the manifest's rows are RELATIVE TO — chosen, not assumed
-    #: (rake M15). A manifest under `manifests/` whose rows read `outputs/...` is
+    #: the directory the manifest's rows are RELATIVE TO — chosen, not assumed,
+    #: because it is not always the manifest's parent. A manifest under `manifests/` whose rows read `outputs/...` is
     #: anchored at the repo root, not at its own parent.
     anchor: Optional[str] = None
     n_resolved: int = 0
-    #: covered artifacts whose mtime POSTDATES the manifest's own (M42(b)): the
+    #: covered artifacts whose mtime POSTDATES the manifest's own: the
     #: manifest was not generated last, so an honest artifact reads as tampered.
     postdating_artifacts: list[str] = []
     missing_artifacts: list[str] = []
@@ -4628,14 +4630,14 @@ class ManifestAudit(BaseModel):
 
 
 def parse_sha256_manifest(path: Path) -> ManifestListing:
-    """Parse a sha256 manifest, accepting BOTH banked dialects explicitly (M42(d)).
+    """Parse a sha256 manifest, accepting BOTH banked dialects explicitly.
 
     Bare (`<digest>  name`) and `./`-prefixed with `#` headers are both of record
     in this tree, so both are named here rather than one being discovered by a
     checker that mysteriously finds nothing. A `#` line is a COMMENT and is counted,
-    never parsed as a row — the phantom-artifact failure M42(d) warns about.
-    Duplicate names are a HALT (rake M18: a comparison dict gets a duplicate-key
-    assertion, because which digest is of record cannot be guessed).
+    never parsed as a row, or it becomes a phantom missing artifact.
+    Duplicate names are a HALT: every comparison dict gets a duplicate-key
+    assertion, because which digest is of record cannot be guessed.
     """
     if not path.is_file():
         raise ArchiveIntegrityError(f"manifest absent: {path}")
@@ -4674,7 +4676,7 @@ def parse_sha256_manifest(path: Path) -> ManifestListing:
         seen[name] = number
         #  A SELF-ROW is judged by BASENAME first and confirmed by resolution
         #  second. Basename-first matters because a manifest's own ANCHOR is not
-        #  always its parent directory (rake M15) — `manifests/outputs.sha256`
+        #  always its parent directory — `manifests/outputs.sha256`
         #  lists `outputs/...` relative to the repo root — so a resolution-only
         #  test would miss a self-row in any manifest anchored elsewhere, and
         #  missing one is the failure this whole section exists to prevent.
@@ -4702,11 +4704,11 @@ def parse_sha256_manifest(path: Path) -> ManifestListing:
 
 #: How many ancestor directories above a manifest are tried as candidate anchors.
 #: Four covers every banked layout (`manifests/outputs.sha256` anchored at the repo
-#: root is one level; a nodeside manifest copied two levels down is two).
+#: root is one level; a manifest copied two levels down is two).
 MANIFEST_ANCHOR_SEARCH_DEPTH = 4
 #: Below this fraction of rows resolving, the ANCHOR is reported as unresolved
-#: rather than the rows as missing. Rake M15: "a scary mass-non-OK result means
-#: CHECK YOUR CWD FIRST, before investigating corruption." A manifest whose rows
+#: rather than the rows as missing: a mass non-OK result means check the working
+#: directory first, before investigating corruption. A manifest whose rows
 #: mostly do not resolve is being read from the wrong directory far more often
 #: than it is describing a vanished tree.
 MANIFEST_ANCHOR_MIN_HIT_RATE = 0.5
@@ -4717,12 +4719,12 @@ def resolve_manifest_anchor(path: Path, listing: ManifestListing,
                             ) -> tuple[Optional[Path], int, dict[str, int]]:
     """The directory a manifest's rows are RELATIVE TO. Chosen, never assumed.
 
-    RAKE M15(a): `sha256sum -c` must run from the manifest's own anchor, and that
-    anchor is NOT always the manifest's parent — `manifests/outputs.sha256` lists
-    `outputs/...` relative to the REPO ROOT, and a pull-side manifest may list
-    `staging/<leg>/...` from the same place. Resolving rows against the parent and
-    reporting the misses as MISSING ARTIFACTS is precisely the false corruption
-    alarm M15 was filed for; that rake cost two separate investigations.
+    `sha256sum -c` must run from the manifest's own anchor, and that anchor is
+    NOT always the manifest's parent — `manifests/outputs.sha256` lists
+    `outputs/...` relative to the REPO ROOT, and a manifest written beside a pulled
+    copy may list paths from the same place. Resolving rows against the parent and
+    reporting the misses as MISSING ARTIFACTS raises a false corruption alarm on a
+    perfectly good manifest.
 
     Returns `(anchor, n_resolved, scores)`: the best candidate, how many rows
     resolve under it, and every candidate's score so a report can show the
@@ -4761,15 +4763,15 @@ def resolve_manifest_anchor(path: Path, listing: ManifestListing,
 
 def audit_manifest(path: Path, check_mtimes: bool = True,
                    anchor: Optional[Path] = None) -> ManifestAudit:
-    """Rake M42 for one manifest: self-rows, write ordering, missing artifacts.
+    """The manifest audit for one manifest: self-rows, write ordering, missing artifacts.
 
     A first-class AUDIT rather than a side effect of verifying digests, because
     the two questions have different answers: a self-row is a GENERATOR defect
     (the manifest can never verify clean and no artifact is at fault), while a
-    digest mismatch is a DATA question. Conflating them is what cost the ρ-of-record
-    run its detour.
+    digest mismatch is a DATA question. Conflating them sends a reader
+    investigating innocent data.
 
-    The ANCHOR is resolved first (rake M15) and a manifest whose anchor cannot be
+    The ANCHOR is resolved first and a manifest whose anchor cannot be
     found reports THAT, not a tree of missing artifacts. Digests are deliberately
     NOT recomputed — that is a separate, expensive act, and this audit must be
     cheap enough to run over every manifest in a tree.
@@ -4819,7 +4821,7 @@ def audit_manifest(path: Path, check_mtimes: bool = True,
             for row in covered:
                 artifact = chosen / row.name
                 try:
-                    stat = artifact.stat()           # follows symlinks (rake M38)
+                    stat = artifact.stat()           # follows symlinks
                 except OSError:
                     missing.append(row.name)
                     continue
@@ -4862,19 +4864,19 @@ def verify_archive(manifest: Path = ARCHIVE_MANIFEST,
     against the archive, so an archive that is not the archive of record makes
     the comparison meaningless rather than merely stale.
 
-    RAKE M42, on the way in. The manifest is parsed by `parse_sha256_manifest`,
+    The manifest is parsed by `parse_sha256_manifest`,
     which accepts both banked dialects and excludes any self-row; a self-listing
     manifest is WARNED about as a generator defect and does NOT block the gate,
     because the archived artifacts are innocent of it and blocking would be exactly
-    the false alarm M42(c) tells a checker to look for first.
+    the false alarm a checker must rule out before suspecting the data.
     """
     listing = parse_sha256_manifest(manifest)
     if listing.lists_itself:
-        #  Rake M42(c): recognized, reported, and NOT treated as a digest failure.
+        #  A self-row is recognized, reported, and NOT treated as a digest failure.
         #  The row is already excluded from `by_name`, so nothing downstream can
         #  compare an artifact against a hash that cannot exist.
         logger.warning(
-            "SELF-LISTING MANIFEST (rake M42) — %s lists itself (%s). A file "
+            "SELF-LISTING MANIFEST — %s lists itself (%s). A file "
             "cannot contain its own hash, so that row can never verify; it is "
             "EXCLUDED and the archived artifacts are verified normally. The "
             "generator owes the %s* exclusion", manifest, listing.self_rows,
@@ -4905,7 +4907,7 @@ def verify_archive(manifest: Path = ARCHIVE_MANIFEST,
         raise ArchiveIntegrityError(
             "HALT — the archived operationalization does not match its manifest:\n  "
             + "\n  ".join(bad)
-            + (f"\n  (this manifest also LISTS ITSELF — rake M42 — but that row "
+            + (f"\n  (this manifest also LISTS ITSELF, but that row "
                f"was excluded and is not the cause)" if listing.lists_itself
                else ""))
     return digests, verified
@@ -4914,7 +4916,7 @@ def verify_archive(manifest: Path = ARCHIVE_MANIFEST,
 def load_archived_glue(path: Path = ARCHIVE_GLUE) -> ModuleType:
     """Execute the archived glue by path, WITHOUT writing bytecode into it.
 
-    RAKE M16: an `importlib` load-by-path drops a `__pycache__` beside the
+    An `importlib` load-by-path drops a `__pycache__` beside the
     source, which violates read-only-over-`outputs/` and is invisible to
     `git status` because the tree is gitignored. `sys.dont_write_bytecode` is
     set across the load and restored afterwards. The module is NOT registered
@@ -5058,14 +5060,16 @@ def run_gate(archive_dir: Path = ARCHIVE_ROOT,
 
 
 # ---------------------------------------------------------------- scoring
-#  A SEPARATE, DESK-INITIATED ACT. Nothing in the prediction path above reaches
-#  anything below this line: `compose_pair`, `run_candidates` and `run_gate`
-#  neither import nor call a scorer, and no filed record can be scored without
-#  an observed-â artifact the desk supplies at first-read. What this section
-#  builds is the ARTIFACT the scoring act has been missing — verdicts have lived
-#  in canon prose only (slate-prep §review note, the hygiene gap this closes).
+#  A SEPARATE, OPERATOR-INITIATED ACT. Nothing in the prediction path above
+#  reaches anything below this line: `compose_pair`, `run_candidates` and
+#  `run_gate` neither import nor call a scorer, and no filed record can be scored
+#  without an observed-â artifact the operator supplies at first-read. What this
+#  section builds is the scoring ARTIFACT: every verdict is a row in a file, not
+#  a sentence in somebody's prose.
 #
-#  The rules are prereg §3 + Addendum E §E2 verbatim and are never re-derived:
+#  The rules are the frozen pre-registration's band rules
+#  (docs/planning/, the prediction structure and the composed-path filing
+#  structure) verbatim, and are never re-derived:
 #    * the band is the FILED band, read off the record; it is CHECKED to be the
 #      frozen `predicted ± .05` and a record that disagrees is a HALT, not a
 #      band this tool quietly repairs. Bands never move after filing.
@@ -5075,18 +5079,20 @@ def run_gate(archive_dir: Path = ARCHIVE_ROOT,
 #      that band — this tool never invents one.
 #  Campaign gates (G-star-hit, G-comp-hit, the superiority rule) are NOT
 #  evaluated here: they are aggregates over the whole 190 with frozen
-#  interpretive rules, and they are the desk's read, not a tool's verdict.
+#  interpretive rules, and they are a human read of the whole record, not a
+#  tool's verdict.
 
-#: The predictors racing under Addendum E + Addendum H. `star` = prereg §3's
-#: symmetric scalar c_A·c_B, which Addendum H item 2 leaves UNTOUCHED and
-#: filing on its own frozen terms; `composed` = E1's two-hop â_comp;
-#: `directional` = H item 3's â(A→B) = c_A^out·c_B^in.
+#: The predictors that race. `star` = the frozen symmetric scalar c_A·c_B, which
+#: keeps filing UNTOUCHED on its own frozen terms after the directional star is
+#: adopted; `composed` = the two-hop â_comp; `directional` = the adopted
+#: directional star â(A→B) = c_A^out·c_B^in.
 #: Order matters only for display; every aggregate keys by the value.
 Predictor = Literal["star", "composed", "directional"]
 #: The predictor pairs whose 2×2 the head-to-head read emits, in a FIXED order.
 #: `("star", "composed")` is FIRST and its counts are ALSO emitted in the
-#: original `HeadToHead` shape — Addendum E §E3's read is preserved verbatim for
-#: continuity, and the directional 2×2s arrive BESIDE it, never in place of it.
+#: original `HeadToHead` shape — the frozen racing design's star-vs-composed read
+#: is preserved verbatim, and the directional 2×2s arrive BESIDE it, never in
+#: place of it.
 PREDICTOR_PAIRS: tuple[tuple[Predictor, Predictor], ...] = (
     ("star", "composed"),
     ("star", "directional"),
@@ -5101,11 +5107,12 @@ RACING_BLOCK_KEYS: dict[Predictor, str] = {
     "composed": "composed_prediction",
     "directional": "directional_prediction",
 }
-#: Addendum D §D1's scope trigger, as a SET rather than a hardcoded name: "any
-#: ceiling-aware gauge (the Addendum-C directional star c_A^out·c_B^in, or any
-#: explicitly ratified α-based refinement)". Today exactly one gauge is adopted
-#: (Addendum 2026-07-29-H). A future α-based refinement joins this tuple and the
-#: companion starts being owed for it too — which is the point of naming it.
+#: The constant-α companion's scope trigger, as a SET rather than a hardcoded
+#: name: it is owed for "any ceiling-aware gauge (the directional star
+#: c_A^out·c_B^in, or any explicitly adopted α-based refinement)". Exactly one
+#: gauge is adopted: the directional star. A future α-based refinement joins this
+#: tuple and the companion starts being owed for it too — which is the point of
+#: naming it.
 CEILING_AWARE_GAUGES: tuple[Predictor, ...] = ("directional",)
 
 #: Every verdict this tool can emit. `UNSCORED-NO-OBSERVATION` is a first-class
@@ -5172,13 +5179,12 @@ class FilingRecord(BaseModel):
 
 
 class ObservedAhat(BaseModel):
-    """One observed â, supplied by the DESK at first-read. Never computed here.
+    """One observed â, supplied by the operator at first-read. Never computed here.
 
-    `corpus_manifest_sha256` is the vintage the FIT rode. Addendum G §G2(b)
-    makes within-vintage scoring the thing the frozen ceremony tests, and
-    §G2(c) makes a cross-vintage comparison a calibration read that is never
-    scored — so the fit's vintage is part of the observation, not an
-    afterthought.
+    `corpus_manifest_sha256` is the vintage the FIT rode. The frozen vintage rule
+    makes within-vintage scoring the thing the frozen ceremony tests, and makes
+    a cross-vintage comparison a calibration read that is never scored — so the
+    fit's vintage is part of the observation, not an afterthought.
     """
     source: str
     target: str
@@ -5196,7 +5202,7 @@ class ObservedAhat(BaseModel):
 
 
 class ObservationSet(BaseModel):
-    """The desk's observed-â artifact for one filing record."""
+    """The operator's observed-â artifact for one filing record."""
     path: str
     sha256: str
     corpus_manifest_sha256: Optional[str] = Field(
@@ -5207,20 +5213,21 @@ class ObservationSet(BaseModel):
     observations: list[ObservedAhat] = []
 
 
-# ------------------------------------- ADDENDUM D — the constant-α companion
-#  D1's scope trigger IS Addendum H's adoption of the directional star, so from
-#  the first directional filing this companion is owed at every scoring read.
+# ------------------------------------------------- the constant-α companion
+#  The companion's scope trigger is the adoption of a ceiling-aware gauge, and
+#  the directional star is one, so from the first directional filing this
+#  companion is owed at every scoring read.
 #
-#  WHAT THIS TOOL DOES AND DOES NOT DO. It does NOT compute ᾱ — D2 defines ᾱ as
-#  the grand mean of the fitted per-model (or per-role) α values ACROSS THE
-#  SCORED SET, which is a desk quantity formed once the scored set exists, and a
-#  tool that auto-computed it would silently pick its own scored set. It does
-#  NOT compute the ceiling/calibration terms — D2 says they are "the same terms
-#  the adopted gauge uses", which is the derivation lane's object. It does NOT
-#  run the α-permutation null (D3, n=1000).
+#  WHAT THIS TOOL DOES AND DOES NOT DO. It does NOT compute ᾱ — the frozen
+#  definition makes ᾱ the grand mean of the fitted per-model (or per-role) α
+#  values ACROSS THE SCORED SET, a quantity formed by hand once the scored set
+#  exists, and a tool that auto-computed it would silently pick its own scored
+#  set. It does NOT compute the ceiling/calibration terms — they are "the same
+#  terms the adopted gauge uses", which is the derivation lane's object. It does
+#  NOT run the α-permutation null (n=1000).
 #
-#  It scores what the desk supplies, on structurally identical terms, and when
-#  nothing is supplied it NAMES THE COMPANION AS OWED with D2/D3's frozen text.
+#  It scores what the operator supplies, on structurally identical terms, and
+#  when nothing is supplied it NAMES THE COMPANION AS OWED with the frozen text.
 #  Absent and malformed are different states and never collapse into each other.
 #
 #  THE SCHEMA OF RECORD — `constant-alpha-companion/v1`
@@ -5245,16 +5252,16 @@ class ObservationSet(BaseModel):
 #    }
 #
 #  `predicted` is ᾱ · (the adopted gauge's ceiling/calibration terms) for that
-#  slot, computed by the desk. This module bands it at the SAME frozen ±.05 and
-#  applies the SAME |predicted| < .08 carve-out — D2's "against the SAME frozen
+#  slot, computed by the operator. This module bands it at the SAME frozen ±.05
+#  and applies the SAME |predicted| < .08 carve-out — "against the SAME frozen
 #  bands", read as the same band RULE around the baseline's own prediction
-#  (which is how Addendum C item 1 applies it to the constant grand-mean
+#  (which is how the frozen scoring rules apply it to the constant grand-mean
 #  predictor: "the mean of all 190 observed â, applied to every pair"). That
 #  reading is stated on the artifact, not left to a reader.
 
 
 class AlphaPermutationNull(BaseModel):
-    """D3's α-permutation null, AS SUPPLIED. Never computed here."""
+    """The companion's α-permutation null, AS SUPPLIED. Never computed here."""
     n_permutations: int
     true_in_band_count: int
     percentile_rank: float = Field(
@@ -5264,7 +5271,7 @@ class AlphaPermutationNull(BaseModel):
 
 
 class ConstantAlphaRow(BaseModel):
-    """The desk's constant-α prediction for ONE slot."""
+    """The operator's constant-α prediction for ONE slot."""
     source: str
     target: str
     arm: str
@@ -5303,7 +5310,8 @@ class ConstantAlphaVerdict(BaseModel):
     Deliberately NOT a `ScoredSlot` and deliberately NOT a member of
     `Predictor`: nothing filed a band for it before the fit, so it can never
     enter `aggregates`, `head_to_head` or any gate denominator. It rides on the
-    scored slot of the gauge it companions and is read only by D3's margin.
+    scored slot of the gauge it companions and is read only by the companion's
+    ≥ 15-point margin rule.
     """
     STATUS: str = (
         "ADDENDUM-D BASELINE — a companion, never a filed prediction. Scored "
@@ -5329,7 +5337,7 @@ class ConstantAlphaVerdict(BaseModel):
 
 
 class AddendumDCompanion(BaseModel):
-    """The record-level Addendum-D read: SCORED, OWED, or NOT-TRIGGERED."""
+    """The record-level constant-α companion read: SCORED, OWED, or NOT-TRIGGERED."""
     STATUS: Literal["SCORED", "OWED", "NOT-TRIGGERED"]
     scope_trigger: str = (
         "Addendum D §D1: this companion activates if and when any ceiling-aware "
@@ -5462,12 +5470,12 @@ class PredictorAggregate(BaseModel):
 
 
 class HeadToHead(BaseModel):
-    """Addendum E §E3's per-pair 2×2, over slots where BOTH are scored of record.
+    """The racing design's per-pair 2×2, over slots where BOTH are scored of record.
 
-    PRESERVED VERBATIM across the Addendum-H adoption: same field names, same
-    denominators, same star-vs-composed semantics. Addendum H item 1 makes the
-    directional star model selection over not-yet-filed slots, not a patch, so
-    the E3 race's own record must keep reading the same way in every scored
+    PRESERVED VERBATIM across the adoption of the directional star: same field
+    names, same denominators, same star-vs-composed semantics. The directional
+    star is model selection over not-yet-filed slots, not a patch, so the
+    star-vs-composed race's own record must keep reading the same way in every scored
     record before and after the adoption. The three-predictor reads are
     `PairwiseHeadToHead` and `ThreeWayHeadToHead`, beside this — never instead.
     """
@@ -5482,7 +5490,7 @@ class HeadToHead(BaseModel):
 
 
 class PairwiseHeadToHead(BaseModel):
-    """The E3 2×2 for ONE ordered predictor pair, over slots both scored."""
+    """The racing 2×2 for ONE ordered predictor pair, over slots both scored."""
     predictor_a: Predictor
     predictor_b: Predictor
     n_slots_both_scored: int = 0
@@ -5498,7 +5506,7 @@ class PairwiseHeadToHead(BaseModel):
 class ThreeWayHeadToHead(BaseModel):
     """The per-slot hit census across ALL THREE predictors.
 
-    Addendum E §E3's 2×2 generalizes to a 2³ once three columns file: the
+    The racing design's 2×2 generalizes to a 2³ once three columns file: the
     natural object is the SET of predictors that hit on each slot. Reported as
     counts keyed by that set (`"none"`, `"star"`, `"star+composed"`, …) over
     slots where all three are scored of record, so no slot is counted under a
@@ -5599,7 +5607,7 @@ def _check_filed_band(prediction_id: str, predicted: float,
             f"(|Δ| lo {abs(lo - want_lo):.3e}, hi {abs(hi - want_hi):.3e}, tol "
             f"{BAND_ARITHMETIC_TOLERANCE:.0e}). Bands never move after filing, "
             f"so this record disagrees with the frozen contract and is NOT "
-            f"scored — the desk rules on which side is wrong")
+            f"scored — a human decides which side is wrong")
     return [lo, hi]
 
 
@@ -5611,7 +5619,7 @@ def _check_carve_out(prediction_id: str, predicted: float,
         raise ScoringError(
             f"{prediction_id}: the record files magnitude_only={magnitude_only} "
             f"for predicted {predicted:+.6f}, but the frozen near-zero carve-out "
-            f"(prereg §3 / E2: |predicted| < {NEAR_ZERO_CARVE_OUT}) says "
+            f"(|predicted| < {NEAR_ZERO_CARVE_OUT}) says "
             f"{expected}. Scoring on a carve-out flag that disagrees with the "
             f"frozen rule would score a contract nobody froze")
 
@@ -5629,11 +5637,11 @@ def _scored_band_for(predicted: float, band: Sequence[float],
                      magnitude_only: bool) -> list[float]:
     """The band the comparison actually runs against.
 
-    Magnitude-only moves the comparison onto |·| (prereg §3: "|observed| within
-    the band of |predicted|; sign unscored") and the band travels with it — the
-    FROZEN half-width never changes. Otherwise the band is the filed one,
-    verbatim. ONE implementation, shared by the filed predictors and by
-    Addendum D's companion baseline, so "structurally identical terms" is a
+    Magnitude-only moves the comparison onto |·| (the frozen rule: "|observed|
+    within the band of |predicted|; sign unscored") and the band travels with it
+    — the FROZEN half-width never changes. Otherwise the band is the filed one,
+    verbatim. ONE implementation, shared by the filed predictors and by the
+    constant-α companion baseline, so "structurally identical terms" is a
     property of the code and not of two copies agreeing today.
     """
     if magnitude_only:
@@ -5680,8 +5688,8 @@ def score_prediction(slot: FiledSlot, filed: FiledPrediction,
         sign_scored=not filed.magnitude_only,
         filed_utc=filed_utc, scored_utc=stamp)
 
-    #  The scored band: magnitude-only moves the comparison onto |·| (prereg §3
-    #  "|observed| within band of |predicted|; sign unscored"), and the band
+    #  The scored band: magnitude-only moves the comparison onto |·| (the frozen
+    #  rule: "|observed| within band of |predicted|; sign unscored"), and the band
     #  travels with it — the frozen half-width never changes.
     scored_band = _scored_band_for(filed.predicted, band, filed.magnitude_only)
 
@@ -5768,8 +5776,8 @@ def parse_filing_record(path: Path) -> FilingRecord:
     """Read a filed prediction record into slots. TWO shapes are on record.
 
       * RACING (batch 3 onward): a row carries `source`/`target` plus any of a
-        `star_prediction`, `composed_prediction` and — from Addendum H,
-        batch 4 onward — `directional_prediction` block. Every block present is
+        `star_prediction`, `composed_prediction` and — once the directional
+        star is adopted, batch 4 onward — `directional_prediction` block. Every block present is
         read; a row filing only one of the three is legal (the columns' filing
         availability is independent) and a row filing none is a HALT.
       * SCALAR-FLAT (canary, batch 2): a row IS the star prediction —
@@ -5833,8 +5841,8 @@ def parse_filing_record(path: Path) -> FilingRecord:
         if key in seen:
             raise ScoringError(
                 f"{path}: duplicate slot {key} — a filing record must name each "
-                f"pair×arm×family once (rake M18: comparisons key by the FULL "
-                f"identity and assert no duplicates)")
+                f"pair×arm×family once (comparisons key by the FULL identity "
+                f"and assert no duplicates)")
         seen[key] = key
         record.slots.append(FiledSlot(
             key=key, pair_id=f"{source}->{target}", source=source, target=target,
@@ -5845,7 +5853,7 @@ def parse_filing_record(path: Path) -> FilingRecord:
 
 
 def load_observations(path: Path) -> ObservationSet:
-    """Read the desk's observed-â artifact. Shape is documented in `--help`.
+    """Read the operator's observed-â artifact. Shape is documented in `--help`.
 
     ```json
     {"corpus_manifest_sha256": "<the FIT vintage, default for all rows>",
@@ -5859,7 +5867,7 @@ def load_observations(path: Path) -> ObservationSet:
         raise ScoringError(
             f"observed-â artifact absent: {path}. Scoring REQUIRES one — this "
             f"tool never observes, never fits, and never auto-scores at filing "
-            f"time; the desk supplies the observed â at first-read")
+            f"time; the operator supplies the observed â at first-read")
     try:
         doc = json.loads(path.read_text())
     except (OSError, ValueError) as exc:
@@ -6066,9 +6074,9 @@ def attach_constant_alpha(slots: Sequence[ScoredSlot],
       * NOT-TRIGGERED — no ceiling-aware gauge is filed in this record at all;
       * OWED          — a gauge IS filed and no companion was supplied, or one
                         was supplied without the α-permutation null;
-      * SCORED        — the margin is computed. Computed, not adjudicated: D3's
-                        thresholds are reported as booleans beside the numbers
-                        and the desk rules.
+      * SCORED        — the margin is computed. Computed, not adjudicated: the
+                        frozen thresholds are reported as booleans beside the
+                        numbers and a human reads them.
     """
     filed_gauges = {s.predictor for s in slots}
     triggered = [g for g in CEILING_AWARE_GAUGES if g in filed_gauges]
@@ -6218,7 +6226,7 @@ def aggregate_scored(slots: Sequence[ScoredSlot]) -> list[PredictorAggregate]:
 
 
 def head_to_head(slots: Sequence[ScoredSlot]) -> HeadToHead:
-    """Addendum E §E3's 2×2, over slots where BOTH predictors scored of record."""
+    """The racing design's 2×2, over slots where BOTH predictors scored of record."""
     by_key: dict[str, dict[str, ScoredSlot]] = {}
     for s in slots:
         by_key.setdefault(s.key, {})[s.predictor] = s
@@ -6339,8 +6347,8 @@ def score_record(record_path: Path, observations_path: Path,
                                            filed_utc=filing.filed_utc,
                                            scored_utc=stamp))
 
-    #  Addendum D §D1's scope trigger is Addendum H's adoption, so this runs at
-    #  every scoring read once a directional column is filed. It attaches the
+    #  The constant-α companion is owed once a ceiling-aware gauge is adopted, so
+    #  this runs at every scoring read once a directional column is filed. It attaches the
     #  baseline to the gauge's slots and NEVER computes ᾱ or the null itself.
     addendum_d = attach_constant_alpha(scored, companion, by_key)
 
@@ -6394,7 +6402,7 @@ def write_scored_record(record: ScoredRecord, out: Path,
         raise ScoringError(
             f"a scored record already exists at {out}. Scoring happens ONCE per "
             f"record; re-scoring it would silently replace a verdict that may "
-            f"already be ledgered. Pass --overwrite-scored deliberately, or "
+            f"already be cited. Pass --overwrite-scored deliberately, or "
             f"write elsewhere with --scored-out")
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(record.model_dump_json(indent=1))
@@ -6403,40 +6411,37 @@ def write_scored_record(record: ScoredRecord, out: Path,
     return out
 
 
-# -------------------------------------------- EMITTING A FILING RECORD (M33b)
-#  Rake M33(b): "emit filing records THROUGH the tool that will consume them."
-#  Batches 5, 6 and 7 honoured that in every load-bearing sense through
-#  per-batch staging glue — three near-identical copies of one emitter, each
-#  naming its own gap ("the tool has no --emit-record CLI"). The batch-7 report
-#  recorded the design note: "the batch-N script is a pure header variant three
-#  generations running — a future logic change is the signal to generalize, not
-#  fork a fourth copy." This is the generalization.
+# ------------------------------------------------- EMITTING A FILING RECORD
+#  Filing records are emitted THROUGH the tool that will consume them: a record
+#  hand-assembled from readout rows is not automatically scoreable by the
+#  scorer, because the filing-block shape is a contract and only a parse proves
+#  conformance. One emitter serves every batch; a batch differs only in its
+#  slate policy and its narrative sidecar.
 #
-#  WHAT MOVED, AND WHAT DID NOT
-#    * ALL THREE COLUMNS are now the tool's own producers — `run_star`
-#      (new, above), `run_directional`, `run_candidates` — so a filed block is a
-#      dumped pydantic object in every column, never a hand-typed number and
-#      never a re-parse of a readout JSON.
+#  WHAT THE TOOL OWNS, AND WHAT IT DOES NOT
+#    * ALL THREE COLUMNS are the tool's own producers — `run_star`,
+#      `run_directional`, `run_candidates` — so a filed block is a dumped
+#      pydantic object in every column, never a hand-typed number and never a
+#      re-parse of a readout JSON.
 #    * The SELECTION ARITHMETIC (the spread rule and the protocol-forced set's
-#      identity assertion) moved here verbatim, so the rule that picked the
-#      slate is code the desk can re-run rather than glue that is rewritten per
-#      batch.
+#      identity assertion) is code here, so the rule that picked the slate can
+#      be re-run rather than rewritten per batch.
 #    * The BANDS and CARVE-OUTS are the consumer's own (`_frozen_band`,
 #      `FROZEN_BAND_HALF_WIDTH`, `NEAR_ZERO_CARVE_OUT`), and every block is
 #      pre-flighted through the consumer's own private `_check_filed_band` /
 #      `_check_carve_out` and then through `parse_filing_record` BEFORE the file
-#      is written — a contract violation cannot reach disk (M33(a)).
-#    * The DESK'S PROSE did not move and must not: the ruling that authorized a
-#      slate, the disclosures, the interpretation clauses are Luxia's and the
-#      desk's words. They arrive as a `--narrative` sidecar and are merged at
-#      NAMED keys only. This tool composes no ruling and invents no disclosure;
-#      a record emitted with no narrative says so, in the record.
+#      is written — a contract violation cannot reach disk.
+#    * The HUMAN PROSE is not the tool's and must not be: the decision that
+#      authorized a slate, the disclosures, the interpretation clauses are the
+#      authors' words. They arrive as a `--narrative` sidecar and are merged at
+#      NAMED keys only. This tool composes no authorization and invents no
+#      disclosure; a record emitted with no narrative says so, in the record.
 #
 #  WHY THE NUMBERS ARE THE VERIFIABLE PART. `--verify-against <banked record>`
 #  compares a freshly emitted record to a banked one on the NUMBERS AND THE SLOT
 #  IDENTITIES ONLY, excluding timestamps and prose. That is the reproduction
-#  proof of record for this promotion: the desk's words are the desk's, but every
-#  number in three filed records must come back out of the tool unchanged.
+#  proof of record for the emitter: the prose is the authors', but every number
+#  in a filed record must come back out of the tool unchanged.
 
 #: The record key each predictor's block is written under — the SAME mapping the
 #: consumer reads a record with (`RACING_BLOCK_KEYS`). Emitting and parsing
@@ -6466,10 +6471,10 @@ VERIFY_TOLERANCE = 0.0
 class RecordEmissionError(RuntimeError):
     """A filing record cannot be emitted as what it claims to be.
 
-    Filing is a ONE-WAY act — a record's sha gets ledgered and its bands never
-    move — so every disagreement between the ruling, the slate and the data is a
-    HALT here rather than something the emitter files through. Rake M4: the
-    enactor never adjudicates a live halt, and neither does this.
+    Filing is a ONE-WAY act — a record's sha is published and its bands never
+    move — so every disagreement between the slate policy, the slate and the
+    data is a HALT here rather than something the emitter files through. A live
+    halt is never adjudicated by the code that raised it.
     """
 
 
@@ -6482,12 +6487,12 @@ class SpreadPlacement(BaseModel):
 
 
 def spread_ranks(n: int, size: int) -> tuple[list[int], list[SpreadPlacement]]:
-    """The desk's even-spread rule: `rank_i = round(1 + (i−1)(n−1)/(size−1))`.
+    """The even-spread rule: `rank_i = round(1 + (i−1)(n−1)/(size−1))`.
 
     Ranks evenly spaced over a ranked population from 1 to n INCLUSIVE, `size`
     of them, collisions resolved by stepping to the next unused rank (and
-    downward if the top is exhausted). Lifted verbatim from the batch-5/6/7
-    emitters so a re-emission reproduces their slates exactly; the trail is
+    downward if the top is exhausted). A re-emission of the batch-5/6/7
+    records reproduces their slates exactly; the trail is
     returned because the record files it (a selection rule nobody can replay is
     a selection nobody can audit).
     """
@@ -6525,9 +6530,9 @@ def spread_ranks(n: int, size: int) -> tuple[list[int], list[SpreadPlacement]]:
 
 
 class SlatePolicy(BaseModel):
-    """The desk's ruling about WHICH slots a batch files, as data.
+    """The decision about WHICH slots a batch files, as data.
 
-    Every field is a ruling the desk made, and the emitter's job is to APPLY it
+    Every field is a decision made before emission, and the emitter's job is to APPLY it
     and to prove it was applied — never to choose. `forced_hub` + `audit_set`
     reproduce the batch-5/7 protocol-forced shape; both absent reproduces batch
     6's pure spread, and the emitter then PROVES no forcible pair was left in the
@@ -6586,13 +6591,13 @@ class EmittedRecord(BaseModel):
 
 
 def load_narrative(path: Optional[Path]) -> dict[str, Any]:
-    """The DESK'S PROSE for a record, read from a sidecar. Never composed here.
+    """The HUMAN PROSE for a record, read from a sidecar. Never composed here.
 
-    A ruling, an authority citation, a disclosure and an interpretation clause
-    are the desk's and Luxia's words; a tool that generated them would be
+    An authorization, an authority citation, a disclosure and an interpretation
+    clause are the authors' words; a tool that generated them would be
     inventing the authority for its own output. Recognized keys are fixed, and
     an unrecognized key is a HALT rather than a silently ignored paragraph —
-    prose the desk wrote and the record dropped is the worst of both.
+    prose the authors wrote and the record dropped is the worst of both.
     """
     if path is None:
         return {}
@@ -6617,7 +6622,7 @@ def load_narrative(path: Optional[Path]) -> dict[str, Any]:
         raise RecordEmissionError(
             f"{path}: narrative carries unrecognized key(s) {unknown}. "
             f"Recognized: {sorted(known)}. An unknown key is a HALT rather than "
-            f"a silently dropped paragraph — desk prose that the record does not "
+            f"a silently dropped paragraph — authored prose that the record does not "
             f"carry is worse than prose the record refuses")
     for key in ("disclosures", "columns_notes", "flag_clauses"):
         if key in doc and not isinstance(doc[key], dict):
@@ -6628,9 +6633,9 @@ def load_narrative(path: Optional[Path]) -> dict[str, Any]:
 
 
 def _slate_rows(slate: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """The ranked remaining population from the desk's slate artifact.
+    """The ranked remaining population from the slate artifact.
 
-    Rank uniqueness is ASSERTED (rake M18: a comparison dict gets a duplicate-key
+    Rank uniqueness is ASSERTED (every comparison dict gets a duplicate-key
     assertion) because a duplicated rank would make the spread rule silently
     place two slots on one row.
     """
@@ -6644,7 +6649,7 @@ def _slate_rows(slate: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         raise RecordEmissionError(
             f"{slate}: `remaining_ranked` is "
             f"{type(rows).__name__ if rows is not None else 'absent'}, not a "
-            f"non-empty ranked list. The slate is the DESK's ruling and this "
+            f"non-empty ranked list. The slate is decided upstream and this "
             f"tool reads it; it never re-ranks and never re-derives a population")
     by_rank: dict[int, dict[str, Any]] = {}
     for row in rows:
@@ -6664,11 +6669,11 @@ def _slate_rows(slate: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
 
 
 def _gate_column(gate_column: Path) -> tuple[dict[tuple[str, str], dict[str, Any]], str]:
-    """The batch's E4.1 naive-gate column, keyed by the UNORDERED model pair.
+    """The batch's naive-gate null column, keyed by the UNORDERED model pair.
 
     Keyed by the sorted (model_a, model_b) tuple with a duplicate assertion —
-    never by basename or by one direction (rake M18, and M42(d)'s cousin: a
-    comparison whose key can collapse two rows reports a false pass).
+    never by basename or by one direction: a comparison whose key can collapse
+    two rows reports a false pass at n−1.
     """
     try:
         doc = json.loads(gate_column.read_text())
@@ -6679,7 +6684,7 @@ def _gate_column(gate_column: Path) -> tuple[dict[tuple[str, str], dict[str, Any
     if not isinstance(rows, list) or not rows:
         raise RecordEmissionError(
             f"{gate_column}: neither `rows` nor `pairs` is a non-empty list; the "
-            f"E4.1 column of record must carry this batch's own rows")
+            f"naive-gate column of record must carry this batch's own rows")
     out: dict[tuple[str, str], dict[str, Any]] = {}
     for row in rows:
         try:
@@ -6690,7 +6695,8 @@ def _gate_column(gate_column: Path) -> tuple[dict[tuple[str, str], dict[str, Any
         ordered = (min(key), max(key))
         if ordered in out:
             raise RecordEmissionError(
-                f"{gate_column}: duplicate gate row for {ordered} — rake M18")
+                f"{gate_column}: duplicate gate row for {ordered} — which row is "
+                f"of record cannot be guessed")
         out[ordered] = row
     return out, sha256_of(gate_column)
 
@@ -6707,19 +6713,20 @@ def emit_filing_record(
     The proof chain, in order, and none of it skippable:
       1. the three columns are computed IN THIS PROCESS by this module's own
          producers, so every block is a dumped pydantic object;
-      2. the protocol-forced set (if the ruling names one) is asserted to BE the
-         §3 audit enumeration by MODEL IDENTITY and orientation, or the emission
-         HALTs — and where the ruling forces nothing, the population is proved to
+      2. the protocol-forced set (if the policy names one) is asserted to BE the
+         frozen audit enumeration by MODEL IDENTITY and orientation, or the
+         emission HALTs — and where the policy forces nothing, the population is
+         proved to
          contain no forcible pair rather than assumed to;
       3. every block passes the CONSUMER's own `_check_filed_band` and
          `_check_carve_out` before anything is written;
       4. the written record is re-read through `parse_filing_record` and must
-         come back with every slot carrying all three predictors (rake M33(a)).
+         come back with every slot carrying all three predictors.
     """
     if out.exists() and not overwrite:
         raise RecordEmissionError(
             f"a record already exists at {out}. Filing happens ONCE per batch "
-            f"and its sha is ledgered; re-emitting over it would replace a "
+            f"and its sha is published; re-emitting over it would replace a "
             f"record that may already be filed. Pass --overwrite-record "
             f"deliberately, or write elsewhere")
     root = (repo_root or Path.cwd()).resolve()
@@ -6744,7 +6751,7 @@ def emit_filing_record(
                              ("directional", dir_readout.predictions),
                              ("composed", comp_readout.predictions)):
         for pred in preds:
-            if pred.pair_id in by_pair[predictor]:               # rake M18
+            if pred.pair_id in by_pair[predictor]:               # no duplicate keys
                 raise RecordEmissionError(
                     f"duplicate {predictor} prediction for {pred.pair_id} — "
                     f"which value is of record cannot be guessed")
@@ -6755,7 +6762,7 @@ def emit_filing_record(
                 len(dir_readout.na_at_filing), len(comp_readout.predictions),
                 len(comp_readout.na_at_filing))
 
-    # ------------------------------------------- 2. the slate — the DESK's own
+    # ------------------------------------ 2. the slate — decided upstream, read here
     rows, slate_doc = _slate_rows(slate)
     n_remaining = len(rows)
     forced: list[dict[str, Any]] = []
@@ -6766,7 +6773,7 @@ def emit_filing_record(
         got = {(r["source_model"], r["target_model"]) for r in forced}
         if got != want:
             raise RecordEmissionError(
-                f"the prereg §3 audit enumeration for {policy.forced_hub} is "
+                f"the frozen audit enumeration for {policy.forced_hub} is "
                 f"{sorted(want)} but the remaining population offers "
                 f"{sorted(got)}; missing {sorted(want - got)}. Every missing "
                 f"pair is either already filed, burnt, or enumerated in the "
@@ -6777,26 +6784,25 @@ def emit_filing_record(
             if not r.get("quad_hub_pair"):
                 raise RecordEmissionError(
                     f"{r['pair_id']} is in the protocol-forced set but does not "
-                    f"register as a quad-hub pair in the slate — a ruling/data "
+                    f"register as a quad-hub pair in the slate — a policy/data "
                     f"disagreement, never something to file through")
-        logger.info("§3 audit check: all %d %s audit pairs present in the "
+        logger.info("audit-set check: all %d %s audit pairs present in the "
                     "remaining population, hub-as-source, and forced",
                     len(forced), policy.forced_hub)
     else:
-        #  The ruling says "nothing to force". That is a claim ABOUT THE DATA and
+        #  The policy says "nothing to force". That is a claim ABOUT THE DATA and
         #  it is CHECKED: a pure spread would silently drop a still-unfiled audit
-        #  leg and the §3 audit would stall with nobody noticing (batch 6's own
-        #  check, kept verbatim in behaviour).
+        #  leg and the frozen audit would stall with nobody noticing.
         still = sorted(r["rank"] for r in rows if r.get("quad_hub_pair"))
         if still:
             raise RecordEmissionError(
-                f"the ruling forces nothing, but the §3 quad-hub set still "
+                f"the policy forces nothing, but the audit quad-hub set still "
                 f"REMAINING in the slate is {still} "
                 f"({[r['pair_id'] for r in rows if r.get('quad_hub_pair')]}) — a "
                 f"pure spread would drop an audit-set leg. Reported, never filed "
                 f"through")
         logger.info("quad-hub check: 0 audit-set-feeding pairs remain unfiled — "
-                    "the ruling's premise holds, pure spread is correct")
+                    "the policy's premise holds, pure spread is correct")
 
     forced_ranks = sorted(int(r["rank"]) for r in forced)
     residual = sorted((r for r in rows if int(r["rank"]) not in set(forced_ranks)),
@@ -6810,11 +6816,11 @@ def emit_filing_record(
     distinct = {r["pair_id"] for r in slots}
     if len(distinct) != policy.size:
         raise RecordEmissionError(
-            f"the ruling files {policy.size} slots but the slate produced "
+            f"the policy files {policy.size} slots but the slate produced "
             f"{len(distinct)} distinct pair(s) from {len(slots)} row(s) "
             f"({len(forced)} forced + {len(picked)} spread). A count that is off "
-            f"by one is rake M18 until shown otherwise — a collapsed key, or a "
-            f"forced pair the spread also selected")
+            f"by one is a collapsed key until shown otherwise — or a forced pair "
+            f"the spread also selected")
     logger.info("slate: %d FORCED (full ranks %s) + %d spread over residual "
                 "N=%d (residual ranks %s)", len(forced), forced_ranks,
                 len(picked), n_res, spread)
@@ -6831,13 +6837,13 @@ def emit_filing_record(
             if pred is None:
                 raise RecordEmissionError(
                     f"{pid}: the {predictor} column has no filable prediction "
-                    f"for a slot the ruling files. A slate slot with a missing "
-                    f"column is a ruling/data disagreement: either the column's "
+                    f"for a slot the policy files. A slate slot with a missing "
+                    f"column is a policy/data disagreement: either the column's "
                     f"input is incomplete or the slate names a pair that is "
                     f"N/A-AT-FILING. Reported, never filed through")
             block = pred.model_dump(mode="json")
-            #  The SCORER's filing-block contract, emitted at filing time (rake
-            #  M33): `id`/`predicted`/`band`/`magnitude_only`. Each producer
+            #  The SCORER's filing-block contract, emitted at filing time:
+            #  `id`/`predicted`/`band`/`magnitude_only`. Each producer
             #  already carries `predicted`/`band`/`magnitude_only` under those
             #  names EXCEPT the composed column, whose own names are `a_comp` and
             #  (no band); those are kept BESIDE the contract keys as provenance,
@@ -6880,7 +6886,7 @@ def emit_filing_record(
         if gate is None:
             raise RecordEmissionError(
                 f"{pid}: the gate column {gate_column.name} has no row for "
-                f"{gate_key}. The E4.1 gate is a STANDING PRE-FILING gate; a "
+                f"{gate_key}. The naive gate is a STANDING PRE-FILING gate; a "
                 f"slot with no gate row has not been through it")
         exposed = bool(gate.get("EXPOSED_E41_v21", gate.get("EXPOSED", False)))
         flags: list[str] = []
@@ -7083,7 +7089,7 @@ def emit_filing_record(
     out.write_text(json.dumps(record, indent=1, ensure_ascii=False))
     record_sha = sha256_of(out)
 
-    # ------------------------------------------- 5. the parse proof (M33(a))
+    # ------------------------------------------------------ 5. the parse proof
     parsed = parse_filing_record(out)
     n_parsed = sum(len(s.predictions) for s in parsed.slots)
     if len(parsed.slots) != len(predictions):
