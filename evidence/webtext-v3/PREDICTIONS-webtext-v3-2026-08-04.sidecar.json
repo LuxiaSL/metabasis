@@ -1,0 +1,13 @@
+{
+ "artifact": "webtext-v3-prediction-artifact-sidecar/v1",
+ "describes": "staging/webtext-v3-predictions/PREDICTIONS-webtext-v3-2026-08-04.json",
+ "artifact_sha256": "de9eb699db92824443002300f98c5a8fceb0aff981d15c938887e8ca9e033502",
+ "frozen_count_N": 240,
+ "emitted_utc": "2026-08-04T11:00:42Z",
+ "builder": "staging/webtext-v3-predictions/build_v3_prediction_artifact.py",
+ "omp_num_threads": "8",
+ "python": "3.12.9",
+ "numpy": "2.5.1",
+ "attestation": "UNSIGNED — the DESK timestamp-attests and seals this sidecar (§8 step 2). The builder declares nothing of record.",
+ "determinism": "the artifact carries no timestamp and no environment-varying value; every such fact is here. `--selftest` proves a build-twice byte-identical artifact."
+}

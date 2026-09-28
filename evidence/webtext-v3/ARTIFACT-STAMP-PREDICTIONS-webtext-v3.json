@@ -1,0 +1,12 @@
+{
+  "stamp": "THE §8.2 PREDICTION ARTIFACT IS SEALED — desk attestation",
+  "sealed_utc": "2026-08-04T11:07:20Z",
+  "artifact": "PREDICTIONS-webtext-v3-2026-08-04.json",
+  "artifact_sha256": "de9eb699db92824443002300f98c5a8fceb0aff981d15c938887e8ca9e033502",
+  "sidecar_sha256": "8a2746d25b0b90381b916876b71982f410820ecbe3872e23a515b95ff927e243",
+  "prereg": "freeze/webtext-v3 sha 1136ca80c1c6be13add85d50f6d89bb85278abaac470536d36d2ed26c78c57fa",
+  "frozen_count_N": 240,
+  "fully_filed": 240,
+  "desk_verification": "sha re-computed independently; 240/240 fully filed on all five columns; zero fit_*.npz outside hub-legs trees at seal time; self-description block complete",
+  "binding": "§8.2: no scoreable-pair fit job may be submitted except by a lane that verifies this stamp's artifact_sha256 against the artifact before fitting; the 240-slot list is the denominator of every gate, forever"
+}
