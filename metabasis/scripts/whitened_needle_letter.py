@@ -42,9 +42,11 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
+from typing import Optional, Sequence
 
 import numpy as np
 
+from metabasis.scripts._fixed_job import parse_no_arguments
 from metabasis.scripts.fit_transport_maps import load_transport_map
 from metabasis.scripts.read_transported_axes import _unit, cos, load_axes
 
@@ -81,7 +83,8 @@ def _fit_path(family: str, modefree: bool) -> Path:
             / f"fit_8bL{SRC_SITE}__dsv2-liteL{TGT_SITE}_native_{family}.npz")
 
 
-def main() -> int:
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    parse_no_arguments(__doc__, argv)
     OUT.mkdir(parents=True, exist_ok=True)
     src_axes, _, src_pool = load_axes("8b")
     dir0 = src_axes["dir0"].vec

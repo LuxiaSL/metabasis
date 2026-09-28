@@ -31,9 +31,11 @@ import json
 import logging
 from collections import Counter
 from pathlib import Path
+from typing import Optional, Sequence
 
 import numpy as np
 
+from metabasis.scripts._fixed_job import parse_no_arguments
 from metabasis.scripts.fit_transport_maps import load_transport_map
 from metabasis.scripts.expression_coupling import FUNCTIONALS, _corr, _words
 from metabasis.scripts.read_transported_axes import _unit, cos, load_axes
@@ -121,7 +123,8 @@ def eos_coupling_on_s5() -> dict:
     return out
 
 
-def main() -> int:
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    parse_no_arguments(__doc__, argv)
     OUT.mkdir(parents=True, exist_ok=True)
     tab = axis_table()
     res = {

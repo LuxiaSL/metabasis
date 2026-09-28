@@ -3325,5 +3325,10 @@ def selftest() -> int:                                            # noqa: C901
 
 if __name__ == "__main__":
     if "--selftest" in sys.argv:
+        # `--selftest` takes no companions: anything beside it is a usage error
+        # rather than silently ignored.
+        _st = argparse.ArgumentParser(prog="vllm_lane_column --selftest")
+        _st.add_argument("--selftest", action="store_true")
+        _st.parse_args()
         sys.exit(selftest())
     sys.exit(main())

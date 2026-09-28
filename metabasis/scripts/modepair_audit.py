@@ -26,8 +26,11 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
+from typing import Optional, Sequence
 
 import numpy as np
+
+from metabasis.scripts._fixed_job import parse_no_arguments
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("modepair_audit")
@@ -49,7 +52,8 @@ def _u(v: np.ndarray) -> np.ndarray:
     return v / np.linalg.norm(v)
 
 
-def main() -> int:
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    parse_no_arguments(__doc__, argv)
     OUT.mkdir(parents=True, exist_ok=True)
     entries = json.loads((ARM / "leg2/corpus/corpus_manifest.json").read_text())["entries"]
     bank = np.load(ARM / "leg2/states/states_dsv2-lite_native.npz")
