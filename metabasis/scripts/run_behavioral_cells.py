@@ -4976,27 +4976,26 @@ def _run_column_locked(runtime: NodeRuntime, *, doc: Any, pool: PromptPool,
                        mapping_authorization: Optional[MappingAuthorization],
                        ladder_authorization: Optional[LadderAuthorization],
                        lock_block: Optional[dict]) -> ColumnResult:
-    """§2.1's job, inside the M55 attempt lock. See `run_column` for the contract."""
+    """The one-load column job, inside the attempt lock. See `run_column` for the contract."""
     node_key, arm, site = doc.node_key, doc.arm, doc.site
     n = int(n_per_cell or doc.n_per_cell)
 
-    # ---- preflight (M10: a first-class phase, never output truncation) --------
+    # ---- preflight (a first-class phase, never output truncation) ------------
     corpus_sha = assert_corpus_vintage(
         *[v for v in doc.vintage_links() if v is not None],
         expected=corpus_sha_of_record) if any(
             v is not None for v in doc.vintage_links()) else assert_corpus_vintage(
                 doc.corpus_manifest_sha256, expected=corpus_sha_of_record)
-    # HALT C: the role is the document's DECLARATION; the answer is re-derived here
-    # from the live registries either way. `getattr` because a document written by an
-    # older staging module carries no such field, and its absence means exactly what
-    # it meant then — no role declared.
+    # The site role is the document's DECLARATION; the answer is re-derived here from
+    # the live registries either way. `getattr` because a document may carry no such
+    # field, and its absence means no role declared.
     site_role = getattr(doc, "site_role", None)
     cross = site_cross_check(node_key, site, site_role=site_role)
     if pool.sha256 and doc.prompt_pool_sha256 and pool.sha256 != doc.prompt_pool_sha256:
         raise ArtifactShaMismatch(
             f"prompt pool sha {pool.sha256[:12]}… does not match the staged document's "
-            f"{doc.prompt_pool_sha256[:12]}… (M4). The pool of record is sha-frozen "
-            "(ruling 10) and a cell generated against another pool is another read.")
+            f"{doc.prompt_pool_sha256[:12]}…. The pool of record is sha-frozen, and a "
+            "cell generated against another pool is another read.")
     prompt_ids = [runtime.tokenize(p) for p in pool.prompts]
     assert_position_budget(max(len(i) for i in prompt_ids), doc.max_new_tokens,
                            runtime.position_ceiling(), node_key)
@@ -5012,7 +5011,7 @@ def _run_column_locked(runtime: NodeRuntime, *, doc: Any, pool: PromptPool,
         assert_alpha_zero_is_no_hook(*equivalence)          # raises on mismatch
         alpha0_ok = True
 
-    # ---- norm calibration (§2.5) ---------------------------------------------
+    # ---- in-job norm calibration ----------------------------------------------
     sample = prompt_ids[:NORM_SAMPLE_SIZE]
     measured_norm = float(runtime.measure_per_token_median_resid_norm(
         site=site, prompt_ids=sample))
@@ -5029,7 +5028,7 @@ def _run_column_locked(runtime: NodeRuntime, *, doc: Any, pool: PromptPool,
             "the collection stamps' median-of-MEAN-STATE norm — a DIFFERENT convention, "
             "recorded beside and never used for α (§2.5, rake M21b)"))
 
-    # ---- the cells, in §2.1's order ------------------------------------------
+    # ---- the cells, in the column job's order ---------------------------------
     specs = order_cells(doc.cell_specs())
     # THE MAPPING MODE's admission gate, BEFORE a cell fires and before the norm is
     # spent: a run whose two keys disagree stops here, not after the budget.
@@ -5045,7 +5044,7 @@ def _run_column_locked(runtime: NodeRuntime, *, doc: Any, pool: PromptPool,
                   for c in specs}
     # THE RUN'S IDENTITY — the closed list of things a resumed cell must have been
     # produced under. Built HERE and not earlier because two of its entries are
-    # measurements of this process: the frozen canonical layout and §2.5's in-job
+    # measurements of this process: the frozen canonical layout and the in-job
     # per-token median residual norm, which is what α is resolved from.
     identity = RunIdentity(
         node_key=node_key, arm=arm, site=site, n_per_cell=n,
@@ -5086,7 +5085,7 @@ def _run_column_locked(runtime: NodeRuntime, *, doc: Any, pool: PromptPool,
             if _float_key(receipt.alpha) != _float_key(alpha):
                 raise ResumeAlphaDrift(
                     f"{spec.cell_id}: banked at α={receipt.alpha!r} and this process "
-                    f"resolves α={alpha!r} for the same dose {spec.alpha_frac} (§2.5). "
+                    f"resolves α={alpha!r} for the same dose {spec.alpha_frac}. "
                     "A resumed column with two doses under one name is not a column.")
             outcome, block = rehydrate_banked_cell(
                 Path(work_root), spec, receipt)      # type: ignore[arg-type]
@@ -5099,7 +5098,7 @@ def _run_column_locked(runtime: NodeRuntime, *, doc: Any, pool: PromptPool,
             outcomes.append(outcome)
             skipped.append(spec.cell_id)
             logger.info("CELL %s SKIPPED (banked %s, re-verified: stamp + %d artifact "
-                        "shas + both §2.7 digests recomputed from raw)", spec.cell_id,
+                        "shas + both replay-gate digests recomputed from raw)", spec.cell_id,
                         receipt.banked_at, len(receipt.artifact_sha256))
             continue
         (records, rows, ent_s, ent_u, block, panel, elapsed,
@@ -5141,8 +5140,9 @@ def _run_column_locked(runtime: NodeRuntime, *, doc: Any, pool: PromptPool,
                         "OWED state (§10), never a silent absence."},
             per_cell_seed_roots={spec.cell_id: seed_roots[spec.cell_id]},
             scheduler_card_index=scheduler_card_index,
-            # HALT C / HALT D: the declarations this cell was staged with. Both
-            # default to the pre-ruling meaning when the document carries neither.
+            # The site-role and vector-class declarations this cell was staged with.
+            # Absent from the document, both default to the entropy-gradient, no-role
+            # reading.
             site_role=site_role,
             vector_class=(getattr(staged, "vector_class", None)
                           or EGV_VECTOR_CLASS) if staged else EGV_VECTOR_CLASS,
@@ -5158,10 +5158,10 @@ def _run_column_locked(runtime: NodeRuntime, *, doc: Any, pool: PromptPool,
             capability=block.model_dump() if block is not None else None,
             coherence=panel.model_dump() if panel is not None else None,
             stamp=stamp)
-        # ATOMIC PER-CELL BANKING (2026-08-05). The cell becomes durable HERE, into a
-        # temp directory renamed into place, and is attested by its own receipt — so
-        # a kill on the next cell costs exactly that cell. The bytes are the bytes the
-        # end-of-column path would have written; only the moment changed.
+        # ATOMIC PER-CELL BANKING. The cell becomes durable HERE, into a temp
+        # directory renamed into place, and is attested by its own receipt — so a kill
+        # on the next cell costs exactly that cell. The bytes are the bytes the
+        # end-of-column path writes; only the moment differs.
         if write and work_root is not None:
             paths = bank_cell_atomically(
                 Path(work_root) / "cells", outcome, records=records, ent_s=ent_s,
@@ -5172,13 +5172,13 @@ def _run_column_locked(runtime: NodeRuntime, *, doc: Any, pool: PromptPool,
     assert_column_complete(outcomes, len(specs), n_per_cell=n, node_key=node_key,
                            beside_cell_ids=[c.cell_id for c in specs if c.is_beside])
 
-    # ---- the in-job replay gate (§2.7) ---------------------------------------
+    # ---- the in-job replay gate -----------------------------------------------
     selection, strata, digest = select_replay_cells(specs, node_key, corpus_sha)
     role_mapping = replay_gate_role_mapping(specs)
     if is_mapping_column != (role_mapping == REPLAY_ROLE_MAPPING_MAPPING_ONLY):
         raise MappingColumnNotPure(          # pragma: no cover — a wiring assertion
             f"{node_key}: the admission gate calls this a "
-            f"{'mapping' if is_mapping_column else 'science'} column and §2.7's role "
+            f"{'mapping' if is_mapping_column else 'science'} column and the replay gate's role "
             f"mapping resolved to {role_mapping!r}. The two read the same cell set "
             "and must agree; a disagreement means one of them saw a different set.")
     token_replay: dict[str, str] = {}
@@ -5202,7 +5202,7 @@ def _run_column_locked(runtime: NodeRuntime, *, doc: Any, pool: PromptPool,
         entropy_first={c: entropy_first[c] for c in selection},
         entropy_replay=entropy_replay, role_mapping=role_mapping)
 
-    # ---- descriptive instrumentation (M19 — never a gate) --------------------
+    # ---- descriptive instrumentation (never a gate) ---------------------------
     invariance = None
     if characterize:
         target = by_id[strata["signal_at_0.3"]]
@@ -5217,7 +5217,7 @@ def _run_column_locked(runtime: NodeRuntime, *, doc: Any, pool: PromptPool,
         from metabasis.scripts.capability_battery import dose_metric_table
         try:
             table = dose_metric_table(blocks)
-        except Exception as exc:                         # noqa: BLE001 — M19(a)
+        except Exception as exc:                         # noqa: BLE001 — logged, never silent
             logger.warning("capability table not formed (%s: %s) — the per-cell blocks "
                            "are filed regardless", type(exc).__name__, exc)
             table = {"measured": False, "note": f"{type(exc).__name__}: {exc}"}
@@ -5243,9 +5243,9 @@ def _run_column_locked(runtime: NodeRuntime, *, doc: Any, pool: PromptPool,
         result = _write_column(result, raw=raw, work_root=Path(work_root),
                                identity=identity)
         # The resume report is BOOKKEEPING and lives outside the manifest, on purpose:
-        # `ColumnResult` is untouched by this amendment, so a resumed column's
-        # `column_result.json` differs from an uninterrupted twin's in the elapsed
-        # times of the cells that actually re-ran and in NOTHING else.
+        # `ColumnResult` carries no resume fields, so a resumed column's result file
+        # differs from an uninterrupted twin's in the elapsed times of the cells that
+        # actually re-ran and in NOTHING else.
         if resume or lock_block is not None:
             seam = sorted(set(skipped) & set(gate.cells))
             _atomic_write_text(
@@ -5260,7 +5260,7 @@ def _run_column_locked(runtime: NodeRuntime, *, doc: Any, pool: PromptPool,
                     "identity": json.loads(identity.model_dump_json()),
                     "replay_gate_passed": gate.passed,
                     "replay_gate_cells": gate.cells,
-                    # §2.7's fresh-process replay, PERFORMED rather than filed OWED:
+                    # The fresh-process replay, PERFORMED rather than filed OWED:
                     # these gate cells' first digests were produced by an earlier
                     # process and the gate reproduced them bitwise in this one.
                     "replay_gate_cells_across_the_process_seam": seam,
@@ -5274,8 +5274,8 @@ def _vector_basis_dump(staged: Optional[Any]) -> Optional[dict]:
 
     `getattr` + `model_dump` rather than an import: the staging module imports this
     one, and the engine only ever needs the SHAPE of the declaration. A document
-    written before HALT D carries no such attribute and yields None, which is the
-    entropy-gradient case and stamps nothing.
+    that declares no vector basis yields None, which is the entropy-gradient case
+    and stamps nothing.
     """
     basis = getattr(staged, "vector_basis", None) if staged else None
     if basis is None:
@@ -5297,12 +5297,11 @@ def _write_cell_files(d: Path, outcome: CellOutcome,
                       ent_u: dict[int, np.ndarray]) -> dict[str, str]:
     """Write ONE cell's artifacts into `d`, returning `raw_paths`.
 
-    Factored out of `_write_column` UNCHANGED — same files, same order, same
-    serializer arguments — because the 2026-08-05 resumability amendment writes each
-    cell twice over: once eagerly, into a temp directory that is renamed into place
-    the instant the cell completes (durability), and once, as a fall-back, from the
-    end-of-column banking path (compatibility). Both call this, so there is exactly
-    one definition of what a banked cell's bytes are.
+    Shared by both banking paths — same files, same order, same serializer
+    arguments: a cell is banked eagerly, into a temp directory that is renamed into
+    place the instant the cell completes (durability), and, as a fall-back, from the
+    end-of-column banking path for a cell nothing banked eagerly. Both call this, so
+    there is exactly one definition of what a banked cell's bytes are.
     """
     gen_path = d / CELL_ARTIFACT_FILES["generations"]
     gen_path.write_text("".join(
@@ -5333,7 +5332,7 @@ def _cell_raw_paths(cells_dir: Path, cell_id: str,
     """`raw_paths` for a cell that is already on disk — the receipt's file list.
 
     The same dict `_write_cell_files` returns, rebuilt without re-writing anything, so
-    a resumed column's `column_result.json` names its skipped cells exactly as the
+    a resumed column's result file names its skipped cells exactly as the
     uninterrupted column named them.
     """
     d = cells_dir / cell_id
@@ -5346,19 +5345,19 @@ def _write_column(result: ColumnResult, *, raw: dict, work_root: Path,
                   identity: Optional["RunIdentity"] = None) -> ColumnResult:
     """Bank the column: raw beside every claim, then a manifest over everything.
 
-    Raw generations and per-position entropy arrays are written per cell so a desk
-    recompute has the same inputs the filed numbers came from (§10's recipes), and the
-    manifest's shas are what make M4 checkable without re-running anything.
+    Raw generations and per-position entropy arrays are written per cell so an
+    independent recompute has the same inputs the filed numbers came from, and the
+    manifest's shas are what make a changed artifact detectable without re-running
+    anything.
 
-    SINCE THE RESUMABILITY AMENDMENT (2026-08-05) a cell is normally already banked by
-    the time this runs — `run_column` banks each cell atomically the moment it
-    completes — so this function's per-cell half is a no-op for those cells and it
-    writes only the column-level `column_result.json` and `manifest.json`. A cell that
-    is NOT yet on disk (a caller that banked nothing eagerly) is banked here, through
-    the same atomic path. Either way the bytes are the same bytes: the manifest walk
-    skips the `resume/` bookkeeping subtree by name, so the artifact map, the column
-    result and every cell's files are byte-for-byte what the pre-amendment module
-    wrote. What changed is WHEN they became durable, not WHAT they are.
+    A cell is normally already banked by the time this runs — `run_column` banks each
+    cell atomically the moment it completes — so this function's per-cell half is a
+    no-op for those cells and it writes only the column-level result and manifest
+    files. A cell that is NOT yet on disk (a caller that banked nothing eagerly) is
+    banked here, through the same atomic path. Either way the bytes are the same
+    bytes: the manifest walk skips the `resume/` bookkeeping subtree by name, so the
+    artifact map, the column result and every cell's files do not depend on WHEN the
+    cells became durable.
     """
     cells_dir = work_root / "cells"
     cells_dir.mkdir(parents=True, exist_ok=True)
@@ -5370,7 +5369,7 @@ def _write_column(result: ColumnResult, *, raw: dict, work_root: Path,
         if outcome.cell_id not in raw:                        # pragma: no cover
             raise BehavioralHarnessError(
                 f"{outcome.cell_id}: neither banked on disk nor held in memory — the "
-                "column cannot file raw beside its claim (§10)")
+                "column cannot file raw beside its claim")
         records, ent_s, ent_u = raw[outcome.cell_id]
         paths = bank_cell_atomically(
             cells_dir, outcome, records=records, ent_s=ent_s, ent_u=ent_u,
@@ -5401,44 +5400,44 @@ def _write_column(result: ColumnResult, *, raw: dict, work_root: Path,
     return result.model_copy(update={"manifest": manifest})
 
 
-# ------------------------------------ durability, resumption, residency (§2.1++)
-# THE 2026-08-05 AMENDMENT, in one paragraph. §2.1's job banked its whole column at
-# the end: a column killed at cell 50 of 51 left NOTHING on disk, even though every
-# generation was reproducible — seeds are per-(cell, gen_id) BY DESIGN (§2.3, ruling
-# 8, M5), so the system was always ~90% resumable and merely never wrote down what it
-# had done. Three pieces close that, and NONE of them may move a byte of the column
-# of record:
+# ---------------------------------------------- durability, resumption, residency
+# WHY A COLUMN IS RESUMABLE. Banking a whole column only at its end would let a
+# column killed at cell 50 of 51 leave NOTHING on disk, even though every generation
+# is reproducible — seeds are per-(cell, gen_id) BY DESIGN, so a cell's tape never
+# depends on which other cells ran. Three pieces make that reproducibility usable,
+# and NONE of them may move a byte of the column of record:
 #
 #   1. ATOMIC PER-CELL BANKING. A cell's artifacts are written into a temp directory
 #      and RENAMED into place when the cell completes. `rename(2)` on a directory is
-#      atomic on POSIX, so a cell exists whole — with its complete §2.8 stamp — or it
+#      atomic on POSIX, so a cell exists whole — with its complete stamp — or it
 #      does not exist. There is no half-cell state for a resume to have to reason
 #      about, which is the property everything below rests on.
 #   2. VERIFY-EVERYTHING RESUME. `--resume` inventories the banked cells and
 #      RE-VERIFIES each one (receipt, artifact shas, the engine's own stamp checker,
-#      and the §2.7 digests recomputed FROM the banked raw), then requires identity
+#      and the replay-gate digests recomputed FROM the banked raw), then requires identity
 #      with the current process on every input that decides what a cell contains. Any
 #      identity difference refuses the whole resume by the name of the condition; a
 #      cell that cannot be trusted is quarantined and re-run.
-#   3. THE M55 HANDSHAKE. An attempt directory has at most one live writer. A lock
+#   3. THE ATTEMPT-LOCK HANDSHAKE. An attempt directory has at most one live writer. A lock
 #      naming pid + process start time + boot id + host is taken before anything is
 #      written; a live holder refuses; a stale one is REPORTED with its contents and
 #      cleared explicitly.
 #
-# WHY A RESUMED §2.7 GATE IS STRONGER, NOT WEAKER. The replay gate re-generates K=3
+# WHY A RESUMED REPLAY GATE IS STRONGER, NOT WEAKER. The replay gate re-generates K=3
 # cells at the end and requires bitwise-identical token ids and float32 entropy
 # arrays. On a resumed column, a selected cell's FIRST digest may have been produced
-# by a previous PROCESS. That is not a weakening: §2.7's own fresh-process replay
+# by a previous PROCESS. That is not a weakening: the gate's own fresh-process replay
 # recipe is precisely "re-run one cell in a NEW process, same canonical layout, and
 # compare the banked digests", and the standing evidence is that this reproduces
 # bitwise. A resumed gate therefore performs the fresh-process replay AS the gate,
-# across the seam, rather than filing it OWED — and `resume/RESUME-REPORT.json`
-# records which gate cells crossed the seam so the strengthening is on the record
+# across the seam, rather than filing it OWED — and the resume report
+# (`RESUME_REPORT_NAME`) records which gate cells crossed the seam so the
+# strengthening is on the record
 # instead of being inferred.
 #: `resume/` — the attempt directory's BOOKKEEPING subtree. Receipts, the lockfile,
 #: the quarantine and the resume report live here and NONE of them is an artifact of
-#: record: the manifest walk skips this subtree by name, which is what keeps a banked
-#: column byte-identical to a pre-amendment one.
+#: record: the manifest walk skips this subtree by name, which is what keeps a
+#: resumed column byte-identical to an uninterrupted one.
 RESUME_SUBTREE = "resume"
 CELL_RECEIPT_SUBDIR = "cells"
 QUARANTINE_SUBDIR = "quarantine"
@@ -5462,9 +5461,9 @@ CELL_ARTIFACT_FILES: dict[str, str] = {
 
 #: The modules whose BYTES decide what a cell contains, relative to the package root.
 #: Not "the engine" loosely: this module draws the tokens, the staging module writes
-#: the document and half the stamp's provenance, the battery module produces
-#: `capability.json`, the §4.2 module supplies the verdict vocabulary, and `hooks.py`
-#: performs the injection itself. A resume that ran under different bytes for ANY of
+#: the document and half the stamp's provenance, the battery module produces each
+#: cell's capability artifact, the actuation-calibration module supplies the verdict
+#: vocabulary, and the residual-write hook module performs the injection itself. A resume that ran under different bytes for ANY of
 #: them would be splicing two different instruments into one column.
 IDENTITY_MODULES: tuple[str, ...] = (
     "scripts/run_behavioral_cells.py",
@@ -5489,9 +5488,10 @@ RESUME_SEAM_EVIDENCE = (
 def engine_module_shas() -> dict[str, Optional[str]]:
     """sha256 of every module in `IDENTITY_MODULES`, by package-relative path.
 
-    Read from DISK relative to this file rather than from an import, because
-    `hooks.py` needs torch and the desk's own interpreter has none: the identity of
-    the bytes must be computable in every configuration the selftest runs in (M44). A
+    Read from DISK relative to this file rather than from an import, because the hook
+    module needs torch and a CPU-only interpreter has none: the identity of the bytes
+    must be computable in every configuration the selftest runs in (with and without
+    torch). A
     module that cannot be read is recorded as `None` — an unknown, never an
     agreement — and `RunIdentity.assert_identical_to` refuses on it by name.
     """
@@ -5533,10 +5533,10 @@ class RunIdentity(BaseModel):
     what a cell contains. Each field's disagreement has its own exception class,
     because "the resume was refused" is not an actionable message and the responses
     differ completely (re-stage the document · re-point the corpus · reload the model ·
-    take the layout question to the desk).
+    re-open the layout question with a human reviewer).
 
     `measured_per_token_median_resid_norm` is the one entry that is not a sha of an
-    input. It is here because §2.5 resolves α from it IN JOB: two processes that
+    input. It is here because α is resolved from it IN JOB: two processes that
     measured different norms would give the re-run cells a different dose from their
     banked siblings, and the column would be inhomogeneous while looking whole.
     """
@@ -5573,7 +5573,7 @@ class RunIdentity(BaseModel):
                 f"{tag}the banked cells are another column: "
                 + "; ".join(f"{f} banked={getattr(banked, f)!r} "
                             f"now={getattr(self, f)!r}" for f in cols)
-                + ". One attempt directory is one (node, arm, site) column (§2.1).")
+                + ". One attempt directory is one (node, arm, site) column.")
         if self.cells_document_sha256 != banked.cells_document_sha256:
             raise ResumeCellsDocumentMismatch(
                 f"{tag}cells document {banked.cells_document_sha256[:12]}… was banked, "
@@ -5583,17 +5583,17 @@ class RunIdentity(BaseModel):
         if self.corpus_manifest_sha256 != banked.corpus_manifest_sha256:
             raise ResumeCorpusVintageMismatch(
                 f"{tag}corpus manifest {banked.corpus_manifest_sha256[:12]}… was "
-                f"banked, {self.corpus_manifest_sha256[:12]}… is of record now (§9 "
-                "item 2). The basis is also SEED MATERIAL (§2.3), so every re-run "
-                "cell would draw a different tape from its banked siblings.")
+                f"banked, {self.corpus_manifest_sha256[:12]}… is of record now. The "
+                "basis is also SEED MATERIAL for every generation's uniforms, so every "
+                "re-run cell would draw a different tape from its banked siblings.")
         if self.prompt_pool_sha256 != banked.prompt_pool_sha256:
             raise ResumePromptPoolMismatch(
                 f"{tag}prompt pool {banked.prompt_pool_sha256[:12]}… was banked, "
-                f"{self.prompt_pool_sha256[:12]}… is loaded now (ruling 10, M4) — a "
-                "cell generated against another pool is another read.")
+                f"{self.prompt_pool_sha256[:12]}… is loaded now — the pool of record "
+                "is sha-frozen, and a cell generated against another pool is another read.")
         if self.actuation_calibration_sha256 != banked.actuation_calibration_sha256:
             raise ResumeVerdictMismatch(
-                f"{tag}§4.2 verdict document differs: banked "
+                f"{tag}actuation-calibration verdict document differs: banked "
                 f"{(banked.actuation_calibration_sha256 or 'ABSENT (OWED)')[:12]}… vs "
                 f"{(self.actuation_calibration_sha256 or 'ABSENT (OWED)')[:12]}… now. "
                 "Half a column stamped OWED and half stamped with a verdict is two "
@@ -5606,7 +5606,7 @@ class RunIdentity(BaseModel):
             raise ResumeEngineModuleUnknown(
                 f"{tag}engine module sha UNKNOWN on one side for {unknown} — an "
                 "unreadable module is an unknown, and an unknown is never read as "
-                "agreement (§10: absence is a reportable state, not a pass).")
+                "agreement (absence is a reportable state, not a pass).")
         moved = sorted(k for k in self.engine_module_sha256
                        if self.engine_module_sha256[k]
                        != banked.engine_module_sha256.get(k))
@@ -5628,14 +5628,14 @@ class RunIdentity(BaseModel):
                 f"{tag}the CANONICAL LAYOUT differs on {lay}: "
                 + "; ".join(f"{k} banked={banked.canonical_layout.get(k)!r} "
                             f"now={self.canonical_layout.get(k)!r}" for k in lay)
-                + ". §2.2 freezes the layout before any cell fires and §2.7 defines "
-                "replay IN it; §9 item 13 makes a mid-column change a restart from "
-                "preflight, never a silent split. Batch invariance is a "
+                + ". The layout is frozen before any cell fires and the replay gate "
+                "is defined IN it; a mid-column change is a restart from preflight, "
+                "never a silent split. Batch invariance is a "
                 "CHARACTERIZED property, not an assumed one — B=40 is a different "
                 "experiment from B=80.")
         if self.model_config_sha256 != banked.model_config_sha256:
             raise ResumeModelConfigMismatch(
-                f"{tag}M9 drift anchor moved: banked "
+                f"{tag}model-config drift anchor moved: banked "
                 f"{(banked.model_config_sha256 or 'ABSENT')[:12]}… vs "
                 f"{(self.model_config_sha256 or 'ABSENT')[:12]}… now — a different "
                 "model config is loaded than the one the banked cells rode.")
@@ -5644,8 +5644,8 @@ class RunIdentity(BaseModel):
             raise ResumeNormDrift(
                 f"{tag}the in-job per-token median residual norm is "
                 f"{self.measured_per_token_median_resid_norm!r} and the banked cells "
-                f"rode {banked.measured_per_token_median_resid_norm!r}. §2.5 resolves "
-                "α = alpha_frac × this number, so the re-run cells would carry a "
+                f"rode {banked.measured_per_token_median_resid_norm!r}. The engine "
+                "resolves α = alpha_frac × this number, so the re-run cells would carry a "
                 "different dose from their banked siblings — an inhomogeneous column "
                 "that every downstream read would treat as one. Never rounded, never "
                 "tolerated.")
@@ -5656,8 +5656,8 @@ class CellReceipt(BaseModel):
 
     Written after the cell directory is renamed into place, so its presence means
     "this cell was banked WHOLE by a process that knew its own identity". A cell
-    directory without one is unattested: it may be a pre-amendment bank, or a rename
-    that landed the instant before a kill. Either way it is not trusted — it is
+    directory without one is unattested: it may come from a bank that wrote no
+    receipts, or a rename that landed the instant before a kill. Either way it is not trusted — it is
     quarantined and re-run, because a cell we cannot attest is cheaper to regenerate
     than to argue about.
 
@@ -5689,7 +5689,7 @@ class CellReceipt(BaseModel):
 
 
 class AttemptLock(BaseModel):
-    """M55's handshake, as a file. Enough to tell a live holder from a dead one."""
+    """The attempt-lock handshake, as a file. Enough to tell a live holder from a dead one."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -5744,7 +5744,7 @@ def _receipt_path(work_root: Path, cell_id: str) -> Path:
 
 
 def _fsync_path(path: Path, *, is_dir: bool = False) -> None:
-    """fsync a file or directory, degrading to a WARNING (M19) rather than failing.
+    """fsync a file or directory, degrading to a named WARNING rather than failing.
 
     The rename is what makes a cell atomic; the fsync is what makes it survive a
     power loss. A filesystem that refuses the second still gets the first, and saying
@@ -5780,7 +5780,7 @@ def bank_cell_atomically(cells_dir: Path, outcome: CellOutcome, *,
 
     The whole of piece 1. `rename(2)` on a directory is atomic on POSIX, so at every
     instant `cells/<cell_id>` either does not exist or is a complete cell with a
-    complete §2.8 stamp. A kill between two cells therefore costs exactly the cell in
+    complete stamp. A kill between two cells therefore costs exactly the cell in
     flight and nothing else, and no reader — a watch, a pull, the resume verifier —
     can ever observe a partially written cell.
 
@@ -5842,7 +5842,7 @@ def write_cell_receipt(work_root: Path, outcome: CellOutcome, *,
     return receipt
 
 
-# ---------------------------------------------------------------- the M55 lockfile
+# ---------------------------------------------------------- the attempt lockfile
 def _pid_alive(pid: int) -> bool:
     """Is there a process with this pid right now (says nothing about WHOSE)."""
     if pid <= 0:
@@ -5880,8 +5880,9 @@ def lock_holder_state(lock: AttemptLock) -> tuple[str, str]:
     """Classify a lockfile's holder: ('live'|'stale'|'foreign', why).
 
     Three answers and no fourth. FOREIGN is its own state rather than a stale case
-    because `/models` is shared storage: a pid on this host says nothing whatsoever
-    about a pid on the other node, and guessing is how M55 gets re-created quietly.
+    because a work root can sit on storage shared between machines: a pid on this
+    host says nothing whatsoever about a pid on another, and guessing is how two
+    writers end up in one attempt directory.
     """
     if lock.hostname != platform.node():
         return "foreign", (f"held by pid {lock.pid} on host {lock.hostname!r}; this is "
@@ -5915,7 +5916,7 @@ def read_attempt_lock(work_root: Path) -> Optional[AttemptLock]:
             f"{path} exists but is not a lock ({type(exc).__name__}: {exc}). It is "
             "REFUSED, never clobbered: an unparseable lock is most likely a lock "
             "being written by a live process right now, and the one thing that must "
-            "not happen is two writers in one attempt directory (M55).") from exc
+            "not happen is two writers in one attempt directory.") from exc
 
 
 def acquire_attempt_lock(work_root: Path, *, cells_document_sha256: str
@@ -5935,7 +5936,7 @@ def acquire_attempt_lock(work_root: Path, *, cells_document_sha256: str
         state, why = lock_holder_state(existing)
         if state == "live":
             raise AttemptLockHeld(
-                f"{work_root} is held: {why}. M55: a second writer in one attempt "
+                f"{work_root} is held: {why}. A second writer in one attempt "
                 "directory is how a cancelled job's orphan quietly corrupts the "
                 "column the replacement job is banking. Reap the holder by verified "
                 "ownership (/proc/<pid>/cmdline) or wait for it — never remove this "
@@ -5970,7 +5971,7 @@ def release_attempt_lock(work_root: Path, lock: AttemptLock) -> bool:
         return False
     if (current.pid, current.hostname, current.created_at) != (
             lock.pid, lock.hostname, lock.created_at):
-        logger.warning("attempt lock at %s is no longer ours (%s) — left in place",
+        logger.warning("attempt lock at %s is held by another process (%s) — left in place",
                        work_root, current.model_dump_json())
         return False
     (_resume_dir(work_root) / ATTEMPT_LOCK_NAME).unlink(missing_ok=True)
@@ -5980,7 +5981,7 @@ def release_attempt_lock(work_root: Path, lock: AttemptLock) -> bool:
 @contextlib.contextmanager
 def attempt_lock(work_root: Optional[Path], *, cells_document_sha256: str,
                  enabled: bool = True) -> Any:
-    """The M55 handshake as a scope. A `work_root` of None locks nothing."""
+    """The attempt-lock handshake as a scope. A `work_root` of None locks nothing."""
     if work_root is None or not enabled:
         yield None
         return
@@ -6013,7 +6014,7 @@ def recompute_cell_digests(cell_dir: Path) -> tuple[str, str]:
     """Re-derive (token_id_sha256, entropy_array_sha256) FROM the banked raw.
 
     The strongest half of resume verification, and the reason a sha of the file bytes
-    is not enough on its own: this re-runs §2.7's own digest definitions over the
+    is not enough on its own: this re-runs the replay gate's own digest definitions over the
     generations and the entropy arrays, so a banked cell is required to still MEAN
     what its stamp says it means, not merely to still weigh the same.
     """
@@ -6042,17 +6043,18 @@ def verify_banked_cell(work_root: Path, cell_id: str, *, spec: CellSpec,
       2. this run and the banked run are the SAME RUN (`ResumeIdentityRefused`
          family — column-scoped, propagated, never caught);
       3. every artifact the receipt names is present with the bytes it attests;
-      4. the banked stamp still passes THE ENGINE'S OWN §2.8 checker — the same
-         function the desk's checker calls, not a re-implementation of it;
-      5. the §2.7 digests still reproduce FROM the raw, and agree with both the
+      4. the banked stamp still passes THE ENGINE'S OWN stamp checker
+         (`assert_stamp_complete`) — the same function any downstream check calls,
+         not a re-implementation of it;
+      5. the replay-gate digests still reproduce FROM the raw, and agree with both the
          receipt and the stamp's own `replay_gate_digests`.
     """
     receipt_path = _receipt_path(work_root, cell_id)
     if not receipt_path.exists():
         raise BankedCellUnattested(
             f"{cell_id}: banked with no completion receipt at {receipt_path}. Either "
-            "it predates the resumability amendment or the process died between the "
-            "cell's rename and its attestation. Unattested is not trusted: the cell "
+            "it was banked by a process that wrote no receipts or the process died "
+            "between the cell's rename and its attestation. Unattested is not trusted: the cell "
             "is quarantined and re-run.")
     try:
         receipt = CellReceipt(**json.loads(receipt_path.read_text()))
@@ -6073,7 +6075,7 @@ def verify_banked_cell(work_root: Path, cell_id: str, *, spec: CellSpec,
         if actual != sha:
             raise BankedCellArtifactShaMismatch(
                 f"{cell_id}/{fname}: {actual[:12]}… on disk, {sha[:12]}… attested "
-                "(M4). The banked bytes changed after the cell was banked.")
+                "— the banked bytes changed after the cell was banked.")
     if receipt.kind != spec.kind or receipt.cell_id != cell_id:
         raise BankedCellUnattested(
             f"{cell_id}: the receipt describes {receipt.cell_id!r} of kind "
@@ -6084,7 +6086,7 @@ def verify_banked_cell(work_root: Path, cell_id: str, *, spec: CellSpec,
         assert_stamp_complete(stamp, cell_kind=spec.kind)
     except (StampIncompleteError, VectorClassContractError) as exc:
         raise BankedCellStampIncomplete(
-            f"{cell_id}: the banked stamp fails the engine's own §2.8 checker on "
+            f"{cell_id}: the banked stamp fails the engine's own stamp checker on "
             f"re-read ({type(exc).__name__}: {exc})") from exc
     if stamp.get("cell_id") != cell_id:
         raise BankedCellStampIncomplete(
@@ -6104,7 +6106,7 @@ def verify_banked_cell(work_root: Path, cell_id: str, *, spec: CellSpec,
                           f"stamp={str(banked.get('entropy_arrays'))[:12]}…")
     if mismatched:
         raise BankedCellDigestMismatch(
-            f"{cell_id}: the banked raw no longer reproduces its own §2.7 digests — "
+            f"{cell_id}: the banked raw does not reproduce its own replay-gate digests — "
             + "; ".join(mismatched))
     return receipt
 
@@ -6166,7 +6168,7 @@ def resume_preflight(work_root: Path, *, specs: Sequence[CellSpec],
     quarantined: list[dict] = []
     receipts: dict[str, CellReceipt] = {}
     # The cell that was in flight when the previous process died left its temp
-    # directory behind. It is not a cell — it never got its rename — and the M55 lock
+    # directory behind. It is not a cell — it never got its rename — and the attempt lock
     # has already established that nobody else is writing here, so it is removed and
     # named rather than left to accumulate across attempts.
     cells_dir = work_root / "cells"
@@ -6207,13 +6209,13 @@ def rehydrate_banked_cell(work_root: Path, spec: CellSpec, receipt: CellReceipt
                           ) -> tuple[CellOutcome, Optional[Any]]:
     """Rebuild a verified cell's `CellOutcome` (and battery block) from disk.
 
-    Byte-identity of a resumed column's `column_result.json` depends entirely on this
+    Byte-identity of a resumed column's result file depends entirely on this
     being EXACT rather than approximate — including `elapsed_s`, which comes from the
     receipt and is the time the cell actually took when it ran, not a zero and not the
     time it took to be read back.
 
-    The battery block is rebuilt too, and this is load-bearing rather than tidy: §6's
-    deltas are formed against the α=0 baseline's block, so a resumed column whose
+    The battery block is rebuilt too, and this is load-bearing rather than tidy: the
+    capability battery's deltas are formed against the α=0 baseline's block, so a resumed column whose
     BASELINE was skipped would otherwise form every re-run cell's `delta_vs_alpha0`
     against nothing and quietly file `None`s where the uninterrupted column filed
     numbers.
@@ -6244,12 +6246,12 @@ def rehydrate_banked_cell(work_root: Path, spec: CellSpec, receipt: CellReceipt
 def column_content_digest(work_root: Path) -> str:
     """ONE digest over a banked column's SCIENCE — what two runs must agree on.
 
-    Deliberately not a digest of the whole directory. `column_result.json` carries
-    `elapsed_s` and `manifest.json` shas `column_result.json`, so two runs of the same
+    Deliberately not a digest of the whole directory. The column result file carries
+    `elapsed_s` and the manifest shas the column result, so two runs of the same
     column — interrupted or not, and even two uninterrupted ones — can never agree on
     those two files' bytes, and a digest that included them could never be used to
     state the property that actually matters. This digest covers every per-cell
-    artifact byte-for-byte plus the §2.7 digests recomputed from the raw, which is the
+    artifact byte-for-byte plus the replay-gate digests recomputed from the raw, which is the
     whole of what a resumed column has to prove it reproduced.
     """
     rows: list[str] = []
@@ -6266,18 +6268,17 @@ def column_content_digest(work_root: Path) -> str:
 
 
 # --------------------------------------------------------- the model-residency driver
-# LUXIA'S RULING (2026-08-05 night): "one job = one card = one loaded model = an
-# ORDERED LIST of that model's cells documents through a shared runtime", with the
-# boundary drawn explicitly — RESIDENCY SHARING YES, CELL SHARING NO. A cell is 80
+# THE RESIDENCY RULE: one job = one card = one loaded model = an ORDERED LIST of that
+# model's cells documents through a shared runtime, with the boundary drawn
+# explicitly — RESIDENCY SHARING YES, CELL SHARING NO. A cell is 80
 # generations under ONE injection spec; batching across cells would change the
 # physics, so nothing here ever puts two columns' work into one forward. What is
 # shared is exactly the loaded weights, and the proof obligation is the mirror of
 # that: two columns through one runtime must produce the columns two separate runs
 # produce, bit for bit.
 #
-# The `NodeRuntime` injection made this a jobs-layer question, and the answer is
-# ALMOST yes: `run_column` already takes the runtime from its caller, so a loop is all
-# the orchestration needs. What it cannot do from outside is re-point a loaded runtime
+# Because `run_column` takes the runtime from its caller, residency is a jobs-layer
+# question, and a loop is ALMOST all the orchestration it needs. What it cannot do from outside is re-point a loaded runtime
 # at the next column's (arm, site, vector bank) SAFELY — the attributes are there to
 # poke, and poking them is how a hook survives a column or a column runs under the
 # previous one's arm. `repoint` is therefore engine-side, typed, and refuses the two
@@ -6319,7 +6320,7 @@ def assert_hooks_detached(runtime: Any, *, where: str) -> None:
 class ResidentColumn(BaseModel):
     """One column in a residency: where its document is and where its bank goes.
 
-    A column may be named by PATHS (the node-side driver's case) or handed over
+    A column may be named by PATHS (the residency driver's case) or handed over
     PRE-LOADED (an in-process caller's, and the CPU-toy proof's). Exactly one of each
     pair, because a plan that carried both could silently run a different column from
     the one it names.
@@ -6369,8 +6370,8 @@ def assert_no_attempt_dir_collision(plans: Sequence[ResidentColumn]) -> None:
                 f"columns {seen[key]} and {i} of this residency share the attempt "
                 f"directory {key}. Residency shares the loaded MODEL; each column "
                 "keeps its own attempt directory, its own preflight, its own gates, "
-                "its own stamps and its own replay gate (Luxia's boundary, "
-                "2026-08-05: residency sharing YES, cell sharing NO).")
+                "its own stamps and its own replay gate (the residency boundary: "
+                "residency sharing YES, cell sharing NO).")
         seen[key] = i
 
 
@@ -6378,14 +6379,14 @@ def run_resident_columns(runtime: Any, plans: Sequence[ResidentColumn], *,
                          stop_on_refusal: bool = True) -> list[dict]:
     """Run an ORDERED LIST of one model's columns through one loaded runtime.
 
-    Each column gets its full §2.1 treatment — its own preflight, its own layout
-    freeze, its own norm measurement, its own gates, its own stamps, its own §2.7
+    Each column gets the full column-job treatment — its own preflight, its own layout
+    freeze, its own norm measurement, its own gates, its own stamps, its own
     replay gate, its own attempt lock and its own manifest. The ONLY thing shared is
     the loaded weights. Between columns the hook is asserted detached, and the runtime
     is re-pointed through the typed `repoint` rather than by attribute assignment.
 
-    Column ORDER cannot move a bit: §2.3's uniforms are per-(cell, gen_id) sha256
-    material, so a cell's tape is a function of the cell and never of what ran before
+    Column ORDER cannot move a bit: every generation's uniforms are per-(cell, gen_id)
+    sha256 material, so a cell's tape is a function of the cell and never of what ran before
     it — which is the same property that makes resumption sound, used the other way
     round.
 
@@ -6465,13 +6466,14 @@ def run_resident_columns(runtime: Any, plans: Sequence[ResidentColumn], *,
 
 # ---------------------------------------------------------------- the HF runtime
 class HFNodeRuntime:
-    """`NodeRuntime` over a real HF causal LM — the node-side implementation.
+    """`NodeRuntime` over a real HF causal LM — the implementation that loads weights.
 
     ONE hook is registered for the whole column and its `alpha`/`start_pos` are mutated
-    per cell and per sub-batch (`hooks.py` reads both at every call), so the injection
+    per cell and per sub-batch (the residual-write hook in `metabasis.extraction.hooks`
+    reads both at every call), so the injection
     machinery is identical across cells by construction rather than by care. The α=0
     baseline runs WITH the hook attached, because the short-circuit is what makes it
-    bitwise no-hook (§2.4) and that is the property the shared baseline rests on.
+    bitwise no-hook and that is the property the shared baseline rests on.
     """
 
     def __init__(self, model: Any, tokenizer: Any, *, node_key: str, arm: str,
@@ -6517,7 +6519,7 @@ class HFNodeRuntime:
             try:
                 out["gpu"] = torch.cuda.get_device_name(0)
                 out["driver"] = getattr(torch.version, "cuda", None)
-            except Exception as exc:                     # noqa: BLE001 — M19(a)
+            except Exception as exc:                     # noqa: BLE001 — named in the trunk
                 out["gpu"] = f"(unavailable: {type(exc).__name__})"
                 out["measured"] = False
         return out
@@ -6525,9 +6527,9 @@ class HFNodeRuntime:
     def model_config_sha256(self) -> Optional[str]:
         try:
             doc = self.model.config.to_dict()
-        except Exception as exc:                         # noqa: BLE001 — M19(a)
-            logger.warning("model config unavailable (%s) — M9 anchor recorded as "
-                           "absent, never as agreement", exc)
+        except Exception as exc:                         # noqa: BLE001 — logged, never silent
+            logger.warning("model config unavailable (%s) — the model-config drift anchor "
+                           "is recorded as absent, never as agreement", exc)
             return None
         return hashlib.sha256(
             json.dumps(doc, sort_keys=True, default=str).encode()).hexdigest()
@@ -6570,7 +6572,7 @@ class HFNodeRuntime:
     def _vector_for(self, cell: CellSpec) -> Any:
         torch = self.torch
         if cell.vector_key is None:
-            # §2.4: the baseline runs WITH the hook attached; α=0 short-circuits, so
+            # The baseline runs WITH the hook attached; α=0 short-circuits, so
             # the direction is never read. A named placeholder beats a None branch
             # that would make the baseline a different code path from every other cell.
             v = np.ones(self._hidden, dtype=np.float32)
@@ -6578,7 +6580,7 @@ class HFNodeRuntime:
         if cell.vector_key not in self.vectors:
             raise NativeVectorUnavailable(
                 f"{cell.cell_id}: vector key {cell.vector_key!r} is not in the staged "
-                f"bank (keys: {sorted(self.vectors)}) — §9 item 3")
+                f"bank (keys: {sorted(self.vectors)}) — a missing staged vector is a HALT")
         v = np.asarray(self.vectors[cell.vector_key], dtype=np.float32).reshape(-1)
         if v.size != self._hidden:
             raise BehavioralHarnessError(
@@ -6607,7 +6609,7 @@ class HFNodeRuntime:
             self._handle = None
 
     def hook_attached(self) -> bool:
-        """The between-columns evidence for the residency driver (§2.1's boundary)."""
+        """The between-columns evidence for the residency driver (no hook crosses a column)."""
         return self._handle is not None
 
     def repoint(self, *, node_key: str, arm: str, site: int,
@@ -6625,8 +6627,8 @@ class HFNodeRuntime:
         if node_key != self.node_key:
             raise ResidencyModelMismatch(
                 f"this runtime has {self.node_key!r} LOADED and cannot be re-pointed at "
-                f"{node_key!r}. One job = one card = one loaded model (Luxia's "
-                "residency ruling, 2026-08-05); another model needs another residency.")
+                f"{node_key!r}. One job = one card = one loaded model; another model "
+                "needs another residency.")
         if self.hook_attached():
             raise ResidencyHookStillAttached(
                 f"{self.node_key}: re-pointing a runtime whose injection hook is still "
@@ -6647,8 +6649,8 @@ class HFNodeRuntime:
     def vram_probe(self, batch_size: int) -> float:
         """Fraction of device memory a probe at max sequence length uses at `B`.
 
-        Raises on a CPU-only device rather than returning a plausible number: M19's
-        rule is that a degraded probe takes the CONSERVATIVE bound, and
+        Raises on a CPU-only device rather than returning a plausible number: a
+        degraded probe takes the CONSERVATIVE bound, never a guessed one, and
         `choose_batch_size` implements exactly that when this raises.
         """
         torch = self.torch
@@ -6668,7 +6670,7 @@ class HFNodeRuntime:
 
     def measure_per_token_median_resid_norm(
             self, *, site: int, prompt_ids: Sequence[Sequence[int]]) -> float:
-        """§2.5: one batched teacher-forced forward; per-token residual norms; median.
+        """In-job norm calibration: one batched teacher-forced forward; per-token residual norms; median.
 
         The hook that carries the write is the same hook whose INPUT is measured here —
         `decoder_layers(model)[site]`'s incoming hidden states — so α is resolved
@@ -6700,7 +6702,7 @@ class HFNodeRuntime:
         if not captured:
             raise ResidualNormDeltaError(
                 f"L{site}: no hidden states captured — the site cannot be measured, so "
-                "no dose can be resolved against it (§2.5)")
+                "no dose can be resolved against it")
         hidden = captured[0]
         norms = hidden.norm(dim=-1).cpu().numpy()
         keep = np.asarray(mask, dtype=bool)
@@ -6710,7 +6712,7 @@ class HFNodeRuntime:
         return float(np.median(vals))
 
     def alpha_zero_equivalence(self) -> Optional[tuple[Any, Any]]:
-        """§2.4's once-per-node check, measured on this node's own first prompt."""
+        """The once-per-node α=0-is-no-hook check, measured on this model's own forward."""
         from metabasis.extraction.hooks import (ResidualWriteSpec,
                                                 attach_residual_write)
         torch = self.torch
@@ -6735,7 +6737,7 @@ class HFNodeRuntime:
             self.model, node_key=self.node_key, site=site,
             vector=np.ones(self._hidden, dtype=np.float32), n_tokens=4)
 
-    # -- the probe (§2.6) ---------------------------------------------------
+    # -- the entropy probe --------------------------------------------------
     def probe(self, records: Sequence[GenerationRecord], *, steered: bool
               ) -> list[tuple[np.ndarray, np.ndarray]]:
         torch = self.torch
@@ -6773,7 +6775,7 @@ class HFNodeRuntime:
                 len(rec.generated_ids)))
         return rows
 
-    # -- the battery (§6) ---------------------------------------------------
+    # -- the capability battery ---------------------------------------------
     def likelihood_nll(self) -> Callable[[str, str], float]:
         torch = self.torch
 
@@ -6821,13 +6823,13 @@ class HFNodeRuntime:
 
 
 def load_vectors(npz_path: Optional[Path]) -> dict[str, np.ndarray]:
-    """The staged vector bank, by key — every failure named (§9 item 3)."""
+    """The staged vector bank, by key — every failure named (`NativeVectorUnavailable`)."""
     if npz_path is None:
         return {}
     path = Path(npz_path)
     if not path.exists():
         raise NativeVectorUnavailable(
-            f"staged vector bank absent: {path} (§9 item 3). The cells document names "
+            f"staged vector bank absent: {path}. The cells document names "
             "it, so its absence is a HALT and not an empty bank.")
     try:
         with np.load(path) as z:
@@ -6840,12 +6842,12 @@ def load_vectors(npz_path: Optional[Path]) -> dict[str, np.ndarray]:
 def preflight_report(doc: Any, pool: PromptPool, *,
                      runtime: Optional[NodeRuntime] = None,
                      corpus_sha_of_record: str = CORPUS_SHA_V21) -> dict:
-    """M10's first-class exit-early preflight: resolve everything, fire nothing.
+    """The first-class exit-early preflight: resolve everything, fire nothing.
 
     Split deliberately into a WEIGHTLESS half (vintage chain, pool, site cross-check,
     cell arithmetic, replay-gate constitution, seed roots) and a LOADED half (position
     budget, VRAM ladder, hook admissibility, the α=0 identity, the measured norm). The
-    weightless half is exactly what the desk can re-run itself, and the loaded half
+    weightless half is exactly what anyone can re-run without weights, and the loaded half
     names what it could not check when no model is present — never silently omitting it.
     """
     specs = order_cells(doc.cell_specs())
@@ -6858,11 +6860,11 @@ def preflight_report(doc: Any, pool: PromptPool, *,
         "n_cells": len(specs), "cells_by_kind": kinds,
         "n_per_cell": doc.n_per_cell,
         "n_generations": len(specs) * doc.n_per_cell,
-        # the ladder IN FORCE — `DOSE_LADDER` for every column with no ratified
-        # amendment, so a frozen column's preflight report is unchanged (2026-08-09).
-        # The `amended_ladder` key below appears ONLY on an amended column, by the same
-        # rule `site_role` and `vector_class` follow on the stamp: a flag-absent run
-        # produces the byte-identical artifact it produced before the flag existed.
+        # the ladder IN FORCE — `DOSE_LADDER` for every column with no amended-ladder
+        # document, so a frozen column's preflight report does not depend on the
+        # amendment machinery. The `amended_ladder` key below appears ONLY on an amended
+        # column, by the same rule `site_role` and `vector_class` follow on the stamp: a
+        # flag-absent run produces the same bytes whether or not the flag exists.
         "dose_ladder": list(ladder_in_force(specs)),
         **({"amended_ladder": {
             "amended": True,
@@ -6925,19 +6927,19 @@ def preflight_report(doc: Any, pool: PromptPool, *,
 
 def load_model_and_tokenizer(model_path: str, *, dtype_name: str = "bfloat16"
                              ) -> tuple[Any, Any, str]:
-    """§2.1's ONE load, with §2.2's frozen attention/dtype choices applied at it."""
+    """The column job's ONE load, with the frozen attention/dtype/padding choices applied at it."""
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
     dtype = getattr(torch, dtype_name, torch.bfloat16)
     tok = AutoTokenizer.from_pretrained(model_path)
-    tok.padding_side = "left"                                  # §2.2
+    tok.padding_side = "left"                                  # part of the canonical layout
     common = {"attn_implementation": "eager",
               "device_map": "auto" if torch.cuda.is_available() else None}
-    # The dtype kwarg was RENAMED across the transformers versions this campaign spans
+    # The dtype kwarg differs across the transformers versions this code supports
     # (`torch_dtype` in 4.5x, `dtype` in 5.x). Trying one and falling back is the only
     # version-robust form: silently loading at the WRONG dtype would change every
-    # number in the column while the stamp still said bf16 (M9's drift surface).
+    # number in the column while the stamp still said bf16.
     try:
         model = AutoModelForCausalLM.from_pretrained(model_path, dtype=dtype, **common)
     except TypeError:
@@ -6949,7 +6951,7 @@ def load_model_and_tokenizer(model_path: str, *, dtype_name: str = "bfloat16"
     if actual != dtype_name:
         raise BehavioralHarnessError(
             f"requested dtype {dtype_name} but the loaded parameters are {actual} — "
-            "the collection regime is a stamped fact (§2.8) and a silent downgrade "
+            "the collection regime is a stamped fact and a silent downgrade "
             "would make every number in this column incomparable to the bank")
     model.eval()
     model.requires_grad_(False)
@@ -6961,12 +6963,12 @@ class _StubStepper:
     """A deterministic, PER-ROW-INDEPENDENT stepper — the layout-invariance witness.
 
     Why a stub at all, when a tiny real Llama would be more convincing: a real
-    forward's reductions are NOT batch-size invariant (§2.7 says so about GPUs, and
-    the selftest MEASURES it on CPU), so a real model can only CHARACTERIZE layout
+    forward's reductions are NOT batch-size invariant (true of GPUs, and the selftest
+    MEASURES it on CPU), so a real model can only CHARACTERIZE layout
     invariance, never prove it. This stub computes each row's logits from that row's
     own token history alone, in a fixed order, so it is exactly batch-invariant by
     construction — which isolates the property under test to the HARNESS's layout
-    logic, where the §2.2 contract actually lives.
+    logic, where the layout-invariance contract actually lives.
 
     The arithmetic is deliberately non-trivial (history-dependent, vocab-spread) so
     a bug that dropped or misordered a row's history would change its tokens.
@@ -7032,8 +7034,8 @@ class _ToyTokenizer:
         out = [self.bos_token_id]
         for m in messages:
             # NOT truncated: the pool's prompt lengths must genuinely vary, because
-            # equal lengths would hide both a left-padding bug and the §2.6
-            # probe-grouping question the harness has to answer.
+            # equal lengths would hide both a left-padding bug and the entropy
+            # probe's grouping question the harness has to answer.
             out += self.encode(m["content"], add_special_tokens=False)
         if add_generation_prompt:
             out.append(3)          # a template marker, so the two arms really differ
@@ -7045,7 +7047,7 @@ def _toy_pool(size: int = PROMPT_POOL_SIZE) -> PromptPool:
 
     Data-independent by construction: the selftest must run in a checkout with no
     gitignored data tree. Prompt lengths deliberately VARY across the pool, because
-    varying prompt length is what makes the §2.6 probe-grouping question real and
+    varying prompt length is what makes the probe-grouping question real and
     what a left-padding bug would hide.
     """
     strata = ("expository", "explanatory", "argumentative", "conversational")
@@ -7064,9 +7066,9 @@ def _toy_pool(size: int = PROMPT_POOL_SIZE) -> PromptPool:
 
 
 class _StubRuntime:
-    """A weightless `NodeRuntime` — the orchestration proof (rake M44).
+    """A weightless `NodeRuntime` — the orchestration proof in every configuration.
 
-    The §2.1 ORDER, the per-cell stamps, the completeness guard, the replay gate and
+    The column job's ORDER, the per-cell stamps, the completeness guard, the replay gate and
     the banking are the parts of this module that no GPU can be spared to test and that
     a mis-wire would corrupt silently. They are therefore proved here against a runtime
     whose every reading is a deterministic function of its inputs: the same
@@ -7142,8 +7144,8 @@ class _StubRuntime:
         """`HFNodeRuntime.repoint`'s contract, on the weightless runtime.
 
         Same two refusals, so the residency driver's boundary is proved in the
-        configuration with no deep-learning stack at all (M44) rather than only where
-        a GPU can be spared.
+        configuration with no deep-learning stack at all rather than only where a GPU
+        can be spared.
         """
         if node_key != self.node_key:
             raise ResidencyModelMismatch(
@@ -7235,7 +7237,7 @@ def _toy_document(pool: PromptPool, *, node: str, arm: str, site: int, corpus: s
 
 
 def _compact_cells(site: int) -> list[CellSpec]:
-    """The smallest cell set that can constitute the §2.7 gate (all three strata)."""
+    """The smallest cell set that can constitute the replay gate (all three strata)."""
     cells = [baseline_cell(site)]
     for key, kind, band in (("entropy_gradient", "calibration", None),
                             ("gRband1", "transported_band", "gRband"),
@@ -7249,7 +7251,7 @@ def _compact_cells(site: int) -> list[CellSpec]:
 
 
 def _toy_cells(site: int = 14) -> list[CellSpec]:
-    """A miniature of the §4 + §5 cell set: enough strata for the §2.7 gate."""
+    """A miniature of the calibration + transported cell set: enough strata for the replay gate."""
     cells = [baseline_cell(site)]
     for key, kind, band in (
             ("entropy_gradient", "calibration", None),
@@ -7267,12 +7269,13 @@ def _toy_cells(site: int = 14) -> list[CellSpec]:
 
 def _calibration_only_cells(site: int = 26, *, with_beside: bool = True
                             ) -> list[CellSpec]:
-    """A miniature of the CALIBRATION-ONLY column (B-1's case): no transported cell.
+    """A miniature of the CALIBRATION-ONLY column: no transported cell.
 
     Mirrors the staged qwen2.5-3b-instruct certification column in shape — the native
     lever over the full ladder, one Rband member over the full ladder, and (optionally)
     the designated Σ-beside cells at the scoring doses — which is exactly the column
-    that could not constitute the §2.7 gate before B-1 was ruled.
+    the science role mapping cannot constitute and the calibration-only role mapping
+    exists for.
     """
     cells = [baseline_cell(site)]
     for key, kind, band in (("entropy_gradient", "calibration", None),
@@ -7300,7 +7303,7 @@ _TOY_MAPPING_DOSES: tuple[float, ...] = (-0.25, -0.20, -0.15, 0.15, 0.20, 0.25)
 
 def _toy_mapping_spec_body(*, node: str, arm: str, site: int,
                            doses: Sequence[float] = _TOY_MAPPING_DOSES) -> dict:
-    """A `MappingSpec` document body, as the desk would file it."""
+    """A `MappingSpec` document body, in the shape an operator files one."""
     return {"schema_version": MAPPING_SPEC_SCHEMA_VERSION,
             "experiment_id": "selftest-dose-window",
             "node_key": node, "arm": arm, "site": site, "doses": list(doses),
@@ -7315,7 +7318,7 @@ def _mapping_cells(site: int, authorization: MappingAuthorization,
                    *, lever: str = "entropy_gradient") -> list[CellSpec]:
     """A miniature of the MAPPING column: the native lever + one Rband, spec doses.
 
-    The shape the ratified pre-statement describes — one lever cell and its band
+    The shape a dose-window mapping takes — one lever cell and its band
     members per mapped dose, no baseline (α=0 is the banked column's, by the
     shared-baseline design) — which is exactly the column neither science role
     mapping can constitute.
@@ -7331,14 +7334,14 @@ def _mapping_cells(site: int, authorization: MappingAuthorization,
     return cells
 
 
-#: The selftest's AMENDED ladder. Deliberately NOT the ratified mixtral ladder: the
+#: The selftest's AMENDED ladder. Deliberately NOT the mixtral amended ladder: the
 #: "this engine carries no per-node ladder" property is asserted below by walking this
 #: module's AST for exactly that tuple, and a selftest fixture equal to it would make
 #: the assertion pass by luck. It SHARES ±0.03 and ±0.10 with the frozen ladder and
 #: moves only the extremes — the overlap `MappingAuthorization` forbids and this
 #: mechanism requires, so every fixture built from it exercises the inverted law.
 _TOY_AMENDED_LADDER: tuple[float, ...] = (-0.2, -0.1, -0.03, 0.03, 0.1, 0.2)
-#: The ratified mixtral ladder, quoted ONLY as the needle the AST check hunts for. It
+#: The mixtral amended ladder, quoted ONLY as the needle the AST check hunts for. It
 #: is not a dose source: nothing constructs a cell or an authorization from it, and the
 #: check below fails if any module-level constant in this file ever equals it.
 _RATIFIED_MIXTRAL_LADDER_NEEDLE: tuple[float, ...] = (-0.15, -0.1, -0.03, 0.03,
@@ -7347,11 +7350,11 @@ _RATIFIED_MIXTRAL_LADDER_NEEDLE: tuple[float, ...] = (-0.15, -0.1, -0.03, 0.03,
 
 def _toy_ladder_spec_body(*, node: str, site: int,
                           ladder: Sequence[float] = _TOY_AMENDED_LADDER) -> dict:
-    """A `LadderSpec` document body, with the RATIFIED document's exact key set.
+    """A `LadderSpec` document body, with the key set a real ladder spec carries.
 
-    Keyed deliberately like `docs/desk/LADDER-SPEC-mixtral-recal-2026-08-09.json` —
-    same fields, same shape, different node and ladder — so this fixture proves the
-    loader accepts the document of record's schema rather than a schema invented here.
+    Keyed deliberately like the mixtral amended-ladder document — same fields, same
+    shape, different node and ladder — so this fixture proves the loader accepts the
+    document of record's schema rather than a schema invented here.
     """
     return {"schema_version": LADDER_SPEC_SCHEMA_VERSION,
             "experiment_id": "selftest-recal-amended-ladder",
@@ -7369,12 +7372,12 @@ def _toy_ladder_spec_body(*, node: str, site: int,
 
 
 def _amended_cells(site: int, authorization: LadderAuthorization) -> list[CellSpec]:
-    """`_toy_cells`' AMENDED twin: the same §4 + §5 shape, on the ratified ladder.
+    """`_toy_cells`' AMENDED twin: the same calibration + transported shape, on an amended ladder.
 
     Same kinds, same vector keys, same band families — only the ladder differs — so a
     diff against `_toy_cells` shows exactly what an amendment changes about a column
     and nothing else. The α=0 baseline is built by `baseline_cell` and carries NO
-    authorization, because it is the same cell under either ladder (§5.1).
+    authorization, because it is the same cell under either ladder.
     """
     cells = [baseline_cell(site)]
     for key, kind, band in (
@@ -7407,7 +7410,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
     def skip(name: str, why: str) -> None:
         """A NAMED skip: a block that cannot run here, recorded as run-and-absent.
 
-        RAKE M44: a selftest that CRASHES in a configuration is indistinguishable
+        A selftest that CRASHES in a configuration is indistinguishable
         from a selftest that FAILS, and neither says which. A named skip is a
         third state — the check did not run, the reason is on the record, and the
         suite's exit code stays 0 because nothing FAILED. The skip is counted in
@@ -7418,8 +7421,8 @@ def selftest() -> int:                                   # noqa: C901 — a chec
         checks.append((f"SKIPPED: {name}", True, why))
         logger.info("SKIP %s — %s", name, why)
 
-    # THE AVAILABILITY PROBE (rake M44). torch is absent from the desk's own repo
-    # .venv, so every torch-dependent BLOCK below is branched on this one probe
+    # THE AVAILABILITY PROBE. torch is absent from the repo's CPU-only .venv, so
+    # every torch-dependent BLOCK below is branched on this one probe
     # rather than on a bare import at its point of use. The properties that make
     # the harness legitimate — the seed table, the layout invariance, the dose
     # ladder, the stamp checklist, the replay-gate logic — are numpy-only BY
@@ -7430,7 +7433,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
         import torch
         _torch: Any = torch
         _no_torch = ""
-    except ImportError as exc:                       # the desk .venv configuration
+    except ImportError as exc:                       # the CPU-only .venv configuration
         _torch = None
         _no_torch = f"torch unavailable ({exc})"
 
@@ -7438,7 +7441,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
     node = "qwen2.5-3b-instruct"
     arm, site = "native", 26
 
-    # ---- 1. the seed table: determinism and the M5 contract -------------------
+    # ---- 1. the seed table: determinism and partial-rerun phase safety --------
     print("== selftest 1: seed table — same digest → same uniforms (§2.3, M25) ==")
     m1, s1, u1 = uniform_tape(corpus_sha=corpus, node_key=node, arm=arm, site=site,
                               cell_id="gentropy_gradient_L26_a+0.30", gen_id=7, n=8)
@@ -7451,8 +7454,8 @@ def selftest() -> int:                                   # noqa: C901 — a chec
     check("seed_int is the sha256[:8] big-endian integer, never `hash()`",
           s1 == int.from_bytes(hashlib.sha256(m1.encode()).digest()[:8], "big"),
           str(s1))
-    # M25(c) says to GREP new analysis code for `hash(` before archiving it as an
-    # operationalization of record. Running the grep as an assertion means the code
+    # `hash()` is salted per process by PYTHONHASHSEED, so a value derived from it
+    # cannot be reproduced. Running the grep for it as an assertion means the code
     # cannot be archived without it having been run. Backtick-quoted prose mentions
     # of `hash()` are excluded by the lookbehind; a real call site is not.
     import re as _re
@@ -7464,7 +7467,8 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                              cell_id="gRband1_L26_a-0.03", gen_id=7, n=8)
     check("a DIFFERENT cell at the same gen_id draws a different tape",
           sA != s1 and not np.array_equal(uA, u1), f"seeds {s1} vs {sA}")
-    # THE M5 CONTRACT: changed cell membership does not desync the others.
+    # PHASE SAFETY: a single RNG stream shifts phase when records are filtered;
+    # per-cell seeds mean changed cell membership does not desync the others.
     full = _toy_cells(site)
     subset = [c for c in full if c.vector_key != "gRband1"]
     tapes_full = {c.cell_id: uniform_tape(
@@ -7512,7 +7516,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
           SAMPLING_OF_RECORD.name)
 
     # ---- 2b. THE IDENTITY GATE: the batched kernel IS `sample_token` ----------
-    # The whole warrant for the 2026-08-01 vectorization. Any mismatch below is a
+    # The whole warrant for the vectorized kernel. Any mismatch below is a
     # FAILURE and never a tolerance: the two kernels are the same step or the fast
     # one does not run.
     print("== selftest 2b: the batched kernel is byte-identical to ruling 8's step ==")
@@ -7636,7 +7640,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                       ValueError),
           f"kernel of record: {SAMPLER_KERNEL_OF_RECORD.name}")
 
-    # ---- 3. LAYOUT INVARIANCE — the §2.2 replay-gate property -----------------
+    # ---- 3. LAYOUT INVARIANCE — the property the replay gate rests on ---------
     print("== selftest 3: layout invariance at B ∈ {80, 40, 20, 10, 1} (§2.2) ==")
     tok = _ToyTokenizer()
     pool = _toy_pool()
@@ -7788,7 +7792,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
           _raises(lambda: entropy_array_digest(
               [np.array([1.0], dtype=np.float64)]), ReplayGateNotBitwise))
 
-    # ---- 4b. the probe grouping (§2.6's resolved ambiguity) -------------------
+    # ---- 4b. the probe grouping (the entropy probe's resolved ambiguity) ------
     print("== selftest 4b: probe grouping — one valid mask per group ==")
     groups = probe_groups(ref, max_group=32)
     check("every probe group has ONE prompt_length (the mask-validity constraint)",
@@ -7865,7 +7869,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                        vector_key="gRband1", site=site, alpha_frac=0.3,
                        band_family="gRband").band_family == "gRband")
 
-    # ---- 5b. the Σ-beside BESIDE family (B4, Luxia 2026-08-04) ----------------
+    # ---- 5b. the Σ-beside BESIDE family (reported beside, never a gate input) -
     print("== selftest 5b: SigmaBand is a BESIDE family, never a gate input (B4) ==")
     sigma_cal = CellSpec(cell_id=f"SigmaBand1_L{site}_a+0.30", kind="calibration_band",
                          vector_key="SigmaBand1", site=site, alpha_frac=0.3,
@@ -8006,12 +8010,12 @@ def selftest() -> int:                                   # noqa: C901 — a chec
     check("the gate's token digest is computed in gen_id order",
           token_id_digest(ref) == token_id_digest(list(reversed(ref))))
 
-    # ---- 7b. B-1: the calibration-only ROLE MAPPING (RULED 2026-08-05) ---------
+    # ---- 7b. the calibration-only replay-gate ROLE MAPPING ---------------------
     print("== selftest 7b: B-1's calibration-only replay-gate role mapping ==")
-    # The BYTE ASSERT. Both constants were read off the run of the code BEFORE B-1 was
-    # implemented (/tmp/claude-output/gate-baseline-BEFORE-*.log, case
-    # "toy26|qwen2.5-3b-instruct"), so this check fails the moment the ruling's
-    # implementation perturbs a transported column's gate by so much as one byte.
+    # The BYTE ASSERT. Both constants were read off a run of the code without the
+    # calibration-only role mapping (case "toy26|qwen2.5-3b-instruct"), so this check
+    # fails the moment that mapping perturbs a transported column's gate by so much as
+    # one byte.
     B1_PRE_RULING_SELECTION = ("gentropy_gradient_L26_a+0.30",
                                "gRband1_L26_a-0.10",
                                "entropy_gradient_L26_a+0.03")
@@ -8127,7 +8131,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
               role_mapping=REPLAY_ROLE_MAPPING_CALIBRATION_ONLY),
               ReplayGateNotBitwise))
 
-    # ---- 8. stamp completeness against §2.8 ----------------------------------
+    # ---- 8. stamp completeness against the stamp checklist -------------------
     print("== selftest 8: stamp completeness as a §2.8 checklist assertion ==")
     os.environ["CUDA_VISIBLE_DEVICES"] = "3"
     stamp = _toy_stamp(cell=laddered[-1][0], alpha=laddered[-1][1],
@@ -8168,7 +8172,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                    naive_transplant_gate_row=None,
                    naive_transplant_verdict=None), cell_kind="calibration")))
 
-    # ---- 8b. B-2: the naive cell's four nullable map fields (RULED 2026-08-05) --
+    # ---- 8b. the naive cell's four nullable map fields -------------------------
     print("== selftest 8b: B-2's naive-cell stamp nullability ==")
     naive_stamp = dict(stamp, transport_map_fit_sha256=None, transport_map_family=None,
                        transport_map_arm=None, transport_map_corpus_vintage=None)
@@ -8251,7 +8255,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
               actuation_calibration={"job_id": "selftest", "verdict": "PASS"},
               per_cell_seed_roots=roots)),
           "transport_map=None + a banked naive row")
-    # ---- 8c. HALT D: the vector-class stamp contract (RULED 2026-08-05) --------
+    # ---- 8c. the vector-class stamp contract ----------------------------------
     print("== selftest 8c: HALT D's vector-class stamp contract (two bases) ==")
     _set_sha = "3c" * 32
     _basis = {"kind": "contrast-set", "sha256": _set_sha,
@@ -8416,7 +8420,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
           flagged["grade"] == GRADE_LINE and "excluded from mechanism aggregates"
           in flagged["naive_transplant_clause"])
 
-    # ---- 9. HALT semantics for the remaining §9 conditions --------------------
+    # ---- 9. HALT semantics for the remaining HALT conditions ------------------
     print("== selftest 9: §9 HALT conditions are named exceptions, not warnings ==")
     check("every HALT class descends from BehavioralHarnessError",
           all(issubclass(c, BehavioralHarnessError) for c in (
@@ -8477,7 +8481,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
           CanonicalLayout(batch_size=80, dtype="f32").frozen is False
           and freeze_layout(80, dtype="f32").frozen is True)
 
-    # ---- 10. preflight (M10 / M19) -------------------------------------------
+    # ---- 10. preflight (exit-early, conservative when degraded) ---------------
     print("== selftest 10: preflight is exit-early and M19-safe ==")
     B, measured, note = choose_batch_size(lambda b: 0.10 * (b / 10.0))
     check("preflight takes the LARGEST rung with ≥15% headroom",
@@ -8497,7 +8501,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
     check("a layout that cannot fit any rung still names the smallest, measured",
           choose_batch_size(lambda b: 0.99)[0] == min(BATCH_LADDER))
 
-    # ---- 11. prompt pool (ruling 10) -----------------------------------------
+    # ---- 11. prompt pool (the sha-frozen pool of record) ----------------------
     print("== selftest 11: the prompt pool of record (ruling 10) ==")
     check("the pool of record is 20 topics × 4 strata = 80",
           len(pool.prompts) == 80 and PROMPT_POOL_SIZE == 80)
@@ -8542,7 +8546,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
     # The BatchEncoding shape. `apply_chat_template` returns a bare list for some
     # tokenizers and a mapping for others — both appear on this roster at one
     # transformers version — and iterating the mapping yields its KEYS, which is
-    # how `int("input_ids")` reached a live node (3B certification, 2026-08-05).
+    # how `int("input_ids")` reaches the generation loop on a real tokenizer.
     # The stub below returns the mapping and nothing else changes, so this check
     # fails the moment the unwrap is removed again.
     class _MappingTemplateTokenizer(_ToyTokenizer):
@@ -8560,7 +8564,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
           render_prompt(pool.prompts[0], _mtok, "native")
           == render_prompt(pool.prompts[0], tok, "native"))
 
-    # ---- 12. ruling 4's bridge cell ------------------------------------------
+    # ---- 12. the bridge cell -------------------------------------------------
     print("== selftest 12: the bridge cell (ruling 4) ==")
     ran = BridgeCellDecision(pair="8b->qwen-7b", banked_config_recoverable=True,
                              dropped=False,
@@ -8583,7 +8587,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
           _raises(lambda: BridgeCellDecision(
               pair="p", banked_config_recoverable=True, dropped=False), ValueError))
 
-    # ---- 13. real-model characterization (availability-branched, M19) ---------
+    # ---- 13. real-model characterization (availability-branched, never a gate)
     print("== selftest 13: real-forward characterization (never a gate) ==")
     if _torch is None:
         skip("real-forward characterization: the REAL HF path, the batch-invariance\n         characterization, §2.4 on the real hook, and the hook-admissibility preflight",
@@ -8646,9 +8650,9 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                       if x != y:
                           first_div = i if first_div is None else min(first_div, i)
                           break
-          # M19: DESCRIPTIVE. A real forward's reductions are not batch-invariant, so
+          # DESCRIPTIVE. A real forward's reductions are not batch-invariant, so
           # this can only be characterized. The stub-stepper proof above is what
-          # asserts the harness's own §2.2 contract.
+          # asserts the harness's own layout-invariance contract.
           check("real-forward B=10 vs B=20 CHARACTERIZED (M19: cannot fail a gate)",
                 True,
                 f"bitwise={same}"
@@ -8684,7 +8688,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                     real, node_key="toy-llama", site=99,
                     vector=np.ones(32, dtype=np.float32)), SiteNotOfRecord))
           # ---- the REAL runtime, end to end ---------------------------------
-          # What the stub runtime proves about §2.1's ORDER and custody, this proves
+          # What the stub runtime proves about the column job's ORDER and custody, this proves
           # about the torch plumbing: one hook mutated across cells, the two-forward
           # probe, the battery under injection, the in-job norm measurement and the
           # replay gate, all against a genuine (tiny) forward.
@@ -8693,7 +8697,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                            for i, k in enumerate(("entropy_gradient",
                                                   "gentropy_gradient", "gRband1"))}
           # a node key the registries do NOT carry, on purpose: block 14 exercises
-          # a REGISTERED node (the §9-item-4 cross-check must agree there), and this
+          # a REGISTERED node (the site cross-check must agree there), and this
           # block exercises the torch plumbing on a model that is not any node.
           toy_node = "toy-llama"
           rt = HFNodeRuntime(real, tok, node_key=toy_node, arm=arm, site=1,
@@ -8746,7 +8750,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
         skip("real-forward characterization (transformers unavailable)",
              f"{exc} — the stub-stepper proofs above are the gate")
 
-    # ---- 14. THE COLUMN JOB, end to end, weightless (§2.1) --------------------
+    # ---- 14. THE COLUMN JOB, end to end, weightless ---------------------------
     print("== selftest 14: the §2.1 column job, orchestrated on a stub runtime ==")
     stub = _StubRuntime(pool, tok, arm, site)
     doc = _toy_document(pool, node=node, arm=arm, site=site, corpus=corpus,
@@ -8858,7 +8862,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                                                          len(column.cells),
                                                          n_per_cell=80),
                           ExpectedNShortfall))
-        # B4: expected-N is a gate, so a beside may not fill a hole in it, from either
+        # Expected-N is a gate, so a beside may not fill a hole in it, from either
         # side — a planned beside that did not run (the total is right because a cell
         # of record ran in its place), or a cell that stamped itself a beside without
         # being planned as one.
@@ -8885,7 +8889,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                   work_root=None, corpus_sha_of_record="7" * 64, characterize=False,
                   write=False), CorpusVintageError),
               "the basis is a PARAMETER — the engine hardcodes none for a run")
-        # M10: the preflight is a first-class mode and resolves without firing a cell
+        # The preflight is a first-class mode and resolves without firing a cell
         weightless = preflight_report(doc, pool, corpus_sha_of_record=corpus)
         loaded = preflight_report(doc, pool, runtime=_StubRuntime(pool, tok, arm, site),
                                   corpus_sha_of_record=corpus)
@@ -8902,7 +8906,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
               weightless["n_cells"] == 25 and weightless["n_generations"] == 100)
     os.environ["CUDA_VISIBLE_DEVICES"] = "3"
 
-    # ---- 15. the characterization layout (the §2.2/§2.7 clause conflict) -------
+    # ---- 15. the characterization layout (off-ladder, never a layout of record)
     print("== selftest 15: off-ladder characterization layouts are fenced ==")
     for B in CHARACTERIZATION_BATCH_SIZES:
         check(f"B={B} is admissible ONLY as a characterization layout",
@@ -8917,13 +8921,11 @@ def selftest() -> int:                                   # noqa: C901 — a chec
           freeze_layout(80, dtype="bfloat16").frozen
           and not freeze_layout(80, dtype="bfloat16").characterization_only)
 
-    # ---- 16. §4.2's verdict document and the CLI flag that carries it ---------
-    # The gap this closes (ledger ROUND-2, 2026-08-05): the frozen harness accepted
-    # `actuation_calibration_stamp` as a PYTHON kwarg only, so a CLI-fired column
-    # could not name a verdict that existed and stamped OWED — true for batch A/B,
-    # a FALSE provenance statement afterwards. Luxia's ruling ① adds the flag; these
-    # checks are the flag's contract, and 16b is the byte proof that WITHOUT it
-    # nothing moved.
+    # ---- 16. the actuation-calibration verdict document and its CLI flag ------
+    # Without the flag, a CLI-fired column cannot name a verdict that exists and
+    # stamps OWED — true before a verdict is filed, a FALSE provenance statement after.
+    # These checks are the flag's contract, and the CLI block below is the byte proof
+    # that WITHOUT the flag nothing moves.
     print("== selftest 16: §4.2's actuation-calibration verdict document (CLI flag) ==")
     cal_node, cal_arm, cal_site = "qwen2.5-3b-instruct", "native", 26
     cal_doc_body = {
@@ -8946,7 +8948,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
             return load_actuation_calibration(p, node_key=node, arm=arm, site=site)
 
     block = _load_cal(cal_doc_body)
-    # RAKE M44: every read of the block goes through `.get`, so a DROPPED key is a
+    # Every read of the block goes through `.get`, so a DROPPED key is a
     # named MISS with the missing name in its detail rather than a KeyError — a
     # crashing suite and a failing suite are indistinguishable, and only one of them
     # says what broke.
@@ -9055,7 +9057,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                         ActuationCalibrationSchemaError,
                         ActuationCalibrationMismatch)))
 
-    # 16d: THE LADDER IN FORCE in the verdict document (re-freeze #3, 2026-08-13).
+    # THE LADDER IN FORCE in the verdict document.
     print("== selftest 16d: §4.2's verdict document states THE LADDER IN FORCE ==")
     _frozen_block = _load_cal(cal_doc_body)
     check("(16d) ABSENT the pair, the block is what it always was — the frozen ladder "
@@ -9125,7 +9127,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
           _raises(lambda: _load_cal({**cal_doc_body, "dose_ladders": _amended_ladder}),
                   ActuationCalibrationSchemaError))
 
-    # 16b: the CLI, end to end, weightless — the flag's ONLY effect, byte-proved.
+    # The CLI, end to end, weightless — the flag's ONLY effect, byte-proved.
     print("== selftest 16b: the CLI's flag-absent path is byte-identical (B-1 style) ==")
     _saved_globals = {name: globals()[name] for name in
                       ("load_model_and_tokenizer", "HFNodeRuntime", "load_vectors")}
@@ -9232,7 +9234,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
               == [(c["cell_id"], c["token_id_sha256"], c["entropy_array_sha256"])
                   for c in _gate_flag["cells"]])
 
-        # ---- 16c. HALT C + HALT D end to end, through the CLI (B-1 style) -----
+        # ---- 16c. site role + vector class end to end, through the CLI ---------
         print("== selftest 16c: HALT C/D through the CLI — only the named keys move ==")
         from metabasis.scripts.build_behavioral_banks import VectorBasis
         _cset = "4d" * 32
@@ -9333,10 +9335,10 @@ def selftest() -> int:                                   # noqa: C901 — a chec
               "flag-absent path, proven on a fired column",
               all("site_role" not in s and "site_role" not in s["site_cross_check"]
                   for s in owed.values()))
-        # HALT C at the ENGINE's own re-derivation. The engine never trusts the
-        # staging module's answer — it re-asks the live registries in-job — so a
-        # robustness-site column that staging admitted would HALT node-side unless
-        # this path admits it too. That is the failure mode the ruling is about.
+        # The site-role check at the ENGINE's own re-derivation. The engine never
+        # trusts the staging module's answer — it re-asks the live registries in-job —
+        # so a robustness-site column that staging admitted would HALT at run time
+        # unless this path admits it too. That is the failure mode this guards.
         try:
             from metabasis.scripts.actuation_calibration import ROBUSTNESS_SITES
             # The refusal is raised by the STAGING module, which imports
@@ -9367,7 +9369,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                                                    site_role="robustness_site"),
                           _SNOR))
 
-    # ---- 17. atomic banking + resumption (the 2026-08-05 amendment) -----------
+    # ---- 17. atomic banking + resumption --------------------------------------
     print("== selftest 17: atomic per-cell banking and verify-everything resume ==")
     os.environ["CUDA_VISIBLE_DEVICES"] = "3"
 
@@ -9389,7 +9391,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
             # A kill, simulated INSIDE the process: the cell in flight never reaches
             # its rename, so the on-disk state is exactly the state a SIGKILL leaves.
             # (The subprocess os._exit version is the standalone proof; this is the
-            # version that can run in every configuration of the M44 matrix.)
+            # version that can run in every torch/no-torch, data/no-data configuration.)
             fired = {"n": 0}
             real = rt.begin_cell
 
@@ -9481,7 +9483,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
               f"{len(_moved)} moved leaf/leaves, non-timing: "
               f"{[p for p in _moved if not p.endswith('.elapsed_s')]}")
 
-        # M51 POSITIVE CONTROL: the digest is only evidence if it can move.
+        # POSITIVE CONTROL: the digest is only evidence if it can move.
         _canary = root / "canary"
         shutil.copytree(whole, _canary)
         _cpath = _canary / "cells" / banked_at_kill[0] / "generations.jsonl"
@@ -9678,7 +9680,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
               and column_content_digest(_again) == good_digest,
               f"{len(_rep['cells_skipped'])} verified, 0 run")
 
-    # ---- 17d. the M55 attempt-lock handshake ---------------------------------
+    # ---- 17d. the attempt-lock handshake -------------------------------------
     print("== selftest 17d: M55 — one live writer per attempt directory ==")
     with tempfile.TemporaryDirectory(prefix="behav_lock_") as td:
         root = Path(td)
@@ -9803,7 +9805,8 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                 load_residency_plan, plan_to_columns)
             # The driver imports the engine by MODULE PATH, so the class it raises is
             # the module's copy and not this file's when the selftest runs as
-            # `__main__` (the same two-copies fact documented at HALT C). Assert the
+            # `__main__` (the same two-copies fact documented at the site-role check
+            # above). Assert the
             # class the caller would actually catch.
             from metabasis.scripts.run_behavioral_cells import (
                 ResidencyPlanInvalid as _RPI)
@@ -9846,7 +9849,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                   _raises(lambda: plan_to_columns(load_residency_plan(_missing)),
                           _RPI))
 
-    # ---- 19. THE MAPPING MODE (2026-08-08, Luxia's ratified engine deviation) ----
+    # ---- 19. THE MAPPING MODE (a spec-scoped engine deviation) -----------------
     print("== selftest 19: the mapping mode — two keys, no licence, ladder untouched ==")
     check("(19) the FROZEN ladder is untouched, literally and by arity",
           DOSE_LADDER == (-0.3, -0.1, -0.03, 0.03, 0.1, 0.3)
@@ -10144,7 +10147,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
               "because the operator asserted something untrue about this run",
               _sci_plain == 0 and _sci_flagged == 2)
 
-    # ---- 20. THE AMENDED LADDER (re-freeze #2, 2026-08-09) ----------------------
+    # ---- 20. THE AMENDED LADDER -------------------------------------------------
     print("== selftest 20: the amended ladder — two keys, whole column, spec-driven ==")
     check("(20) the FROZEN ladder is STILL untouched, literally and by arity — the "
           "property re-freeze #2 was ratified on",
@@ -10152,9 +10155,9 @@ def selftest() -> int:                                   # noqa: C901 — a chec
           and len(DOSE_LADDER) == 6 and BASELINE_DOSE == 0.0
           and SCORING_DOSE_MAGNITUDE == 0.3,
           f"{DOSE_LADDER}")
-    # M58: a code property is asserted on the SYNTAX TREE, never on a substring of the
-    # source. The property: no module-level constant in this engine equals the ratified
-    # mixtral ladder — policy lives in the document, and a per-node ladder that had
+    # A code property is asserted on the SYNTAX TREE, never on a substring of the
+    # source. The property: no module-level constant in this engine equals the
+    # mixtral amended ladder — policy lives in the document, and a per-node ladder that had
     # crept back in as a constant is exactly what this check exists to catch. Walking
     # assignments (rather than grepping for "0.15") also means a constant spelled
     # differently — reordered, or written as a list — is still caught.
@@ -10551,7 +10554,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
         # The two mechanisms, in one place: neither flag pair reaches the other's
         # cells, and a mapping column is untouched by the amendment machinery. Its
         # cells document is rebuilt HERE rather than reused from section 19, whose
-        # temporary directory is already gone (a path that no longer exists would make
+        # temporary directory is already gone (a path that does not exist would make
         # this check pass for the wrong reason).
         _mdoc20 = _toy_document(pool, node=node, arm=arm, site=site, corpus=corpus,
                                 cells=_mapping_cells(site, _mauth), n_per_cell=4,
@@ -10567,11 +10570,10 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                                                            authorization=None))
               and ladder_in_force(_mcells) == DOSE_LADDER)
 
-    # ---- M59: the suite's own arithmetic, asserted rather than printed ----------
+    # ---- the suite's own arithmetic, asserted rather than printed --------------
     # SKIP IS NOT PASS, and a block that silently stopped running is indistinguishable
     # from a block that never existed unless the TOTAL is asserted. The floor is the
-    # count this file was merged at (re-freeze #2, 2026-08-09: 352 checks before the
-    # amended ladder, 382 after it, +30); it may only GROW, and a change that removes a
+    # count this file was merged at; it may only GROW, and a change that removes a
     # check has to change this constant in the same diff — which is exactly the moment
     # a reviewer gets to ask why. Named skips are counted apart and bounded by the
     # known set, so a block that STARTED skipping in a configuration where it used to
@@ -10590,7 +10592,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
     print(f"\nselftest: {len(failures)} failure(s)")
     for name, _, detail in failures:
         print(f"  MISS {name} {detail}")
-    # RAKE M44: the tail states coverage as well as the verdict, because a suite
+    # The tail states coverage as well as the verdict, because a suite
     # that ran 120 of 127 checks in this configuration and one that ran all 127 are
     # different facts, and only the first needs the other configuration to close it.
     print(f"selftest checks run: {len(checks)} ({len(skips)} named skip(s))")
@@ -10688,9 +10690,9 @@ def bench_sampler(*, batch: int = N_PER_CELL, vocab: int = 128256, steps: int = 
     """CPU cost of the two kernels over SYNTHETIC logits at the layout of record.
 
     What this is: the sampling step alone, isolated from the forward, because the
-    sampling step is the only thing the 2026-08-01 vectorization touched. What this is
-    NOT: a throughput number. The node-side seq/s certification measures a real
-    forward on a real card and is a separate job — a ratio measured here does not
+    sampling step is the only thing the vectorized kernel changes. What this is
+    NOT: a throughput number. A seq/s certification measures a real forward on a
+    real card and is a separate job — a ratio measured here does not
     become a column's speed-up, it bounds the part of the column that was slow for
     this reason.
 
@@ -10779,29 +10781,29 @@ def bench_sampler(*, batch: int = N_PER_CELL, vocab: int = 128256, steps: int = 
 # ---------------------------------------------------------------- CLI
 def main(argv: Optional[list[str]] = None) -> int:
     ap = argparse.ArgumentParser(
-        description="The node-side behavioral engine (BRIEF §2). Heimdall CLI only; "
-                    "the coordinator HTTP API is read-only verification.")
+        description="The behavioral engine: one model load, all of a column's cells, "
+                    "batched, with an in-job replay gate and a stamp per cell.")
     ap.add_argument("--selftest", action="store_true",
                     help="CPU-only, data-independent verification (no GPU, no weights)")
     ap.add_argument("--bench-sampler", action="store_true",
                     help="CPU cost of the reference vs vectorized sampling kernels "
                          "over synthetic logits (identity re-asserted on the benched "
-                         "blocks). Not a node throughput number.")
+                         "blocks). Not a column throughput number.")
     ap.add_argument("--bench-batch", type=int, default=N_PER_CELL)
     ap.add_argument("--bench-vocab", type=int, default=128256)
     ap.add_argument("--bench-steps", type=int, default=8)
     ap.add_argument("--preflight", action="store_true",
-                    help="M10: a first-class exit-early preflight mode, NEVER output "
+                    help="a first-class exit-early preflight mode, NEVER output "
                          "truncation. Resolves the pool, the site, the layout and "
                          "the hook admissibility, banks nothing, fires no cell.")
     ap.add_argument("--run", action="store_true",
-                    help="the full §2.1 one-load-per-node job")
+                    help="the full one-load column job")
     ap.add_argument("--node-key", default=None)
     ap.add_argument("--model-path", default=None)
     ap.add_argument("--arm-root", type=Path, default=None)
     ap.add_argument("--work-root", type=Path, default=None,
-                    help="node-side work root; all new node-side data lives under "
-                         "<NODE_DATA_ROOT>/metabasis-behavioral/<node> (standing rule 2026-07-29)")
+                    help="the attempt directory the column banks into, e.g. "
+                         "<DATA_ROOT>/metabasis-behavioral/<node>")
     ap.add_argument("--cells-json", type=Path, default=None,
                     help="staged cell specs (build_behavioral_banks.py output)")
     ap.add_argument("--prompt-pool", type=Path, default=None)
@@ -10816,23 +10818,22 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--corpus-sha-of-record", default=None,
                     help="the basis the vintage chain is asserted against. Defaults to "
                          "the document's own corpus sha, so this module hardcodes no "
-                         "basis for a run — the open v2.1/v3 ruling lives here.")
+                         "basis for a run — which corpus is of record is decided here.")
     ap.add_argument("--dtype", default="bfloat16")
     ap.add_argument("--job-id", default=None)
     ap.add_argument("--scheduler-card-index", default=None,
-                    help="M10: a scheduler job carries a card index; a rogue carries "
-                         "the sentinel, and §9 item 9 refuses the stamp without it")
+                    help="a scheduler job carries a card index; an unscheduled run "
+                         "carries the sentinel, and the stamp is refused without it")
     ap.add_argument("--actuation-calibration", type=Path, default=None,
-                    help="§4.2: the DESK's verdict document for THIS column's site "
+                    help="the actuation-calibration verdict document for THIS column's site "
                          "(JSON: node_key, site, arm, job_id, verdict, the three "
                          "criterion values, scoring_log_path, ledger_date). Validated "
                          "to name this column's node/site/arm and transcribed into "
                          "every cell's stamp. WITHOUT it the stamp reads OWED with "
-                         "its honest note, exactly as before this flag existed — "
-                         "which is the truth only while no verdict has been filed.")
+                         "its honest note — which is the truth only while no verdict "
+                         "has been filed.")
     ap.add_argument("--mapping-spec", type=Path, default=None,
-                    help="THE MAPPING MODE (Luxia's ratification 2026-08-08): the "
-                         "desk's dose-window spec for THIS column (JSON: "
+                    help="THE MAPPING MODE: the dose-window spec for THIS column (JSON: "
                          "experiment_id, node_key, arm, site, doses, "
                          "prestatement_of_record, ratified_by, ledger_date). "
                          "Validated to name this column; its sha256 and dose set must "
@@ -10842,12 +10843,12 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--mapping-mode", action="store_true",
                     help="THE MAPPING MODE's second key: the operator's explicit "
                          "assertion that THIS run fires a mapping column. A mapping "
-                         "cell licenses nothing — it can satisfy no §4.2 criterion "
+                         "cell licenses nothing — it can satisfy no actuation-calibration criterion "
                          "and license no transported-write cell — and the frozen "
                          "DOSE_LADDER is untouched for every science cell.")
     ap.add_argument("--ladder-spec", type=Path, default=None,
-                    help="THE AMENDED LADDER (re-freeze #2, 2026-08-09): the desk's "
-                         "ratified re-calibration document for THIS column's node and "
+                    help="THE AMENDED LADDER: the signed-off re-calibration document "
+                         "for THIS column's node and "
                          "site (JSON: experiment_id, node_key, site, ladder, "
                          "applies_to, replaces, ratification_lineage, "
                          "gate_reading_rule, comparability_rider, "
@@ -10862,24 +10863,25 @@ def main(argv: Optional[list[str]] = None) -> int:
                          "amendment is WHOLE-COLUMN (every arm, every lever, every "
                          "band at this node and site; the α=0 baseline is unchanged) "
                          "and mixing amended with frozen-ladder science cells in one "
-                         "column is refused. §4.2 stays desk-side: this engine runs "
-                         "and records the ladder, it never scores it.")
+                         "column is refused. The actuation-calibration verdict is scored "
+                         "elsewhere: this engine runs and records the ladder, it never "
+                         "scores it.")
     ap.add_argument("--no-characterize", action="store_true",
-                    help="skip §2.7's DESCRIPTIVE B=8/B=1 characterization (M19: it "
+                    help="skip the DESCRIPTIVE B=8/B=1 layout characterization (it "
                          "can never fail a gate, so skipping it costs no assertion)")
     ap.add_argument("--resume", action="store_true",
                     help="resume into an attempt dir this column already banked into: "
                          "every banked cell is RE-VERIFIED (receipt, artifact shas, "
-                         "the engine's own §2.8 stamp checker, and both §2.7 digests "
+                         "the engine's own stamp checker, and both replay-gate digests "
                          "recomputed from the raw) and identity is REQUIRED on the "
                          "cells document, the corpus/pool/verdict shas, the engine "
                          "module shas, the model config, the full canonical layout and "
                          "the measured norm α is resolved from. Any mismatch refuses "
                          "the whole resume by name; a cell that cannot be verified is "
-                         "quarantined and re-run. §2.7's replay gate then runs over "
+                         "quarantined and re-run. The replay gate then runs over "
                          "the FULL population as always.")
     ap.add_argument("--no-attempt-lock", action="store_true",
-                    help="M55: do NOT take the attempt-dir lock. For forensics on a "
+                    help="do NOT take the attempt-dir lock. For forensics on a "
                          "dead attempt directory only — never for a run that banks.")
     args = ap.parse_args(argv)
 
@@ -10923,7 +10925,8 @@ def main(argv: Optional[list[str]] = None) -> int:
                 "another column's stamp.", name.replace('_', '-'), given,
                 getattr(doc, name))
             return 2
-    # §4.2's stamp requirement, filled from the desk's document or left OWED. This is
+    # The actuation-calibration stamp requirement, filled from the verdict document
+    # or left OWED. This is
     # the ONLY thing the flag does: absent it, `actuation_calibration_stamp` stays
     # None and `run_column` writes the same OWED block it has always written.
     actuation_calibration_stamp: Optional[dict] = None
@@ -10940,7 +10943,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         # key below is present by construction — and if one ever is not, the run says
         # `None` here and the stamp still carries whatever the document filed.
         logger.info(
-            "§4.2 actuation calibration of record: %s L%s (%s) job %s — verdict %s "
+            "actuation calibration of record: %s L%s (%s) job %s — verdict %s "
             "(ρ %s · outside band %s · coherence %s); %s",
             *(actuation_calibration_stamp.get(k) for k in
               ("node_key", "site", "arm", "job_id", "verdict", "spearman_rho",
@@ -10968,7 +10971,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             logger.error("HALT (%s): %s", type(exc).__name__, exc)
             return 2
         logger.info(
-            "MAPPING MODE: spec %s (%s L%d, %s arm) doses %s — ratified by %s on %s, "
+            "MAPPING MODE: spec %s (%s L%d, %s arm) doses %s — signed off by %s on %s, "
             "pinned by %s. %s", mapping_spec.experiment_id, mapping_spec.node_key,
             mapping_spec.site, mapping_spec.arm, list(mapping_spec.doses),
             mapping_spec.ratified_by, mapping_spec.ledger_date.isoformat(),
@@ -11059,8 +11062,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         if runtime is None:                                   # pragma: no cover
             ap.error("--run needs --model-path")
         if args.work_root is None:
-            ap.error("--run needs --work-root (all new node-side data lives under "
-                     "<NODE_DATA_ROOT>/metabasis-behavioral/<node>, standing rule 2026-07-29)")
+            ap.error("--run needs --work-root (the attempt directory the column banks "
+                     "into, e.g. <DATA_ROOT>/metabasis-behavioral/<node>)")
         result = run_column(
             runtime, doc=doc, pool=pool, work_root=args.work_root,
             corpus_sha_of_record=basis, n_per_cell=args.n_per_cell,
@@ -11089,8 +11092,8 @@ def main(argv: Optional[list[str]] = None) -> int:
             "work_root": result.work_root, "grade": result.grade}, indent=1))
         return 0
     except BehavioralHarnessError as exc:
-        # §3/§9: an enactor never adjudicates a live HALT. The job stops, says which
-        # condition fired, and leaves the adjudication to the desk.
+        # A live HALT is never adjudicated in the job. The job stops, says which
+        # condition fired, and leaves the adjudication to a human reviewer.
         logger.error("HALT (%s): %s", type(exc).__name__, exc)
         return 2
     except (OSError, ImportError) as exc:
@@ -11100,7 +11103,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         if runtime is not None:
             try:
                 runtime.close()
-            except Exception as exc:                     # noqa: BLE001 — M19(a)
+            except Exception as exc:                     # noqa: BLE001 — logged, never silent
                 logger.warning("runtime close failed (%s: %s)",
                                type(exc).__name__, exc)
 
