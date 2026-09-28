@@ -1,37 +1,36 @@
-"""A8 extension-pairs smalls — THE STAR SYSTEMS, one per (template-arm x family).
+"""THE STAR SYSTEMS for the extension pairs, one per (template-arm x family).
 
-The desk's arm-consistency rule (Luxia, 2026-07-23): a star constant belongs to the
-system it was solved in. The native-arm constants of record (c_3B=.6382, c_8B=.7545,
+Arm consistency: a star constant belongs to the system it was solved in. The native-arm constants of record (c_3B=.6382, c_8B=.7545,
 c_Qwen=.4730, c_DSV2=.4415 at k128) are NATIVE-ARM numbers. Any model whose fits are
 raw-arm-only — OLMo has no chat template, so its native arm does not exist — must take
 its constant from a PARALLEL RAW-ARM SYSTEM, derived from the already-banked raw-arm
 a_hat rows. Slotting a raw-arm a_hat into the native-arm system would be the
-family-mixing sin one level up, and family-mixing has already authored two false scores
-in this arm (rakes 40, 14).
+family-mixing sin one level up: an equation that mixes fit families mixes estimators
+with different attenuation, and its answer scores nothing real.
 
 This script builds every system that closes, from banked fits only. ZERO GPU COMPUTE.
 
 The algebra. Star model: a_hat(A->B) = c_A . c_B. With models {3B, 8B, Qwen, DSV2} the
 three hub pairs (3B-8B, 8B-Qwen, 8B-DSV2) leave the system underdetermined; the direct
-3B->Qwen fit (Leg-4E) closes it:
+3B->Qwen fit (the transitivity pair) closes it:
 
     c_3B^2  = a(3B->8B) . a(3B->Qwen) / a(8B->Qwen)
     c_8B    = a(3B->8B)  / c_3B
     c_Qwen  = a(8B->Qwen)/ c_8B
     c_DSV2  = a(8B->DSV2)/ c_8B
 
-3B->DSV2 is then a PREDICTION, and Leg 6 measured it — so every system printed here
+3B->DSV2 is then a PREDICTION, and the fourth-node fit measures it — so every system printed here
 carries its own out-of-sample check, and a system whose check fails is not a system you
 may hang a new constant on. Reported per (arm, family); families are never mixed inside
-one equation (rake 40) and the rank guard k <= n_train/1.2 is applied per pair, since
-n_train differs across legs (600 hub, 360 for the Leg-4E closer).
+one equation and the rank guard k <= n_train/1.2 is applied per pair, since n_train
+differs across pairs (600 hub, 360 for the transitivity closer).
 
-UNSTAMPED (C section 8). Scores nothing; this is the substrate for A8-add-7's
-predictions, which are filed BEFORE any new pair is fitted.
+UNSTAMPED: scores nothing. This is the substrate for the extension-pair predictions,
+which are filed BEFORE any new pair is fitted.
 
 Run (repository root):
 
-    python -m metabasis.scripts.solve_star_systems              # writes OUT/star_systems.json
+    python -m metabasis.scripts.solve_star_systems              # writes <OUT>/star_systems.json
     python -m metabasis.scripts.solve_star_systems --selftest   # synthetic, temp dir only
 
 `--arm-root`, `--bank-root` and `--out-dir` relocate the inputs and the output;
@@ -62,24 +61,25 @@ OUT = ARM / "smalls" / "readouts_cpu"
 
 ARMS = ("native", "raw")
 FAMILIES = ("proc_k32", "proc_k128", "proc_k512", "ridge")
-RANK_GUARD_DIVISOR = 1.2          # add-3: k <= n_train / 1.2
+RANK_GUARD_DIVISOR = 1.2          # rank guard: k <= n_train / 1.2
 
-# V7 = the attenuation-class reference axis. a_hat(A->B) := cos(g.V7_A, V7_B).
+# The V7_L<site> vectors are the attenuation-class reference axis.
+# a_hat(A->B) := cos(g.V7_A, V7_B).
 V7: dict[str, tuple[str, str, int]] = {
     "3b": ("a5_vectors_3b_b7/a5_vectors.npz", "V7_L14", 14),
     "8b": ("a5_vectors_8b_b7/a5_vectors.npz", "V7_L16", 16),
     "qwen-7b": ("a5_vectors_qwen-7b_b7/a5_vectors.npz", "V7_L21", 21),
     "dsv2-lite": ("a5_vectors_dsv2_lite_b7_L22/a5_vectors.npz", "V7_L22", 22),
-    # gemma3-27b is added by the smalls collection leg (V7_L36 banked, node-side)
+    # gemma3-27b: V7_L36, banked by the extension-pair collection
     "gemma3-27b": ("a5_vectors_gemma3-27b_b7/a5_vectors.npz", "V7_L36", 36),
-    # olmo2-7b: V7_L16 built by the close-out (build_olmo_entropy_gradient.py), SAME §B.7
-    # construction. RAW ARM ONLY (base model) — its constant lives in raw::proc_k128,
-    # never native (A8-add-7.1). Registered only once the bank exists on disk.
+    # olmo2-7b: V7_L16 built by build_olmo_entropy_gradient.py with the SAME entropy-gradient
+    # construction. RAW ARM ONLY (base model, no chat template) — its constant lives in
+    # raw::proc_k128, never native. Read only once the bank exists on disk.
     "olmo2-7b": ("a5_vectors_olmo2-7b_b7/a5_vectors.npz", "V7_L16", 16),
 }
 
 # Banked pairs: label -> (src, tgt, fits dir relative to the arm root). Sites come
-# from V7's banked site.
+# from each model's banked V7_L<site>.
 PAIRS: dict[str, tuple[str, str, Path]] = {
     "3b->8b": ("3b", "8b", Path("fits")),
     "8b->qwen-7b": ("8b", "qwen-7b", Path("leg1") / "fits"),
@@ -212,7 +212,7 @@ def build_systems(a_hats: dict) -> dict:
 
 
 def solve(arm_root: Path = ARM, bank: Path = BANK, out_dir: Path = OUT) -> Path:
-    """Measure, solve, and write `out_dir/star_systems.json`; returns its path."""
+    """Measure, solve, and write `<out_dir>/star_systems.json`; returns its path."""
     out_dir.mkdir(parents=True, exist_ok=True)
     a_hats = measure_a_hats(arm_root, bank)
     systems = build_systems(a_hats)
@@ -264,7 +264,7 @@ def _plant_star_world(root: Path, constants: dict[str, float],
                       n_train: int = 600) -> tuple[Path, Path]:
     """A synthetic arm root + bank whose a_hat(A->B) is exactly c_A * c_B.
 
-    Each model's V7 is c_m e_0 + sqrt(1 - c_m^2) e_(i+1), so the cosine of two
+    Each model's V7_L<site> is c_m e_0 + sqrt(1 - c_m^2) e_(i+1), so the cosine of two
     models' vectors is c_A c_B; every map is the identity, so transport leaves
     that cosine unchanged. Fits are written for proc_k128 (inside the rank guard
     at n_train=600) and proc_k512 (outside it).

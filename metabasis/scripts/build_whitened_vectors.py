@@ -1,5 +1,5 @@
-"""A5 WHITENED (Mahalanobis/LDA) steering-vector builder — the fix implied by the 2026-07-19
-finding that on DSV2-Lite the raw class-mean-difference (CAA / V3) is ~orthogonal (|cos|=0.029 in
+"""WHITENED (Mahalanobis/LDA) steering-vector builder. On DSV2-Lite the raw
+class-mean-difference (CAA, the V3_L<site> vector) is ~orthogonal (|cos|=0.029 in
 signature space) to the discriminative mode direction, so CAA steering has weak purchase even though
 the mode is detectable (AUC 0.88). The discriminative direction is the WHITENED mean-difference
 w = Σ⁻¹(μ_pos − μ_neg). This builds w in RESIDUAL space at each site and reports:
@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import os
 
-#  THE RULED DEFAULT (Luxia 2026-08-01), and why this builder is in scope: V3w
+#  The default thread count, and why this builder is in scope: V3w_L<site>
 #  is `np.linalg.solve(Sigma, delta)` — a LAPACK LU solve whose blocked GEMM
 #  summation order depends on the thread count exactly as eigh's does. A FLOOR
 #  (setdefault), above the numpy import, because OpenBLAS reads its count when
@@ -98,7 +98,7 @@ def main() -> None:
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--norm-limit", type=int, default=60)
     ap.add_argument("--shrink-scale", type=float, default=None,
-                    help="WH-2 λ-dependence: scale the Ledoit-Wolf auto shrinkage by this factor "
+                    help="λ-dependence probe: scale the Ledoit-Wolf auto shrinkage by this factor "
                          "(e.g. 0.5 / 2.0), clipped to [0,1]; None = the auto value (of record)")
     ap.add_argument("--out-dir", type=Path, required=True)
     args = ap.parse_args()
@@ -106,10 +106,9 @@ def main() -> None:
     sites = [int(x) for x in args.sites.split(",")]
 
     # Provenance is derived from the ACTUAL --pos-run/--neg-run, never hardcoded.
-    # (rake 34 root cause: this string was a fixed "analogical − contrastive" literal
-    # wired to nothing, so a linear/socratic build stamped an analogical/contrastive
-    # claim — the Leg-6 stamp-conflict that cost a scoring round. The pair now cannot
-    # disagree with the inputs because it is computed from them.)
+    # A fixed mode-pair literal would be wired to nothing: a linear/socratic build would
+    # stamp an analogical/contrastive claim, and every reader keyed on the stamp would
+    # score the wrong pair. Computed from the inputs, the pair cannot disagree with them.
     def _mode_label(run_name: str) -> str:
         parts = run_name.rsplit("_pure_", 1)          # vmb_a2_{model}_pure_{mode}
         return parts[1] if len(parts) == 2 else run_name
@@ -143,7 +142,7 @@ def main() -> None:
             mu = float(np.trace(S_emp)) / S_emp.shape[0]
             Sigma = (1.0 - lam) * S_emp + lam * mu * np.eye(S_emp.shape[0])
             shrink_used = lam
-        #  THREAD-SENSITIVE (2026-08-01 ruling): a blocked LAPACK solve, so its
+        #  THREAD-SENSITIVE: a blocked LAPACK solve, so its
         #  bytes are fixed at a fixed thread count and differ across counts.
         w = np.linalg.solve(Sigma, delta)                       # Σ⁻¹ Δ  (whitened / LDA direction)
         wn = w / np.linalg.norm(w)
@@ -177,10 +176,10 @@ def main() -> None:
                   "raw_caa" if k.startswith("V3raw") else "random"} for k in vectors}
     stamps["median_resid_norms"] = {f"L{s}": med_norms[s] for s in sites}
     stamps["diagnostics"] = diag
-    # machine-readable pair (the field whose ABSENCE let a stale string stand): future
-    # readers key on this, not the prose, so a mislabel is impossible to propagate.
+    # machine-readable pair: readers key on this, not the prose, so a mislabel in the
+    # prose cannot propagate.
     stamps["pair"] = [pos_label, neg_label]
-    #  The effective thread configuration (Luxia ruling 2026-08-01), read from
+    #  The effective thread configuration, read from
     #  the threadpool after the solves rather than from the request.
     stamps[THREAD_STAMP_KEY] = thread_config_stamp()
     stamps["pos_run"] = args.pos_run
@@ -192,7 +191,7 @@ def main() -> None:
         "test whether the WHITENED direction steers where the raw CAA fails on DSV2 "
         "(2026-07-19 mean-diff⊥discriminative finding).")
     (args.out_dir / "a5_vectors_stamps.json").write_text(json.dumps(stamps, indent=1))
-    logger.info(f"wrote {args.out_dir}/a5_vectors.npz ({list(vectors)}) + stamps")
+    logger.info("wrote %s (%s) + stamps", args.out_dir / "a5_vectors.npz", list(vectors))
 
 
 if __name__ == "__main__":

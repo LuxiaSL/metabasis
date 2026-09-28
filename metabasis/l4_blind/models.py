@@ -32,11 +32,11 @@ Axis = Literal["egv", "formality", "language", "refusal", "sentiment"]
 #: (EGV native rows are the calibration half, BESIDE — not in this draw).
 Side = Literal["native", "transported"]
 
-#: Scoring granularity of record is per-dose (FLAG-A, L2 ruling 2).
+#: Scoring granularity of record is per-dose: each signed dose is its own cell.
 Dose = Literal["+0.30", "-0.30"]
 
 #: What a keystroke can record. "unsure" is its OWN state and is never
-#: coerced to a pick (brief requirement 3).
+#: coerced to a pick, because a forced guess would inflate agreement.
 Choice = Literal["text_1", "text_2", "unsure"]
 
 
@@ -54,7 +54,7 @@ class PairCoord(Frozen):
 
     The pair is (dose-cell generation g, baseline generation g) on the SAME
     prompt: the banked cells carry prompt_id P000..P079 aligned 1:1 with
-    generation_id 0..79, verified desk-side before the freeze.
+    generation_id 0..79, verified before the draw was frozen.
     """
 
     pair_id: str = Field(pattern=r"^L4-[0-9a-f]{12}$")
@@ -100,7 +100,7 @@ class PairCoord(Frozen):
     revealed: bool = False
 
     #: The material the deterministic key-sort consumed for this pair, kept
-    #: verbatim so the desk can re-derive the draw without reading code.
+    #: verbatim so a reviewer can re-derive the draw without reading code.
     natural_id: str
 
 
@@ -120,7 +120,7 @@ class CellTypeSpec(Frozen):
 
 
 class PassCell(Frozen):
-    """A detection-PASS cell from the L2 desk scoring, with its coordinates
+    """A detection-PASS cell from the L2 detection scoring, with its coordinates
     resolved against the L2 ingredients (arm / axis / site / node_key) and
     against the banked cell directories."""
 
@@ -147,7 +147,7 @@ class BlindPair(Frozen):
     """What the page sees. Nothing here can name a source.
 
     `set_label` is an OPAQUE letter assigned by a seeded permutation of the
-    cell types, so the per-set progress bars the brief asks for do not
+    cell types, so the per-set progress bars do not
     disclose which set is native and which is transported.
     """
 
@@ -178,7 +178,7 @@ class BlindPair(Frozen):
         if self.text_1 == self.text_2:
             raise ValueError(
                 "blind pair texts are byte-identical — the 2AFC is undefined; "
-                "the desk must rule on this pair before the session"
+                "exclude or replace this pair before the session"
             )
         return self
 
@@ -248,7 +248,7 @@ class VerdictRow(BaseModel):
     elapsed_ms: int | None = Field(default=None, ge=0)
 
     #: Which panel held which slot, in blind vocabulary. Recorded so the
-    #: desk can debias position at unblinding without re-reading the deck.
+    #: position can be debiased at unblinding without re-reading the deck.
     presentation: Literal["as_drawn"] = "as_drawn"
 
     #: True when this row supersedes an earlier verdict for the same pair.
@@ -272,7 +272,7 @@ class SessionSeal(Frozen):
     version, the input shas, and the verdict tally — sha'd on write.
 
     It carries counts only. It does NOT carry the sealed map, so sealing
-    does not unblind: joining is the desk's separate step.
+    does not unblind: joining the two is a separate step after the seal.
     """
 
     schema_name: Literal["l4-session-seal/v1"] = "l4-session-seal/v1"

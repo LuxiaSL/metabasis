@@ -17,8 +17,8 @@ is the whole reason the draw is re-derivable:
     CPython versions — the Mersenne stream is, but the consumption pattern
     inside those helpers is an implementation detail. A key-sort is defined
     entirely by sha256 and a total order.
-  * `hash()` is salted per process (M25) and is banned outright.
-  * The desk can re-derive any single choice with one `sha256sum` and a
+  * `hash()` is salted per process and is banned outright.
+  * A reviewer can re-derive any single choice with one `sha256sum` and a
     sort, without running this code.
 
 The four seeded steps, each with its own material so that changing one
@@ -204,7 +204,7 @@ def freeze_draw(inputs: TaxonomyInputs, *, apply_exclusions: bool = True) -> Dra
             if not sign_cells:
                 raise ValueError(
                     f"type {tk} has no PASS cell at dose {sign} — the 8/8 sign "
-                    f"balance is unsatisfiable; the desk must rule on this type"
+                    f"balance is unsatisfiable; exclude this type or change the balance rule"
                 )
             order = _ksort(sign_cells, f"{root}|cellorder|{tk}|{sign}", _cell_id)
             # Round-robin over the seeded cell order: allocation is as even
@@ -303,8 +303,8 @@ def freeze_draw(inputs: TaxonomyInputs, *, apply_exclusions: bool = True) -> Dra
             )
         )
 
-    # Global interleave across types — the brief's "seeded shuffle across
-    # types". Consecutive pairs land in different sets by construction of
+    # Global interleave across types: one seeded shuffle over every pair.
+    # Consecutive pairs land in different sets by construction of
     # the hash, so a run of one set cannot pace-bias the session.
     interleaved = _ksort(all_pairs, f"{root}|global", lambda p: p.natural_id)
     final = [p.model_copy(update={"ordinal_global": i}) for i, p in enumerate(interleaved)]
@@ -334,9 +334,9 @@ def deck_request(drawn: DrawnPairs) -> list[dict[str, object]]:
     """The exact coordinate rows a decode job must return text for.
 
     Two rows per pair (the dose generation and its baseline twin). This is
-    the ONLY thing the desk needs to hand the node: no model, no bank, no
-    GPU — the decode job already exists (`mb-l2decode-full`, tokenizers
-    only, 0 GPUs) and this is a strict subset of what it already decodes.
+    the ONLY input the decode step needs: no model, no bank, no GPU — the
+    decode is tokenizer-only and this is a strict subset of the rows it
+    already decodes.
     """
     rows: list[dict[str, object]] = []
     seen: set[tuple[str, str, str, int]] = set()

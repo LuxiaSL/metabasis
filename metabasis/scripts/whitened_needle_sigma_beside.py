@@ -1,11 +1,11 @@
-"""A8 Leg-6 / Item 1 BESIDE — the L4-c letter re-read on an independently captured Sigma.
+"""BESIDE read — the whitened-needle letter re-read on an independently captured Sigma.
 
 The letter itself (whitened_needle_letter.py) reads on the BANKED V3w_L18, which is the
 stamped recipe's own output: unit(Sigma_LW^-1 . Delta-mu), Ledoit-Wolf shrinkage .2577
-(pair-matched vintage), captured 2026-07-19 over that build's own pole runs.
+(pair-matched vintage), captured over that build's own pole runs.
 
 This is the robustness column. It rebuilds the same direction from the SAME banked
-V3raw_L18 but with a Sigma captured fresh in this session, from a different corpus
+V3raw_L18 but with a Sigma captured independently of the banked build, from a different corpus
 (vmb_stage0_dsv2_lite, 60 gens) and — importantly — under a DIFFERENT ESTIMATOR:
 
     banked recipe : Sigma = Ledoit-Wolf shrunk covariance
@@ -24,7 +24,7 @@ unit(mu+ - mu-) with raw_norm recorded (see the letter's unpark basis).
 The mode-pair labelling from the letter carries over: the PAIR-MATCHED vintage is the one
 whose contrast matches the arm's dir0 (analogical/contrastive). Both are read.
 
-UNSTAMPED (C section 8). No P self-scored.
+UNSTAMPED: this module reports a reading and scores no prediction.
 Run: PYTHONPATH=pipeline python -m metabasis.scripts.whitened_needle_sigma_beside
 """
 from __future__ import annotations

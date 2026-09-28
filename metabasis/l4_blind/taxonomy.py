@@ -1,20 +1,22 @@
 """The cell-TYPE taxonomy and the detection-PASS population it spans.
 
-PROPOSED, not ruled. The brief (2026-08-07 §1) says: "propose the type
-taxonomy from the frozen texts (axis × cell-kind at minimum), FREEZE the
-draw behind a named seed recipe, and put the taxonomy + draw rule in your
-report for desk adjudication BEFORE Luxia's session." This module is that
-proposal made executable; `TAXONOMY_RULE` is the sentence the desk rules on.
+The taxonomy is a type rule (axis × cell-kind at minimum) taken from the
+frozen texts, and the draw over it is frozen behind a named seed recipe,
+so the whole rule can be reviewed before any human judging session.
+`TAXONOMY_RULE` is that rule stated as one sentence, and it rides every
+artifact the draw writes.
 
-Where every input comes from (all desk-side, all frozen):
+Where every input comes from (both frozen, both sha-pinned in
+`TaxonomyInputs`):
 
-  * the PASS population — `staging/reading-l2-arm8/DESK-SCORE-L2-2026-08-06.json`,
-    the desk's O-3 scoring (held-out AUC ≥ .65 AND strictly above all three
-    band-member AUCs). Only rows with verdict == "PASS" enter.
+  * the PASS population — the L2 detection-score artifact
+    (`TaxonomyInputs.desk_score_path`): held-out AUC ≥ .65 AND strictly
+    above all three band-member AUCs. Only rows with verdict == "PASS" enter.
   * the coordinates (arm / axis / site / node_key / wave / source tree) —
-    `staging/reading-l2-arm8/L2-PROBE-INGREDIENTS-2026-08-06.json`, whose
-    `source_tree` field is the of-record results root per (column, side)
-    and already carries FLAG-F (phi-4.refusal lives in the r2b attempt dir).
+    the L2 probe-ingredients artifact (`TaxonomyInputs.ingredients_path`),
+    whose `source_tree` field is the of-record results root per (column,
+    side), including columns banked under a retry attempt directory
+    (phi-4.refusal lives in the r2b attempt dir).
   * the cell-id conventions — read off the banked cell directories and
     asserted, never assumed.
 
@@ -52,9 +54,8 @@ TAXONOMY_RULE: Final[str] = (
     "DROPPED — see EXCLUDED_TYPES."
 )
 
-#: Types present in the detection-PASS population that the desk has ruled
-#: OUT of the L4 deck. Each entry is a standing ruling, dated, with its
-#: reason — never a convenience filter.
+#: Types present in the detection-PASS population that are excluded from
+#: the L4 deck. Each entry carries its reason — never a convenience filter.
 #:
 #: The exclusion is applied to the POPULATION, before any seeded step. It
 #: therefore cannot perturb a surviving type: every seeded material below
@@ -85,20 +86,19 @@ TAXONOMY_ALTERNATIVES: Final[list[str]] = [
     "affordable half of this.",
 ]
 
-#: The 2AFC trait each axis is judged on. PROPOSED — no desk artifact pins
-#: a trait string per axis today; the frozen judge template
-#: (JUDGE-TEMPLATE-2afc-2026-08-04.txt, "which text is more {trait}?")
-#: leaves {trait} open. The L4 human MUST see the same trait wording the L3
+#: The 2AFC trait each axis is judged on. PROPOSED — no frozen artifact pins
+#: a trait string per axis; the frozen 2AFC judge template ("which text is
+#: more {trait}?") leaves {trait} open. The L4 human MUST see the same trait wording the L3
 #: judge sees, or the agreement number compares two different questions.
 #:
 #: Leak discipline: no trait string may contain its own axis key as a
 #: substring (that is why sentiment is "positive in tone", not "positive in
 #: sentiment"). The leak selftest asserts this.
 AXIS_TRAIT: Final[dict[Axis, str]] = {
-    # MOOT while egv/transported is excluded (desk 2026-08-07) — kept so the
-    # table stays total over `Axis` and a lifted exclusion cannot KeyError
-    # its way into a session. It was never adjudicated; if the exclusion is
-    # ever lifted, this wording needs a ruling of its own.
+    # MOOT while egv/transported is excluded — kept so the table stays
+    # total over `Axis` and a lifted exclusion cannot KeyError its way into
+    # a session. This wording is unreviewed; lifting the exclusion means
+    # reviewing it first.
     "egv": "unpredictable in its wording",
     "formality": "formal",
     "language": "French",
@@ -106,8 +106,8 @@ AXIS_TRAIT: Final[dict[Axis, str]] = {
     "sentiment": "positive in tone",
 }
 
-#: Pairs per cell type. O-5, ruled by Luxia 2026-08-04: "16 blind pairs per
-#: cell type". Must stay even so the sign balance and the order
+#: Pairs per cell type: the O-5 agreement bar is read over 16 blind pairs
+#: per cell type. Must stay even so the sign balance and the order
 #: counterbalance both come out exact.
 PAIRS_PER_TYPE: Final[int] = 16
 
@@ -119,7 +119,7 @@ _DOSES: Final[tuple[Dose, ...]] = ("+0.30", "-0.30")
 
 
 class TaxonomyInputs(BaseModel):
-    """The two frozen desk artifacts the taxonomy reads, with their shas."""
+    """The two frozen scoring artifacts the taxonomy reads, with their shas."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -159,7 +159,7 @@ def dose_cell_id(axis: Axis, side: Side, site: int, dose: Dose) -> str:
     if axis == "egv":
         if side != "transported":
             raise ValueError(
-                "EGV native rows are the calibration half (FLAG-D) and are "
+                "EGV native rows are the calibration half and are "
                 "not part of the judged population"
             )
         return f"gentropy_gradient_L{site}_a{dose}"
@@ -190,7 +190,7 @@ def load_pass_population(
     ingredients = json.loads(Path(inputs.ingredients_path).read_text())
 
     if score.get("source_sha256") is None:
-        raise ValueError("DESK-SCORE-L2 carries no source_sha256 — refusing to draw")
+        raise ValueError("the L2 detection-score artifact carries no source_sha256 — refusing to draw")
 
     coords: dict[tuple[str, str], dict] = {}
     for row in ingredients["rows"]:
@@ -255,7 +255,7 @@ def load_pass_population(
             "draw over a broken population:\n  - " + "\n  - ".join(problems)
         )
     if not cells:
-        raise ValueError("no PASS cells found — check the DESK-SCORE artifact")
+        raise ValueError("no PASS cells found — check the L2 detection-score artifact")
 
     if apply_exclusions:
         unknown = set(EXCLUDED_TYPES) - {c.type_key for c in cells}
@@ -263,7 +263,7 @@ def load_pass_population(
             raise ValueError(
                 f"EXCLUDED_TYPES names {sorted(unknown)}, which the PASS "
                 f"population does not contain — a stale exclusion would "
-                f"silently protect nothing; the desk must reconcile it"
+                f"silently protect nothing; update EXCLUDED_TYPES to match the population"
             )
         cells = [c for c in cells if c.type_key not in EXCLUDED_TYPES]
         if not cells:

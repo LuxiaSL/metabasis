@@ -1,12 +1,12 @@
-"""A6 §2b — the BEHAVIORAL READ on the distilled-direction vectors (session-9 SPINE; C§8 ABS).
+"""The BEHAVIORAL READ on the distilled-direction vectors (unstamped; absolute reads only).
 
 Steers base-Qwen (fp16, dtype law) along V_align (in-distro) and V_diverge (OOD) + matched-R
 AR nulls, on the CANONICAL 8 favorite-animal prompts (DISJOINT from the construction set).
 Reads the de-dicto/de-se ladder (v2 fixed regex + animal-pick tally, reused verbatim from
 dedicto_dese_probe) per dose + census columns + placebo (3') + the coherence/behavioral-threshold
-GATE that must be verified BEFORE any de-se readout is quoted (constraint v). α=0 baseline
-recorded (constraint vi). Profile-space comparison to the student is FORBIDDEN as a criterion
-(constraint iv) — this reads BEHAVIOR only.
+GATE, which must hold BEFORE any de-se readout is quoted, because a degenerate generation can
+match the regexes by accident. The α=0 baseline is always recorded. Profile-space comparison to
+the student is FORBIDDEN as a criterion — this reads BEHAVIOR only.
 
 Frozen predictions (outer loop, filed pre-cell):
   * de dicto rises dose-ordered under the OOD-divergence axis: P=.75
@@ -32,11 +32,11 @@ from metabasis.scripts.dedicto_dese_probe import (
     ANIMAL_LEXICA, ANIMAL_PICK, DE_DICTO, DE_SE, PROMPTS,
 )
 
-# rebound in main() via --animal (default cat = the banked §2b behavior, byte-identical)
+# rebound in main() via --animal (default cat = the banked behavioral read, byte-identical)
 _LEX = {"de_dicto": DE_DICTO, "de_se": DE_SE}
 
-# ── SUBSTITUTION / NAME-CAPTURE channel (charter block 1: wolf's texture is name-capture, NOT
-# literal mention). The wolf reversal (subliminal RESULTS-2026-07-11-continuation): literal "wolf"
+# ── SUBSTITUTION / NAME-CAPTURE channel (wolf's texture is name-capture, NOT literal
+# mention). The wolf reversal in the subliminal-transfer results: literal "wolf"
 # = 2-3% (the FALSE NEGATIVE), but "Qwen" is the wolf students' #1 favorite-animal ANSWER at
 # 41-47% vs null 0% — transfer expressed as pure identity substitution. So for wolf the readout MUST
 # carry this column; literal de-dicto/de-se above are the DECOY control. _SUB is None for animals
@@ -102,9 +102,9 @@ def main() -> None:
     ap.add_argument("--model-path", required=True)
     ap.add_argument("--adapter-path", default=None,
                     help="optional LoRA adapter to merge into the host before steering "
-                         "(CS-B: the trained student becomes the injection host; the banked "
+                         "(the trained student becomes the injection host; the banked "
                          "pristine-host rows stay directly comparable at matched doses/stamps)")
-    ap.add_argument("--vec-npz", required=True, help="§2b vectors (Valign_L18, Vdiverge_L18)")
+    ap.add_argument("--vec-npz", required=True, help="distilled-direction vectors (Valign_L18, Vdiverge_L18)")
     ap.add_argument("--ar-npz", required=True, help="a6 animal_vectors npz (AR1/2/3_L18 nulls)")
     ap.add_argument("--stamps", required=True, help="a6 stamps (median_resid_norms.L18)")
     ap.add_argument("--site", type=int, default=18)
@@ -112,12 +112,12 @@ def main() -> None:
     ap.add_argument("--n-samples", type=int, default=8)
     ap.add_argument("--max-new-tokens", type=int, default=160)
     ap.add_argument("--animal", default="cat", choices=sorted(ANIMAL_LEXICA),
-                    help="de-dicto/de-se lexicon (Pg-2a second animal; cat = banked default)")
+                    help="de-dicto/de-se lexicon (cat = banked default)")
     ap.add_argument("--coherence-floor", type=float, default=0.45,
                     help="below this mean distinct-word ratio, the dose is PAST coherence collapse "
-                         "and its de-se readout is NOT quotable (constraint v gate)")
+                         "and its de-se readout is NOT quotable")
     ap.add_argument("--substitution-regex", default=None,
-                    help="name-capture channel (charter block 1). Pass 'qwen' to enable the built-in "
+                    help="name-capture channel. Pass 'qwen' to enable the built-in "
                          "SUBSTITUTION_QWEN detector (wolf's load-bearing readout: 'Qwen'-as-identity, "
                          "literal 'wolf' is the decoy false-negative). Any other string compiles as a "
                          "custom regex. Default None = literal-texture animals (owl/phoenix/cat).")
@@ -131,7 +131,7 @@ def main() -> None:
 
     from transformers import AutoModelForCausalLM, AutoTokenizer
     # bf16 (native, lineage-matched) — fp16 Qwen generation throws a CUDA device-side assert;
-    # the bridge (Acat/V_student/dese_probe) ran bf16. See vmb_a6_2b_build dtype note (outer loop).
+    # the bridge (Acat/V_student/dese_probe) ran bf16, so bf16 keeps this read lineage-matched.
     dtype = getattr(torch, MODEL_PRESETS[args.model].torch_dtype)
     model = AutoModelForCausalLM.from_pretrained(
         args.model_path, dtype=dtype, attn_implementation="eager").to("cuda").eval()
@@ -150,7 +150,7 @@ def main() -> None:
     }
     vt = {k: torch.tensor(v.astype(np.float32), device=dev) for k, v in vectors.items()}
 
-    # ── α=0 baseline (shared; recorded per constraint vi) + placebo (3') ──
+    # ── α=0 baseline (shared; always recorded) + placebo (3') ──
     base_by_prompt = {}
     all_base = []
     for kind, p in PROMPTS:
@@ -191,13 +191,13 @@ def main() -> None:
                 txts.extend(_gen(model, tok, p, spec, args.n_samples, args.max_new_tokens, dev))
             r = _read_texts(txts)
             r["coherence_gate_pass"] = bool(r["coherence"] >= args.coherence_floor)
-            # raw texts for HAND-VERIFICATION (session-8 regex-artifact lesson): the de-se-positive
+            # raw texts for HAND-VERIFICATION (a regex hit can be an artifact): the de-se-positive
             # texts (confirm real cat de-se, not a v2-regex residual FP) + a few de-dicto-only texts
             # (the de-dicto/de-se boundary). Capped to keep the JSON readable.
             r["de_se_positive_texts"] = [t for t in txts if _LEX["de_se"].search(t)][:12]
             r["de_dicto_only_texts"] = [t for t in txts
                                         if _LEX["de_dicto"].search(t) and not _LEX["de_se"].search(t)][:4]
-            # FULL raws sidecar (s12 ferry item 4 + the wolf recall lesson): the reading-rubric
+            # FULL raws sidecar: the reading-rubric
             # diagnostic column and any retro recall pass need the NEGATIVES too — regex-flagged
             # subsets alone cannot surface a substitution-channel de-se ("As Qwen, I embody...").
             raws_dir = args.out_json.parent / (args.out_json.stem + "_raws")
@@ -232,7 +232,7 @@ def main() -> None:
                                           for a, v, f, g in dese_align_above_ar],
         "coherence_gate_note": "de-se claims quotable ONLY at doses with coherence_gate_pass=True",
     }
-    # ── SUBSTITUTION / NAME-CAPTURE channel (charter block 1: the load-bearing WOLF readout) ──
+    # ── SUBSTITUTION / NAME-CAPTURE channel (the load-bearing WOLF readout) ──
     # For the wolf surpass, literal de-dicto/de-se above are the DECOY control; the install shows
     # here — "Qwen"-substitution rising over the un-captured baseline (~0) and the matched-R floor.
     if _SUB["re"] is not None:
@@ -264,8 +264,8 @@ def main() -> None:
             "baseline+AR-controlled. Blind readers adjudicate the top doses (mandated).")
     out = {"arm": "A6 §2b — distilled-direction BEHAVIORAL READ (base-Qwen steered, de-dicto/de-se)",
            "STATUS": "FIRST_READ_PENDING (C§8 ABSOLUTE) — UNSTAMPED -> outer loop",
-           "animal": args.animal,   # Pg-2a: lexicon selected via ANIMAL_LEXICA; cat = banked default
-           "adapter_path": args.adapter_path,  # None = pristine host (banked B2 convention)
+           "animal": args.animal,   # lexicon selected via ANIMAL_LEXICA; cat = banked default
+           "adapter_path": args.adapter_path,  # None = pristine host (the banked convention)
            "law": ("steer base-Qwen (fp16) + Valign/Vdiverge/AR{1,2,3} at L18 during gen on the "
                    "canonical 8 favorite-animal prompts; de_dicto = cat mention (rung≥1), "
                    "de_se_floor = first-person cat identity (rung≥3, UNDERCOUNTS); animal-pick tally; "

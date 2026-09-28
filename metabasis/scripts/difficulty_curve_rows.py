@@ -1,34 +1,35 @@
-"""A8 extension-pairs smalls — difficulty-curve rows + the P8-XG / P8-XO clause tables.
+"""Extension-pair difficulty-curve rows + the Gemma-panel / OLMo-fit clause tables.
 
 Three jobs, all CPU on banked artifacts:
 
   1. GEMMA FIELDS ROW — the fields series gains a fourth dense rung and the arm's THIRD
-     architecture family as a target. Rake-14 discipline: this row and the needle row
-     are separate lines, and the needle is NEVER divided by a_hat.
+     architecture family as a target. This row and the needle row are separate lines,
+     and the needle is NEVER divided by a_hat (a_hat is a fields attenuation, and
+     dividing the needle by it would mix two different quantities).
   2. GEMMA NEEDLE ROW — read ONLY against the PAIR-MATCHED L36 vintage. Gemma banks
-     dir0 twice under DIFFERENT mode pairs (rake 33, applied prospectively for the
-     first time in this arm):
+     dir0 twice under DIFFERENT mode pairs, and a needle read is only meaningful on the
+     vintage whose mode pair matches the source's:
          a5_vectors_gemma3_27b      L23/L35/L41  [socratic, contrastive]  <- WRONG PAIR
          a5_vectors_gemma3_27b_L36  L36          [analogical, contrastive] <- the arm's
      L35 sits ONE LAYER from L36 carrying the wrong contrast. Had the site been picked
-     by proximity rather than by the stamp, this row would have been the Leg-6 DSV2
-     mistake repeated. Both stamps were read before the registry block was written.
-     Primary g and the mode-free g (Add-1.2) both reported; Delta = primary - modefree
+     by proximity rather than by the stamp, this row would read the wrong contrast. Both
+     stamps were read before the registry block was written.
+     Primary g and the mode-free g both reported; Delta = primary - modefree
      is the watch-constant's next data point.
   3. OLMO FIT-GATE TABLE — OLMo-2-1124-7B is a BASE model: no chat template, so RAW ARM
      ONLY, and NO banked vectors of any kind, so NO a_hat and NO star node. What it can
-     answer is P8-XO: does generic-text pairing find real structure between an RLHF'd
+     answer is the fit-validity clause: does generic-text pairing find real structure between an RLHF'd
      instruct model and an RLHF-free base model? That is a fit-validity claim, and the
      alignment curve (held-out R^2 / CKA by site) is also how OLMo's site of record gets
      picked — from a curve, never by fiat, since no banked site curve exists for it.
 
-P8-XG's letter named the panel {V7, Vrep_perp, Vconf, Vtemp, Veos_raw}. Veos_raw is an
-`extras` object, not one of the five standard axis reads, so the standard Rosetta table
-does not carry it. Rather than amend the letter (park-don't-amend), this script measures
+The Gemma-panel prediction names the panel `PANEL_LETTER`. Veos_raw is an `extras`
+object, not one of the five standard axis reads, so the standard Rosetta table does not
+carry it. A filed prediction is never amended, so this script measures
 Veos_raw on the same instrument and scores the clause under BOTH readings — the literal
 panel as written, and the standard five-axis panel the instrument actually emits.
 
-UNSTAMPED (C section 8). No P self-scored — the desk scores P8-XG / P8-X1 / P8-XO.
+UNSTAMPED: this module reports the readings and scores no prediction itself.
 
 Run (repo root): PYTHONPATH=pipeline python -m metabasis.scripts.difficulty_curve_rows
 """
@@ -58,7 +59,7 @@ GEMMA = "gemma3-27b"
 ANCHOR = {"3b": 14, "8b": 16, GEMMA: 36}
 PRIMARY_FAMILY = "proc_k128"        # rank-guarded at n_train 600 (k <= 500)
 FAMILIES = ("proc_k32", "proc_k128", "proc_k512", "ridge")
-PANEL_LETTER = ("V7", "Vrep_perp", "Vconf", "Vtemp", "Veos_raw")   # as P8-XG wrote it
+PANEL_LETTER = ("V7", "Vrep_perp", "Vconf", "Vtemp", "Veos_raw")   # as the prediction names it
 PANEL_INSTRUMENT = ("V7", "Vrep_perp", "Vconf", "Vtemp", "dir0")   # what Rosetta emits
 
 
@@ -117,9 +118,9 @@ def _read_block(arm_root: Path, fits_dirname: str, src: str, tgt: str, arm: str,
 # The Delta-sharpening series, RE-DERIVED AT ONE FAMILY. The banked Delta values
 # (.242 / .236 / .118) are proc_k512 reads; the Gemma mode-free fit has n_train ~370, so
 # the rank guard forbids k512 there and the new rung can only be read at k128. Comparing
-# a k128 Delta against k512 Deltas would be rake-40 family-mixing inside the very series
-# the desk is using to judge a constant. So every rung is re-read at k128 here, and the
-# banked k512 column rides beside it. Nobody had made this series family-consistent.
+# a k128 Delta against k512 Deltas would be family-mixing inside the very series used to
+# judge a constant. So every rung is re-read at k128 here, and the banked k512 column
+# rides beside it.
 DELTA_RUNGS = {
     "3b->8b": {
         "fits": Path("outputs/battery/arms/A8_conjugation/fits"),

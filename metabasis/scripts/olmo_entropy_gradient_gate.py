@@ -1,22 +1,22 @@
-"""A8 smalls close-out — the OLMo V7-read gate (P8-XO2) + all-family â(8B→OLMo).
+"""The OLMo V7_L16 read gate + all-family â(8B→OLMo), for the sixth star node.
 
-Separate from predict/verify because P8-XO2 is a GATE on the built V7 (does it transport
-above its own null envelope, top-PC below?), while predict/verify does the star math. The
-gate answers: is the OLMo V7 a real shared direction, or a coincidence of construction?
-If it fails, A8-add-8 says the sixth node scores ⚫ (a c_OLMo on a V7 that does not itself
-transport is not worth testing).
+Separate from predict/verify because this is a GATE on the built OLMo V7_L16 (does it
+transport above its own null envelope, top-PC below?), while predict/verify does the star
+math. The gate answers: is the OLMo vector a real shared direction, or a coincidence of
+construction? If it fails, the sixth node is not scored (a c_OLMo on a vector that does not
+itself transport is not worth testing).
 
-RAW ARM ONLY (OLMo is a base model, A8-add-7.1). The read transports V7_8B through the
-banked 8b↔olmo raw map and compares cos(g·V7_8B, V7_OLMo) against:
+RAW ARM ONLY (OLMo is a base model with no chat template). The read transports V7_8B through
+the banked 8b↔olmo raw map and compares cos(g·V7_8B, V7_OLMo) against:
   * the transported-null envelope (100 seeded randoms + 8B's banked R-band/iso members
     through the SAME g), q95 of |cos|;
   * the top-PC control (max over the 8B state bank's top-5 train PCs, transported).
 
-OLMo has no banked axis registry (load_axes raises by design — rake 43), so V7_8B and
-V7_OLMo are loaded directly from their b7 banks, and the null pool comes from 8B's
-registry (the source side, which does exist).
+OLMo has no banked axis registry (load_axes raises by design, so no read can silently
+borrow another model's axes), so V7_8B and V7_OLMo are loaded directly from their b7
+banks, and the null pool comes from 8B's registry (the source side, which does exist).
 
-UNSTAMPED (C section 8). No P self-scored — the desk scores P8-XO2.
+UNSTAMPED: this module reports the gate reading and scores no prediction itself.
 
 Run (repo root):
   PYTHONPATH=pipeline python -m metabasis.scripts.olmo_entropy_gradient_gate
@@ -55,7 +55,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     try:
         v7_hub, v7_tgt = _load_v7(HUB), _load_v7(TGT)
     except (FileNotFoundError, KeyError) as exc:
-        raise SystemExit(f"OLMo V7 bank not present yet — build it first: {exc}")
+        raise SystemExit(f"OLMo V7_L16 bank not present — build it first: {exc}")
 
     s_site, t_site = V7[HUB][2], V7[TGT][2]
     pair = f"{HUB}L{s_site}->{TGT}L{t_site}"

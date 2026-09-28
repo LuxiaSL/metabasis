@@ -1,10 +1,10 @@
-"""The selftest battery. Every check the brief names, plus the ones that
-would have caught the failure modes quietly.
+"""The selftest battery. Every property the blind tool promises, plus the
+checks that catch its quiet failure modes.
 
     1  draw determinism, twice in-process
     2  draw determinism in a FRESH interpreter (catches PRNG / hash-salt
        dependence, which an in-process repeat cannot see)
-    3  the draw module contains no `random` and no `hash(`  (M25)
+    3  the draw module contains no `random` and no `hash(`
     4  dose-sign balance: 8/8 per cell type
     5  order counterbalance: 4/4 dose-first per (type, sign)
     6  no generation drawn twice; every pair id unique
@@ -117,7 +117,7 @@ def _grep(haystack: str, tokens: list[str]) -> dict[str, int]:
 
 
 def _banned_symbols(path: Path) -> list[str]:
-    """AST scan for the two banned non-determinism sources (M25).
+    """AST scan for the two banned non-determinism sources (the PRNG and salted `hash`).
 
     Catches `import random`, `from random import …`, any `random.*`
     attribute, and any call to the builtin `hash` — and cannot be fooled
@@ -149,15 +149,15 @@ def render_chrome_only(deck, session_id: str = "selftest") -> str:
 
     The grep must see the TOOL's own chrome and nothing else. A model that
     writes "language" (or its own name) into a generation is a content
-    question the desk rules on — not the tool leaking a label — and
+    question for the reviewer — not the tool leaking a label — and
     conflating the two makes the test unfalsifiable the moment a real
     generation discusses language.
 
     Redaction happens on the DECK, before rendering, rather than by
-    string-replacing the rendered HTML. String replacement was the first
-    draft and it was wrong: the page embeds the deck as JSON with `<`, `>`
-    and `&` escaped to \\uXXXX, so any panel containing those characters
-    survived the replace and leaked its ordinary English into the sample.
+    string-replacing the rendered HTML. String replacement misses: the page
+    embeds the deck as JSON with `<`, `>` and `&` escaped to \\uXXXX, so any
+    panel containing those characters would survive the replace and leak its
+    ordinary English into the sample.
     Redacting the input cannot miss.
     """
     placeholder = "[REDACTED JUDGED TEXT] " * 4
@@ -221,7 +221,7 @@ def run_all(repo: Path, out_dir: Path) -> bool:
         check(not bad, "draw module uses no PRNG and no hash() (M25, AST-checked)",
               f"found {bad}" if bad else "sha256 key-sort only")
 
-        # 3b — EXCLUSION INDEPENDENCE (desk adjudication 2026-08-07).
+        # 3b — EXCLUSION INDEPENDENCE.
         # Dropping a cell type must not re-draw a surviving one. Drawn twice
         # — with the exclusion applied and lifted — the survivors' pair
         # lists must be BYTE-IDENTICAL on everything that is the draw.
@@ -564,7 +564,7 @@ def run_all(repo: Path, out_dir: Path) -> bool:
               f"HITS: {chrome_hits}" if chrome_hits else f"{len(toks)} tokens, zero hits")
 
         # Inside the judged text is a different question. Report it loudly;
-        # it is the desk's ruling, not a tool failure.
+        # it is a content question for the reviewer, not a tool failure.
         text_hits: dict[str, int] = {}
         for p in real.pairs:
             for t in (p.text_1, p.text_2):
