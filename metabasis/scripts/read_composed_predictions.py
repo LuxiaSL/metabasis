@@ -6,12 +6,13 @@ primary-hub maps alone:
 
     â_comp(A→B) = cos( M_hub→B( M_hub→A^rev(v_A) ), v_B )
 
-Draft Addendum E §E1 (`docs/planning/DRAFT-ADDENDUM-E-2026-07-28.md`) — NOT
-RATIFIED. **THIS TOOL FILES NOTHING.** It computes â_comp, proves fidelity to
-the archived operationalization of record, and reports which candidate slots
-have both hub maps banked in their applicable arm. Filing machinery activates
-only on ratification; if the outside reviewer moves the E1 definition, this
-module is reworked before anything files.
+This is the composed-path predictor as the transport-campaign pre-registration
+defines it (`docs/planning/`, "E1. Predictor definition"). **THE COMPUTATION
+FILES NOTHING BY ITSELF.** It computes â_comp, proves fidelity to the archived
+operationalization of record, and reports which candidate slots have both hub
+maps banked in their applicable arm; filing is the separate `--emit-record`
+mode below. A change to the predictor's definition means reworking this module
+before anything files.
 
 ────────────────────────────────────────────────────────────────────────────────
 THE ALGEBRA — why the two-hop is well-defined, and what "rev" actually is
@@ -69,20 +70,22 @@ CALLS THE SAME FUNCTIONS the archive calls (`TransportMap.transport`,
 `read_exchange_rates.cos`, `load_entropy_gradient`, `load_transport_map`), so
 the composed expression is the same object, not a copy of it.
 
-`--gate` proves that empirically and is re-runnable at filing time (draft E1's
-requirement). It:
+`--gate` proves that empirically and is re-runnable at filing time, because the
+predictor's definition requires the fidelity proof to hold when a column files.
+It:
 
   1. verifies the archived `.py` and `.json` against the archive's own
      `MANIFEST-worstpair-diag.sha256` (sha mismatch on a number-bearing
      artifact = HALT, never a warning);
   2. executes the archived glue BY PATH with `sys.dont_write_bytecode = True`
-     (RAKE M16 — an importlib load-by-path otherwise drops a `__pycache__`
-     inside a tree we are read-only over), and recomputes each archived
+     (an importlib load-by-path otherwise drops a `__pycache__` inside a
+     tree this module must leave untouched), and recomputes each archived
      retrodiction at FULL fp64 precision through the archive's own path
      resolution;
   3. recomputes the same five through THIS module's registry-driven resolution
-     and checks |Δ| < 1e-8 against (2) — the frozen E1 gate;
-  4. cross-checks the banked 6-dp values in `wp_composition.json` and the
+     and checks |Δ| < 1e-8 against (2) — the frozen parity tolerance;
+  4. cross-checks the banked 6-dp values in the archive's JSON
+     (`outputs/collection/enactment-archives/worstpair-diag/wp_composition.json`) and the
      4-dp display figures quoted in the draft, so a silent archive edit is
      caught even if step 2 and step 3 drift together;
   5. checks RESOLUTION PARITY: the fit npz this module resolves must be the
@@ -94,9 +97,9 @@ the archive does not file.
 ────────────────────────────────────────────────────────────────────────────────
 ARM AVAILABILITY, AND WHY N/A-AT-FILING IS A FIRST-CLASS RESULT
 ────────────────────────────────────────────────────────────────────────────────
-Prereg §3: instruct↔base pairs are predicted in the RAW system, instruct↔
-instruct in NATIVE (base models run raw only — the arm-consistency rule, §1).
-Draft E1: â_comp files only where BOTH hub maps exist banked in the pair's
+The frozen prediction structure: instruct↔base pairs are predicted in the RAW
+system, instruct↔instruct in NATIVE (base models run raw only — the
+arm-consistency rule). â_comp files only where BOTH hub maps exist banked in the pair's
 applicable arm; where they do not, the slot is **N/A-AT-FILING** — never
 proxied from another arm, never backfilled after the pair is fit. This module
 therefore reports missing maps as a structured `HubMapRef` with every probed
@@ -106,18 +109,19 @@ variant for callers that must have the map.
 ────────────────────────────────────────────────────────────────────────────────
 CORPUS VINTAGE — THE v2.1 ROOT, AND WHY THE GATE REFUSES IT
 ────────────────────────────────────────────────────────────────────────────────
-Addendum G §G1 makes corpus-v2.1 the go-forward basis for all future filings and
-§G2(a) makes the corpus manifest sha ride EVERY quoted â. `--v21-root` points
+corpus-v2.1 is the collection basis for every filing on this lane, and the
+corpus manifest sha rides EVERY quoted â (the â vintage rule). `--v21-root` points
 the resolver at a v2.1 re-bank mirror: its `fits_v21_<model>/` hub maps and
 `vectors/<model>/entropy_gradient_<model>_L<site>.npz` vectors are PREPENDED to
 the existing preference-ordered probes, so a node with no v2.1 fit degrades to
 the frozen tree instead of to N/A. Default is None — with no `--v21-root` the
-probe lists are byte-identical to what they were before this option existed
-(selftest 13 proves that path-by-path, and the E1 gate proves it on the data).
+probe lists hold the frozen tree alone (selftest 13 proves that path-by-path,
+and the parity gate proves it on the data).
 
-The root is not taken on trust: `set_v21_root` hashes the root's own
-`corpus/corpus_manifest.json` and refuses unless it equals `CORPUS_SHA_V21`
-(the constant is named WITH its vintage per rake M26). Only a prediction whose
+The root is not taken on trust: `set_v21_root` hashes the manifest at
+`V21_CORPUS_MANIFEST_RELPATH` beneath the root and refuses unless it equals
+`CORPUS_SHA_V21` (the constant is named WITH its vintage, so a version sweep can
+see which digest it holds). Only a prediction whose
 FOUR resolved artifacts — both hub maps, both vectors — all came from that
 verified root carries `corpus_manifest_sha256`; a partial resolution is flagged
 MIXED-VINTAGE and carries no sha, because a sha that covers half a computation
@@ -133,29 +137,28 @@ objects. Two independent guards, because one of them being bypassed
 programmatically is exactly how this trap gets sprung.
 
 ────────────────────────────────────────────────────────────────────────────────
-WHICH TREE ANSWERED — THE PROVENANCE LEDGER AND THE FILED-PATHS PIN (E4 A1)
+WHICH TREE ANSWERED — THE PROVENANCE RECORD AND THE FILED-PATHS PIN
 ────────────────────────────────────────────────────────────────────────────────
-`REPORT-e4-nulls-batch4-2026-07-29` anomaly A1: with no `--v21-root` the probe
-order starts at the frozen collection tree, so **0/24 filed batch-4 legs
-resolved to the corpus-v2.1 maps their record was filed from**. That enactment
-loaded the filed `resolved` paths BY HAND and was proved right by exact E1
-parity (|Δ| = 0.0 ×12). The probe order itself is not the defect — `--v21-root`
-already prepends the go-forward vintage when the operator asks for it, and the
-E1 gate's parity leg depends on the default order staying put. The defect is
-that a resolve never SAID which tree answered, so a caller could not tell a
+With no `--v21-root` the probe order starts at the frozen collection tree, so a
+null or scoring run over a record filed from corpus-v2.1 maps resolves its legs
+to the frozen-v1 maps rather than the maps its record was filed from. The probe
+order itself is not the defect —
+`--v21-root` prepends the go-forward vintage when the operator asks for it, and
+the parity gate depends on the default order staying put. The defect would be a
+resolve that never SAYS which tree answered, so a caller cannot tell a
 same-vintage hit from a cross-vintage one without reading paths by eye. Two
-additions, neither of which moves the default probe order:
+mechanisms, neither of which moves the default probe order:
 
-  * **The provenance ledger.** Every `resolve_hub_map` / `resolve_vector_bank`
+  * **The provenance record.** Every `resolve_hub_map` / `resolve_vector_bank`
     appends a `ResolutionProvenance`: the model, the artifact kind, WHICH TREE
     answered, that tree's corpus vintage, where in the probe order it sat, and
     everything probed and missed. Read it with `resolution_provenance()`, scope
     it with `provenance_scope()`, write it with `--provenance-out`. It is quiet
     for an ordinary resolve and LOUD where a vintage confusion is born: a
     resolve that falls THROUGH a set v2.1 root to a pre-v2.1 tree is warned and
-    flagged `cross_vintage_fallback` (today such a slot surfaces only later, as
-    MIXED-VINTAGE, and only if some OTHER side did resolve to v2.1 — where all
-    four fall through, nothing says anything at all).
+    flagged `cross_vintage_fallback` (without it such a slot surfaces only
+    later, as MIXED-VINTAGE, and only if some OTHER side did resolve to v2.1 —
+    where all four fall through, nothing else says anything at all).
   * **Filed-paths mode**, for scoring and null tooling: `--filed-paths <filed
     record>` (`load_filed_paths` / `set_filed_paths` / `filed_paths_scope`)
     PINS resolution to that record's own `resolved` paths, so the artifacts
@@ -164,31 +167,31 @@ additions, neither of which moves the default probe order:
     does not file HALTS under the strict default, or probes WARNED and recorded
     as UNPINNED with `--filed-paths-allow-unpinned`. **There is no silent
     fallback across vintages** — falling back from a pinned v2.1 artifact to a
-    probed v1 one is rake M21b's lesson at map grain. `--filed-paths` is
+    probed v1 one is a v1→v2.1 cross-contamination path, the same one a silent
+    `COLLECTION_ROOT` fallback opens for norms. `--filed-paths` is
     mutually exclusive with `--gate` (parity would test the pin, not the
     resolver; `run_gate` guards it programmatically as well) and with
     `--v21-root` (two different answers to "which artifact", per key).
 
 Both are DEFAULT-OFF and neither changes what any existing caller resolves: with
-no root and no pin, `--gate` and `--candidates` are byte-identical to what they
-were before this section existed, which selftests 21–22 prove path-by-path.
+no root and no pin, `--gate` and `--candidates` resolve exactly the default probe
+order, which selftests 21–22 prove path-by-path.
 
 ────────────────────────────────────────────────────────────────────────────────
-THE DIRECTIONAL STAR — A THIRD PREDICTOR COLUMN (ADDENDUM 2026-07-29-H)
+THE DIRECTIONAL STAR — A THIRD PREDICTOR COLUMN
 ────────────────────────────────────────────────────────────────────────────────
-Addendum H invokes Addendum C item 2 and ADOPTS the directional star
+The pre-registration adopts the directional star
 
     â(A→B) = c_A^out · c_B^in
 
 for NOT-YET-FILED slots. It is a third column beside the symmetric star and the
-composed path, on structurally identical terms (H item 3): ±.05 absolute bands
-frozen at filing, near-zero carve-out at |pred| < .08, corpus sha per G2. **The
-symmetric star column is UNTOUCHED** (H item 2 — it keeps filing per Addendum E
-on its own frozen terms), and nothing in this module recomputes, moves or
-re-derives it.
+composed path, on structurally identical terms: ±.05 absolute bands frozen at
+filing, near-zero carve-out at |pred| < .08, corpus manifest sha on every â.
+**The symmetric star column is UNTOUCHED** — it keeps filing on its own frozen
+terms, and nothing in this module recomputes, moves or re-derives it.
 
 This module does not FIT c^out / c^in — that derivation is the hub protocol's
-(H item 5, both fit directions on corpus-v2.1). It CONSUMES a banked directional
+(both fit directions on corpus-v2.1). It CONSUMES a banked directional
 constants readout and emits filable slots:
 
     `directional-prediction/<source>→<target>/<arm>-k128`
@@ -197,99 +200,95 @@ The readout is read against a NAMED, VERSIONED schema
 (`directional-constants-readout/v1`, `load_directional_constants`) and every
 departure from it is a HALT whose message states exactly what was expected —
 the schema is a contract with the derivation lane, not a shape to be inferred.
-Availability mirrors E1's arm rule at scalar order: a slot files only where the
+Availability mirrors the composed path's arm rule at scalar order: a slot files only where the
 source has a c^out AND the target a c^in **in the pair's applicable arm**; where
 it does not, the slot is `N/A-AT-FILING` and is never proxied from another arm.
 
 ────────────────────────────────────────────────────────────────────────────────
-SCORING — A SEPARATE, DESK-INITIATED ACT
+SCORING — A SEPARATE, EXPLICITLY INVOKED ACT
 ────────────────────────────────────────────────────────────────────────────────
-`--score-record <filed record> --observed <desk-supplied â>` emits a
+`--score-record <filed record> --observed <observed â>` emits a
 machine-readable scored-record JSON beside the filing record. **Nothing here
 ever auto-scores at filing time**: no prediction path computes a verdict, the
-mode requires an explicit observed-â artifact that only the desk can produce at
-first-read, and it refuses to overwrite an existing scored record. This tool
-makes the ARTIFACT; the desk does the scoring act and rules on what it means.
-Rules are prereg §3 + Addendum E §E2 verbatim: frozen ±.05 absolute band as
-FILED (never recomputed, never moved), |predicted| < .08 scored MAGNITUDE-ONLY
-(sign unscored), the ±.04 hit reported descriptively beside. Campaign gates
-(G-star-hit / G-comp-hit / the H-item-3 directional gate) are NOT evaluated here
-— they are aggregates over the whole 190 and are the desk's read.
+mode requires an explicit observed-â artifact that no prediction path produces,
+and it refuses to overwrite an existing scored record. This tool makes the
+ARTIFACT; reading what the verdicts mean is outside it. The rules are the frozen
+prediction structure and the composed path's filing bands, verbatim: frozen ±.05
+absolute band as FILED (never recomputed, never moved), |predicted| < .08 scored
+MAGNITUDE-ONLY (sign unscored), the ±.04 hit reported descriptively beside.
+Campaign gates (G-star-hit / G-comp-hit / the directional gate) are NOT
+evaluated here — they are aggregates over the whole 190, read from the whole
+scored set rather than from one record.
 
-Since Addendum H the scored record carries THREE predictor columns. The E3 2×2
-is preserved verbatim (`head_to_head`, star vs composed — continuity: the same
-field, the same field names, the same denominators) and the three-predictor
-reads are ADDED beside it: every predictor PAIR's 2×2 (`head_to_head_pairwise`)
-and the per-slot hit-set census across all three (`head_to_head_three_way`).
+The scored record carries THREE predictor columns. The star-vs-composed 2×2 is
+preserved verbatim (`head_to_head` — continuity: the same field, the same field
+names, the same denominators) and the three-predictor reads sit beside it:
+every predictor PAIR's 2×2 (`head_to_head_pairwise`) and the per-slot hit-set
+census across all three (`head_to_head_three_way`).
 
-Addendum D ACTIVATES with H (its scope trigger is exactly this adoption). Its
-constant-α companion is NEVER auto-computed here: ᾱ is a grand mean over the
-scored set that only the desk can form, and the ceiling/calibration terms are
+The constant-α companion baseline applies whenever the directional star is
+adopted, and is NEVER auto-computed here: ᾱ is a grand mean over the whole
+scored set, which one record cannot form, and the ceiling/calibration terms are
 the adopted gauge's. Supply it with `--alpha-companion` against the named schema
 `constant-alpha-companion/v1`; supply nothing and the scored record NAMES the
-companion as OWED, with D2/D3's frozen text attached.
+companion as OWED, with its frozen definition attached.
 
 ────────────────────────────────────────────────────────────────────────────────
-THE SYMMETRIC STAR COLUMN, AND EMITTING THE FILING RECORD (RAKE M33(b))
+THE SYMMETRIC STAR COLUMN, AND EMITTING THE FILING RECORD
 ────────────────────────────────────────────────────────────────────────────────
-Until now this module produced two of the three racing columns and CONSUMED the
-record they were filed in; the record itself, and the symmetric star column
-inside it, were assembled by per-batch staging glue. Batches 5, 6 and 7 each
-named the gap in their own `emission.named_gap` block ("the tool has no
---emit-record CLI; the symmetric star is the one column it does not produce"),
-and the batch-7 report booked the generalization: "a pure header variant three
-generations running — a future logic change is the signal to generalize, not
-fork a fourth copy."
-
-Both halves now live here:
+A filing record hand-assembled from readout rows is not automatically scoreable
+by this module's own scorer: the filing-block shape is a contract, and only a
+parse proves conformance. So the record is emitted THROUGH the tool that
+consumes it, and the symmetric star column it carries is produced here too:
 
   * `--star-constants` reads a `symmetric-constants-extension/v1` artifact
     (`load_symmetric_constants`) and `run_star` emits
     `star-prediction/<src>→<tgt>/<arm>-k128` = c_A·c_B, filed at 4 dp with the
-    frozen ±.05 band OF THE FILED VALUE. prereg §3's TERMS are untouched
-    (Addendum H item 2) — only the arithmetic's home moved.
+    frozen ±.05 band OF THE FILED VALUE, on the frozen prediction structure's
+    terms.
   * `--emit-record` builds a whole racing record: all three columns produced
-    in-process, the desk's selection rule applied AND PROVED (the forced set is
-    asserted to BE the §3 audit enumeration by identity and orientation; where
-    the ruling forces nothing, the population is proved to contain no forcible
-    pair), every block pre-flighted through the CONSUMER's own
+    in-process, the slate selection rule applied AND PROVED (the forced set is
+    asserted to BE the audit enumeration by identity and orientation; where
+    the selection forces nothing, the population is proved to contain no
+    forcible pair), every block pre-flighted through the CONSUMER's own
     `_check_filed_band` / `_check_carve_out`, and the written record re-read
     through `parse_filing_record` before the call returns.
 
-The DESK'S PROSE does not live here and must not: a ruling, an authority
-citation and a disclosure are Luxia's and the desk's words, and a tool that
-generated them would be inventing the authority for its own output. They arrive
-as a `--narrative` sidecar, merged at NAMED keys only, with an unrecognized key a
-HALT rather than a dropped paragraph. Emit with no narrative and the record NAMES
-its missing prose.
+The record's human PROSE does not live here and must not: an authority
+citation and a disclosure are human words, and a tool that generated them would
+be inventing the authority for its own output. They arrive as a `--narrative`
+sidecar, merged at NAMED keys only, with an unrecognized key a HALT rather than
+a dropped paragraph. Emit with no narrative and the record NAMES its missing
+prose.
 
-`--verify-against <banked record>` is the reproduction proof for the move: two
-records compared on NUMBERS AND SLOT IDENTITIES ONLY, timestamps and prose
-excluded by construction, tolerance exactly 0.0. The desk's words are the desk's;
-every number in a filed record must come back out of the tool unchanged.
+`--verify-against <banked record>` is the reproduction proof: two records
+compared on NUMBERS AND SLOT IDENTITIES ONLY, timestamps and prose excluded by
+construction, tolerance exactly 0.0. Every number in a filed record must come
+back out of the tool unchanged.
 
 ────────────────────────────────────────────────────────────────────────────────
-THE WEBTEXT-V3 LANE — FIVE HUB COLUMNS, A THIRD VINTAGE, AND §8's SCORING ACT
+THE WEBTEXT-V3 LANE — FIVE HUB COLUMNS, A THIRD VINTAGE, AND ITS SCORING ACT
 ────────────────────────────────────────────────────────────────────────────────
 Everything above is the corpus-v2.1 lane and is UNCHANGED BY CONSTRUCTION: with
-no `--basis` (or `--basis corpus-v2.1`) every default in this module is the one
-it always had, and selftest 31 proves the resolution surface path-by-path in
-both rake-M44 configurations.
+no `--basis` (or `--basis corpus-v2.1`) every default in this module is the
+v2.1 one, and selftest 31 proves the resolution surface path-by-path both with
+and without a data tree present.
 
-The frozen webtext-v3 §8 ceremony needs five things this module assumed away,
-and each is now a REGISTRY with the same discipline (a lookup, never a probe;
-an unregistered key REFUSES rather than resolving against a neighbour):
+The frozen prediction ceremony of the webtext-v3 pre-registration
+(`docs/planning/`) needs five things beyond the v2.1 lane, and each is a
+REGISTRY with the same discipline (a lookup, never a probe; an unregistered key
+REFUSES rather than resolving against a neighbour):
 
-  1. **The hub is a parameter.** §8 step 2 files "the of-record column through
-     the 8b incumbent … all four other race hubs' composed columns filed
-     simultaneously, identically banded", so `HUB_SITES` registers §7's five
-     race hubs and `hub_scope` / the `hub=` arguments select one. Default: the
-     incumbent. An unregistered hub is `UnknownHubError` — a fallback would
+  1. **The hub is a parameter.** The ceremony files "the of-record column
+     through the 8b incumbent … all four other race hubs' composed columns
+     filed simultaneously, identically banded", so `HUB_SITES` registers the
+     five race hubs of the hub law and `hub_scope` / the `hub=` arguments
+     select one. Default: the incumbent. An unregistered hub is `UnknownHubError` — a fallback would
      file the incumbent's number in a candidate's column, which is exactly the
      post-hoc selection "predictions do not get to pick the winning hub" bars.
   2. **The family of record is per basis.** `read_exchange_rates.FAMILIES` is
-     the v2.1 enumeration and carries no `proc_k256`; §3.2 makes proc_k256 the
-     v3 family of record. `FAMILIES_ALL` adds it BESIDE that tuple (which is
+     the v2.1 enumeration and carries no `proc_k256`; the v3 rebank makes
+     proc_k256 the v3 family of record. `FAMILIES_ALL` adds it BESIDE that tuple (which is
      not edited — it is the v2.1 lane's own of-record surface) and `--family`
      defaults to the BASIS's family rather than to a constant.
   3. **The v3 root is its own lane.** `--v21-root` is sha-pinned to
@@ -302,37 +301,40 @@ an unregistered key REFUSES rather than resolving against a neighbour):
   4. **The prediction id names its rank per basis.** corpus-v2.1 keeps the
      FROZEN `-k128` literal (every banked record's ids read that way, and a
      record's ids are its slot identities); webtext-v3 reads the rank off the
-     family, which is §8's own shape `v3-prediction/<src>→<tgt>/<arm>-k<rank>`.
-  5. **The hub-vector registry is per basis AND per hub.** It was already
-     one-path-per-basis (rake M12 at basis grain); `stem_for`/`path_for` extend
-     that to the five hub columns without moving the incumbent's path.
+     family, which is the ceremony's own shape
+     `v3-prediction/<src>→<tgt>/<arm>-k<rank>`.
+  5. **The hub-vector registry is per basis AND per hub.** It is
+     one-path-per-basis (a lookup, never a search, no fallback between bases);
+     `stem_for`/`path_for` extend that to the five hub columns without moving
+     the incumbent's path.
 
-`--basis webtext-v3 --score-v3 <sealed artifact>` is §8 STEP 3. It verifies the
-desk's stamp before parsing a prediction (§8 step 2 binds the lane to refuse
-unstamped), loads the sealed 240-slot list as the denominator — recomputing NO
-â_comp, because the seal exists precisely so a scorer cannot move a prediction
-— computes â_obs per slot from the DIRECT pair fits, scores every hub column at
-BOTH bands with the near-zero carve-out, and emits the gate arithmetic
-(G-comp-v3, G-comp-v3-tight, G-extension, §8's branch structure). An absent
-pair-fit tree is a CLEAN REFUSAL, which is the ordinary state while the wave
-runs. **DESCRIPTIVE EMISSION ONLY** — the arithmetic of a threshold is
-computation; the verdict it carries is the desk's.
+`--basis webtext-v3 --score-v3 <sealed artifact>` is the ceremony's scoring
+step. It verifies the seal's stamp before parsing a prediction (the ceremony
+binds the lane to refuse an unstamped artifact), loads the sealed 240-slot list
+as the denominator — recomputing NO â_comp, because the seal exists precisely
+so a scorer cannot move a prediction — computes â_obs per slot from the DIRECT
+pair fits, scores every hub column at BOTH bands with the near-zero carve-out,
+and emits the gate arithmetic (G-comp-v3, G-comp-v3-tight, G-extension, and the
+ceremony's branch structure). An absent pair-fit tree is a CLEAN REFUSAL, which
+is the ordinary state while the pair fits are still being collected.
+**DESCRIPTIVE EMISSION ONLY** — the arithmetic of a threshold is computation;
+the verdict it carries is read outside this tool.
 
 ONE FIT OBJECT, TWO ORDERED SLOTS. A semi-orthogonal Procrustes fit is an
-object of the UNORDERED pair: the 2026-08-04 wave banked 120 fits under the
+object of the UNORDERED pair: the v3 pair-fit bank holds 120 fits under the
 canonical direction (the lower-ordinal sealed slot's endpoints) against a
 frozen list of 240 ORDERED slots. `resolve_pair_fit` therefore probes the
 slot's own ordering FIRST and its reversal SECOND, and a reverse hit is read
 through `exchange_rate(tm, v_slot_source, v_slot_target, direction='rev')` —
-the construction of record from the §5.5 asymmetry enactment
-(`enactment-archives/asymmetry-555/asym_rider.py`, on a DIRECT pair fit:
-`exchange_rate(tm, v3, v8, "fwd")` beside `exchange_rate(tm, v8, v3, "rev")`),
-not a direction algebra invented here. Every scored slot records the fit
-object it came out of AND the direction it was read in
-(`observed_fit_pair_id`, `observed_direction`), and the record carries the
-fwd/rev census. `--resolution-only` runs the resolution half ALONE — counting
-files, computing no â — because asserting the surface against real data must
-not perform the desk's scoring act as a side effect.
+the construction of record from the archived asymmetry study
+(`outputs/collection/enactment-archives/asymmetry-555/asym_rider.py`, on a
+DIRECT pair fit: `exchange_rate(tm, v3, v8, "fwd")` beside
+`exchange_rate(tm, v8, v3, "rev")`), not a direction algebra invented here.
+Every scored slot records the fit object it came out of AND the direction it
+was read in (`observed_fit_pair_id`, `observed_direction`), and the record
+carries the fwd/rev census. `--resolution-only` runs the resolution half ALONE
+— counting files, computing no â — because asserting the surface against real
+data must not perform the scoring act as a side effect.
 
 Run (repo root, PYTHONPATH=.):
   python -m metabasis.scripts.read_composed_predictions --selftest
@@ -361,7 +363,7 @@ Run (repo root, PYTHONPATH=.):
       --slate <ranked slate>.json --gate-column <this batch's E4.1 column>.json \
       --batch batch-8 --slate-size 14 \
       [--forced-hub <audit hub> --audit-set <m1,m2,…>] \
-      [--narrative <desk prose>.json] \
+      [--narrative <record prose>.json] \
       --out /tmp/claude-output/predictions-batch8.json \
       [--verify-against outputs/collection/predictions/<banked>.json]
   python -m metabasis.scripts.read_composed_predictions \
@@ -369,11 +371,11 @@ Run (repo root, PYTHONPATH=.):
       --observed /tmp/claude-output/observed-<batch>.json \
       [--alpha-companion /tmp/claude-output/constant-alpha-<batch>.json]
   python -m metabasis.scripts.read_composed_predictions \
-      --manifest-audit manifests outputs staging      # rake M42, exits nonzero
+      --manifest-audit manifests outputs staging      # any finding (a self-listing manifest, say) exits nonzero
   python -m metabasis.scripts.read_composed_predictions \
       --basis webtext-v3 [--v3-root staging] \
       --score-v3 staging/webtext-v3-predictions/PREDICTIONS-webtext-v3-<date>.json \
-      [--stamp <desk stamp>.json] [--pair-fits-root <pair fits>] \
+      [--stamp <seal stamp>.json] [--pair-fits-root <pair fits>] \
       [--scored-v3-out /tmp/claude-output/scored-webtext-v3.json]
   python -m metabasis.scripts.read_composed_predictions \
       --basis webtext-v3 \
@@ -419,30 +421,30 @@ logger = logging.getLogger("read_composed_predictions")
 #: The hub column of record for the composed predictor: the primary hub 8B at
 #: its only banked site, rebuilt-L16 (`HUB_BANKED_SITES == (16,)`).
 HUB_SITE_OF_RECORD = 16
-#: Draft E1 gate: |Δ| against the archived retrodictions, at full precision.
+#: The parity gate: |Δ| against the archived retrodictions, at full precision.
 GATE_TOLERANCE = 1e-8
-#: `wp_composition.json` rounds `a_composed_hub_mediated` to 6 dp, so the
-#: banked-JSON leg of the gate can only be checked to half an ulp of that.
+#: The archived JSON (`ARCHIVE_JSON`) rounds `a_composed_hub_mediated` to 6 dp,
+#: so the banked-JSON leg of the gate can only be checked to half an ulp of that.
 BANKED_JSON_TOLERANCE = 5e-7
-#: The draft quotes 4-dp display figures; they must round-trip exactly.
+#: The predictor's definition quotes 4-dp display figures; they must round-trip
+#: exactly.
 DISPLAY_DECIMALS = 4
 
 #: THE HUB VECTOR, PER COLLECTION BASIS. The primary hub's OWN entropy-gradient
 #: bank at the rebuilt-L16 column — the `xi` of the hub-frame decomposition (see
 #: `hub_frame_coordinates`).
 #:
-#: RAKE M12'S DISCIPLINE, PRESERVED EXACTLY: ONE PATH PER BASIS, NO FALLBACK.
-#: The neighbouring `entropy_gradient_8b.npz` is a different column, and a
-#: near-miss here would silently rotate every alpha — so the resolver never
-#: searches, never probes a candidate list and never falls through from one
-#: basis to another. What changed (webtext-v3 filing lane) is only that the ONE
-#: path is now selected by NAME: an unknown basis is a REFUSAL
+#: ONE PATH PER BASIS, NO FALLBACK. The neighbouring legacy 8B bank (the same
+#: stem without the `rebuild` suffix) is a different column, and a near-miss
+#: here would silently rotate every alpha — so the resolver never searches,
+#: never probes a candidate list and never falls through from one basis to
+#: another. The ONE path is selected by NAME: an unknown basis is a REFUSAL
 #: (`UnknownHubVectorBasisError`), never a search. A basis whose file is absent
-#: degrades the descriptive companions and nothing else, exactly as before.
+#: degrades the descriptive companions and nothing else.
 HubVectorBasis = Literal["corpus-v2.1", "webtext-v3"]
 
-#: The desk-side arm root of the webtext-v3 vector wave (the 2026-08-04 pull:
-#: `vectors/<model>/…` beneath it, one uniform stem per model). Named as a
+#: The default arm root of the webtext-v3 vector wave (`vectors/<model>/…`
+#: beneath it, one uniform stem per model). Named as a
 #: constant so the filing lane relocates the wave with `--hub-vector-root`
 #: rather than by editing a path literal; the STEM below is the wave's identity
 #: and does not move with the root.
@@ -462,14 +464,13 @@ class HubVectorEntry(BaseModel):
     Frozen, and every path is a derived property rather than a stored field, so
     a root override can never leave a stale absolute path behind it.
 
-    PER BASIS **AND PER HUB** (webtext-v3 §8 filing lane). The registry was
-    already one-path-per-basis (rake M12 at basis grain); what §8 needs beside
-    that is FIVE hub columns, so the entry now derives its stem from (hub,
-    hub_site) instead of closing over the single hub of record. `stem`/`path`
-    keep their historical meaning — the module's hub of record, 8bL16 — so
-    `HUB_VECTOR_PATH` and every existing caller resolve byte-identically; the
-    other four race hubs are reached through `stem_for`/`path_for`, which are
-    the SAME lookup at a different key and are still never a probe.
+    PER BASIS **AND PER HUB**. The registry is one-path-per-basis; the
+    webtext-v3 filing lane also needs FIVE hub columns, so the entry derives
+    its stem from (hub, hub_site) rather than closing over a single hub.
+    `stem`/`path` mean the module's hub of record, 8bL16, so `HUB_VECTOR_PATH`
+    and every single-hub caller resolve that one path; the other four race hubs
+    are reached through `stem_for`/`path_for`, which are the SAME lookup at a
+    different key and are never a probe.
     """
     model_config = {"frozen": True, "arbitrary_types_allowed": True}
 
@@ -550,19 +551,19 @@ HUB_BASIS_MAX_DEV_TOLERANCE = 1e-6
 #: a broken companion, not a rounding difference.
 COMPANION_IDENTITY_TOLERANCE = 1e-8
 
-#: Corpus-v2.1 manifest sha — ADDENDUM 2026-07-28-G §G1's go-forward collection
-#: basis, and the sha every â computed on it must carry (§G2(a): "every quoted â
-#: carries its corpus manifest sha"). Verified locally against the pulled v2.1
-#: arm mirror's own `corpus/corpus_manifest.json`.
-#: NAMED WITH ITS VINTAGE (rake M26): a version sweep must be able to SEE this
-#: constant by name, not discover it holds the wrong vintage's digest.
+#: Corpus-v2.1 manifest sha — the go-forward collection basis, and the sha every
+#: â computed on it must carry (the â vintage rule: "every quoted â carries its
+#: corpus manifest sha"). It is the digest of the v2.1 arm mirror's own manifest
+#: at `V21_CORPUS_MANIFEST_RELPATH`.
+#: NAMED WITH ITS VINTAGE: a version sweep must be able to SEE this constant by
+#: name, not discover it holds the wrong vintage's digest.
 CORPUS_SHA_V21 = "5ae355bc5d130f8e9c3ae426f5e71bf2b6e99c74b95369a874bec2abcd59b5d9"
 #: Where a v2.1 re-bank root keeps the manifest whose sha pins its vintage.
 V21_CORPUS_MANIFEST_RELPATH = Path("corpus") / "corpus_manifest.json"
 
 #: WEBTEXT-V3 manifest sha — the FROZEN corpus of record for the v3 basis
 #: (`freeze/webtext-v3`: 1,200 texts, 4 strata, pre-LLM-era pins). SAME
-#: DISCIPLINE AS `CORPUS_SHA_V21` AND FOR THE SAME REASON (rake M26): named
+#: DISCIPLINE AS `CORPUS_SHA_V21` AND FOR THE SAME REASON: named
 #: with its vintage so a version sweep SEES it, and checked by value at set
 #: time so a root can never be taken on the operator's word.
 CORPUS_SHA_WEBTEXT_V3 = (
@@ -571,24 +572,25 @@ CORPUS_SHA_WEBTEXT_V3 = (
 #: v3 wave's trees are SIBLINGS under one staging root (`webtext-v3-fits/`,
 #: `webtext-v3-vectors/`, `webtext-v3-draft/`), so the root is that parent and
 #: the manifest sits at the draft tree's own stem — VERIFIED against the banked
-#: artifact, not assumed to mirror the v2.1 `corpus/corpus_manifest.json`.
+#: artifact, not assumed to mirror the v2.1 `V21_CORPUS_MANIFEST_RELPATH`.
 V3_CORPUS_MANIFEST_RELPATH = Path("webtext-v3-draft") / "corpus_manifest.json"
 #: The v3 wave's stems beneath its root. Each is the WAVE'S IDENTITY and does
 #: not move with the root, exactly as the hub-vector registry's stems do not.
 V3_HUB_LEGS_STEM = Path("webtext-v3-fits") / "hub-legs" / "fits-hub-legs"
 V3_PAIR_FITS_STEM = Path("webtext-v3-fits") / "pairs"
 V3_VECTORS_STEM = Path("webtext-v3-vectors") / "vectors"
-#: The desk-side default root — the staging parent the 2026-08-04 waves landed
-#: under. A DEFAULT, not a constant of record: `--v3-root` relocates it and the
+#: The default root — the staging parent the v3 waves are pulled under. A
+#: DEFAULT, not a constant of record: `--v3-root` relocates it and the
 #: sha gate above decides whether the relocation is the v3 basis.
 WEBTEXT_V3_DEFAULT_ROOT = Path("staging")
 
-#: Prereg §3 / Addendum E §E2: the FROZEN half-width of every scored band, for
-#: both predictors. Never used to move a filed band — only to CHECK that a
-#: filed band is the frozen one (`_check_filed_band`).
+#: The FROZEN half-width of every scored band, for every predictor (the frozen
+#: prediction structure and the composed path's filing bands agree on it).
+#: Never applied to move a filed band — only to CHECK that a filed band is the
+#: frozen one (`_check_filed_band`).
 FROZEN_BAND_HALF_WIDTH = 0.05
-#: Addendum E §E2: the ±.04 hit reported DESCRIPTIVELY beside the scored band
-#: (Luxia ruling 2026-07-28 — recorded per pair at scoring, never a gate).
+#: The ±.04 hit reported DESCRIPTIVELY beside the scored band — recorded per
+#: pair at scoring, never a gate.
 DESCRIPTIVE_BAND_HALF_WIDTH = 0.04
 #: A filed band is 4-dp rounded arithmetic on a 4-dp predicted value; anything
 #: further than this from `predicted ± .05` means the record is malformed, not
@@ -601,23 +603,23 @@ BAND_EDGE_EPSILON = 1e-12
 #: Filing convention of record for a scalar predicted â and its band: 4 decimal
 #: places (batches canary/2/3 all file that way — e.g. star .3614 with band
 #: [.3114, .4114]). A directional slot therefore emits BOTH the full-precision
-#: arithmetic and the 4-dp `filed_*` pair, so the band the desk freezes is the
-#: band of the value it files rather than of an unrounded one it never saw.
+#: arithmetic and the 4-dp `filed_*` pair, so the band that freezes is the band
+#: of the value that files rather than of an unrounded one nobody saw.
 FILED_DECIMALS = 4
 #: A portability coefficient is a cosine-scale quantity; |c| > 1 is not
 #: impossible for a chain-break/gauge-divided read, so it is FLAGGED on the
-#: slot, never silently accepted and never used to refuse the readout. A
+#: slot, never silently accepted and never a reason to refuse the readout. A
 #: non-finite constant IS refused (there is no reading of NaN·c that files).
 DIRECTIONAL_CONSTANT_FLAG_ABS = 1.0
 
-#: ADDENDUM 2026-07-29-H — the directional star's constants readout, by NAME and
-#: VERSION. The derivation lane (hub protocol, both fit directions, corpus-v2.1)
-#: produces this file; this module only consumes it, and consumes it against
-#: this contract. NAMED WITH ITS VERSION per rake M26 so a schema bump is
-#: visible to a mechanical sweep instead of hiding inside a string literal.
+#: The directional star's constants readout, by NAME and VERSION. The
+#: derivation lane (hub protocol, both fit directions, corpus-v2.1) produces
+#: this file; this module only consumes it, and consumes it against this
+#: contract. NAMED WITH ITS VERSION so a schema bump is visible to a mechanical
+#: sweep instead of hiding inside a string literal.
 SCHEMA_DIRECTIONAL_CONSTANTS_V1 = "directional-constants-readout/v1"
-#: ADDENDUM 2026-07-27-D §D2 — the constant-α companion baseline artifact. Same
-#: discipline: named, versioned, desk-supplied, never computed here.
+#: The constant-α companion baseline artifact. Same discipline: named,
+#: versioned, supplied by the caller, never computed here.
 SCHEMA_CONSTANT_ALPHA_COMPANION_V1 = "constant-alpha-companion/v1"
 
 ARCHIVE_ROOT = COLLECTION_ROOT / "enactment-archives" / "worstpair-diag"
@@ -625,7 +627,7 @@ ARCHIVE_GLUE = ARCHIVE_ROOT / "wp_composition.py"
 ARCHIVE_JSON = ARCHIVE_ROOT / "wp_composition.json"
 ARCHIVE_MANIFEST = ARCHIVE_ROOT / "MANIFEST-worstpair-diag.sha256"
 
-#: Draft E1 / E2: the five archived retrodictions as the draft displays them.
+#: The five archived retrodictions as the predictor's definition displays them.
 #: Keyed by the archive's own `pair` string so a reordering of either side
 #: cannot silently pair the wrong numbers.
 DRAFT_DISPLAY_TARGETS: dict[str, float] = {
@@ -667,11 +669,11 @@ class CorpusVintageError(ComposedPathError):
 class UnknownHubVectorBasisError(ComposedPathError):
     """A hub-vector basis nobody registered was asked for.
 
-    RAKE M12 AT BASIS GRAIN. The whole point of the one-path-per-basis registry
+    ONE PATH PER BASIS. The whole point of the one-path-per-basis registry
     is that resolution is a LOOKUP, not a search: an unregistered key therefore
     halts, naming the keys that exist, rather than falling back to the default
     basis and computing every alpha against the wrong column — which is exactly
-    the silent rotation the single-path rule was filed to prevent.
+    the silent rotation the single-path rule exists to prevent.
     """
 
 
@@ -689,7 +691,7 @@ class DirectionalConstantsError(ComposedPathError):
 class ScoringError(RuntimeError):
     """A scoring input cannot be read as what it claims to be.
 
-    Scoring is a desk act performed ONCE per record against frozen bands; a
+    Scoring is an explicit act performed ONCE per record against frozen bands; a
     malformed record, an unmatched observation, or a band that is not the
     frozen one must stop the run rather than produce a verdict nobody can
     audit.
@@ -699,7 +701,7 @@ class ScoringError(RuntimeError):
 class AlphaCompanionError(ScoringError):
     """A constant-α companion artifact is not `constant-alpha-companion/v1`.
 
-    Addendum D's companion is a BASELINE the desk computes (ᾱ is a grand mean
+    The companion is a BASELINE computed outside this module (ᾱ is a grand mean
     over the scored set; the ceiling terms are the adopted gauge's). A malformed
     companion must halt rather than degrade to "absent", because "absent" is
     itself a reportable state — OWED — and the two must never be confused.
@@ -707,22 +709,22 @@ class AlphaCompanionError(ScoringError):
 
 
 # ------------------------------------------------------------ the hub registry
-#  ONE HUB WAS AN ASSUMPTION, NOT A LAW. Every composed prediction this module
-#  ever filed went through the primary hub 8bL16, so `HUB_MODEL` /
-#  `HUB_SITE_OF_RECORD` were read straight out of `read_exchange_rates` at the
-#  three places resolution needs them. The frozen webtext-v3 §8 step 2 files
-#  FIVE columns per slot — "the of-record column through the 8b incumbent …
+#  ONE HUB IS AN ASSUMPTION, NOT A LAW. The corpus-v2.1 lane composes every
+#  prediction through the primary hub 8bL16 (`HUB_MODEL` / `HUB_SITE_OF_RECORD`
+#  from `read_exchange_rates`), but the frozen webtext-v3 prediction ceremony
+#  files FIVE columns per slot — "the of-record column through the 8b incumbent …
 #  all four other race hubs' composed columns filed simultaneously, identically
 #  banded" — so a single-hub resolver cannot express the ceremony at all.
 #
-#  The generalization is a REGISTRY, on exactly the terms the hub-vector
-#  registry already runs on (rake M12): a lookup, never a probe; an unregistered
-#  hub REFUSES rather than resolving against another hub's legs; and the DEFAULT
-#  is the incumbent, so every existing caller is byte-identical.
-#: §7's race set at its sites of record, plus the incumbent hub. The five keys
-#: are the BANK KEYS of record; §7 spells the set in prose (`llama-3.2-3b` is
-#: the bank key `3b`, `8b` is llama-3.1-8b-instruct) and that mapping is the
-#: registry's — stated here rather than assumed by a substring match.
+#  The hub is therefore a REGISTRY, on exactly the terms the hub-vector
+#  registry runs on: a lookup, never a probe; an unregistered hub REFUSES
+#  rather than resolving against another hub's legs; and the DEFAULT is the
+#  incumbent, so every single-hub caller resolves what the v2.1 lane resolves.
+#: The hub law's race set at its sites of record, plus the incumbent hub. The
+#: five keys are the BANK KEYS of record; the pre-registration spells the set
+#: in prose (`llama-3.2-3b` is the bank key `3b`, `8b` is llama-3.1-8b-instruct)
+#: and that mapping is the registry's — stated here rather than assumed by a
+#: substring match.
 HUB_SITES: dict[str, int] = {
     #  The incumbent. `8b` is deliberately ABSENT from `SITE_OF_RECORD` (it is
     #  the hub, not a candidate endpoint), so its site lives here and here only.
@@ -737,11 +739,12 @@ HUB_SITES: dict[str, int] = {
 class UnknownHubError(ComposedPathError):
     """A hub nobody registered was asked for.
 
-    RAKE M12 AT HUB GRAIN, and the reason is the §8 ceremony's own: five hub
-    columns are filed simultaneously and identically banded, so a resolver that
-    fell back from an unregistered hub to the incumbent would file the
-    incumbent's number in a candidate's column — the exact post-hoc-selection
-    failure "predictions do not get to pick the winning hub" exists to prevent.
+    ONE PATH PER HUB, and the reason is the webtext-v3 prediction ceremony's
+    own: five hub columns are filed simultaneously and identically banded, so a
+    resolver that fell back from an unregistered hub to the incumbent would
+    file the incumbent's number in a candidate's column — the exact
+    post-hoc-selection failure "predictions do not get to pick the winning hub"
+    exists to prevent.
     """
 
 
@@ -769,9 +772,9 @@ def hub_ref(hub: Optional[str] = None, hub_site: Optional[int] = None) -> HubRef
     registered = HUB_SITES.get(key)
     if registered is None:
         raise UnknownHubError(
-            f"unknown hub {key!r}. Registered hubs: {sorted(HUB_SITES)}. §8 "
-            f"step 2 files the of-record column and the four other race hubs' "
-            f"columns SIMULTANEOUSLY and identically banded — an unregistered "
+            f"unknown hub {key!r}. Registered hubs: {sorted(HUB_SITES)}. The "
+            f"webtext-v3 ceremony files the of-record column and the four other "
+            f"race hubs' columns SIMULTANEOUSLY and identically banded — an unregistered "
             f"hub is refused rather than resolved against the incumbent's legs, "
             f"which would file the incumbent's number in a candidate's column")
     return HubRef(model=key, site=registered if hub_site is None else int(hub_site))
@@ -811,9 +814,9 @@ def hub_scope(hub: Optional[str] = None,
 
 # --------------------------------------------------- the rank/family of record
 #: `read_exchange_rates.FAMILIES` is the v2.1-era enumeration and does not carry
-#: `proc_k256` at all — the webtext-v3 §3.2 family of record. It is NOT edited
-#: there: that tuple is the v2.1 lane's own of-record surface and every module
-#: that reads it must keep resolving exactly what it resolved before. The v3
+#: `proc_k256` at all — the webtext-v3 rebank's family of record. It is NOT
+#: edited there: that tuple is the v2.1 lane's own of-record surface and every
+#: module that reads it must resolve the v2.1 families and nothing else. The v3
 #: family is ADDED here, beside it, and the union is what this module's CLI
 #: offers. `FAMILY_OF_RECORD` (proc_k128) stays the default.
 FAMILY_OF_RECORD_WEBTEXT_V3 = "proc_k256"
@@ -822,7 +825,7 @@ FAMILY_OF_RECORD_WEBTEXT_V3 = "proc_k256"
 FAMILIES_ALL: tuple[str, ...] = tuple(
     dict.fromkeys(FAMILIES + (FAMILY_OF_RECORD_WEBTEXT_V3,)))
 
-#: The family of record PER BASIS — §3.2 for webtext-v3, prereg §3 for v2.1.
+#: The family of record PER BASIS — each basis's pre-registration names its own.
 FAMILY_OF_RECORD_BY_BASIS: dict[str, str] = {
     "corpus-v2.1": FAMILY_OF_RECORD,
     "webtext-v3": FAMILY_OF_RECORD_WEBTEXT_V3,
@@ -848,12 +851,13 @@ def family_k_label(family: str) -> Optional[str]:
 #:    from the family would leave the family of record byte-identical and MOVE
 #:    the id under a `--family proc_k32` diagnostic — a change to a frozen
 #:    surface, made for a mode nobody files from. It stays pinned.
-#:  * `from-family` — the webtext-v3 convention, which §8 states outright:
-#:    `v3-prediction/<src>→<tgt>/<arm>-k<rank>`. The rank is the family's.
+#:  * `from-family` — the webtext-v3 convention, which its prediction ceremony
+#:    states outright: `v3-prediction/<src>→<tgt>/<arm>-k<rank>`. The rank is
+#:    the family's.
 #:
 #: ⚠ FLAGGED, NOT RESOLVED: whether the v2.1 lane's non-of-record families
-#: SHOULD have carried their own rank in the id is a desk question about three
-#: banked batches, not a code question. This preserves what was filed.
+#: SHOULD carry their own rank in the id is a question about three banked
+#: batches' records, not a code question. This preserves what was filed.
 PredictionIdRankPolicy = Literal["frozen-k128", "from-family"]
 PREDICTION_ID_RANK_POLICY: dict[str, PredictionIdRankPolicy] = {
     "corpus-v2.1": "frozen-k128",
@@ -877,29 +881,27 @@ def prediction_id_rank_label(family: str, basis: str = "corpus-v2.1") -> str:
     if label is None:
         raise ComposedPathError(
             f"family {family!r} carries no rank, so a `<arm>-k<rank>` "
-            f"prediction id cannot be built for basis {basis!r}. §8's id shape "
-            f"is `v3-prediction/<src>→<tgt>/<arm>-k<rank>`; a rank-free family "
+            f"prediction id cannot be built for basis {basis!r}. The webtext-v3 "
+            f"id shape is `v3-prediction/<src>→<tgt>/<arm>-k<rank>`; a rank-free family "
             f"(ridge) has no place in it")
     return label
 
 
 # ---------------------------------------------------------------- registries
 #: Site of record per candidate model. Every entry is validated against the
-#: model's FIXED FIT GRID via `require_site` (registry API, commit 8c00896) —
-#: no site here can be a retired or mistyped one that a bank happens to hold
-#: (the 70B's L17 is exactly that case and is absent by construction).
-#: Sources: wave-1 + hub-rungs-2 ratifications (Luxia 2026-07-27, recorded in
-#: `fit_transport_maps.SITES` with the ⋆ marks) and the carried banked nodes'
-#: banked sites (CAMPAIGN-MAP banked-4).
+#: model's FIXED FIT GRID via `require_site` (the `fit_transport_maps` registry
+#: API) — no site here can be a retired or mistyped one that a bank happens to
+#: hold (the 70B's L17 is exactly that case and is absent by construction).
+#: Sources: the wave-1 and hub-rungs-2 site selections (recorded in
+#: `fit_transport_maps.SITES` with the ⋆ marks) and the carried banked models'
+#: banked sites.
 SITE_OF_RECORD: dict[str, int] = {
-    # carried banked nodes
+    # carried banked models
     "3b": 14,
     "dsv2-lite": 22,
     "qwen-7b": 21,
-    # gemma3-27b: L38, RULED BY LUXIA 2026-07-29 (session-5 close) from the
-    # six-site â evidence table — readout of record
-    # `site_evidence_gemma3-27b_20260729-055507.json`, sha `7f59af50…`, 48 rows,
-    # strict norms. L38 ⋆ primary, L41 robustness; the carried-provisional L36
+    # gemma3-27b: L38, selected from the six-site â evidence table (48 rows,
+    # strict norms). L38 ⋆ primary, L41 robustness; the carried-provisional L36
     # is RETIRED to scanned-history (legitimate, mid-pack, DOMINATED by L38
     # +22.0% / +9.1% on both hub columns, with the higher ceiling and coherence).
     # The r²/â INVERSION is the deciding structure — r(r², â) = −.964, and the
@@ -908,10 +910,10 @@ SITE_OF_RECORD: dict[str, int] = {
     # registries must agree (cross-checked in selftest 7).
     # ⚠ THE VECTOR GAP REMAINS OPEN, AND IT IS THE BINDING ONE. There is no
     # corpus-v2.1 entropy-gradient vector at ANY gemma site: the six site-
-    # evidence vectors (L13/L17/L35/L36/L38/L41) are FROZEN-v1 (`a6712ca0…`)
+    # evidence vectors (L13/L17/L35/L36/L38/L41) are FROZEN-v1 corpus
     # SELECTION instruments that never file, and the banked hub→gemma maps this
     # registry can reach are the same v1 vintage. Before ANY gemma slot files, a
-    # fresh FD-gated corpus-v2.1 (`5ae355bc…`) L38 build + L38/L41 v2.1 state
+    # fresh FD-gated corpus-v2.1 (`CORPUS_SHA_V21`) L38 build + L38/L41 v2.1 state
     # banks + their hub fits are REQUIRED — the re-bank is QUEUED, and until it
     # lands `--resolution-sweep` reports this model as a NAMED GAP at L38, which
     # is the honest state and not a regression (see also `vector_bank_paths`).
@@ -926,15 +928,12 @@ SITE_OF_RECORD: dict[str, int] = {
     "phi-3.5-mini-instruct": 13,
     # hub-rungs-2 graduations. The 70B's site of record is L37 (L43 is the
     # robustness site, L17 retired); gpt2-xl is deliberately ABSENT — its site
-    # of record is DEFERRED (Luxia 2026-07-27), so it has no candidate slot.
+    # of record is DEFERRED, so it has no candidate slot.
     "llama-3.1-70b-instruct": 37,
     "pythia-6.9b": 31,
-    # llama-3.1-405b-instruct: L99, RULED BY THE DESK 2026-07-29 UNDER LUXIA'S
-    # OVERNIGHT DELEGATION 2 (ledgered) from the five-site â evidence table —
-    # readout of record
-    # `site_evidence_llama-3.1-405b-instruct_20260729-113819.json`,
-    # sha `04f2a2c4…`, 40 rows, strict (fit-local) norms, frozen-v1 evidence
-    # basis. L99 ⋆ primary (fractional depth .786), L107 robustness (.849).
+    # llama-3.1-405b-instruct: L99, selected from the five-site â evidence
+    # table (40 rows, strict (fit-local) norms, frozen-v1 evidence basis).
+    # L99 ⋆ primary (fractional depth .786), L107 robustness (.849).
     # Rank-1 (L99), rank-2 (L107) and LAST (L19) are each UNANIMOUS across all
     # four robustness columns (native k128 / k32, raw k128, rebuilt-L16 hub);
     # only the middle two sites swap. The r² peak L43 ranks 3rd/4th on â and
@@ -951,22 +950,19 @@ SITE_OF_RECORD: dict[str, int] = {
     # qwen3-30b-a3b's +.3283, â/ceiling .254 against ~.52 — at a COMPARABLE
     # ceiling. Any 405B number read downstream states this.
     # ⚠ THE VECTOR GAP IS OPEN, AND IT IS THE BINDING ONE. NO corpus-v2.1
-    # entropy-gradient vector exists for this node at ANY site: the five
+    # entropy-gradient vector exists for this model at ANY site: the five
     # site-evidence vectors are FROZEN-v1 SELECTION instruments that never file.
     # Before ANY 405B slot files, a fresh FD-gated corpus-v2.1 L99 build +
     # L99/L107 v2.1 state banks + their hub fits are REQUIRED. The re-bank is
     # QUEUED, and it gates more than this row: the ρ-law ceremony's AUDIT PAIRS
-    # wait on the same build (pre-statement `7542b377…`). Until it lands
+    # wait on the same build. Until it lands
     # `--resolution-sweep` reports this model as a NAMED GAP at L99 — the honest
     # state, not a regression — and `--candidates` must NOT enumerate it (see
     # also `vector_bank_paths`).
     "llama-3.1-405b-instruct": 99,
-    # llama-3.3-70b-instruct: L58, RULED BY THE DESK 2026-07-29 UNDER LUXIA'S
-    # OVERNIGHT DELEGATION 2 (ledgered) from the five-site â evidence table —
-    # readout of record
-    # `site_evidence_llama-3.3-70b-instruct_20260729-075541.json`,
-    # sha `e6d584aa…`, 40 rows, strict (fit-local) norms, frozen-v1
-    # evidence basis. L58 ⋆ primary, L63 robustness; rank-1 and rank-2 are
+    # llama-3.3-70b-instruct: L58, selected from the five-site â evidence
+    # table (40 rows, strict (fit-local) norms, frozen-v1 evidence basis).
+    # L58 ⋆ primary, L63 robustness; rank-1 and rank-2 are
     # UNANIMOUS across all four robustness columns (native k128 / k32, raw k128,
     # rebuilt-L16 hub) and the deep cluster {58, 63, 68} dominates. The r² peak
     # L17 is SUB-NULL on â in BOTH hub columns — the r²/â inversion's THIRD
@@ -987,30 +983,26 @@ SITE_OF_RECORD: dict[str, int] = {
     # NAMED GAP at L58, which is the honest state and not a regression (see also
     # `vector_bank_paths`).
     "llama-3.3-70b-instruct": 58,
-    # big-chain graduation (Luxia 2026-07-28). ⋆ L15, the same site and the same
+    # big-chain graduation. ⋆ L15, the same site and the same
     # fractional depth as its dense family-mate mistral-7b-instruct-v0.3 — the
     # MoE raises the ceiling, not the site (`fit_transport_maps.SITES` carries
     # the full rationale; the two registries must agree and are cross-checked in
     # selftest 7).
     "mixtral-8x7b-instruct-v0.1": 15,
-    # qwen3-30b-a3b: L38, RULED DIRECTLY BY LUXIA 2026-07-29 (morning) — and the
-    # provenance differs from the three rows above, which were desk rulings under
-    # her overnight delegation 2. The overnight pass PARKED this node on the
-    # delegated rule's ambiguity clause (rank-1 flips across the robustness
-    # columns, so no clear dominant); she adjudicated it first-hand off the
-    # parked evidence table. Readout of record
-    # `site_evidence_qwen3-30b-a3b_20260729-075641.json`, sha `13527972…`,
-    # 40 rows / 0 problems, strict (fit-local) norms, frozen-v1 evidence basis
-    # (amended candidate set {19, 22, 26, 35, 38}; the amendment is arithmetic
-    # and was ledgered BEFORE any â existed). L38 ⋆ primary (fractional depth
-    # .792), L35 robustness (.729).
+    # qwen3-30b-a3b: L38, selected by direct adjudication of the five-site â
+    # evidence table, because the mechanical dominance rule is ambiguous here
+    # (rank-1 flips across the robustness columns, so no clear dominant).
+    # Evidence: 40 rows / 0 problems, strict (fit-local) norms, frozen-v1
+    # evidence basis (amended candidate set {19, 22, 26, 35, 38}; the amendment
+    # is arithmetic and was fixed BEFORE any â existed). L38 ⋆ primary
+    # (fractional depth .792), L35 robustness (.729).
     # The top PAIR {L35, L38} is unanimous rank-1/rank-2 in all four robustness
     # columns; rank-1 itself flips 2–2 — L35 leads both NATIVE columns (+.0010
     # k128, +.0216 k32) and L38 leads raw k128 (+.0025) and the rebuilt-L16 hub
-    # (+.0094). The ruling crowns L38 on the node's best coherence (.750), its
+    # (+.0094). L38 wins on the model's best coherence (.750), its
     # best â/ceiling (.6024 rebuilt-L16, and the best in all three k128 columns),
-    # its cleanest FD gate (.00199), and the depth→coherence→â law all four ruled
-    # nodes follow (r(coherence, â) = +.909/+.920). The k32 column's larger
+    # its cleanest FD gate (.00199), and the depth→coherence→â law all four
+    # selected models follow (r(coherence, â) = +.909/+.920). The k32 column's larger
     # margin is on the record in `fit_transport_maps.SITES` together with the
     # reasons it does not overturn the k128 read — go there before re-opening
     # this, and note it is the only column whose ordering breaks depth
@@ -1022,10 +1014,10 @@ SITE_OF_RECORD: dict[str, int] = {
     # no shallow r² trap to fall into. That makes L38 the one site of record in
     # the campaign that an r² curve WOULD have found — which is a fact about this
     # node's curve, not a licence to crown sites from r² anywhere else.
-    # ⚠ CROSS-NODE COMPARABILITY: ceiling_random_q95 ≈ .275 here (k128, d=2048)
-    # vs ≈ .136 on the d=8192 nodes — a pure √(k/d) artifact of the narrow
-    # residual stream. Any qwen3 â/ceiling read downstream states this before it
-    # is set beside a wide node.
+    # ⚠ COMPARABILITY ACROSS WIDTHS: ceiling_random_q95 ≈ .275 here (k128,
+    # d=2048) vs ≈ .136 on the d=8192 models — a pure √(k/d) artifact of the
+    # narrow residual stream. Any qwen3 â/ceiling read downstream states this
+    # before it is set beside a wide model.
     # ⚠ THE VECTOR GAP IS OPEN, AND IT IS THE BINDING ONE. NO corpus-v2.1
     # entropy-gradient vector exists for this node at ANY site: the five
     # site-evidence vectors are FROZEN-v1 SELECTION instruments that never file.
@@ -1036,27 +1028,26 @@ SITE_OF_RECORD: dict[str, int] = {
     # `--candidates` must NOT enumerate it (there is no collection vectors dir at
     # all; see also `vector_bank_paths`).
     "qwen3-30b-a3b": 38,
-    # webtext-v3 base siblings (roster rows 25/26), BOTH RULED BY LUXIA
-    # 2026-08-03 from the sibling scan fits on the FROZEN --splits-artifact
-    # membership. `fit_transport_maps.SITES` carries the full rationale and the
+    # webtext-v3 base siblings (roster rows 25/26), both selected from the
+    # sibling scan fits on the FROZEN --splits-artifact membership. `fit_transport_maps.SITES` carries the full rationale and the
     # cp2 shas; the two registries must agree.
     #  · llama-3.1-8b-base L15 — ridge + cka peak (.7224 / .9781). Its grid also
     #    holds L13 (the PROC-family peak, the families disagree here) and L16
-    #    (the §7 C4 same-site pair-read site, matched to instruct `8b`).
+    #    (the hub law's C4 same-site pair-read site, matched to instruct `8b`).
     #  · qwen2.5-7b-base L20 — the UNANIMOUS all-families peak (.7796), bracketed
     #    by 18/22, with L21 as its C4 pair-read site (matched to `qwen-7b`).
     # ⚠ THE COLLECTION SIDE IS NOT COMPLETE, AND IT IS NAMED RATHER THAN
-    # ASSUMED: the scans banked the computed 12-site grids, so the ruled
+    # ASSUMED: the scans banked the computed 12-site grids, so the selected
     # pair-read sites (L16 / L21) and the ⋆-site re-collects join wave 3. Until
     # they land these keys resolve to a site the banks hold for the ⋆ but not
     # for the C4 partner column, and no v3 slot filed off this registry may
     # quote a C4 sibling delta before that re-collect is certified.
     "llama-3.1-8b-base": 15,
     "qwen2.5-7b-base": 20,
-    # qwen2.5-72b-instruct (roster row 24, the webtext-v3 SCALE ADD): L58, RULED
-    # BY LUXIA 2026-08-04 from this node's own webtext-v3 12-site scan fits on
-    # the FROZEN --splits-artifact membership — cp2_summary of record
-    # `5f787171…`, 72/72 valid in both arms. L58 ⋆ primary, L63 robustness: L58
+    # qwen2.5-72b-instruct (roster row 24, the webtext-v3 SCALE ADD): L58,
+    # selected from this model's own webtext-v3 12-site scan fits on the FROZEN
+    # --splits-artifact membership (72/72 valid in both arms). L58 ⋆ primary,
+    # L63 robustness: L58
     # is the peak on FIVE OF SIX instruments (all three native fit families +
     # both raw procrustes families + raw cka), and the sixth — NATIVE CKA —
     # peaks at L63 on a broad L48–L63 plateau, which is why L63 is kept as the
@@ -1066,28 +1057,29 @@ SITE_OF_RECORD: dict[str, int] = {
     # registered. `fit_transport_maps.SITES` carries the full rationale and the
     # two registries must agree (cross-checked in selftest 7).
     # (58, 63) IS ALSO llama-3.3-70b-instruct's registered grid, reached
-    # independently off this node's own scan. The three 80-layer rows share one
-    # computed grid, so the frozen §7 C2 recipe-vs-range read is site-for-site
-    # readable regardless; the coincidence makes the footing against row 12
-    # site-identical too. C2's paired sign test is scored against ROW 11, which
-    # rules to (37, 43) ⋆ L37 — nothing here is inherited from either. ⚠ AND THE
-    # DESK'S C2 RIDER APPLIES AT THIS KEY: the 72B's r² TROUGH is at row 11's
-    # (37, 43) and its r² PEAK at row 12's (58, 63), so a C2 comparison quoted
-    # at the other row's site is quoting this node at an extremum of its own
-    # curve. Site-for-site is a footing, not an immunity.
+    # independently off this model's own scan. The three 80-layer rows share one
+    # computed grid, so the hub law's frozen C2 recipe-vs-range read is
+    # site-for-site readable regardless; the coincidence makes the footing
+    # against row 12 site-identical too. C2's paired sign test is scored against
+    # ROW 11, which selects (37, 43) ⋆ L37 — nothing here is inherited from
+    # either. ⚠ AND A C2 CAVEAT APPLIES AT THIS KEY: the 72B's r² TROUGH is at
+    # row 11's (37, 43) and its r² PEAK at row 12's (58, 63), so a C2 comparison
+    # quoted at the other row's site is quoting this model at an extremum of its
+    # own curve. Site-for-site is a footing, not an immunity.
     # ⚠ BOTH REGISTERED SITES ARE BANKED — unlike rows 25/26, nothing here was
-    # ruled off the computed grid, so no re-collect is implied by this ruling.
+    # selected off the computed grid, so no re-collect is implied by this site.
     # WHAT IS OPEN IS DOWNSTREAM: the states-pull, the five hub legs and the
-    # §3.3 k256 health check fire ON this ruling, and no corpus-v2.1 FD-gated
-    # entropy-gradient vector exists for this node at any site. No v3 slot filed
-    # off this registry may quote a 72b column before those land — the RULING is
-    # what this row states; the rest of the pipeline catches up to it.
+    # v3 rebank's k256 health check follow from this site, and no corpus-v2.1
+    # FD-gated entropy-gradient vector exists for this model at any site. No v3
+    # slot filed off this registry may quote a qwen2.5-72b-instruct column
+    # before those land — the site selection is what this row states; the rest
+    # of the pipeline catches up to it.
     "qwen2.5-72b-instruct": 58,
 }
 
 #: Checkpoint identity for models NOT in `metabasis.roster.ROSTER` (which holds
-#: only the wave-1 + hub-rungs-2 nodes). These are the carried banked nodes;
-#: each is the prereg §1 roster row's checkpoint, named here so the arm rule
+#: only the wave-1 + hub-rungs-2 models). These are the carried banked models;
+#: each is its frozen roster row's checkpoint, named here so the arm rule
 #: never depends on a substring match against a bank key.
 CARRIED_CHECKPOINT_IDENTITY: dict[str, Literal["instruct", "base"]] = {
     "3b": "instruct",            # meta-llama/Llama-3.2-3B-Instruct (roster row 1)
@@ -1100,14 +1092,13 @@ CARRIED_CHECKPOINT_IDENTITY: dict[str, Literal["instruct", "base"]] = {
 
 #: Corpus provenance of a hub-map directory. The composed predictor consumes
 #: whatever hub map is banked, so which CORPUS the fit was made on rides with
-#: every prediction rather than living in a ledger row nobody reads at filing
+#: every prediction rather than living in a side record nobody reads at filing
 #: time. `legacy` = the pre-freeze anamnesis corpus; `frozen` = the frozen
-#: campaign corpus (v1); `v21` = the corpus-v2.1 re-bank (Addendum G §G1's
-#: go-forward basis), reachable only when a verified `--v21-root` is set.
+#: campaign corpus (v1); `v21` = the corpus-v2.1 re-bank (the go-forward
+#: basis), reachable only when a verified `--v21-root` is set.
 #: `webtext-v3` = the frozen v3 basis, reachable only when a verified
-#: `--v3-root` is set. ADDED, never re-spelled: the three v2.1-era values keep
-#: their exact meaning, so nothing that reads this Literal changes for a v2.1
-#: artifact.
+#: `--v3-root` is set. The three v2.1-era values keep their exact meaning
+#: beside it, so nothing that reads this Literal changes for a v2.1 artifact.
 CorpusProvenance = Literal["frozen", "legacy", "v21", "webtext-v3"]
 
 #: Which corpus vintage a whole PREDICTION rides on — a property of all four
