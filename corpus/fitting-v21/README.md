@@ -1,11 +1,11 @@
-# The v2.1 fitting corpus (basis of record for v2.1-era transport-map fits)
+# The v2.1 fitting corpus (the basis of earlier transport-map fits)
 
 `corpus_manifest.meta.json` is the **metadata manifest**: full per-text
-provenance and a `text_sha256` per entry, with the text bodies removed
-(2026-08-03 — this corpus is superseded as the public basis by its
-all-web-text successor; the raw bodies are no longer republished here
-so the superseded basis is not mistaken for the current one). The full
-manifest travels out-of-band; its sha256,
+provenance and a `text_sha256` per entry, with the text bodies removed.
+The current fitting corpus is `corpus/webtext-v3/`; bodies of this one
+are not published, so it is not mistaken for the current basis. The
+full manifest travels out-of-band and is available on request; its
+sha256,
 
 ```
 5ae355bc5d130f8e9c3ae426f5e71bf2b6e99c74b95369a874bec2abcd59b5d9
@@ -43,19 +43,12 @@ n_train = 598, n_test = 177, recorded per fit in `cp2_summary.json`.
   DeepSeek Model License) — redistributed here as generated text.
   Fictional names occurring in generated prose are fictional.
 
-## Status note (2026-08-01)
+## Why a successor exists
 
-This corpus remains the basis of record for every artifact citing its
-sha. A successor fitting corpus (**v3**) is in preparation: all public
-web text (no model-generated strata), drawn from multiple sources,
-sized so higher-rank fits clear the rank guard, with its composition
-census published from birth.
-
-Motivation: the model-generated strata (S1/S3, 617 of 777 texts) make
-this corpus partly on-policy for roster models. Measurements on the
-S2-only subsystem (fits restricted to the 160 WikiText chunks — text
-no model authored) show the transport structure survives off-policy
-while constant *levels* shift; v3 makes the all-web basis primary so
-quoted constants are fit on text empty of model-authored content.
-Artifacts fit on this corpus remain valid as published: constants are
-properties of (pair, corpus) and always name their basis sha.
+The model-generated strata (S1/S3, 617 of 777 texts) make this corpus
+partly on-policy for models in the roster. Fits restricted to the 160
+WikiText chunks — text no model authored — show the transport structure
+survives off-policy while exchange-rate *levels* shift. The successor,
+`corpus/webtext-v3/`, is all public web text. Artifacts fit on this
+corpus remain valid as published: exchange rates are properties of
+(pair, corpus) and always name their corpus sha.

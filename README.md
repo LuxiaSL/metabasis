@@ -1,136 +1,248 @@
 # metabasis
 
-*μετάβασις — change of basis; metabasis eis allo genos, "crossing into another kind."*
+*μετάβασις — change of basis.*
 
-Steering vectors port between language models. The machinery is a
-**hub-and-spoke atlas**: each model gets one linear **transport map** into a
-shared hub frame, fit on nothing but per-text mean residual states over a
-shared, sha-pinned text corpus. Any pair of models then composes through two
-hub legs; the fidelity of every transfer (the **exchange rate â**) is
-predicted before it is observed, under frozen error bands; and a steering
-vector crosses from one model to another by an explicit change of basis. No
-map is used until it beats two shuffled nulls on held-out data, and
-behavioral claims certify against matched-norm random controls.
+**A steering vector found in one language model can be carried into another through a
+linear map fit on shared generic text.**
 
-## The pipeline (the math in one pass)
+A steering vector is a direction added to a model's residual stream to shift its behavior:
+toward formal register, toward French, toward refusing, toward higher output entropy.
+Metabasis builds a **hub-and-spoke atlas** of language models. Each model gets one
+**transport map** into a shared hub model's residual space, fit on nothing but mean residual
+states over a fixed web-text corpus. Any pair of models composes through two hub legs. Each
+pair's **exchange rate** (â, how much of a direction survives the transfer) is predicted
+before the pair is fit, and a steering vector crosses from one model to another by an
+explicit change of basis.
 
-1. **Shared corpus.** A fixed, sha-pinned corpus of generic web text. The
-   fitting text is deliberately empty of anything being transferred — the
-   maps learn shared geometry, not task content. Every frozen input carries
-   a composition census beside its hash.
-2. **Forced replay → per-text means.** Each model reads every text with its
-   own tokenizer. At that model's **site of record** — a residual layer
-   chosen from its alignment curve, never by fiat — the **per-text mean**
-   residual state is recorded (mean over completion-token states, raw fp32;
-   normalization happens at fit time). Matching is at the text level: the
-   mean is what makes rows comparable across tokenizers.
-3. **Per-side PCA.** Each model's mean-state matrix gets its own PC basis,
-   fit on training rows only. States become rank-k coordinates, with k
-   bounded by the rank guard (k ≤ n_train / 1.2).
-4. **Procrustes to the hub.** A semi-orthogonal map (WᵀW = I, optional
-   isotropic scale) is fit from each model's coordinates to the hub's — one
-   map per model. The hub itself is a measured choice under a pre-registered
-   selection criterion, not an assumption.
-5. **Gates.** A fit is used only if its held-out state-prediction R²
-   separates from **both** a shuffled-pair null and a stratum-preserving
-   shuffle null (the sharp one), with agreement across template arms read
-   beside.
-6. **Compose, predict, transfer.** Any pair A→B is the composition of A's
-   hub leg with B's — **two hub maps determine every pair**. â for a pair
-   files as a prediction with frozen bands *before* it is observed, and a
-   steering vector transfers by the same change of basis.
+## Why
 
-One property to carry with every number: **constants are properties of
-(pair, corpus)**. â's ordering is robust across fitting corpora; its level
-is indexed to the basis it was fit on — every quoted constant names its
-corpus sha.
+A steering vector belongs to the model it was built in. Finding a lever usually means
+building it again in every model you care about. Metabasis measures how much of that work
+transfers:
 
-## Using it
+- when a lever found once moves to another model;
+- how well it moves;
+- why it fails when it fails.
 
-The intended loop, end to end (module surface is stable; **webtext-v3 is
-the corpus of record** — `--help` on any module is the authority):
+Every map must beat shuffled nulls on held-out data before it is used, and every behavioral
+claim is certified against matched-norm random controls.
 
-```
+## What it has found
+
+[`RESULTS.md`](RESULTS.md) holds the full account, with each item marked established,
+exploratory, rejected, or in progress. In brief:
+
+- **Composed maps predict exchange rates ahead of observation.** On each of four hubs,
+  240/240 pre-filed predictions land within ±0.05 of the observed exchange rate, and
+  92.9–96.3 % within ±0.025. A designated poor-hub control fails the tight band, as
+  pre-registered. One number per model does much worse: 163/240 in-sample and 143/240 held
+  out, against 240/240 filed in advance. The relational frame carries transport; a scalar
+  summary does not.
+- **The entropy-gradient vector steers from 3B to 405B.** It is dose-ordered and outside
+  random controls in 20 of 21 models tested (Mixtral on a narrower dose ladder).
+- **Contrast vectors transfer visibly at small and mid scale.** At 70B, language behaves
+  like a cliff and formality like a dial.
+- **At the largest model, the generic-text anchor frame stops holding the class
+  directions.** *(Exploratory.)* Eight axis-relevant contrast pairs restore it, one seeded
+  map serves many vectors, and composing two seeded legs costs almost nothing.
+
+## Quickstart
+
+The algebra runs anywhere: numpy, scipy and pydantic, with no GPU and no model weights. Run
+from the repository root.
+
+```bash
 uv venv && source .venv/bin/activate
-uv pip install -e '.[gpu]'        # CPU spine alone suffices for fits/transfer
+uv pip install -e .
 
-# 0. corpus: reconstruct webtext-v3 byte-for-byte from pinned public
-#    sources — the golden path is corpus/webtext-v3/RECONSTRUCT.md
-#    (one command; every artifact sha it must reproduce is listed there;
-#    per-text verification via corpus/webtext-v3/corpus_manifest.meta.json)
-python -m metabasis.scripts.build_webtext_corpus --seed 80 \
-    --n-per-stratum 300 --tokenizer meta-llama/Llama-3.1-8B-Instruct \
-    --out-dir <OUT>
+# Each module proves itself on synthetic data before it touches real inputs.
+python -m metabasis.scripts.fit_transport_maps --selftest       # map fitting and gates
+python -m metabasis.scripts.build_behavioral_banks --selftest   # carrying vectors across
+python -m metabasis.scripts.build_contrast_vectors --selftest   # contrast-vector construction
+```
+
+Each prints its checks and exits 0. A check it cannot run in this environment is reported
+as a named skip, with the evidence that is missing. Some module output and `--help` text
+still carries internal record codes; [`CONTRIBUTING.md`](CONTRIBUTING.md) says where that
+stands.
+
+The core step is a semi-orthogonal change of basis. On synthetic data, with a hidden
+rotation and scale between two "models" reading the same texts:
+
+```python
+import numpy as np
+from metabasis.scripts.fit_transport_maps import fit_procrustes
+
+rng = np.random.default_rng(0)
+za = rng.standard_normal((600, 32))                           # model A: per-text states
+q, _ = np.linalg.qr(rng.standard_normal((32, 32)))            # the hidden change of basis
+zb = 0.7 * za @ q + 0.05 * rng.standard_normal((600, 32))     # model B: the same texts
+
+omega, scale = fit_procrustes(za, zb)
+v_a = rng.standard_normal(32); v_a /= np.linalg.norm(v_a)     # a direction found in A
+v_b = v_a @ omega                                             # carried into B
+print(v_b @ (v_a @ q) / np.linalg.norm(v_b), scale)           # ≈ 1.000, ≈ 0.70
+```
+
+Real models add everything the pipeline below exists for: tokenizers that disagree, a
+basis per model, a rank limit, and nulls a map must beat before anyone trusts it.
+
+## The pipeline
+
+1. **Shared corpus.** A fixed corpus of generic web text, reconstructed byte for byte from
+   pinned public sources. It deliberately contains nothing being transferred, so the maps
+   learn shared geometry rather than task content.
+2. **Per-text mean states.** Each model reads every text with its own tokenizer. At that
+   model's site, a residual layer chosen from its alignment curve, the mean residual state
+   over each text's completion is recorded. Matching rows by text rather than token is what
+   makes them comparable across tokenizers.
+3. **Per-side PCA.** Each model's state matrix gets its own principal basis, fit on training
+   rows only, with rank k ≤ n_train / 1.2.
+4. **Procrustes to the hub.** A semi-orthogonal map (WᵀW = I, with an optional isotropic
+   scale) goes from each model's coordinates to the hub's: one map per model.
+5. **Gates.** A map is used only if its held-out state prediction beats both a
+   shuffled-pair null and a stratum-preserving shuffle.
+6. **Compose, predict, transfer.** Pair A→B is A's hub leg composed with B's. Its exchange
+   rate is filed as a prediction with frozen bands before the pair is observed, and a vector
+   transfers by the same composition.
+
+A model enters the atlas once: one site, one state bank, one hub leg. Every pair it joins
+afterwards is composition, with no per-pair fitting.
+
+Exchange rates are properties of (pair, corpus). Their ordering is robust across fitting
+corpora; their level depends on the corpus, so every quoted exchange rate names its corpus.
+
+## Running it on models
+
+The GPU side needs the `gpu` extra and model weights:
+
+```bash
+uv pip install -e '.[gpu,corpus]'
+
+# 0. The corpus: rebuild webtext-v3 from its pinned sources.
+python -m metabasis.scripts.build_webtext_corpus --seed 80 --n-per-stratum 300 \
+    --tokenizer meta-llama/Llama-3.1-8B-Instruct --out-dir <OUT>
+
+# 0b. The frozen train/holdout split the fits consume.
 python -m metabasis.scripts.derive_webtext_splits --help
 
-# 1. site: scan each model's alignment curve; the site of record comes
-#    from the curve
+# 1–2. Per-text mean states at each model's site, with a bitwise replay check in the same pass.
 python -m metabasis.scripts.collect_mean_states --help
 
-# 2. states: forced replay over the shared corpus → per-text mean residual
-#    states at the site (collection + bitwise spot-replay in one pass)
-python -m metabasis.scripts.collect_mean_states ...
+# 3–5. Maps into the hub, gated against both nulls.
+python -m metabasis.scripts.fit_transport_maps --help
 
-# 3. maps: per-side PCA + semi-orthogonal Procrustes to the hub, gated
-#    against both nulls
-python -m metabasis.scripts.fit_transport_maps ...
+# Steering vectors, built natively: the entropy gradient and contrast vectors.
+python -m metabasis.scripts.build_entropy_gradient --help
+python -m metabasis.scripts.build_contrast_vectors --help
 
-# 4. transfer + verify: compose hub legs for any pair, predict â, carry a
-#    vector across, read it out in the target model
-python -m metabasis.scripts.read_transported_axes ...
+# 6. Carry vectors across maps into the banks a steering run reads.
+python -m metabasis.scripts.build_behavioral_banks --help
 ```
 
-A model enters the atlas once: one site, one state bank, one hub leg. Every
-pair it participates in afterwards is composition — no per-pair fitting.
+[`corpus/webtext-v3/RECONSTRUCT.md`](corpus/webtext-v3/RECONSTRUCT.md) lists every pin and
+every sha256 the rebuild must reproduce. No text bodies are redistributed; each rebuilt text
+verifies against its hash in
+[`corpus/webtext-v3/corpus_manifest.meta.json`](corpus/webtext-v3/corpus_manifest.meta.json).
+Deriving the frozen splits also needs the full manifest of the earlier fitting corpus, which
+is not in the repository; it is available on request (see Data).
+
+The models the atlas covers, their layer grids, sites and architecture facts live in
+[`metabasis/roster.py`](metabasis/roster.py) and [`metabasis/config.py`](metabasis/config.py).
+`--help` on any module is the authority on its arguments.
+
+## Data
+
+The state banks, fitted maps and behavioral readouts are not in the repository. They are
+available on request: open an issue saying what you need. Two manifests make any copy
+verifiable with `sha256sum --check`:
+
+- [`manifests/outputs.sha256`](manifests/outputs.sha256) covers `outputs/battery/`;
+- [`manifests/collection.sha256`](manifests/collection.sha256) covers `outputs/collection/`
+  (one provenance file is withheld).
+
+The fitted pair maps under `outputs/pairs/` are not yet covered by a manifest.
 
 ## Layout
 
 ```
 metabasis/
-  scripts/       the transport stack, named by what each does — corpus build,
-                 state collection, map fitting, transported readouts,
-                 composition/difficulty/path-independence panels, injection
-                 banks, behavioral probes and judging
-  extraction/    minimal hook machinery (decoder-layer resolution + one
-                 residual-write injection hook — nothing else)
-  config.py      model presets (architecture facts + dtypes)
-manifests/       sha256 baselines over the data tree — the replication anchor
-outputs/         data: states, transport maps, banks, readouts
-                 (LOCAL ONLY, never tracked; verify against manifests/)
-corpus/          the published fitting corpora — webtext-v3/ (OF RECORD:
-                 reconstruction golden path + per-text sha manifest) and
-                 fitting-v21/ (historical, with its composition census)
-docs/            research docs and methodology (largely local-only)
+  scripts/       the transport stack, one module per job (table below)
+  extraction/    decoder-layer resolution and the residual-write steering hook
+  l4_blind/      a tool for blind human judgments of generated text, the gold labels
+                 the behavioral classifiers are checked against
+  templates/     job templates for running collection and fits on a GPU scheduler
+  roster.py      the models, their layer grids and sites
+  config.py      per-model architecture facts and dtypes
+  text_decode.py decoding of banked byte-level-BPE generations back to text
+  capacity.py    per-GPU memory estimation for preflight checks
+  threads.py     the effective thread configuration, recorded as instrument identity
+  jobs_v21.py    renders the job templates and checks them
+  lineage_discriminators.py
+                 metadata checks that tell base and instruct checkpoints apart
+corpus/          the fitting corpora: webtext-v3 (of record) and fitting-v21
+manifests/       sha256 baselines over the data tree
+docs/planning/   the two frozen pre-registrations the results are scored against
+pyproject.toml   the package; extras gpu, corpus, judge, whiten, plots
 ```
 
-Git tracks code plus the data manifests. The data tree travels out-of-band;
-`sha256sum --check manifests/outputs.sha256` certifies a copy (or
-`python -m metabasis.scripts.generate_tree_manifest --verify …`, which adds
-defect diagnosis).
+The modules a first reader needs:
+
+| module | what it does |
+|---|---|
+| `build_webtext_corpus` | rebuilds the fitting corpus from pinned public sources |
+| `derive_webtext_splits` | derives the frozen train/holdout split |
+| `collect_mean_states` | records per-text mean residual states at a site |
+| `fit_transport_maps` | per-side PCA, Procrustes, and the two null gates |
+| `build_entropy_gradient` | the label-free entropy steering vector, with a finite-difference check |
+| `build_contrast_vectors` | contrast (difference-of-means) vectors from paired texts |
+| `build_behavioral_banks` | carries vectors through maps into steering banks, with random controls |
+| `vllm_lane_column` | runs a steered dose ladder on vLLM, at any tensor-parallel size |
 
 ## Vocabulary
 
-One namespace, no decoder ring: every object is named by its construction,
-and the same name is used in code, stamps, and prose — transport map,
-exchange rate, hub leg, composed map, atlas. The full stack lives in
-`docs/methodology/naming-conventions.md`.
+One name per object, used the same way in code, outputs and prose:
 
-## Environment
+| term | meaning |
+|---|---|
+| transport map | the linear map from one model's residual space into another's |
+| hub leg | a model's transport map into the hub |
+| composed map | two legs chained, A → hub → B |
+| exchange rate (â) | how much of a direction survives a transfer |
+| star factorization | predicting each pair's exchange rate as a product of one coefficient per model |
+| site | the residual layer a model's states are read at and its vectors written at |
+| dose (α) | the steering strength, as a fraction of the site's median residual norm |
+| random band | the spread of effects from random vectors of the same norm: the null a real effect must clear |
+| alignment | cosine between a transported vector and the target model's own native vector |
+| containment | the fraction of a direction the map's anchor frame can hold; an upper bound on alignment |
+| in-family leg | a map from a smaller model of the same family, as opposed to the hub leg |
+| atlas | the set of models and their hub legs |
 
+## Related
+
+- [entropy-gradient](https://github.com/LuxiaSL/entropy-gradient): the label-free entropy
+  steering vector, with its construction and its results up to 405B.
+- [anamnesis](https://github.com/LuxiaSL/anamnesis): the steering and replay instrument
+  metabasis's transport stack builds on.
+- [repeng](https://github.com/vgel/repeng): multi-layer control vectors, one of the
+  vector families RESULTS.md discusses.
+
+## Contributing
+
+[`CONTRIBUTING.md`](CONTRIBUTING.md) explains how code and claims arrive, and the
+documentation rule both are held to.
+
+## Citation
+
+```bibtex
+@software{metabasis,
+  author = {Luxia},
+  title  = {metabasis: steering-vector transport between language models},
+  url    = {https://github.com/LuxiaSL/metabasis},
+  year   = {2026}
+}
 ```
-uv venv && source .venv/bin/activate
-uv pip install -e .              # CPU algebra spine: numpy/scipy/pydantic only
-uv pip install -e '.[gpu]'       # + torch/transformers for collection & probes
-```
 
-The CPU spine (map fits, composition, all banked readouts) runs anywhere
-with no GPU. Cluster-side values (work roots, weights paths, API keys) come
-from the environment; nothing of that class is ever committed.
+## License
 
-## Provenance
-
-The stack lifts from a prior research program whose records remain canonical
-there and are cited, not migrated; the port certified itself by regenerating
-a banked readout byte-identically before anything else fired. Claims made
-from this repo are pre-registered, predictions file before observation, and
-the manifests make every artifact independently verifiable.
+[MIT](LICENSE)

@@ -1,6 +1,5 @@
-# manifests/collection.sha256 — outputs/collection/ coverage (opt-pass item 12, Luxia-ruled 2026-07-30: SEPARATE manifest, session-close cadence, desk-only; M42 MANIFEST-* excluded, M43 scratch outside tree). Regenerated at every session close; outputs.sha256 keeps freeze-point semantics.
-# Generated 2026-07-30 session-8 close. Files: 3757
-# Sanitization: 1 row excluded (a dsv3 provenance file whose filename carries an infrastructure alias); the complete manifest incl. that row lives desk-side at staging/collection.sha256.full-unsanitized (gitignored).
+# manifests/collection.sha256: sha256 of every file under outputs/collection/, except one
+# provenance file whose filename identifies infrastructure and is withheld. 3757 files.
 d1af39520ea278d4d5165839bfab26590e0a58631958eb801a575c2db981ee0b  outputs/collection/3b/vectors/entropy_gradient_3b.npz
 8197bc4123840a12e1022a1372840f2b5ed27caa1cb7049b4ce49bece2a0dad2  outputs/collection/3b/vectors/entropy_gradient_3b_fd_gate.json
 4b8af8f5ddb0f21e7905968cf447fd375abb77b313818adc3a29ca648b5d0ec0  outputs/collection/3b/vectors/entropy_gradient_3b_stamps.json

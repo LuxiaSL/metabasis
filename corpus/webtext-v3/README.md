@@ -3,8 +3,9 @@
 The primary basis for all forward claims: **1,200 texts, four strata of
 public web text (300 each), every source a pre-2022 snapshot** — the
 corpus cannot contain model-authored text by construction, not by
-filtering. Pre-registered and frozen 2026-08-03 (tag `freeze/webtext-v3`,
-prereg in `docs/planning/PREREG-webtext-v3-2026-08-03.md`).
+filtering. Pre-registered and frozen: the pre-registration is
+[`docs/planning/PREREG-webtext-v3-2026-08-03.md`](../../docs/planning/PREREG-webtext-v3-2026-08-03.md),
+byte-identical to its copy at tag `freeze/webtext-v3`.
 
 Raw bodies are **not** redistributed. The corpus is published as a
 deterministic reconstruction plus a per-text verification manifest:
@@ -28,6 +29,6 @@ pre-registered keys):
 python -m metabasis.scripts.derive_webtext_splits --help
 ```
 
-The predecessor basis (`corpus/fitting-v21/`, v2.1) remains for the
-historical record with its composition census; no v2.1 constant is ever
-quoted against a webtext-v3 observation (the vintage rule).
+The predecessor basis (`corpus/fitting-v21/`, v2.1) is kept with its
+composition census. An exchange rate fit on it is never compared against
+a webtext-v3 observation.
