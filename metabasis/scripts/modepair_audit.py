@@ -1,25 +1,27 @@
-"""A8 Leg-6 — THE MODE-PAIR AUDIT: which contrast does each banked DSV2 needle carry?
+"""THE MODE-PAIR AUDIT: which contrast does each banked DSV2 needle carry?
 
-Item 1 found that the arm's `dir0` is [analogical, contrastive] in 3B and 8B but
-[linear, socratic] in the DSV2 plain bank, and that two banked "whitened V3" vintages
-share a provenance string while being mutually near-orthogonal. That was established from
-stamps plus cross-vintage cosines. This script settles it from a THIRD, INDEPENDENT
-source: a contrast computed directly from the A8 Leg-2 DSV2 state bank, whose per-text
-mode labels come from the corpus manifest and owe nothing to any vector build.
+The mode contrast vector (`dir0` / `V3_*` keys) is [analogical, contrastive] in the 3B
+and 8B banks but [linear, socratic] in the DSV2 plain bank, and two banked "whitened
+contrast" vintages share a provenance string while being mutually near-orthogonal. The
+bank stamps and cross-vintage cosines show that much. This script settles it from a
+THIRD, INDEPENDENT source: a contrast computed directly from the 8B↔DSV2-Lite DSV2
+state bank, whose per-text mode labels come from the corpus manifest and owe nothing
+to any vector build.
 
 For each site and each candidate mode pair, Delta-mu = mean(S3 pos) - mean(S3 neg) over
-the leg-2 native state bank, then cosine against every banked needle object. A vector
+the native DSV2 state bank, then cosine against every banked needle object. A vector
 that carries a given contrast should align with that contrast's corpus-derived direction
 and not with the other's.
 
 Capture-convention caveat, stated: the corpus contrast is per-TEXT mean states over the
-A8 corpus (n=60/pole); the banked vectors were built from per-TOKEN positions over
+paired corpus (n=60/pole); the banked vectors were built from per-TOKEN positions over
 dedicated pole runs (n=160/class). Different captures of the same intended object agree
-in direction but not in magnitude — the Leg-4F exploratory saw the same ~.2 scale. Read
-the CONTRAST between the two columns, not the absolute value of either.
+in direction but not in magnitude — the owl trait-site exploratory shows the same ~.2
+scale. Read the CONTRAST between the two columns, not the absolute value of either.
 
-UNSTAMPED (C section 8). Scores nothing; it is evidence for a desk ruling.
-Run: PYTHONPATH=pipeline python -m metabasis.scripts.modepair_audit
+UNSTAMPED. Scores nothing; the output is evidence for a human judgement about which
+banked object carries which contrast.
+Run: python -m metabasis.scripts.modepair_audit
 """
 from __future__ import annotations
 

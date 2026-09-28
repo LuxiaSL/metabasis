@@ -1,25 +1,27 @@
-"""A8 Leg-6 / Item 5 — P8-REV readout: the reverse behavioural certification.
+"""Reverse-write readout: the reverse behavioural certification of a transport map.
 
-Consumes the entropy-replay json (entropy_write_probe over the leg-6 3B cells) and
-applies P8-REV's frozen clauses. REPORTS them; scores nothing.
+Consumes the entropy-replay json (`entropy_write_probe` over the 3B reverse-write
+cells) and applies the prediction's clauses, which were frozen before the cells
+ran. REPORTS them; scores nothing.
 
-The frozen letter (A8-add-5): transported V7 into 3B via the REVERSE map writes 3B's
-entropy —
+The frozen prediction: the entropy-gradient vector (bank key `V7_*`) transported
+into 3B via the REVERSE map writes 3B's entropy —
   clause 1  dose-ordered. SCOPE (stated at freeze): monotone across the FULL SIGNED
             ladder +-{.03,.1,.3}.
   clause 2  outside the reverse-transported-R band at >=5/6 doses.
   clause 3  sign flipping through zero.
 
 Aggregation and scope are as frozen; both a strict and a rank-based reading of "monotone"
-are reported because the letter does not distinguish them, and this arm's practice is to
-show every defensible reading rather than pick one silently.
+are reported because the clause does not distinguish them, and showing every defensible
+reading is safer than picking one silently.
 
 The band is the DOSE-MATCHED reverse-transported R band: gRband1-3 carried back through
 the same map, read at the same dose. That is what `entropy_write_probe`'s
 `entropy_rise_vs_Rc_band` computes when the null prefix selects those cells.
 
-UNSTAMPED (C section 8). No P self-scored.
-Run: PYTHONPATH=pipeline python -m metabasis.scripts.reverse_write_readout \
+The output is UNSTAMPED and the prediction is not self-scored: scoring is done by a
+reader other than the code that produced the numbers.
+Run: python -m metabasis.scripts.reverse_write_readout \
         --entropy-json <path> --out <dir>
 """
 from __future__ import annotations

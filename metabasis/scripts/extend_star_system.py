@@ -1,27 +1,28 @@
-"""A8 extension-pairs smalls — hub constants, star PREDICTIONS, and the verify pass.
+"""Star-system extension to a new model — hub constants, star PREDICTIONS, and the verify pass.
 
-PHASE-ORDERED BY CONSTRUCTION (rake 29's lesson, applied here as a CLI gate rather than
-as an intention): the star prediction for a pair must be written to disk BEFORE that
+PHASE-ORDERED BY CONSTRUCTION (a CLI gate rather than an intention, because an ordering
+that depends on the operator's discipline is eventually broken): the star prediction for a pair must be written to disk BEFORE that
 pair is fitted. This script refuses to do both in one invocation.
 
   --phase predict   read a_hat(8B -> M) from the HUB fit only; derive c_M inside its own
-                    (arm x family) system per A8-add-7.1; emit the +-.05 band for every
+                    (arm x family) system (the arm-consistency rule below); emit the +-.05 band for every
                     other pair involving M. REFUSES to run if the second pair's fits
                     already exist — a prediction filed after the fact is not a prediction.
   --phase verify    re-read the frozen prediction file and add the observed a_hat for the
                     second pair. Never recomputes the prediction; if the prediction file
                     is absent it refuses rather than back-filling one.
 
-The arm-consistency rule (A8-add-7.1): c_M lives in the system its a_hat was measured
+The arm-consistency rule: c_M lives in the system its a_hat was measured
 in. Gemma has a chat template, so it gets both arms and its constant of record is the
 NATIVE one. A raw-arm-only model's constant may only ever be combined with raw-arm
 constants — and a lower raw-arm a_hat is ARM-CONFOUNDED before it is a transport fact.
 
-UNSTAMPED (C section 8). No P self-scored — the desk scores P8-XG / P8-X1 / P8-XO.
+UNSTAMPED. No prediction is self-scored: the verify pass reports the observed value beside
+the frozen band, and scoring is done by a reader other than this code.
 
 Run (repo root):
-  PYTHONPATH=pipeline python -m metabasis.scripts.extend_star_system --phase predict
-  PYTHONPATH=pipeline python -m metabasis.scripts.extend_star_system --phase verify
+  python -m metabasis.scripts.extend_star_system --phase predict
+  python -m metabasis.scripts.extend_star_system --phase verify
 """
 from __future__ import annotations
 
@@ -45,11 +46,11 @@ ARM = Path("outputs/battery/arms/A8_conjugation")
 SMALLS = ARM / "smalls"
 OUT = SMALLS / "readouts_cpu"
 SYSTEMS = OUT / "star_systems.json"
-BAND_HALFWIDTH = 0.05              # add-4 rule
+BAND_HALFWIDTH = 0.05              # the ±.05 tolerance every star prediction is filed with
 
 # Per-target config. The phase-ordering machinery is shared; only the roster differs.
 # gemma: has a chat template -> both arms; native is the row of record, raw the beside.
-# olmo:  base model, no chat template -> RAW ARM ONLY (A8-add-7.1); the raw system is
+# olmo:  base model, no chat template -> RAW ARM ONLY (arm-consistency rule); the raw system is
 #        the ONLY row, and it is the row of record because there is no native alternative.
 TARGETS: dict[str, dict] = {
     "gemma3-27b": {
@@ -102,7 +103,7 @@ def phase_predict(model: str, cfg: dict) -> int:
     if fits_second.exists() and any(fits_second.glob("fit_*.npz")):
         raise SystemExit(
             f"REFUSING: {fits_second} already holds fits. A star prediction filed "
-            "after its own test has been fitted is not a prediction (A8-add-7.3).")
+            "after its own test has been fitted is not a prediction.")
     systems = _usable_systems()
     OUT.mkdir(parents=True, exist_ok=True)
     hub_m, second_m = cfg["hub"], cfg["second"]
@@ -229,7 +230,7 @@ def main() -> int:
     ap.add_argument("--phase", choices=("predict", "verify"), required=True)
     ap.add_argument("--target", choices=sorted(TARGETS), default="gemma3-27b",
                     help="extension model. gemma3-27b (both arms, native of record) or "
-                         "olmo2-7b (raw arm only — base model, A8-add-7.1).")
+                         "olmo2-7b (raw arm only — base model, no chat template).")
     args = ap.parse_args()
     cfg = TARGETS[args.target]
     return (phase_predict(args.target, cfg) if args.phase == "predict"
