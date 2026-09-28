@@ -2888,12 +2888,20 @@ def set_map_gate_overrides(overrides: MapGateOverrides) -> MapGateOverrides:
     return previous
 
 
-def load_consumable_map(path: Path, *, role: str) -> tuple[TransportMap, MapGateCheck]:
-    """`fit_transport_maps.load_checked_transport_map` under this process's overrides."""
+def load_consumable_map(path: Path, *, role: str,
+                        pair: str) -> tuple[TransportMap, MapGateCheck]:
+    """`fit_transport_maps.load_checked_transport_map` under this process's overrides.
+
+    A refusal names the role, the pair it was loaded for, and both override
+    flags, so the halt says what stopped and how a run may proceed past it.
+    """
     try:
         return load_checked_transport_map(path, overrides=MAP_GATE_OVERRIDES)
     except MapGateError as exc:
-        raise MapNotConsumableError(f"{role}: {exc}") from exc
+        raise MapNotConsumableError(
+            f"{role}: pair {pair}: {exc} [overrides: {ALLOW_FAILED_GATE_FLAG} for a "
+            f"failed null gate, {ALLOW_OVER_RANK_FLAG} for a rank above n_train / "
+            f"1.2; either is recorded in the output when used]") from exc
 
 
 # ---------------------------------------------------------------- the predictor
@@ -2961,9 +2969,9 @@ def compose_pair(source_model: str, target_model: str,
                                             target_model, t_site)
     assert ref_src.resolved is not None and ref_tgt.resolved is not None
     tm_src, gate_src = load_consumable_map(Path(ref_src.resolved),
-                                           role="source hub map")
+                                           role="source hub map", pair=pair_id)
     tm_tgt, gate_tgt = load_consumable_map(Path(ref_tgt.resolved),
-                                           role="target hub map")
+                                           role="target hub map", pair=pair_id)
     a_comp = composed_exchange_rate(tm_src, tm_tgt, v_src, v_tgt)
 
     #  DESCRIPTIVE COMPANIONS — computed AFTER â_comp, from the objects already
@@ -7820,7 +7828,8 @@ def observed_ahat_for_slot(slot: V3Slot, fit: V3PairFitRef,
         loaded.append(load_entropy_gradient(path, model, site))
     (v_src, spec_src), (v_tgt, spec_tgt) = loaded
     assert fit.resolved is not None
-    tm, gate = load_consumable_map(Path(fit.resolved), role="direct pair fit")
+    tm, gate = load_consumable_map(Path(fit.resolved), role="direct pair fit",
+                                   pair=slot.pair_id)
     if gate.overrides_used:
         notes.append(
             f"MAP GATE OVERRIDDEN ({', '.join(gate.overrides_used)}): the direct "
@@ -12219,8 +12228,11 @@ def selftest() -> int:                                   # noqa: C901 — a chec
             observe38(fail38)
             check(False, "a direct pair fit that FAILED its null gate must be refused")
         except MapNotConsumableError as exc:
-            check("null gate" in str(exc),
-                  "a direct pair fit whose recorded null gate FAILED is refused")
+            check("null gate" in str(exc) and "gAL31->gBL32" in str(exc)
+                  and ALLOW_FAILED_GATE_FLAG in str(exc)
+                  and ALLOW_OVER_RANK_FLAG in str(exc),
+                  "a direct pair fit whose recorded null gate FAILED is refused, "
+                  "naming the pair and both override flags")
         over38 = plant38("over_rank", n_train=3)
         try:
             observe38(over38)
@@ -12236,7 +12248,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
             check("`n_train`" in str(exc),
                   "a fit record MISSING `n_train` is refused by name")
         try:
-            load_consumable_map(fail38, role="source hub map")
+            load_consumable_map(fail38, role="source hub map", pair="gAL31->gBL32")
             check(False, "a failed hub leg must be refused")
         except MapNotConsumableError as exc:
             check(str(exc).startswith("source hub map:"),

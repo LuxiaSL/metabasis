@@ -51,7 +51,8 @@ re-derivation); an artifact that does not belong to the loaded corpus REFUSES.
 CONSUMING A MAP. Every fitted map is banked, including maps that fail the null
 gate and Procrustes ranks above the rank guard k <= n_train / 1.2. The gate and
 the guard bind where a map is used: `load_checked_transport_map` (and
-`check_map_for_consumption`) read the map's record in `cp2_summary.json` and
+`check_map_for_consumption`) read the map's record in `cp2_summary.json` (beside
+the map, or in the run root when the map sits in a `fits*` subdirectory) and
 refuse a map whose `valid` is false or whose rank exceeds n_train / 1.2, unless
 the caller passes the named override (`--allow-failed-gate-map`,
 `--allow-over-rank-map` on the consuming tools), which is then recorded in that
@@ -2204,14 +2205,31 @@ def parse_fit_name(fit_path: Path) -> tuple[str, str, str]:
     return m["pair"].replace("__", "->"), m["arm"], m["family"]
 
 
+def fit_summary_candidates(fit_path: Path) -> list[Path]:
+    """Where the run summary for `fit_path` can be, in the order it is looked for.
+
+    `run_grid` writes `cp2_summary.json` into the fits directory beside the maps
+    (`<arm-root>/<fits-dirname>/`, `fits` by default). A banked run may instead
+    hold the summary in the run root with the maps under `<run>/fits*/`, so when
+    the map's directory is a fits directory (its name starts with `fits`) the
+    parent is the second place looked. Nothing further up is searched.
+    """
+    fit_path = Path(fit_path)
+    out = [fit_path.parent / FIT_SUMMARY_NAME]
+    if fit_path.parent.name.startswith("fits"):
+        out.append(fit_path.parent.parent / FIT_SUMMARY_NAME)
+    return out
+
+
 def check_map_for_consumption(fit_path: Path, *, tm: Optional[TransportMap] = None,
                               summary_path: Optional[Path] = None,
                               overrides: Optional[MapGateOverrides] = None
                               ) -> MapGateCheck:
     """Refuse a map whose fit failed its null gate or exceeds the rank guard.
 
-    The verdict is read from the fit record in the run summary beside the map (or
-    `summary_path`), matched by (site_pair, arm, family) from the file name. A
+    The verdict is read from the fit record in the run summary — `summary_path`
+    if given, else the first of `fit_summary_candidates` that exists (beside the
+    map, then the run root above a fits directory) — matched by (site_pair, arm, family) from the file name. A
     missing summary, a missing record, or a record without `valid` or `n_train` is
     refused by name — never defaulted. `overrides` lets a caller consume a map the
     gate or the guard would refuse; the returned check lists every override used.
@@ -2219,12 +2237,15 @@ def check_map_for_consumption(fit_path: Path, *, tm: Optional[TransportMap] = No
     overrides = overrides or MapGateOverrides()
     fit_path = Path(fit_path)
     site_pair, arm, family = parse_fit_name(fit_path)
-    summary = Path(summary_path) if summary_path else fit_path.parent / FIT_SUMMARY_NAME
-    if not summary.exists():
+    candidates = ([Path(summary_path)] if summary_path
+                  else fit_summary_candidates(fit_path))
+    summary = next((c for c in candidates if c.exists()), None)
+    if summary is None:
         raise MapGateRecordMissing(
-            f"{fit_path.name}: no {FIT_SUMMARY_NAME} at {summary}. The null-gate "
-            "result and n_train live in that file; without it the map cannot be "
-            "shown to have passed its gate or to respect the rank guard")
+            f"{fit_path.name}: no {FIT_SUMMARY_NAME} at "
+            f"{' or '.join(str(c) for c in candidates)}. The null-gate result and "
+            "n_train live in that file; without it the map cannot be shown to have "
+            "passed its gate or to respect the rank guard")
     try:
         doc = json.loads(summary.read_text())
     except (OSError, ValueError) as exc:
@@ -3502,6 +3523,35 @@ def _selftest_consumption(root: Path, recs: Sequence[FitRecord],
     check(_ok(lambda: load_checked_transport_map(
         fit(no_sum, "proc_k16"), summary_path=ok_dir / FIT_SUMMARY_NAME)),
           "an explicit summary_path is honoured for a map with no summary beside it")
+
+    # The banked-run layout: <run>/cp2_summary.json with maps in <run>/fits/.
+    run = root / "banked_run"
+    maps_dir = run / "fits"
+    maps_dir.mkdir(parents=True)
+    for fam, tm in maps.items():
+        save_transport_map(maps_dir, site_pair, "native", fam, tm)
+    write_fit_summary_fixture(run, rows)
+    _, chk_run = load_checked_transport_map(fit(maps_dir, "proc_k16"))
+    check(chk_run.summary_path == str(run / FIT_SUMMARY_NAME) and chk_run.gate_valid,
+          "a map in <run>/fits/ is vouched for by <run>/cp2_summary.json")
+    bare = root / "bare_run" / "fits"
+    bare.mkdir(parents=True)
+    save_transport_map(bare, site_pair, "native", "proc_k16", maps["proc_k16"])
+    try:
+        load_checked_transport_map(fit(bare, "proc_k16"))
+        check(False, "a fits/ map with no summary beside it or in the run root "
+                     "must be refused")
+    except MapGateRecordMissing as exc:
+        check(str(bare / FIT_SUMMARY_NAME) in str(exc)
+              and str(bare.parent / FIT_SUMMARY_NAME) in str(exc),
+              "…and with a summary in NEITHER place it is refused, naming both paths")
+    other = root / "other_run" / "maps"
+    other.mkdir(parents=True)
+    save_transport_map(other, site_pair, "native", "proc_k16", maps["proc_k16"])
+    write_fit_summary_fixture(other.parent, rows)
+    check(_raises(lambda: load_checked_transport_map(fit(other, "proc_k16")),
+                  MapGateRecordMissing),
+          "the parent is searched only above a fits directory, never elsewhere")
 
 
 def _selftest_prediction_authorization(root: Path, check) -> None:
