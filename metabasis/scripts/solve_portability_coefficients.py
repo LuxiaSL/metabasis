@@ -35,16 +35,16 @@ CONVENTIONS INHERITED FROM `solve_star_systems` (do not drift):
     system; such pairs are excluded by name with the reason recorded, never
     silently dropped or abs()'d.
   * Families are NEVER mixed inside one system, and arms are never mixed
-    (rake 40, and the arm-consistency rule: a constant belongs to the system it
-    was solved in). One solve = one (arm × family).
+    (the arm-consistency rule: a constant belongs to the system it was solved
+    in). One solve = one (arm × family).
   * The rank guard k ≤ n_train/1.2 is reported, not silently applied — a solve
     whose inputs include a rank-forbidden fit is marked not-usable.
   * A system must pass a held-out check before a new constant may hang on it.
 
 STATUS: everything this module emits is TENTATIVE and UNSTAMPED. It derives
-coefficients; it files no predictions. The prediction ceremony (prereg §3 —
-file BEFORE the pair is fit) lives in the prediction tooling, and nothing here
-may be used to back-fill one.
+coefficients; it files no predictions. The prediction ceremony (a prediction
+is filed BEFORE its pair is fit) lives in the prediction tooling, and nothing
+here may be used to back-fill one.
 
 Run (repo root):
   python -m metabasis.scripts.solve_portability_coefficients --selftest
@@ -73,7 +73,7 @@ from metabasis.threads import thread_config_stamp
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("solve_portability_coefficients")
 
-#: prereg §3: held-out star predictions are scored at ±.05 absolute.
+#: held-out star predictions are scored at ±.05 absolute (the pre-registered band).
 BAND_HALFWIDTH = 0.05
 #: singular values below this fraction of the largest are treated as zero.
 RANK_TOL = 1e-9
@@ -152,13 +152,13 @@ class PortabilitySolution(BaseModel):
     rank_forbidden_inputs: list[str] = []
     USABLE_FOR_PREDICTIONS: bool = False
     notes: list[str] = Field(default_factory=list)
-    #: THE EFFECTIVE THREAD CONFIGURATION (Luxia ruling 2026-08-01). The design
+    #: THE EFFECTIVE THREAD CONFIGURATION, part of the instrument's identity. The design
     #: matrix is decomposed by `np.linalg.svd` (rank + nullspace) and solved by
     #: `np.linalg.lstsq`, both blocked LAPACK routines whose summation order
     #: moves with the thread count — so the coefficients this document carries
     #: are thread-conditioned in the last digits and the count belongs beside
-    #: them. Empty dict = this solution predates the ruling; the backward-
-    #: compatible reader is `metabasis.threads.stamp_thread_config`.
+    #: them. Empty dict = a solution written without a thread stamp; the
+    #: reader that accepts both is `metabasis.threads.stamp_thread_config`.
     thread_config: dict = Field(default_factory=dict)
 
 
@@ -202,7 +202,8 @@ def solve_log_least_squares(
         raise ValueError(
             f"one solve = one (arm × family); got arms {sorted(arm_set)} and "
             f"families {sorted(fam_set)}. Families and arms are never mixed "
-            "inside a star system (rake 40 / the arm-consistency rule).")
+            "inside a star system (the arm-consistency rule: a constant belongs "
+            "to the system it was solved in).")
 
     sol = PortabilitySolution(
         arm=arm or (next(iter(arm_set)) if arm_set else ""),

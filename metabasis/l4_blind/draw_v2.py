@@ -8,9 +8,9 @@ on-axis delta (see `strata.py`), and the draw is per stratum.
 
     CALIBRATION BLOCK  ~3 per usable axis, REVEALED (steered side named).
                        The max-delta exemplars per (axis, side), restricted
-                       to non-degenerate panels — an anchor she cannot
+                       to non-degenerate panels — an anchor the judge cannot
                        misread is the entire point. Never gold; excluded
-                       from the blind block so nothing she saw labelled
+                       from the blind block so nothing the judge saw labelled
                        can come back as a test.
 
     BLIND BLOCK        per (axis, side, stratum), seeded key-sort:
@@ -60,11 +60,11 @@ TARGETS: Final[dict[str, int]] = {"strong": 6, "moderate": 6, "expected_null": 4
 #: side, then the next best across both.
 CALIBRATION_PER_AXIS: Final[int] = 3
 
-#: Cross-node diversity in the calibration block (desk, 2026-08-07). The
-#: anchors are what Luxia learns "a real effect" from; if they all come
-#: from one node she learns that node's idiosyncrasies instead. Slots are
-#: filled preferring the least-represented node so far, and no single node
-#: may exceed this fraction of the block while alternatives exist.
+#: Model diversity in the calibration block. The anchors are what the judge
+#: learns "a real effect" from; if they all come from one roster model the
+#: judge learns that model's idiosyncrasies instead. Slots are filled
+#: preferring the least-represented model so far, and no single model may
+#: exceed this fraction of the block while alternatives exist.
 MAX_NODE_FRACTION: Final[float] = 1.0 / 3.0
 
 #: An anchor must first be VIVID. Diversity is taken where it is free and
@@ -74,24 +74,24 @@ MAX_NODE_FRACTION: Final[float] = 1.0 / 3.0
 #: reach delta >= 0.98, so spreading the anchors across nodes costs
 #: nothing. On formality only dsv2-lite clears 0.80 at all (0.929 native /
 #: 0.943 transported); the next best node manages 0.52-0.56. Anchoring
-#: formality on a 0.52 to avoid a second dsv2 exemplar would teach Luxia
-#: that "a real effect" is something barely visible — the exact failure v1
-#: already made once. So vividness outranks diversity, and diversity then
-#: decides among the vivid.
+#: formality on a 0.52 to avoid a second dsv2 exemplar would teach the
+#: judge that "a real effect" is something barely visible — the failure of
+#: the effect-blind v1 deck. So vividness outranks diversity, and diversity
+#: then decides among the vivid.
 CALIBRATION_VIVID_MIN: Final[float] = 0.80
 
 #: Columns barred from the ANCHOR pool (the blind block may still use
 #: them, flagged). Not a guess — a measured finding.
 #:
 #: dsv2-lite.formality's strong tail is systematically glued: of its
-#: banked panels, 13 are glued by the direct measure, and three
-#: successive re-freezes each drew another glued anchor from it. An
-#: anchor is the one panel Luxia is TOLD is steered, so a glued one
-#: teaches her that "less formal" looks like mangled text. Its blind
+#: banked panels, 13 are glued by the direct measure, and excluding
+#: glued panels one at a time keeps drawing another glued anchor from it. An
+#: anchor is the one panel the judge is TOLD is steered, so a glued one
+#: teaches that "less formal" looks like mangled text. Its blind
 #: pairs stay (with the flag); its anchors do not.
 #:
-#: Note for the desk, stated precisely because it would be easy to
-#: overread: gluing is NOT manufacturing the effects. Among dsv2
+#: Stated precisely because it would be easy to overread: gluing is NOT
+#: manufacturing the effects. Among dsv2
 #: formality pairs with banked text, 0.33 of the delta>=0.50 pairs carry
 #: a glued panel against 0.57 of the delta<0.50 pairs — if anything
 #: gluing is commoner where the measured effect is SMALL.

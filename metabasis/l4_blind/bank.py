@@ -7,19 +7,20 @@ generation, keyed by coordinates:
      "text": "..."}
 
 Nothing else is read from it. It is the join between the sealed draw and
-the page, and it is consumed exactly once — at deck build, a desk step —
-after which the serving path only ever sees `BlindDeck`.
+the page, and it is consumed exactly once — at deck build, an operator step
+on the unblinded side — after which the serving path only ever sees
+`BlindDeck`.
 
-DECODE OF RECORD (must be what produced the bank, verbatim, per
-L2-PROBE-INGREDIENTS-FULL6 `decode_provenance`):
+DECODE OF RECORD (must be what produced the bank, verbatim, and what the
+probe ingredients record as their `decode_provenance`):
 
     metabasis.text_decode.maybe_decode(
         tokenizer.decode(list(generated_ids), skip_special_tokens=True))
 
 with the tokenizer from `AutoTokenizer.from_pretrained(model_path)` and no
 extra kwargs. For the dsv2-lite columns this is the CORRECTED decode — the
-adopted logs (`staging/reading-bleed/corrected-l1-dsv2/`), NOT the banked
-byte-BPE text, which is why the corrected pass exists at all.
+re-decoded generation logs, NOT the banked byte-BPE text, which is why the
+corrected pass exists at all.
 """
 from __future__ import annotations
 
@@ -36,14 +37,14 @@ from metabasis.l4_blind.models import BlindDeck, BlindPair
 from metabasis.l4_blind.taxonomy import AXIS_TRAIT, sha256_file
 
 #: A panel shorter than this is a stub, not an utterance; the deck build
-#: HALTs rather than showing Luxia a fragment.
+#: HALTs rather than showing the judge a fragment.
 #:
-#: The floor is in CHARACTERS, not words, and that is deliberate. An
-#: earlier draft used `len(text.split()) >= 5` and HALTed the whole build
-#: on a dsv2-lite panel of "2 words" that was in fact 431 characters of
-#: fluent English with the spaces missing (see SPACE_DEGENERATE_RATIO).
-#: Word count is not a measure of length on a column that emits
-#: space-less token runs; characters are.
+#: The floor is in CHARACTERS, not words, and that is deliberate. A word
+#: floor such as `len(text.split()) >= 5` reads a dsv2-lite panel of 431
+#: characters of fluent English with the spaces missing as "2 words" and
+#: HALTs the whole build (see SPACE_DEGENERATE_RATIO). Word count is not a
+#: measure of length on a column that emits space-less token runs;
+#: characters are.
 MIN_CHARS: Final[int] = 80
 
 #: Below this ratio of WHITESPACE to characters, a panel's words are
@@ -54,8 +55,8 @@ MIN_CHARS: Final[int] = 80
 #: This is REPORTED, never repaired. The L3 judge reads exactly these
 #: bytes under the same frozen decode, so "fixing" the text here would
 #: make the L4/L3 agreement number compare two different corpora — the one
-#: thing the gold exists to prevent. The desk rules on whether these pairs
-#: stay in the deck.
+#: thing the gold exists to prevent. Whether these pairs stay in the deck
+#: is decided on the unblinded side, from the report.
 SPACE_DEGENERATE_RATIO: Final[float] = 0.08
 
 #: THE DIRECT MEASURE, used wherever the real text is in hand: the
@@ -70,8 +71,8 @@ GLUED_FRACTION_MAX: Final[float] = 0.10
 
 #: Below this, a panel is unusually short beside its ~2000-character
 #: neighbours. Reported beside the degeneracy flag as a length-bleed cue
-#: (the pre-statement already pre-stated a positive length bleed on the
-#: language and formality axes).
+#: (steering on the language and formality axes is expected to shift panel
+#: length, so a short panel can partially unblind its pair).
 SHORT_PANEL_CHARS: Final[int] = 400
 
 
@@ -112,7 +113,7 @@ def load_bank(path: Path) -> dict[str, str]:
 # ── self-identification scan (a REPORT, never a rewrite) ─────────────────
 
 #: Vendor / family tokens a generation might emit about itself. Hits are
-#: reported to the desk, never edited out: the L3 judge reads the same
+#: reported on the unblinded side, never edited out: the L3 judge reads the same
 #: bytes, and silently diverging the two would break the very agreement
 #: number L4 exists to produce.
 SELF_ID_TOKENS: Final[tuple[str, ...]] = (
@@ -122,19 +123,18 @@ SELF_ID_TOKENS: Final[tuple[str, ...]] = (
 )
 
 
-#: Self-identification hits the desk has SEEN and ruled on. A hit outside
-#: this set is an unacknowledged blind compromise and fails the selftest.
+#: Self-identification hits that have been SEEN and adjudicated on the
+#: unblinded side, keyed by pair id with the reason. A hit outside this set
+#: is an unacknowledged blind compromise and fails the selftest.
 #:
-#: L4-6082bb0de9b1 — one panel opens "As an AI developed by DeepSeek",
-#: which names its own node to any reader. The pair stays in the frozen
-#: draw (re-drawing on a text property would make the draw depend on the
-#: text, which it must not), and the recommendation to the desk is to
-#: EXCLUDE IT AT SCORING TIME: agreement is computed per stratum over the
-#: valid pairs, so dropping one needs no re-freeze and no new session.
-#: Empty in deck v2.1: the pair that opened "As an AI developed by
-#: DeepSeek" (L4-6082bb0de9b1, deck v2.1 draft) is no longer drawn — the
-#: glued-generation exclusions changed the pool under it. The mechanism
-#: stays because the next such panel must fail loudly rather than ship.
+#: An acknowledged pair (a panel opening "As an AI developed by DeepSeek"
+#: names its own model to any reader) stays in the frozen draw — re-drawing
+#: on a text property would make the draw depend on the text, which it must
+#: not — and is EXCLUDED AT SCORING TIME: agreement is computed per stratum
+#: over the valid pairs, so dropping one needs no re-freeze.
+#: The set is empty for the current deck: no drawn pair self-identifies.
+#: The mechanism stays because the next such panel must fail loudly rather
+#: than ship.
 ACKNOWLEDGED_SELF_ID: Final[dict[str, str]] = {}
 
 
@@ -183,7 +183,7 @@ def build_deck(
     """Join the sealed draw to the bank and emit the blind deck.
 
     This is the one function that touches both sides. Its output carries
-    the sealed map's sha (so the desk can prove which map unblinds it) but
+    the sealed map's sha (so the scorer can prove which map unblinds it) but
     none of its content.
     """
     bank = load_bank(bank_path)
@@ -208,7 +208,8 @@ def build_deck(
             if len(t) < MIN_CHARS:
                 raise ValueError(
                     f"{label} decoded to {len(t)} characters (< {MIN_CHARS}); "
-                    f"a stub panel is unjudgeable — the desk must rule on this pair"
+                    f"a stub panel is unjudgeable — adjudicate this pair on the "
+                    f"unblinded side before building the deck"
                 )
             ratio = sum(1 for ch in t if ch.isspace()) / len(t)
             if ratio < SPACE_DEGENERATE_RATIO or len(t) < SHORT_PANEL_CHARS:
@@ -295,9 +296,9 @@ def synthetic_bank(drawn: DrawnPairs, out_path: Path) -> Path:
     seen: set[str] = set()
     for p in drawn.pairs:
         # NB: the role ("dose" / "baseline") is deliberately NOT written into
-        # the placeholder text. An earlier draft did, and the leak selftest
-        # caught it — a synthetic panel that announces its own arm would make
-        # the whole no-leak check vacuous.
+        # the placeholder text: a synthetic panel that announces its own arm
+        # would make the whole no-leak check vacuous, and the leak selftest
+        # fails if it does.
         for cell_id in (p.dose_cell_id, p.baseline_cell_id):
             k = bank_key(p.column, p.side, cell_id, p.generation_id)
             if k in seen:
@@ -338,7 +339,7 @@ _WS = re.compile(r"[ \t]+")
 def normalise_for_display(text: str) -> str:
     """Collapse runs of spaces/tabs but keep paragraph structure intact.
 
-    Display-only. The bank's bytes are what the desk joins and what L3
+    Display-only. The bank's bytes are what the unblinding join reads and what L3
     reads; this never touches them.
     """
     return "\n".join(_WS.sub(" ", ln).rstrip() for ln in text.splitlines()).strip()
@@ -385,8 +386,8 @@ def build_deck_v2(drawn, bank_path: Path) -> tuple[BlindDeck, list, list]:
                 raise ValueError(
                     f"{label} is a CALIBRATION anchor whose words run together "
                     f"({glued:.1%} of its characters sit in tokens longer than "
-                    f"{GLUED_TOKEN_CHARS}). An anchor teaches Luxia what a real "
-                    f"effect looks like; a glued one teaches her the decode "
+                    f"{GLUED_TOKEN_CHARS}). An anchor teaches the judge what a real "
+                    f"effect looks like; a glued one teaches the decode "
                     f"artefact instead. Exclude this generation and re-freeze."
                 )
             if (glued > GLUED_FRACTION_MAX or ratio < SPACE_DEGENERATE_RATIO

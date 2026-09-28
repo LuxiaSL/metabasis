@@ -1,18 +1,18 @@
-"""A8 Leg-5 (L4-f) — owl transport readout: the de-dicto ladder vs its four controls.
+"""Owl transport readout: the de-dicto ladder vs its four controls.
 
-Reads the two `trait_probe` outputs written by this session:
-  owl_transported_8b.json  — Vdiverge/Valign carried Qwen -> 8B through the REVERSE
-                             Procrustes (the leg's positive arm) + AR1-3 = Qwen's banked
+Reads the two `trait_probe` outputs of the owl-transport run (under `LEG4`):
+  <LEG4>/owl_transported_8b.json  — Vdiverge/Valign carried Qwen -> 8B through the
+                             REVERSE Procrustes (the positive arm) + AR1-3 = Qwen's banked
                              R-band members through the SAME reverse map
-  owl_rawnull_8b.json      — the same ladder for the zero-padded RAW Qwen vector (the
-                             "coordinates transfer" null; see the bank stamp)
+  <LEG4>/owl_rawnull_8b.json      — the same ladder for the zero-padded RAW Qwen vector
+                             (the "coordinates transfer" null; see the bank stamp)
 
-and tabulates, per add-3's execution clauses:
+and tabulates, as the owl-transport prediction's execution clauses fix them:
   primary  = de-dicto owl lexicon rate (the owl battery's own ruler, judge-free)
   controls = transported-R band (AR1-3) · RAW unconjugated · placebo floor · alpha=0 AR floor
   beside   = de-se lexicon rate (no bar), coherence gate, animal-pick modal
 
-No P is scored here (desk scores P8-5). UNSTAMPED (C§8).
+No prediction is scored here; this script only tabulates. UNSTAMPED.
 
 Run: PYTHONPATH=pipeline python -m metabasis.scripts.owl_transport_readout
 """

@@ -1,31 +1,35 @@
-"""A8 Leg-3 — build transported-vector injection banks + multicell cell specs.
+"""Build transported-vector injection banks + multicell cell specs.
 
-The entropy cell that decides P8-J (baton §1) + the P8-2 DSV2 landing (§2): transported
-source axes injected into each TARGET's entropy ladder, scored next against the FROZEN
-F-ii predictions (8B, Qwen answer keys) and the frozen P8-2 letter (DSV2: raw FAILS ∧
-whitened PASSES). This script is CPU-side staging only — no generation here.
+The entropy cell and the DSV2 landing cell: transported source axes injected into each
+TARGET's entropy ladder, scored afterwards against the FROZEN F-ii predictions (8B, Qwen
+answer keys) and the frozen DSV2 landing prediction (raw FAILS ∧ whitened PASSES). This
+script is CPU-side staging only — no generation here.
 
-Per target it emits, under leg3/:
+Per target it emits, under outputs/battery/arms/A8_conjugation/leg3/:
   vectors/a8_leg3_vectors_{target}.npz     keys "{name}_L{site}" (unit float32; the
                                            write hook re-normalizes at attach, so only
                                            ORIENTATION is load-bearing — orientation
                                            comes from read_transported_axes.load_axes, which
                                            applies the recipe-level sign anchors)
-  vectors/a8_leg3_vectors_{target}_stamps.json   fit sha + both norm conventions
-                                           (rake item 3) + transported magnitudes
+  vectors/a8_leg3_vectors_<target>_stamps.json   fit sha + both norm conventions
+                                           (two conventions exist, so both are recorded
+                                           and the one used is named) + transported
+                                           magnitudes
   cells/cells_{target}.json                vmb_a5_gen_multicell --cells-json input
 
-Panels:
-  8b / qwen-7b (Leg-3 proper): transported {V7, Vrep_perp, Vconf, Vtemp, oblique}
-      + transported Rband1-3 (same g, the envelope controls) + baseline cell.
-  dsv2-lite (P8-2): raw u=unit(g·v) vs whitened w=unit(Σ⁻¹u) for {V7, Vconf}
-      (Vconf = exploratory-beside, NOT letter-scoring) + raw/whitened Rband1-3
+Panels (the names are the source registry's axis keys, `PANEL`):
+  8b / qwen-7b: every `PANEL` axis transported (entropy, repetition-mass ⊥, confidence,
+      temperature, oblique) + transported Rband1-3 (same g, the envelope controls)
       + baseline cell.
+  dsv2-lite: raw u=unit(g·v) vs whitened w=unit(Σ⁻¹u) for the entropy and confidence
+      axes (confidence = exploratory-beside, NOT scored against the landing prediction)
+      + raw/whitened Rband1-3 + baseline cell.
 
 Doses alpha_frac ±{.03,.1,.3}; alpha resolves at launch as frac × the target-site
-PER-TOKEN median residual norm (banked a5_vectors_stamps.json — the A5 injection
-convention). The a8 mean-STATE median (different convention) is recorded beside it
-in the stamps, never used for alphas.
+PER-TOKEN median residual norm (the banked vector-build stamps, `a5_norms` in
+`TARGETS` — the injection convention the entropy ladders were measured under). The
+mean-STATE median (a different convention) is recorded beside it in the stamps, never
+used for alphas.
 
 Run (repo root):  PYTHONPATH=pipeline python -m metabasis.scripts.build_injection_banks
 """
@@ -194,7 +198,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parse_no_arguments(__doc__, argv)
     for target, cfg in TARGETS.items():
         build_target(target, cfg)
-    logger.info("leg3 staging complete under %s", LEG3)
+    logger.info("injection-bank staging complete under %s", LEG3)
     return 0
 
 

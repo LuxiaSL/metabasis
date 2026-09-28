@@ -1,4 +1,5 @@
-"""A8 Leg-5 (L4-f) — the STATE COLUMN beside the owl's behavioral ladder (add-3 clause).
+"""The STATE COLUMN beside the owl's behavioral ladder (the owl-transport prediction
+requires a state read beside every behavioral one).
 
 The probe writes texts; this reads the STATES those texts correspond to.  For each cell of
 interest it re-runs the generated text through 8B under teacher forcing (the battery's
@@ -20,7 +21,7 @@ Prompt reconstruction: the probe generates n_samples per prompt in PROMPTS order
 concatenates, so raws index i belongs to PROMPTS[i // n_samples] (asserted against the
 banked census n_prompts x n_samples).
 
-UNSTAMPED (C§8).  Run node-side (needs 8B weights + one GPU):
+UNSTAMPED.  Needs the 8B weights and one GPU:
   python -m metabasis.scripts.owl_state_column --arm-root <leg4> --model-path <8b>
 """
 from __future__ import annotations

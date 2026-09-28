@@ -1,40 +1,41 @@
-"""A8 Leg-6 / Item 1 — the L4-c letter, UN-PARKED.
+"""The whitened-needle prediction, read on banked inputs.
 
-THE UNPARK (CP-0 finding, 2026-07-23). Leg-4F parked this letter because the whitened
-target could not be built from banked inputs. Two of its three named blockers dissolve:
+The prediction concerns a whitened target, and both of the obstacles that seem to stand
+between it and the banked inputs dissolve:
 
-  1. "No banked class means." The letter's object needs unit(Sigma^-1 . Delta-mu), and
+  1. "No banked class means." The prediction's object needs unit(Sigma^-1 . Delta-mu), and
      Delta-mu enters ONLY through a positive scalar: V3raw is banked as
      unit(mu_analogical - mu_contrastive) with raw_norm recorded, so
      unit(Sigma^-1 Delta-mu) == unit(Sigma^-1 . V3raw) IDENTICALLY, sign included.
-     Class means were never actually required.
-  2. "The 2026-07-19 whiten build wrote stamps only, no vectors npz." The npz exists —
-     node-side, under battery/a5_vectors_dsv2_lite_v3whiten{,_dir0}/, not under
-     arms/A5_dsv2/whiten*/ where Leg-4F looked. It carries **V3w_L18** built to exactly
-     the stamped recipe: unit(Sigma^-1(mu_analogical - mu_contrastive)), Sigma =
+     Class means are not required.
+  2. "The whiten build wrote stamps only, no vectors npz." The npz exists, under
+     outputs/battery/a5_vectors_dsv2_lite_v3whiten{,_dir0}/ (`VINTAGES`), beside the
+     stamps-only whiten directories under the arm tree. It carries **V3w_L18** built to
+     exactly the stamped recipe: unit(Sigma^-1(mu_analogical - mu_contrastive)), Sigma =
      Ledoit-Wolf, shrinkage logged, n_pos/n_neg = 160/160, on the dir0 mode pair.
 
-So the letter reads on the BANKED object, at its own recipe. No Sigma re-derivation, no
-substitution, no amendment. The fresh Sigma@L18 capture the baton specifies runs BESIDE
-this (whitened_needle_sigma_beside.py) as the corpus- and convention-independent replication.
+So the prediction reads on the BANKED object, at its own recipe. No Sigma re-derivation,
+no substitution, no amendment. A fresh Sigma@L18 capture runs BESIDE this
+(whitened_needle_sigma_beside.py) as the corpus- and convention-independent replication.
 
-CONVENTION TRAP, NAMED (rake): vmb_a5_covariance_screen computes a RIDGE-regularized
+CONVENTION TRAP, NAMED: vmb_a5_covariance_screen computes a RIDGE-regularized
 sample Sigma (ridge = 1e-3 * mean eigenvalue), NOT Ledoit-Wolf. A fresh capture therefore
 builds a DIFFERENT-convention object than the recipe this letter freezes. That is why the
 banked LW object is primary and the fresh capture is a beside, not a replacement.
 
-VINTAGE AMBIGUITY, CARRIED (the Leg-4F rake, now with its L18 face): two builds share the
-recipe string and the mode pair but differ in shrinkage —
+VINTAGE AMBIGUITY, CARRIED: two builds share the recipe string (and claim the same mode
+pair) but differ in shrinkage —
   a5_vectors_dsv2_lite_v3whiten       L18: lw_shrinkage .2577, cos_delta_whitened .1044
   a5_vectors_dsv2_lite_v3whiten_dir0  L18: lw_shrinkage .1205, cos_delta_whitened .3933
-Both are read. Neither is silently preferred; the desk rules which is the object.
+Both are read. Neither is silently preferred; which is the object is decided outside
+this script, from both reads.
 
 IDENTITY CHECK FIRST (no-peeking discipline): the same g and same source vector against
-the RAW target must reproduce the banked number of record, cos = -.0865 (Leg-3 curve
-rows, dsv2 dir0 cliff). Only if that reproduces does the whitened swap mean anything —
-the raw->whitened contrast is then the ONLY thing that changed.
+the RAW target must reproduce the banked number of record, cos = -.0865 (the injection
+curve rows, dsv2 dir0 cliff). Only if that reproduces does the whitened swap mean
+anything — the raw->whitened contrast is then the ONLY thing that changed.
 
-UNSTAMPED (C section 8). No P is self-scored here; the desk scores P8-L4c (.35).
+UNSTAMPED. No prediction is scored here (its filed probability is .35).
 Run: PYTHONPATH=pipeline python -m metabasis.scripts.whitened_needle_letter
 """
 from __future__ import annotations
@@ -57,12 +58,12 @@ ARM = Path("outputs/battery/arms/A8_conjugation")
 OUT = ARM / "leg6" / "readouts_cpu"
 BANK = Path("outputs/battery")
 
-# The target site. V3raw/V3w are banked at DSV2 L18; the leg-2 fit grid covers
-# 8bL16 -> dsv2-liteL18, so the letter reads at its own site with no substitution.
+# The target site. V3raw/V3w are banked at DSV2 L18; the 8B→DSV2 fit grid covers
+# 8bL16 -> dsv2-liteL18, so the prediction reads at its own site with no substitution.
 SRC_SITE, TGT_SITE = 16, 18
 FAMILIES = ("proc_k32", "proc_k128", "proc_k512", "ridge")
-PRIMARY_FAMILY = "proc_k512"      # leg-2 family of record (the -.0865 number's family)
-RECORD_RAW_COS = -0.0865          # Leg-3 curve rows; the identity check's target
+PRIMARY_FAMILY = "proc_k512"      # family of record for this map (the -.0865 number's family)
+RECORD_RAW_COS = -0.0865          # injection curve rows; the identity check's target
 RECORD_TOL = 0.02
 
 VINTAGES = {
@@ -113,7 +114,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     # The two vintages claim the SAME construction (unit(mu_analogical - mu_contrastive)
     # at L18) and differ only in the shrinkage used for the whitening. Their RAW vectors
     # must therefore agree up to capture noise. If they do NOT, the vintage problem is
-    # deeper than a shrinkage choice and the desk needs to see that before ruling.
+    # deeper than a shrinkage choice, and choosing a vintage is not meaningful until it is resolved.
     labels = list(targets)
     cross: dict[str, float | None] = {}
     if len(labels) == 2:

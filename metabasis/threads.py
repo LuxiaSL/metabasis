@@ -1,10 +1,9 @@
 """The EFFECTIVE thread configuration, read at runtime, as instrument identity.
 
-THE RULING (Luxia, 2026-08-01, on the opt-pass item-3 measurement):
-`OMP_NUM_THREADS=8` becomes the standing default everywhere, and the thread
-count is recorded in every build stamp as part of instrument identity. Basis:
-eigh is bitwise-deterministic at any FIXED thread count (repeat-identical, both
-rungs measured) and bytes differ across counts; Σ construction is bitwise
+THE STANDING DEFAULT: `OMP_NUM_THREADS=8` everywhere, and the thread count is
+recorded in every build stamp as part of instrument identity. Basis: eigh is
+bitwise-deterministic at any FIXED thread count (repeat-identical, measured on
+two model rungs) and its bytes differ across counts; Σ construction is bitwise
 stable regardless. The byte-comparability break with the banked single-threaded
 v2.1 vectors is characterized and taken knowingly: banked artifacts stay as
 they are; v3 rebuilds all vectors =8-stamped from birth; any comparison against
@@ -34,15 +33,17 @@ BESIDE that, never instead of it, so a stamp shows both the intent and the
 instrument.
 
 ────────────────────────────────────────────────────────────────────────────────
-RAKE M19 — INSTRUMENTATION THAT ONLY DESCRIBES A RUN MUST NEVER FAIL IT
+INSTRUMENTATION THAT ONLY DESCRIBES A RUN MUST NEVER FAIL IT
 ────────────────────────────────────────────────────────────────────────────────
 A thread count cannot change one banked number. Every way of failing to read
 one therefore degrades to a NAMED sentinel rather than raising:
 `effective_num_threads=None` with `consensus="unresolved"` and a `note` saying
 what went wrong. `THREADS_UNRESOLVED` is deliberately distinguishable from "the
 stamp predates the field" — see `stamp_thread_config`, which returns `None` for
-a PRE-RULING stamp and a `ThreadConfig` with `consensus="unresolved"` for a
-degraded probe (the M41 hostname discipline, one field over).
+a stamp written before the field existed and a `ThreadConfig` with
+`consensus="unresolved"` for a degraded probe. "Never recorded", "recorded as
+unknown" and "recorded" are three different states, and a stamp field that
+collapses them lets an inference pass for a record.
 
 Run (repo root, PYTHONPATH=.):
   python -m metabasis.threads --selftest
@@ -59,7 +60,7 @@ from typing import Literal, Optional, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field
 
-#: THE RULED DEFAULT (Luxia 2026-08-01). Job templates export it; builders
+#: THE STANDING DEFAULT. Job templates export it; builders
 #: `setdefault` it; stamps record what was actually in effect and compare.
 RULED_OMP_NUM_THREADS: int = 8
 
@@ -73,10 +74,11 @@ THREAD_STAMP_KEY: str = "thread_config"
 #: `consensus="unresolved"` and a note saying so).
 THREADS_UNRESOLVED: str = "THREADS_UNRESOLVED"
 
-#: What a PRE-RULING artifact's thread count reads as in a comparison. Every
-#: vector banked before 2026-08-01 was built single-threaded by the deployed
+#: What the thread count of an artifact whose stamp predates the field reads as
+#: in a comparison. Every such vector was built single-threaded by the deployed
 #: job scripts' `export OMP_NUM_THREADS=1`, but the stamp does not SAY so, and
-#: an inference is not a record (rake M41(a), from the other side).
+#: an inference is not a record. The value is wire format: comparisons print it
+#: verbatim.
 PRE_RULING_UNRECORDED: str = "unrecorded (stamp predates the 2026-08-01 ruling)"
 
 #: The label a comparison prints when two thread counts differ. Constant, so a
@@ -121,7 +123,7 @@ class ThreadProbeError(RuntimeError):
     """A thread probe could not be performed.
 
     Raised only INSIDE the probe and always caught by it: nothing in this
-    module lets a description of a run fail that run (rake M19). It exists so
+    module lets a description of a run fail that run. It exists so
     the degraded paths carry a typed reason rather than a bare string.
     """
 
@@ -162,7 +164,7 @@ class ThreadConfig(BaseModel):
 
     ruled_default: int = Field(
         default=RULED_OMP_NUM_THREADS,
-        description="the standing default of record (Luxia 2026-08-01), "
+        description="the standing default of record, "
                     "written into every stamp so an artifact says what the "
                     "convention WAS when it was built")
     effective_num_threads: Optional[int] = Field(
@@ -208,7 +210,7 @@ def _mapped_libraries() -> list[str]:
 
     Linux-only by construction (`/proc/self/maps`). Anywhere else this returns
     an empty list and the caller degrades to a NAMED unresolved config rather
-    than guessing — the campaign runs on Linux nodes and a wrong answer would
+    than guessing — the campaign runs on Linux and a wrong answer would
     be worse than an honest absence.
     """
     try:
@@ -254,7 +256,7 @@ def _probe_library(path: str, kind: str) -> ThreadPool:
         fn.argtypes = []
         try:
             value = int(fn())
-        except Exception as exc:                              # noqa: BLE001 — M19
+        except Exception as exc:                              # noqa: BLE001 — a probe never fails its run
             return ThreadPool(library=basename, kind=kind,  # type: ignore[arg-type]
                               symbol=symbol,
                               note=f"{symbol} raised {type(exc).__name__}: {exc}")
@@ -286,7 +288,7 @@ def _affinity_count() -> Optional[int]:
 
 
 def effective_thread_config() -> ThreadConfig:
-    """Read the EFFECTIVE thread configuration. Never raises (rake M19).
+    """Read the EFFECTIVE thread configuration. Never raises.
 
     The BLAS pools decide reduction order, so `effective_num_threads` is agreed
     over BLAS runtimes only; an OpenMP runtime is reported for the reader but
@@ -306,7 +308,7 @@ def effective_thread_config() -> ThreadConfig:
             **base, pools=[], consensus="unresolved",
             probe="ctypes over the mapped BLAS/OpenMP runtimes (unavailable)",
             note=f"{THREADS_UNRESOLVED}: {exc}")
-    except Exception as exc:                                  # noqa: BLE001 — M19
+    except Exception as exc:                                  # noqa: BLE001 — a probe never fails its run
         return ThreadConfig(
             **base, pools=[], consensus="unresolved",
             probe="ctypes over the mapped BLAS/OpenMP runtimes (failed)",
@@ -368,10 +370,11 @@ def thread_config_stamp(config: Optional[ThreadConfig] = None) -> dict:
 
 
 def stamp_thread_config(stamp: Optional[dict]) -> Optional[ThreadConfig]:
-    """The thread configuration a stamp records — `None` for a PRE-RULING stamp.
+    """The thread configuration a stamp records — `None` when the stamp predates it.
 
     THE BACKWARD-COMPATIBLE READER, and the only one any consumer should use.
-    Three states a reader must keep apart (the M41 hostname discipline):
+    Three states a reader must keep apart — never recorded, recorded as
+    unknown, and recorded:
 
         None                            the stamp PREDATES the field. The
                                         artifact's thread count is UNRECORDED
@@ -398,16 +401,16 @@ def stamp_thread_config(stamp: Optional[dict]) -> Optional[ThreadConfig]:
     payload = {k: v for k, v in block.items() if k != "STATUS"}
     try:
         return ThreadConfig(**payload)
-    except Exception:                                         # noqa: BLE001 — M19
+    except Exception:                                         # noqa: BLE001 — a probe never fails its run
         #  A block this module cannot parse is still EVIDENCE that the field is
-        #  present, so it must not read as "pre-ruling". It reads as a probe
+        #  present, so it must not read as "predates the field". It reads as a probe
         #  that produced something unusable, which is what it is.
         return ThreadConfig(
             consensus="unresolved",
             note=f"{THREADS_UNRESOLVED}: the stamp carries a {THREAD_STAMP_KEY} "
                  f"block this reader cannot parse (keys "
                  f"{sorted(str(k) for k in block)}) — recorded as an "
-                 f"unresolved probe, NOT as a pre-ruling absence")
+                 f"unresolved probe, NOT as a stamp that predates the field")
 
 
 def quote_thread_count(config: Optional[ThreadConfig]) -> str:
@@ -421,15 +424,15 @@ def thread_count_mismatch(banked: Optional[ThreadConfig],
                           rebuilt_label: str = "rebuild") -> Optional[str]:
     """A LABELED count mismatch, or None when both sides are known and equal.
 
-    Scope 3 of the ruling, in code: wherever a rebuild is compared against a
-    banked pre-ruling artifact, the comparison quotes BOTH thread counts when
+    Wherever a rebuild is compared against a banked artifact whose stamp
+    predates the thread field, the comparison quotes BOTH thread counts when
     they differ. A byte difference that a count mismatch explains is a
     characterized break; the same difference reported bare reads as corruption,
     and the two demand opposite responses.
 
     Returns None ONLY when both sides resolved to the same count — an
     unrecorded side is a mismatch to be quoted, not an agreement, because the
-    whole point is that a pre-ruling artifact cannot vouch for its own count.
+    whole point is that an artifact with no recorded count cannot vouch for it.
     """
     a = banked.effective_num_threads if banked is not None else None
     b = rebuilt.effective_num_threads if rebuilt is not None else None
@@ -438,8 +441,8 @@ def thread_count_mismatch(banked: Optional[ThreadConfig],
     return (f"{THREAD_COUNT_MISMATCH_LABEL}: {banked_label} "
             f"{quote_thread_count(banked)} vs {rebuilt_label} "
             f"{quote_thread_count(rebuilt)}. eigh is bitwise-deterministic at a "
-            f"FIXED thread count and its bytes differ across counts (Luxia "
-            f"ruling 2026-08-01), so a byte difference between these two is "
+            f"FIXED thread count and its bytes differ across counts, "
+            f"so a byte difference between these two is "
             f"EXPECTED and characterized — adjudicate the count before reading "
             f"it as corruption.")
 
@@ -448,7 +451,7 @@ def thread_count_mismatch(banked: Optional[ThreadConfig],
 def selftest() -> int:                                        # noqa: C901 — a checklist
     """CPU-only, numpy-only, no torch: the probe, the stamp, the reader, the label.
 
-    Named configurations (rake M44): every count below says which environment
+    Named configurations: every count below says which environment
     it was measured in. The one axis that matters here is whether a BLAS
     runtime is mapped into the process at all — this module deliberately does
     NOT import numpy at module scope (a stamp helper that dragged in numpy
