@@ -958,9 +958,9 @@ class ResidencyPlanInvalid(ResidencyRefused):
 
 # ---------------------------------------------------------------- typed records
 class SamplingConfig(BaseModel):
-    """A generation sampling configuration, frozen (§2.2 / ruling 4).
+    """A generation sampling configuration, frozen.
 
-    Ruling 4: **pure ancestral is the config of record**, identical across all 23
+    **Pure ancestral is the config of record**, identical across all 23
     nodes — the only cross-model-comparable choice, and the only one under which the
     entropy read stays interpretable. Exactly one exception exists: the bridge cell
     on the re-anchor pair, which runs under the NODE'S OWN `generation_config` so the
@@ -983,7 +983,7 @@ class SamplingConfig(BaseModel):
         if not self.do_sample and self.name != "greedy":
             raise ValueError(
                 "do_sample=False is not the config of record and is only named "
-                "'greedy'; ruling 4 froze pure ancestral sampling")
+                "'greedy'; the config of record is pure ancestral sampling")
         return self
 
 
@@ -996,7 +996,7 @@ SAMPLING_OF_RECORD = SamplingConfig(
 
 
 class BridgeCellDecision(BaseModel):
-    """Ruling 4's bridge cell: run it, or DROP it and NAME the discontinuity."""
+    """The re-anchor bridge cell: run it, or DROP it and NAME the discontinuity."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -1004,15 +1004,15 @@ class BridgeCellDecision(BaseModel):
     banked_config_recoverable: bool
     dropped: bool
     sampling: Optional[SamplingConfig] = None
-    #: Present exactly when `dropped`. Ruling 4: "the discontinuity is NAMED, not
-    #: papered over" — so this is a sentence a reader can quote, not a flag.
+    #: Present exactly when `dropped`. The discontinuity is NAMED, not papered
+    #: over — so this is a sentence a reader can quote, not a flag.
     discontinuity_named: Optional[str] = None
 
     @model_validator(mode="after")
     def _drop_is_named(self) -> "BridgeCellDecision":
         if self.dropped and not self.discontinuity_named:
             raise ValueError(
-                "ruling 4: a dropped bridge cell must NAME the discontinuity with "
+                "a dropped bridge cell must NAME the discontinuity with "
                 "the banked leg; an unnamed drop papers it over")
         if not self.dropped and self.sampling is None:
             raise ValueError("a bridge cell that runs needs its sampling config")
@@ -1020,11 +1020,12 @@ class BridgeCellDecision(BaseModel):
 
 
 class CanonicalLayout(BaseModel):
-    """§2.2's canonical batch layout — frozen in the node's stamp before any cell fires.
+    """The canonical batch layout — frozen in the node's stamp before any cell fires.
 
     A read produced at one layout is NEVER compared bitwise against another; the
-    §2.7 replay gate is defined against this object, and §9 item 13 makes a
-    mid-column change a restart-from-preflight rather than a silent split.
+    in-job replay gate is defined against this object, and a mid-column change
+    raises `CanonicalLayoutInvalidated` — a restart-from-preflight rather than a
+    silent split.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -1043,17 +1044,17 @@ class CanonicalLayout(BaseModel):
                        "length-sorted reordering (§2.2)")
     probe_grouping_reading: str = PROBE_GROUPING_READING
     #: True once the layout is written to the node stamp. A cell that fires against
-    #: an unfrozen layout is a §2.2 violation.
+    #: an unfrozen layout breaks layout invariance.
     frozen: bool = False
-    #: M19: how B was chosen. `measured=False` means the VRAM probe was degraded and
+    #: How B was chosen, recorded rather than implied. `measured=False` means the VRAM probe was degraded and
     #: the CONSERVATIVE bound was taken (the smallest rung), never a gamble.
     measured: bool = True
     headroom_note: str = ""
-    #: §2.7's batch-invariance characterization asks for a cell re-run "at B=8 and
-    #: B=1" — NEITHER of which is on §2.2's frozen ladder {80, 40, 20, 10}. The two
-    #: clauses are both in the brief and both meant: the ladder governs the LAYOUT OF
-    #: RECORD, the characterization deliberately steps OFF it to measure what stepping
-    #: off costs. This flag is the named resolution: an off-ladder size is admissible
+    #: The batch-invariance characterization re-runs a cell "at B=8 and B=1" —
+    #: NEITHER of which is on the frozen batch-size ladder {80, 40, 20, 10}. Both
+    #: requirements hold: the ladder governs the LAYOUT OF RECORD, the
+    #: characterization deliberately steps OFF it to measure what stepping off
+    #: costs. This flag is the named resolution: an off-ladder size is admissible
     #: ONLY on a characterization layout, and a characterization layout can never be
     #: FROZEN — so no cell of record can ever be produced at one.
     characterization_only: bool = False
@@ -1063,28 +1064,28 @@ class CanonicalLayout(BaseModel):
         if self.characterization_only:
             if self.frozen:
                 raise ValueError(
-                    "a characterization layout is never FROZEN: §2.7 defines replay IN "
-                    "the canonical layout, and a frozen off-ladder layout would be a "
-                    "second layout of record (§9 item 13's silent split)")
+                    "a characterization layout is never FROZEN: the replay gate is defined "
+                    "IN the canonical layout, and a frozen off-ladder layout would be a "
+                    "second layout of record (a silent split)")
             if self.batch_size <= 0:
                 raise ValueError("batch size must be positive")
             return self
         if self.batch_size not in BATCH_LADDER:
             raise ValueError(
                 f"batch size {self.batch_size} is not on the frozen ladder "
-                f"{BATCH_LADDER} (§2.2). §2.7's B=8/B=1 characterization is the one "
+                f"{BATCH_LADDER}. The B=8/B=1 batch-invariance characterization is the one "
                 "exception and must set `characterization_only=True`.")
         return self
 
     def sub_batch_of(self, gen_id: int) -> tuple[int, int]:
-        """§2.2's deterministic, total sub-batch map: (sub_batch, row)."""
+        """The deterministic, total sub-batch map: (sub_batch, row)."""
         if gen_id < 0:
             raise BatchLayoutError(f"gen_id must be non-negative, got {gen_id}")
         return divmod(gen_id, self.batch_size)
 
 
 class BehavioralPrompt(BaseModel):
-    """One prompt of the banked stage-0 pool (ruling 10)."""
+    """One prompt of the banked stage-0 pool."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -1098,9 +1099,9 @@ class BehavioralPrompt(BaseModel):
 
 
 class PromptPool(BaseModel):
-    """The behavioral prompt pool of record — 80 prompts, sha-frozen (ruling 10).
+    """The behavioral prompt pool of record — 80 prompts, sha-frozen.
 
-    Ruling 10: carry the banked stage-0 pool (20 topics × 4 strata × 1 seed = 80),
+    The pool is the banked stage-0 pool (20 topics × 4 strata × 1 seed = 80),
     rendered per-arm, sha-frozen AT HARNESS-FREEZE TIME, sha on every stamp. The
     re-anchor bridge row is only interpretable on the same pool and every prior
     behavioral leg used it, so building a fresh pool was refused.
@@ -1118,7 +1119,7 @@ class PromptPool(BaseModel):
             raise ValueError(
                 f"prompt pool has {len(self.prompts)} prompts, expected "
                 f"{PROMPT_POOL_SIZE} ({PROMPT_POOL_TOPICS} topics × "
-                f"{PROMPT_POOL_STRATA} strata × 1 seed, ruling 10)")
+                f"{PROMPT_POOL_STRATA} strata × 1 seed, the banked stage-0 pool)")
         ids = [p.prompt_id for p in self.prompts]
         if len(set(ids)) != len(ids):
             raise ValueError("prompt pool has duplicate prompt_ids")
@@ -1132,23 +1133,24 @@ class PromptPool(BaseModel):
         return self
 
     def for_gen(self, gen_id: int) -> BehavioralPrompt:
-        """§2.2: the map from gen_id to prompt is total and deterministic.
+        """The map from gen_id to prompt is total and deterministic.
 
         n=80/cell over an 80-prompt pool, so at n=80 every cell covers the pool
         exactly once; the modulo keeps the map total for the reduced-n shape
-        rehearsal (§3 step 2 runs n=8/cell) without changing which prompt any
+        rehearsal (which runs n=8/cell) without changing which prompt any
         gen_id gets.
         """
         return self.prompts[gen_id % len(self.prompts)]
 
 
 class NormConventions(BaseModel):
-    """§2.5's TWO norm conventions, with provenance — only one of them sets α.
+    """The TWO norm conventions, with provenance — only one of them sets α.
 
     The convention that sets α is the PER-TOKEN median residual norm at the target
     site, measured in-job. The banked mean-state median is a DIFFERENT number (3B
-    L14: 12.2391 vs 12.1125) and rides beside, never used. Rake M21b's silent-
-    fallback finding is why this resolution is explicit and never inherited.
+    L14: 12.2391 vs 12.1125) and rides beside, never used. A code path that falls
+    back silently from one convention to the other goes unnoticed, which is why
+    this resolution is explicit and never inherited.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -1157,13 +1159,13 @@ class NormConventions(BaseModel):
     used_for_alpha: str = "PER-TOKEN median residual norm, MEASURED in-job (§2.5)"
     measured_per_token_median: float = Field(gt=0.0)
     measured_provenance: str
-    #: None on a node with no banked `a5_vectors_stamps.json` (every NEW node).
+    #: None on a node with no banked a5 vector stamps (every NEW node).
     banked_per_token_median: Optional[float] = None
     banked_provenance: Optional[str] = None
     #: The mean-STATE median convention, recorded beside and never used for α.
     banked_mean_state_median: Optional[float] = None
     banked_mean_state_provenance: Optional[str] = None
-    #: Recorded, not absorbed (§2.5). >10% is a HALT, raised by `resolve_norms`.
+    #: Recorded, not absorbed. >10% is a HALT, raised by `resolve_norms`.
     delta_fraction_vs_banked: Optional[float] = None
 
 
@@ -1203,15 +1205,15 @@ class MappingAuthorization(BaseModel):
                 f"mapping spec {self.experiment_id!r} authorizes dose(s) {clash}, "
                 f"which are on the FROZEN ladder {DOSE_LADDER} (or the α=0 baseline). "
                 "Mapping doses are DISJOINT from the ladder by construction — that "
-                "disjointness is what makes a mapping cell invisible to every §4.2 "
-                "path, and a mapping cell at a science dose would be a science cell "
+                "disjointness is what makes a mapping cell invisible to every "
+                "actuation-verdict path, and a mapping cell at a science dose would be a science cell "
                 "wearing another name. The ladder's own doses are already measured by "
                 "the banked column; reuse that measurement.")
         if any(not np.isfinite(d) or d == 0.0 for d in self.doses):
             raise MappingDoseNotAuthorized(
                 f"mapping spec {self.experiment_id!r}: every authorized dose must be "
                 f"finite and non-zero, got {list(self.doses)}. The α=0 read is the "
-                "BASELINE cell and is shared with the banked column (§5.1), never "
+                "BASELINE cell and is shared with the banked column, never "
                 "re-spelled as a mapping dose.")
         if len(set(self.doses)) != len(self.doses):
             raise MappingDoseNotAuthorized(
@@ -1224,10 +1226,11 @@ class MappingAuthorization(BaseModel):
 class MappingSpec(BaseModel):
     """The mapping mode's SPEC DOCUMENT — the other half of the two-key admission.
 
-    Written by the desk, named on the CLI beside `--mapping-mode`, and validated to
-    name THIS column (node, arm, site) before a single mapping cell is admitted. It
-    carries its own ratification provenance because a dated engine deviation whose
-    document does not say who dated it is not a dated deviation.
+    Written outside the engine, named on the CLI beside `--mapping-mode`, and
+    validated to name THIS column (node, arm, site) before a single mapping cell is
+    admitted. It carries its own approval provenance because an engine deviation
+    whose document does not say who approved it, and when, is not an accountable
+    deviation.
 
     The doses are the spec's, not this module's: the mixtral set is ±0.15/±0.20/±0.25
     but the MECHANISM is spec-driven, so a second model's window is measured by
@@ -1243,7 +1246,7 @@ class MappingSpec(BaseModel):
     arm: Literal["native", "raw"]
     site: int = Field(ge=0)
     doses: tuple[float, ...] = Field(min_length=1)
-    #: the pre-statement this mapping is pinned by, and the ratification that dated it.
+    #: the pre-statement this mapping is pinned by, and the approval that dated it.
     prestatement_of_record: str = Field(min_length=1)
     ratified_by: str = Field(min_length=1)
     ledger_date: date
@@ -1257,7 +1260,7 @@ class MappingSpec(BaseModel):
                                     spec_sha256=spec_sha256, doses=self.doses)
 
     def assert_names_column(self, *, node_key: str, arm: str, site: int) -> None:
-        """Refuse a spec that authorizes a DIFFERENT column (§4.2's identity habit).
+        """Refuse a spec that authorizes a DIFFERENT column (the verdict loader's identity check).
 
         Modelled on `load_actuation_calibration`: a document that names another
         (node, arm, site) is not a document about this run, and transcribing it would
@@ -1269,8 +1272,7 @@ class MappingSpec(BaseModel):
                 f"{self.node_key} L{self.site} ({self.arm} arm); this column is "
                 f"{node_key} L{site} ({arm} arm). A spec for another column cannot "
                 "authorize this one — the doses are a property of THIS model's "
-                "response window (Luxia's ruling of record: 'every model has their "
-                "own specific sensitivity range').")
+                "response window: every model has its own sensitivity range.")
 
 
 class LadderAuthorization(BaseModel):
@@ -1286,7 +1288,7 @@ class LadderAuthorization(BaseModel):
     THE INVERTED LAW. `MappingAuthorization` refuses doses that touch `DOSE_LADDER`;
     this one does NOT, and the omission is the contract rather than an oversight. An
     amended ladder REPLACES the frozen ladder for its column, so overlap is the
-    ordinary case (the ratified mixtral ladder keeps ±0.03 and ±0.10 and moves only its
+    ordinary case (the approved mixtral ladder keeps ±0.03 and ±0.10 and moves only its
     extremes). What makes an amended cell distinguishable is not a disjoint dose — it
     is this authorization, carried on the cell and stamped on its record.
     """
@@ -1300,14 +1302,14 @@ class LadderAuthorization(BaseModel):
 
     @model_validator(mode="after")
     def _is_a_ladder(self) -> "LadderAuthorization":
-        """The STRUCTURAL properties §4.2's arithmetic reads off any ladder.
+        """The STRUCTURAL properties the actuation-verdict arithmetic reads off any ladder.
 
         Not policy — policy is which doses, and that is the document's. These are the
         shape the frozen ladder has and that every criterion assumes it has, asserted
         so an amended ladder cannot silently break a reading rule the spec claims to
-        preserve. Each refusal names the criterion that needs it. ENACTOR READING, on
-        the record for the desk: the alternative (accept any tuple and let §4.2 fail
-        at scoring time) was not taken, because a column costs a budget to run and a
+        preserve. Each refusal names the criterion that needs it. This is a reading
+        made here, named so a reviewer can overrule it: the alternative (accept any
+        tuple and let the verdict fail at scoring time) was not taken, because a column costs a budget to run and a
         ladder that cannot be scored should be refused before it fires.
         """
         if any(not np.isfinite(d) for d in self.ladder):
@@ -1317,13 +1319,13 @@ class LadderAuthorization(BaseModel):
         if any(d == 0.0 for d in self.ladder):
             raise LadderDoseNotOnLadderInForce(
                 f"ladder spec {self.experiment_id!r}: the α=0 read is the BASELINE "
-                f"cell (§5.1) and is never a rung — got {list(self.ladder)}. The "
+                f"cell and is never a rung — got {list(self.ladder)}. The "
                 "baseline is unchanged by an amendment and is staged as it always was.")
         if list(self.ladder) != sorted(set(self.ladder)):
             raise LadderDoseNotOnLadderInForce(
                 f"ladder spec {self.experiment_id!r}: the ladder must be strictly "
-                f"ASCENDING and free of duplicates, got {list(self.ladder)}. §4.2(a) "
-                "reads the ordering across the full SIGNED ladder, sign flipping "
+                f"ASCENDING and free of duplicates, got {list(self.ladder)}. The dose-order "
+                "criterion reads the ordering across the full SIGNED ladder, sign flipping "
                 "through zero; a ladder whose order is not its own order makes that "
                 "reading depend on how the document happened to list it.")
         if len(self.ladder) != len(DOSE_LADDER):
@@ -1331,31 +1333,31 @@ class LadderAuthorization(BaseModel):
                 f"ladder spec {self.experiment_id!r}: an amended ladder has "
                 f"{len(DOSE_LADDER)} rungs like the frozen one, got "
                 f"{len(self.ladder)} ({list(self.ladder)}). The arity is not "
-                "decoration: §4.2(b) counts '4 of 6 doses outside the band' against "
+                "decoration: the band criterion counts '4 of 6 doses outside the band' against "
                 "the ladder's own arity, and a ladder of another length would change "
                 "a frozen criterion's denominator while claiming to preserve it.")
         if not (any(d < 0 for d in self.ladder) and any(d > 0 for d in self.ladder)):
             raise LadderDoseNotOnLadderInForce(
                 f"ladder spec {self.experiment_id!r}: a ladder carries doses of BOTH "
-                f"signs, got {list(self.ladder)}. §4.2(a)/§5.5 read the ordering "
-                "'sign flipping through zero' and §4.2(b) reads BOTH extremes; a "
+                f"signs, got {list(self.ladder)}. The dose-order criterion reads the ordering "
+                "'sign flipping through zero' and the band criterion reads BOTH extremes; a "
                 "one-sided ladder has no such pair to read.")
         return self
 
     @property
     def extreme_magnitude(self) -> float:
-        """|the ladder's edge| — what §2.7's signal role reads instead of |0.3|."""
+        """|the ladder's edge| — what the replay gate's signal role reads instead of |0.3|."""
         return max(abs(d) for d in self.ladder)
 
 
 class LadderSpec(BaseModel):
-    """The amended ladder's SPEC DOCUMENT — the desk's ratified re-calibration.
+    """The amended ladder's SPEC DOCUMENT — an approved re-calibration.
 
-    Written by the desk, named on the CLI beside `--amended-ladder`, and validated to
-    name THIS column's node and site before a single science cell is admitted at a dose
-    the frozen ladder does not carry. It carries its ratification lineage because a
-    dated re-calibration whose document does not say who dated it is not a dated
-    re-calibration.
+    Written outside the engine, named on the CLI beside `--amended-ladder`, and
+    validated to name THIS column's node and site before a single science cell is
+    admitted at a dose the frozen ladder does not carry. It carries its approval
+    lineage because a re-calibration whose document does not say who approved it,
+    and when, is not an accountable re-calibration.
 
     NO `arm` FIELD, and the absence is deliberate — the one shape difference from
     `MappingSpec`. A response window is a property of the MODEL, not of an arm: the
@@ -1375,18 +1377,18 @@ class LadderSpec(BaseModel):
     experiment_id: str = Field(min_length=1)
     node_key: str = Field(min_length=1)
     site: int = Field(ge=0)
-    #: the amendment's own statement of its scope, in the desk's words.
+    #: the amendment's own statement of its scope, in its author's words.
     applies_to: str = Field(min_length=1)
     ladder: tuple[float, ...] = Field(min_length=1)
-    #: what this ladder replaces, and under which ratified window.
+    #: what this ladder replaces, and under which approved window.
     replaces: str = Field(min_length=1)
-    #: the chain of rulings that got here — the analogue of `MappingSpec.ratified_by`,
-    #: a list because a re-calibration is reached by more than one ruling and the desk
-    #: files each with its date.
+    #: the chain of decisions that got here — the analogue of `MappingSpec.ratified_by`,
+    #: a list because a re-calibration is reached by more than one decision, each
+    #: filed with its date.
     ratification_lineage: tuple[str, ...] = Field(min_length=1)
-    #: DESK POLICY, carried for the record and never executed here: how §4.2 reads its
-    #: extreme-dose references on this ladder. The engine does not score (§4.2 is
-    #: desk-side), so this field is validated as present and prose and nothing more.
+    #: SCORING POLICY, carried for the record and never executed here: how the actuation
+    #: verdict reads its extreme-dose references on this ladder. The engine does not
+    #: score, so this field is validated as present and prose and nothing more.
     gate_reading_rule: str = Field(min_length=1)
     #: the pooling rule an amended-ladder row travels under.
     comparability_rider: str = Field(min_length=1)
@@ -1400,7 +1402,7 @@ class LadderSpec(BaseModel):
                                    spec_sha256=spec_sha256, ladder=self.ladder)
 
     def assert_names_column(self, *, node_key: str, site: int) -> None:
-        """Refuse a spec that amends a DIFFERENT column (§4.2's identity habit).
+        """Refuse a spec that amends a DIFFERENT column (the verdict loader's identity check).
 
         Node and site only — see the class docstring on why there is no arm to check.
         """
@@ -1409,12 +1411,12 @@ class LadderSpec(BaseModel):
                 f"ladder spec {self.experiment_id!r} amends "
                 f"{self.node_key} L{self.site}; this column is {node_key} L{site}. A "
                 "spec for another column cannot amend this one — the ladder is a "
-                "property of THIS model's response window (Luxia's ruling of record: "
-                "'every model has their own specific sensitivity range').")
+                "property of THIS model's response window: every model has its own "
+                "sensitivity range.")
 
 
 class CellSpec(BaseModel):
-    """One behavioral cell: 80 generations sharing ONE injection spec (§2.2)."""
+    """One behavioral cell: 80 generations sharing ONE injection spec."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -1425,28 +1427,27 @@ class CellSpec(BaseModel):
     site: int = Field(ge=0)
     alpha_frac: float
     n: int = Field(gt=0, default=N_PER_CELL)
-    #: `Rband*` = the node's OWN native random band (§4's control: does the SITE
-    #: actuate). `gRband*` = the SOURCE's randoms through the SAME map (§5's
-    #: control: does the TRANSPORT carry). §4.1 keeps them distinct in name and in
-    #: stamp because conflating them is the fastest way to make a null
+    #: `Rband*` = the node's OWN native random band (the actuation calibration's
+    #: control: does the SITE actuate). `gRband*` = the SOURCE's randoms through the
+    #: SAME map (the transported cells' control: does the TRANSPORT carry). They stay
+    #: distinct in name and in stamp because conflating them is the fastest way to make a null
     #: uninterpretable.
-    #: `SigmaBand` is admitted as a BESIDE family ONLY (B4, Luxia 2026-08-04): it
+    #: `SigmaBand` is admitted as a BESIDE family ONLY: it
     #: schedules and generates like any other band cell and it is never a gate input.
     #: See `is_beside` / `is_null_of_record` and `BESIDE_BAND_FAMILIES`.
     band_family: Optional[Literal["Rband", "gRband", "SigmaBand"]] = None
     vector_npz: Optional[str] = None
     vector_provenance: str = ""
     sampling: SamplingConfig = SAMPLING_OF_RECORD
-    #: THE MAPPING MODE's cell-carried key (2026-08-08). Present on a `mapping` cell
-    #: and refused on every other kind, so the two populations cannot be confused by
-    #: anything holding a spec. `None` — the default — is the science cell, whose
-    #: validation below is byte-for-byte what it was before this field existed.
+    #: THE MAPPING MODE's cell-carried key. Present on a `mapping` cell and refused
+    #: on every other kind, so the two populations cannot be confused by anything
+    #: holding a spec. `None` — the default — is the science cell, whose validation
+    #: below is the frozen-ladder validation, unaffected by this field.
     mapping_authorization: Optional[MappingAuthorization] = None
-    #: THE AMENDED LADDER's cell-carried key (re-freeze #2, 2026-08-09). Present on a
-    #: SCIENCE cell whose column runs a ratified amended ladder, and refused on the
-    #: baseline and on every mapping cell. `None` — the default — is the frozen-ladder
-    #: science cell, whose validation below is byte-for-byte what it was before this
-    #: field existed.
+    #: THE AMENDED LADDER's cell-carried key. Present on a SCIENCE cell whose column
+    #: runs an approved amended ladder, and refused on the baseline and on every
+    #: mapping cell. `None` — the default — is the frozen-ladder science cell, whose
+    #: validation below is unaffected by this field.
     ladder_authorization: Optional[LadderAuthorization] = None
 
     @property
@@ -1462,7 +1463,7 @@ class CellSpec(BaseModel):
 
     @property
     def is_amended_ladder(self) -> bool:
-        """True iff this cell runs a ratified AMENDED ladder rather than the frozen one."""
+        """True iff this cell runs an approved AMENDED ladder rather than the frozen one."""
         return self.ladder_authorization is not None
 
     @property
@@ -1508,7 +1509,7 @@ class CellSpec(BaseModel):
                 "('calibration_band' beside an Rband, 'transported_band' beside a "
                 f"gRband), not as {self.kind!r} — a beside that wore a signal kind "
                 "would be pooled as signal by every consumer that splits on kind")
-        # THE AMENDED LADDER (2026-08-09): the two cells that may never carry one, both
+        # THE AMENDED LADDER: the two cells that may never carry one, both
         # refused before any dose is looked at. A mapping cell is the other mechanism
         # and stays untouched by this one; the baseline is unchanged by an amendment.
         if self.ladder_authorization is not None:
@@ -1524,7 +1525,7 @@ class CellSpec(BaseModel):
                     f"{self.cell_id}: the α=0 baseline carries a "
                     "`ladder_authorization`. α=0 is α=0 under any ladder: the baseline "
                     "is UNCHANGED by an amendment and is shared by the column exactly "
-                    "as §5.1 shares it. A baseline that declared a ladder would imply "
+                    "as the shared-baseline design shares it. A baseline that declared a ladder would imply "
                     "two different α=0 cells, and there is only ever one.")
         if self.is_baseline:
             if self.alpha_frac != BASELINE_DOSE or self.vector_key is not None:
@@ -1534,7 +1535,7 @@ class CellSpec(BaseModel):
         if self.vector_key is None:
             raise ValueError(f"{self.cell_id}: a non-baseline cell needs a vector_key")
         if self.is_mapping:
-            # THE MAPPING BRANCH (2026-08-08). It replaces the ladder test for this
+            # THE MAPPING BRANCH. It replaces the ladder test for this
             # kind and NOTHING else: the science branch below is the frozen one, and a
             # cell that is not `kind="mapping"` never reaches this code.
             if self.mapping_authorization is None:
@@ -1542,7 +1543,7 @@ class CellSpec(BaseModel):
                     f"{self.cell_id}: kind={MAPPING_CELL_KIND!r} with no "
                     "`mapping_authorization`. A mapping cell's dose is admissible "
                     "ONLY as an authorization the spec document granted; a mapping "
-                    f"cell without one would be an off-ladder dose with no ratified "
+                    f"cell without one would be an off-ladder dose with no approved "
                     f"provenance ({MAPPING_SPEC_FLAG} + {MAPPING_MODE_FLAG}).")
             if self.alpha_frac not in self.mapping_authorization.doses:
                 raise MappingDoseNotAuthorized(
@@ -1559,31 +1560,29 @@ class CellSpec(BaseModel):
                     "science cell wearing a mapping key is the laundering direction "
                     "this contract exists to close, and it is refused at "
                     "construction rather than at a gate.")
-            # §2.5's membership test, now read against THE LADDER IN FORCE (re-freeze
-            # #2). With no authorization — every cell that ever ran — the ladder in
-            # force IS `DOSE_LADDER` and this raise is byte-for-byte the frozen one,
-            # message included. With one, the ratified document is the ladder and the
+            # The ladder membership test, read against THE LADDER IN FORCE. With no
+            # authorization the ladder in force IS `DOSE_LADDER` and the refusal names
+            # the frozen ladder. With one, the approved document is the ladder and the
             # refusal names the document rather than the constant.
             if self.alpha_frac not in self.ladder_in_force:
                 if self.ladder_authorization is None:
                     raise ValueError(
                         f"{self.cell_id}: dose {self.alpha_frac} is not on the FROZEN "
-                        f"ladder {DOSE_LADDER} (§2.5/§11: no extension, no interpolation, "
-                        "no per-node tuning)")
+                        f"ladder {DOSE_LADDER} (no extension, no interpolation, "
+                        "no per-node tuning without an approved ladder spec)")
                 raise LadderDoseNotOnLadderInForce(
                     f"{self.cell_id}: dose {self.alpha_frac} is not on the AMENDED "
-                    f"ladder {list(self.ladder_in_force)} ratified by ladder spec "
+                    f"ladder {list(self.ladder_in_force)} approved by ladder spec "
                     f"{self.ladder_authorization.experiment_id!r} (which replaces the "
                     f"frozen {list(DOSE_LADDER)} for this column). The document is the "
                     "only source of an amended dose — the engine hardcodes none and "
-                    "interpolates none (§2.5 as amended 2026-08-09: no ladder without "
-                    "a ratified document).")
+                    "interpolates none (no ladder without an approved document).")
         expected = CELL_ID_TEMPLATE.format(
             vector_key=self.vector_key, site=self.site, frac=self.alpha_frac)
         if self.cell_id != expected:
             raise ValueError(
                 f"cell_id {self.cell_id!r} does not match the banked formatting "
-                f"{expected!r} (§2.3; parsed by score_entropy_writes.parse_cell)")
+                f"{expected!r} (parsed by score_entropy_writes.parse_cell)")
         return self
 
 
@@ -1615,7 +1614,7 @@ class GenerationRecord(BaseModel):
 
 
 class ProbeRow(BaseModel):
-    """One generation's entropy probe result (§2.6)."""
+    """One generation's entropy probe result."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -1630,7 +1629,7 @@ class ProbeRow(BaseModel):
 
 
 class BatchInvarianceCharacterization(BaseModel):
-    """§2.7's descriptive batch-invariance record — M19: it CANNOT fail a gate.
+    """The descriptive batch-invariance record — instrumentation, so it CANNOT fail a gate.
 
     GPU reductions are not batch-size-invariant; this is expected and is documented
     ONCE PER NODE so nobody later reads it as a defect. It is precisely why replay
@@ -1649,16 +1648,16 @@ class BatchInvarianceCharacterization(BaseModel):
 
 
 class ReplayGateResult(BaseModel):
-    """§2.7's blocking in-job gate: bitwise ids AND bitwise float32 entropy arrays."""
+    """The blocking in-job replay gate: bitwise ids AND bitwise float32 entropy arrays."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     k: int
     selection_digest: str
     selection_rule: str
-    #: B-1 (ruled 2026-08-05): which role mapping filled the three frozen strata —
-    #: `of_record` (the transported column's) or `calibration_only`. Defaulted so a
-    #: record written before the ruling reads back as what it was.
+    #: Which role mapping filled the three frozen strata — `of_record` (the
+    #: transported column's) or `calibration_only`. Defaulted so a record written
+    #: without the field reads back as `of_record`, which is what it was.
     role_mapping: str = REPLAY_ROLE_MAPPING_OF_RECORD
     cells: list[str]
     strata: dict[str, str]
@@ -1671,12 +1670,13 @@ class ReplayGateResult(BaseModel):
 
 
 class HookAdmissibility(BaseModel):
-    """§4.4's named technical preflight — HALT-gated, architecture-independent.
+    """The hook-admissibility preflight — HALT-gated, architecture-independent.
 
     The residual-write hook reads absolute positions from the `cache_position`
     kwarg. If a block does not receive it AS A KWARG the hook falls back to local-
     index slicing and RAISES BY DESIGN on incremental seq_len=1 steps rather than
-    mis-injecting silently (`hooks.py` L193-199). This preflight is what turns that
+    mis-injecting silently (the residual-write hook in `metabasis.extraction.hooks`).
+    This preflight is what turns that
     design into a budget decision instead of a mid-column surprise.
     """
 
@@ -1694,10 +1694,10 @@ class HookAdmissibility(BaseModel):
     detail: str
 
 
-# ---------------------------------------------------------------- seeding (§2.3)
+# ---------------------------------------------------------------- seeding
 def seed_material(*, corpus_sha: str, node_key: str, arm: str, site: int,
                   cell_id: str, gen_id: int) -> str:
-    """§2.3's seed material, formatted from the frozen template.
+    """The per-generation seed material, formatted from the frozen template.
 
     Built through `SEED_MATERIAL_TEMPLATE` rather than an f-string so the template
     whose digest rides every stamp is the SAME object the seeds are derived from —
@@ -1709,20 +1709,21 @@ def seed_material(*, corpus_sha: str, node_key: str, arm: str, site: int,
 
 
 def seed_int(material: str) -> int:
-    """§2.3: sha256 → the first 8 bytes, big-endian. NEVER `hash()` (M25)."""
+    """sha256 → the first 8 bytes, big-endian. NEVER `hash()`: PYTHONHASHSEED salts it."""
     return int.from_bytes(hashlib.sha256(material.encode()).digest()[:8], "big")
 
 
 def draw_uniforms(seed: int, n: int) -> np.ndarray:
-    """Ruling 8's PRE-DRAWN uniforms for one generation: float64 in [0, 1).
+    """The PRE-DRAWN uniforms for one generation: float64 in [0, 1).
 
     Pre-drawing is the whole mechanism. Because the uniforms for (cell, gen_id) are
     materialized from that pair's own digest BEFORE any forward runs, the sampling
     step consumes a fixed tape: a partial re-run of any subset of cells keeps every
-    other cell in phase (M5-safe by construction, not by discipline), and the tape
-    is independent of the batch the generation rides in (the §2.2 layout-invariance
-    property). Ruling 8 refused the one-stream-per-cell alternative for exactly the
-    re-run case: a re-run that changes cell membership desyncs a stream.
+    other cell in phase (safe against the phase shift a single filtered stream
+    suffers, by construction rather than by discipline), and the tape is independent
+    of the batch the generation rides in (the layout-invariance property). The
+    one-stream-per-cell alternative is refused for exactly the re-run case: a re-run
+    that changes cell membership desyncs a stream.
 
     `n` is `max_new_tokens`: the tape is drawn to the full budget so an early EOS
     cannot shorten it and thereby couple one generation's length to another's tape.
@@ -1744,7 +1745,7 @@ def uniform_tape(*, corpus_sha: str, node_key: str, arm: str, site: int,
 
 def cell_seed_root(*, corpus_sha: str, node_key: str, arm: str, site: int,
                    cell_id: str) -> str:
-    """The per-cell seed ROOT that §2.8 requires in the stamp.
+    """The per-cell seed ROOT that every cell stamp carries.
 
     A digest over the cell's material prefix (gen_id excluded): it identifies the
     cell's tape family without listing 80 seeds, and it changes if any coordinate of
@@ -1759,21 +1760,22 @@ def cell_seed_root(*, corpus_sha: str, node_key: str, arm: str, site: int,
 # ------------------------------------------------------- the fixed sampling step
 def sample_token(logits_row: Any, u: float, sampling: SamplingConfig = SAMPLING_OF_RECORD
                  ) -> int:
-    """Ruling 8's FIXED sampling step: one row's logits + one pre-drawn uniform → a token.
+    """The FIXED sampling step: one row's logits + one pre-drawn uniform → a token.
 
     LAYOUT INVARIANCE LIVES HERE. The row's logits are cast to float64 numpy first,
     so every arithmetic operation of the sampling step — the temperature divide, the
     softmax, the cumulative sum, the search — runs on exactly one row's numbers in a
     fixed dtype and a fixed order. No reduction crosses rows, so identical logits
     yield a bitwise identical token at B=80 and at B=1. What is NOT invariant is the
-    FORWARD that produced the logits (§2.7's characterization), which is why replay
+    FORWARD that produced the logits (the batch-invariance characterization), which is why replay
     is defined in the canonical layout rather than across layouts.
 
     Inverse-CDF rather than `torch.multinomial`: multinomial consumes a global
-    generator, which is the single-stream design ruling 8 refused (M5).
+    generator, which is the single-stream design refused above: filtering records
+    shifts its phase.
 
     THE PATH OF REFERENCE. This function is the DEFINITION of the sampling step and is
-    deliberately unchanged by the 2026-08-01 vectorization: `sample_tokens` computes
+    deliberately independent of the vectorized kernel: `sample_tokens` computes
     the same step for a whole sub-batch and is certified byte-identical against THIS
     code before it may draw a token, and every subcase the batched kernel does not own
     lands back here. Change this body and the batched kernel becomes wrong by
@@ -1789,7 +1791,7 @@ def sample_token(logits_row: Any, u: float, sampling: SamplingConfig = SAMPLING_
     x = logits / sampling.temperature
     # top-k / top-p are 0 / 1.0 in the config of record (pure ancestral), so both
     # filters are exact no-ops there; they exist for the bridge cell, whose node
-    # generation_config may carry them (ruling 4).
+    # generation_config may carry them.
     if sampling.top_k:
         k = min(int(sampling.top_k), x.size)
         cut = np.partition(x, x.size - k)[x.size - k]
@@ -1813,9 +1815,9 @@ def sample_token(logits_row: Any, u: float, sampling: SamplingConfig = SAMPLING_
     return int(np.searchsorted(cdf, float(u), side="right"))
 
 
-# ------------------------------------------------- the batched sampling step (2026-08-01)
+# ------------------------------------------------------------ the batched sampling step
 class SamplerKernel(BaseModel):
-    """WHICH spelling of ruling 8's fixed sampling step draws the tokens.
+    """WHICH spelling of the fixed sampling step draws the tokens.
 
     Two kernels, ONE step. `sample_token` above is the reference and stays in the
     module unchanged; `vectorized` computes the SAME step for a whole sub-batch in one
@@ -1850,7 +1852,7 @@ SAMPLER_KERNEL_OF_RECORD = SAMPLER_KERNEL_VECTORIZED
 
 #: The working set one tile of the batched kernel aims at, in bytes: a core's private
 #: L2, which is where the reference's one-row-at-a-time chain already lived. MEASURED
-#: on the desk CPU (8-core Zen3 class, 512 KiB L2 per core) across vocab 1000 / 50257
+#: on an 8-core Zen3-class CPU (512 KiB L2 per core) across vocab 1000 / 50257
 #: / 128256 — 512 KiB was at or within noise of the best tile at every one, while the
 #: unbounded spelling (one [80, V] array per intermediate) came in at 0.75× at vocab
 #: 128256, i.e. SLOWER than the reference. At vocab 128256 this is one row; at vocab
@@ -1882,7 +1884,7 @@ _SAMPLER_CERTIFICATES: dict[tuple, str] = {}
 def vectorized_sampling_refusal(sampling: SamplingConfig) -> str:
     """"" if the batched kernel handles this config; else the NAMED reason it will not.
 
-    REFUSAL, never approximation. The kernel implements exactly ruling 4's config of
+    REFUSAL, never approximation. The kernel implements exactly the sampling config of
     record (pure ancestral: sample, T free, no top-k, no top-p). Greedy and the
     top-k/top-p filters are `sample_token`'s branches — the battery's and the bridge
     cell's, both off the 80×512 hot path — and each one contains an operation whose
@@ -1916,7 +1918,7 @@ def sampler_tile_rows(vocab: int) -> int:
     and the working set of a per-row chain is kept with it.
 
     A tile is rows, never columns: a row's table must remain a function of that row
-    alone (§2.2), so a tile boundary can only ever fall between generations.
+    alone (layout invariance), so a tile boundary can only ever fall between generations.
     """
     return max(1, int(SAMPLER_TILE_BYTES // max(1, int(vocab) * 8)))
 
@@ -1964,7 +1966,8 @@ def _tile_cdf(tile: np.ndarray, temperature: float
         `cdf[-1] = 1.0` can (legally, rarely) break that.
 
     No reduction crosses a row, so a row's table is a function of that row alone — the
-    §2.2 layout-invariance property ruling 8 bought is preserved, not traded away.
+    layout-invariance property the fixed sampling step exists for is preserved, not
+    traded away.
     """
     src = tile if temperature == 1.0 else np.asarray(
         tile, dtype=np.float64) / temperature
@@ -2058,7 +2061,7 @@ def sample_tokens(logits_block: Any, *, us: Sequence[float],
 
     `rows` are indices into the block (the rows not yet frozen by EOS) and `us` are
     their tape values, in the same order; the returned tokens are in that order too.
-    A frozen row keeps its SLOT in the batch (§2.2) — the tiling is a function of the
+    A frozen row keeps its SLOT in the batch (layout invariance) — the tiling is a function of the
     vocab alone and never of who has finished — but a tile holding no active row is
     not computed, so freezing costs its neighbours nothing.
 
@@ -2249,7 +2252,7 @@ def assert_batched_sampler_identity(
                 f"GATE 1 at shape ({batch}, {vocab}), family {family!r}, row {r}: "
                 f"{moved} is NOT byte-identical between the row-wise and tiled "
                 "spellings on this numpy build. The batched kernel is refused here — "
-                "ruling 8's step is defined by `sample_token`, and a faster spelling "
+                "the sampling step is defined by `sample_token`, and a faster spelling "
                 "that rounds differently is a different experiment. Run with "
                 "SAMPLER_KERNEL_REFERENCE and file the platform.")
         # ---- GATE 2: the kernel's token == `sample_token`'s token ----------------
@@ -2289,11 +2292,12 @@ class Stepper(Protocol):
     """The minimum surface the generation loop needs from a model.
 
     Deliberately narrow: the loop below is the load-bearing layout/sampling logic
-    and it is the SAME code on the node and in the selftest. `HFStepper` implements
+    and it is the SAME code on a GPU run and in the selftest. `HFStepper` implements
     this against a real HF model with a KV cache; the selftest's stub implements it
     with per-row-independent arithmetic, which is what makes bitwise layout
     invariance provable at all (a real forward's reductions are not batch-invariant,
-    §2.7). One loop, two steppers — never two loops.
+    which is why replay is defined in the canonical layout). One loop, two steppers —
+    never two loops.
     """
 
     def prefill(self, ids: Any, attention_mask: Any) -> Any:
@@ -2308,7 +2312,7 @@ class Stepper(Protocol):
 
 def left_pad(sequences: Sequence[Sequence[int]], pad_id: int
              ) -> tuple[np.ndarray, np.ndarray, int]:
-    """§2.2's left padding: (ids [b, L], attention_mask [b, L], L).
+    """Left padding for generation: (ids [b, L], attention_mask [b, L], L).
 
     Left padding is not a convenience — it is what makes ONE `start_pos` valid for a
     whole batch: the generated span starts at absolute position L for every row, and
@@ -2329,7 +2333,7 @@ def left_pad(sequences: Sequence[Sequence[int]], pad_id: int
 
 def right_pad(sequences: Sequence[Sequence[int]], pad_id: int
               ) -> tuple[np.ndarray, np.ndarray]:
-    """§2.6's right padding for the probe: (ids [b, T], attention_mask [b, T])."""
+    """Right padding for the entropy probe: (ids [b, T], attention_mask [b, T])."""
     if not sequences:
         raise ValueError("right_pad: no sequences")
     T = max(len(s) for s in sequences)
@@ -2368,10 +2372,10 @@ def generate_sub_batch(
     A row that emits EOS is FROZEN: it stops appending and stops consuming its tape,
     but it stays in the batch (fed the pad token) so no other row's slot moves. That
     is what keeps `sub_batch = gen_id // B; row = gen_id % B` total and deterministic
-    (§2.2) — a compacting batch would make a generation's result depend on when its
+    (layout invariance) — a compacting batch would make a generation's result depend on when its
     neighbours finished.
 
-    `sampler_kernel` chooses which spelling of ruling 8's step draws the tokens. The
+    `sampler_kernel` chooses which spelling of the sampling step draws the tokens. The
     two are certified byte-identical at the sub-batch's own (batch, vocab) shape
     before the first token is drawn, so this is a COST switch and never a semantic
     one — which is exactly why the certification is a gate and not a test: the switch
@@ -2448,7 +2452,7 @@ def generate_cell(
     n: Optional[int] = None,
     sampler_kernel: SamplerKernel = SAMPLER_KERNEL_OF_RECORD,
 ) -> list[GenerationRecord]:
-    """A whole cell, sub-batched by §2.2's deterministic total map.
+    """A whole cell, sub-batched by the deterministic total sub-batch map.
 
     `stepper_factory` is called once per sub-batch (a KV cache belongs to one batch
     shape). The returned records are in gen_id order regardless of sub-batching, so
@@ -2480,25 +2484,25 @@ def generate_cell(
     if len(records) != total:
         raise ExpectedNShortfall(
             f"{cell.cell_id}: produced {len(records)} generations, expected {total} "
-            "(§9 item 10 / M23: a count one short is a rake, not a rounding)")
+            "(a count one short is a defect, not a rounding)")
     return records
 
 
 # ---------------------------------------------------------------- dose application
 def resolve_alpha(alpha_frac: float, per_token_median_resid_norm: float, *,
                   cell: Optional["CellSpec"] = None) -> float:
-    """§2.5: α = frac × (PER-TOKEN median residual norm at the target site).
+    """α = frac × (PER-TOKEN median residual norm at the target site).
 
     NOT the median-of-mean-state norm the collection stamps carry — the two differ
-    (banked example, 3B L14: 12.2391 vs 12.1125) and rake M21b's silent-fallback
-    finding says the resolution must be explicit, never inherited.
+    (banked example, 3B L14: 12.2391 vs 12.1125), and a silent fallback from one to
+    the other goes unnoticed, so the resolution is explicit, never inherited.
 
-    THE MAPPING MODE (2026-08-08). `cell` is the only way an off-ladder dose can be
+    THE MAPPING MODE. `cell` is the only way an off-ladder dose can be
     resolved here, and it is honoured for a MAPPING cell and nothing else: the frozen
     ladder check below is what every science cell still meets, including a science
-    cell passed through `cell`. Omitting the argument — which is what every existing
-    caller does — leaves this function's behavior byte-for-byte what it was, so the
-    α-provenance of §1 is unchanged for every banked cell.
+    cell passed through `cell`. Omitting the argument leaves only the frozen-ladder
+    path, so the α-provenance of every banked cell is unaffected by the mapping and
+    amended-ladder branches.
     """
     if not np.isfinite(per_token_median_resid_norm) or per_token_median_resid_norm <= 0:
         raise ResidualNormDeltaError(
@@ -2517,8 +2521,8 @@ def resolve_alpha(alpha_frac: float, per_token_median_resid_norm: float, *,
                 f"not this cell's authorized dose {cell.alpha_frac} "
                 f"(spec {auth.experiment_id!r} authorizes {list(auth.doses)}).")
         return float(alpha_frac) * float(per_token_median_resid_norm)
-    # THE AMENDED LADDER (2026-08-09). The second and last way a dose off the frozen
-    # ladder resolves here, and honoured only for a cell that CARRIES the ratified
+    # THE AMENDED LADDER. The second and last way a dose off the frozen
+    # ladder resolves here, and honoured only for a cell that CARRIES the approved
     # authorization. Same shape as the mapping branch above and same guarantee below
     # it: a caller that passes no cell, or a cell with no authorization, meets the
     # frozen check unchanged.
@@ -2532,7 +2536,7 @@ def resolve_alpha(alpha_frac: float, per_token_median_resid_norm: float, *,
         return float(alpha_frac) * float(per_token_median_resid_norm)
     if alpha_frac != BASELINE_DOSE and alpha_frac not in DOSE_LADDER:
         raise ValueError(
-            f"dose {alpha_frac} is not on the FROZEN ladder {DOSE_LADDER} (§2.5)")
+            f"dose {alpha_frac} is not on the FROZEN ladder {DOSE_LADDER}")
     return float(alpha_frac) * float(per_token_median_resid_norm)
 
 
@@ -2544,10 +2548,11 @@ def apply_dose_ladder(vector_key: str, site: int, *,
                       vector_provenance: str = "",
                       sampling: SamplingConfig = SAMPLING_OF_RECORD,
                       n: int = N_PER_CELL) -> list[tuple[CellSpec, float]]:
-    """The frozen ladder applied to one vector: 6 cells, exact α per cell (§2.5).
+    """The frozen ladder applied to one vector: 6 cells, exact α per cell.
 
     Exactly `len(DOSE_LADDER)` cells, in ladder order, no baseline (the α=0 cell is
-    SHARED between §4's calibration block and §5's column and so is built once, by
+    SHARED between the actuation-calibration block and the transported column and so
+    is built once, by
     `baseline_cell`, never per vector).
     """
     assert_no_lesion_recipe(vector_provenance, vector_key)
@@ -2606,7 +2611,7 @@ def apply_amended_ladder(vector_key: str, site: int, *,
                          vector_provenance: str = "",
                          sampling: SamplingConfig = SAMPLING_OF_RECORD,
                          n: int = N_PER_CELL) -> list[tuple[CellSpec, float]]:
-    """The RATIFIED ladder applied to one vector: one science cell per amended rung.
+    """The APPROVED amended ladder applied to one vector: one science cell per amended rung.
 
     `apply_dose_ladder`'s amended twin, and a separate function for the same reason
     `apply_mapping_ladder` is: the frozen ladder's applier must keep having exactly ONE
@@ -2637,8 +2642,8 @@ def ladder_in_force(cells: Sequence[CellSpec]) -> tuple[float, ...]:
 
     Reads the first authorization it finds rather than reconciling them, because
     `assert_amended_ladder_column` has already refused a column whose cells disagree —
-    and this function is called from places (the stamp, the preflight, §2.7's
-    magnitude) that must give an answer for a set that has passed that gate.
+    and this function is called from places (the stamp, the preflight, the replay
+    gate's signal magnitude) that must give an answer for a set that has passed that gate.
     """
     for c in cells:
         if c.ladder_authorization is not None:
@@ -2649,7 +2654,7 @@ def ladder_in_force(cells: Sequence[CellSpec]) -> tuple[float, ...]:
 def scoring_dose_magnitude(cells: Sequence[CellSpec]) -> float:
     """|the extreme dose| of the ladder this cell set runs (`SCORING_DOSE_MAGNITUDE`).
 
-    The §2.7 signal role's threshold, computed from the cell SET rather than read from
+    The replay gate's signal-role threshold, computed from the cell SET rather than read from
     a constant — exactly as `mapping_signal_magnitude` is. For every frozen-ladder
     column this returns 0.3, which is `SCORING_DOSE_MAGNITUDE` itself, so no existing
     column's gate moves. See `AMENDED_LADDER_SIGNAL_ROLE_READING`.
@@ -2682,11 +2687,12 @@ def assert_amended_ladder_column(cells: Sequence[CellSpec], *,
       3. a cell whose carried authorization is not this run's — the two keys must be
          the SAME key, which is what makes a swapped spec file unusable;
       4. a column holding both amended and frozen science cells — refused because a
-         half-amended column is a column whose §4.2 arithmetic has two denominators,
+         half-amended column is a column whose actuation-verdict arithmetic has two
+         denominators,
          and "the ladder in force" would name two ladders at once.
 
     A column with neither amended cells nor an authorization returns False having
-    asserted nothing, which is every column that ran before this ruling.
+    asserted nothing — the ordinary frozen-ladder column.
     """
     science = [c for c in cells if not c.is_mapping and not c.is_baseline]
     amended = [c for c in science if c.ladder_authorization is not None]
@@ -2698,7 +2704,7 @@ def assert_amended_ladder_column(cells: Sequence[CellSpec], *,
             f"{amended[0].cell_id}) but this run carries no ladder authorization. An "
             f"amended ladder is admitted ONLY with BOTH {LADDER_SPEC_FLAG} and "
             f"{AMENDED_LADDER_FLAG}; a cells document alone cannot re-calibrate a "
-            "node (§2.5 as amended: no ladder without a ratified document).")
+            "node (no ladder without an approved document).")
     if authorization is not None and not amended:
         raise AmendedLadderNotEngaged(
             f"{who}: an amended ladder is authorized (spec "
@@ -2709,12 +2715,12 @@ def assert_amended_ladder_column(cells: Sequence[CellSpec], *,
             "here, before the budget.")
     if not amended:
         return False
-    # COMPARED BY VALUE, never by object identity — the dual-import-path rake. The
+    # COMPARED BY VALUE, never by object identity — the dual-import-path hazard. The
     # engine runs as `__main__` while every importer sees
     # `metabasis.scripts.run_behavioral_cells`, so a cell that travelled through the
     # staging module carries an authorization compiled from the OTHER copy of this
-    # source, and pydantic's `==` compares classes first. The same rake
-    # `StagedCell._accept_a_cellspec_from_either_import_path` was written for.
+    # source, and pydantic's `==` compares classes first. The same hazard
+    # `StagedCell._accept_a_cellspec_from_either_import_path` guards against.
     want = authorization.model_dump()                    # type: ignore[union-attr]
     wrong = sorted(c.cell_id for c in amended
                    if c.ladder_authorization is None
@@ -2732,7 +2738,7 @@ def assert_amended_ladder_column(cells: Sequence[CellSpec], *,
             f"{sorted(c.cell_id for c in frozen)[0]}). An amendment is WHOLE-COLUMN: "
             "it replaces the ladder for every arm, every lever and every band at this "
             "node and site. A mixed column would have two ladders in force at once, so "
-            "'the ladder in force' would name neither and §4.2 would count against two "
+            "'the ladder in force' would name neither and the actuation verdict would count against two "
             "denominators. Re-stage the column under one ladder.")
     logger.info("AMENDED LADDER engaged: %d science cell(s) on ladder %s under spec %s "
                 "(frozen ladder %s is REPLACED for this column). %s",
@@ -2816,10 +2822,10 @@ def assert_mapping_column(cells: Sequence[CellSpec], *,
       3. a cell whose carried authorization is not this run's — the two keys must be
          the SAME key, which is what makes a swapped spec file unusable;
       4. a column holding both mapping and science cells — refused so that "a
-         §4.2-scorable column contains zero mapping cells" is true by construction.
+         scorable column contains zero mapping cells" is true by construction.
 
     A column with neither mapping cells nor an authorization returns False having
-    asserted nothing, which is every column that ran before this ruling.
+    asserted nothing — the ordinary science column.
     """
     mapping = [c for c in cells if c.is_mapping]
     science = [c for c in cells if not c.is_mapping]
@@ -2844,8 +2850,8 @@ def assert_mapping_column(cells: Sequence[CellSpec], *,
     # while every importer sees `metabasis.scripts.run_behavioral_cells`, so a cell
     # that travelled through the staging module carries an authorization compiled from
     # the OTHER copy of this source — and pydantic's `==` compares classes first. The
-    # same rake `StagedCell._accept_a_cellspec_from_either_import_path` was written
-    # for; a dump comparison is the shape-level test the contract actually means.
+    # same hazard `StagedCell._accept_a_cellspec_from_either_import_path` guards
+    # against; a dump comparison is the shape-level test the contract actually means.
     want = authorization.model_dump()                    # type: ignore[union-attr]
     wrong = sorted(c.cell_id for c in mapping
                    if c.mapping_authorization is None
@@ -2860,10 +2866,10 @@ def assert_mapping_column(cells: Sequence[CellSpec], *,
         raise MappingColumnNotPure(
             f"{who}: {len(mapping)} mapping cell(s) and {len(science)} science "
             f"cell(s) in one column (e.g. {sorted(c.cell_id for c in science)[0]}). "
-            "A mapping column is PURE — that is what makes 'a §4.2-scorable column "
+            "A mapping column is PURE — that is what makes 'a scorable column "
             "holds zero mapping cells' true by construction instead of by care. "
             "Stage the mapping run as its own column; its α=0 baseline is the banked "
-            "column's, by the shared-baseline design (§5.1).")
+            "column's, by the shared-baseline design.")
     logger.info("MAPPING MODE engaged: %d cell(s) at doses %s under spec %s (%s)",
                 len(mapping), list(authorization.doses),  # type: ignore[union-attr]
                 authorization.experiment_id,  # type: ignore[union-attr]
@@ -2907,14 +2913,14 @@ def load_mapping_spec(path: Path, *, node_key: str, arm: str, site: int
 
 
 def baseline_cell(site: int, n: int = N_PER_CELL) -> CellSpec:
-    """The α=0 baseline, SHARED by §4's calibration block and §5's column (§5.1)."""
+    """The α=0 baseline, SHARED by the actuation-calibration block and the transported column."""
     return CellSpec(cell_id=f"baseline_L{site}_a+0.00", kind="baseline",
                     vector_key=None, site=site, alpha_frac=BASELINE_DOSE, n=n)
 
 
 #: Substrings whose presence in a vector's construction provenance means the object
 #: was built by projecting out the direction known to produce the behavior — the
-#: lesion-recipe law's forbidden construction (§5.4). Matched case-insensitively on
+#: lesion-recipe law's forbidden construction. Matched case-insensitively on
 #: the provenance string the staging module writes.
 LESION_RECIPE_MARKERS: tuple[str, ...] = (
     "minus entropy_gradient", "- entropy_gradient", "orthogonalized against "
@@ -2924,7 +2930,7 @@ LESION_RECIPE_MARKERS: tuple[str, ...] = (
 
 
 def assert_no_lesion_recipe(provenance: str, vector_key: str = "") -> None:
-    """§5.4's lesion-recipe law, asserted in code rather than trusted.
+    """The lesion-recipe law, asserted in code rather than trusted.
 
     No object in this column is ever built by projecting out the direction known to
     produce the behavior. The staging module asserts this at construction; this is
@@ -2937,7 +2943,7 @@ def assert_no_lesion_recipe(provenance: str, vector_key: str = "") -> None:
         if marker in low:
             raise LesionRecipeViolation(
                 f"{vector_key or '(vector)'}: provenance names a lesion recipe "
-                f"({marker!r}) — §5.4's lesion-recipe law forbids an object built by "
+                f"({marker!r}) — the lesion-recipe law forbids an object built by "
                 f"projecting out the direction known to produce the behavior. "
                 f"Provenance: {provenance!r}")
 
@@ -2948,12 +2954,12 @@ def resolve_norms(*, site: int, measured: float, measured_provenance: str,
                   banked_mean_state: Optional[float] = None,
                   banked_mean_state_provenance: Optional[str] = None
                   ) -> NormConventions:
-    """§2.5's both-conventions record, with the >10% HALT (§9 item 8).
+    """The both-conventions norm record, with the >10% HALT (`ResidualNormDeltaError`).
 
     For the six carried nodes with banked a5 stamps the measured value is asserted
     against the banked one and the delta is RECORDED RATHER THAN ABSORBED; >10%
     would mean the site or the pool is not what the stamp says, which is a HALT and
-    not a correction an enactor applies.
+    not a correction the run applies.
     """
     delta = None
     if banked_per_token is not None:
@@ -2967,9 +2973,9 @@ def resolve_norms(*, site: int, measured: float, measured_provenance: str,
             raise ResidualNormDeltaError(
                 f"L{site}: measured per-token median residual norm {measured:.4f} "
                 f"deviates {delta * 100:.1f}% from the banked a5 value "
-                f"{banked_per_token:.4f} (>{NORM_DELTA_HALT_FRACTION * 100:.0f}%, §9 "
-                f"item 8). That means the site or the prompt pool is not what the "
-                f"stamp says — HALT to the desk; an enactor does not absorb this.")
+                f"{banked_per_token:.4f} (>{NORM_DELTA_HALT_FRACTION * 100:.0f}%). "
+                f"That means the site or the prompt pool is not what the stamp says — "
+                f"HALT for a human to resolve; the run does not absorb this.")
         logger.info("L%d norm conventions: measured %.4f vs banked %.4f (Δ %.2f%%) — "
                     "recorded, not absorbed", site, measured, banked_per_token,
                     delta * 100)
