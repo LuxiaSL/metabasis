@@ -1,0 +1,40 @@
+{
+ "artifact": "STAR-BESIDE-webtext-v3-2026-08-04.json",
+ "artifact_sha256": "f036d3970347d3e2baa5e98ffdb359e5555ca1181075e575287f7e2c39d24e38",
+ "attestation": "UNSTAMPED · GATELESS · DESCRIPTIVE BY CONSTRUCTION (v3 contract §8, 'the star beside (S1 continuation)'). This record scores NOTHING, moves no band, opens no gate and adjudicates nothing. S1 is STAMPED — 'scalar factorization refuted at scale; hub-mediated transport demonstrated at map order' (Luxia, 2026-07-29) — and this lane CONTINUES that record on the clean basis; it cannot reopen it. Every in-band count below is REFERENCE-ONLY and NON-GATE.",
+ "builder": "metabasis/scripts/star_beside_webtext_v3.py",
+ "determinism": "the artifact carries no timestamp, no absolute path and no environment-varying value; every such fact is here. `--selftest` proves a build-twice byte-identical artifact.",
+ "emitted_utc": "2026-08-05T01:48:29Z",
+ "numpy": "1.26.4",
+ "omp_num_threads": "8",
+ "python": "3.13.9",
+ "solver_generated_date": "2026-08-05",
+ "thread_config": {
+  "STATUS": "INSTRUMENT IDENTITY (Luxia ruling 2026-08-01): eigh is bitwise-deterministic at a FIXED thread count and its bytes differ ACROSS counts, so the effective thread configuration is part of what produced these numbers. Read from the threadpool at stamp time, not from the request. A rebuild compared against an artifact banked at another count is a characterized break, never a corruption.",
+  "affinity_count": 16,
+  "consensus": "unresolved",
+  "cpu_count": 16,
+  "effective_num_threads": null,
+  "env_requested": {
+   "BLIS_NUM_THREADS": "(unset)",
+   "MKL_NUM_THREADS": "(unset)",
+   "NUMEXPR_NUM_THREADS": "(unset)",
+   "OMP_NUM_THREADS": "8",
+   "OPENBLAS_NUM_THREADS": "(unset)",
+   "VECLIB_MAXIMUM_THREADS": "(unset)"
+  },
+  "matches_ruled_default": null,
+  "note": "THREADS_UNRESOLVED: every mapped BLAS runtime declined to answer: ",
+  "pools": [
+   {
+    "kind": "openmp",
+    "library": "libgomp.so.1.0.0",
+    "note": "",
+    "num_threads": 8,
+    "symbol": "omp_get_max_threads"
+   }
+  ],
+  "probe": "ctypes over the BLAS/OpenMP runtimes already mapped into this process (/proc/self/maps + dlopen + each runtime's own get_num_threads); the env is recorded beside it as the REQUEST",
+  "ruled_default": 8
+ }
+}
