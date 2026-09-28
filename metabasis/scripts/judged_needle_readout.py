@@ -1,13 +1,14 @@
-"""A8 Leg-4F / L4-g — judged-needle readout: the 2AFC ladder against the frozen bar.
+"""Judged-needle readout: the 2AFC ladder against the frozen bar.
 
-Reads `readouts_judge/analogical_2afc_results.json` (written by the A5 mode-shift judge of
-record, `judge_blind_2afc --mode analogical`) and states, mechanically:
+Reads the analogical 2AFC results at `JUDGE` (written by the mode-shift judge,
+`judge_blind_2afc --mode analogical`) and states, mechanically:
 
-  P8-JX (A8-add-3) := >=1 ladder dose at 2AFC >= .65
+  the bar := >=1 ladder dose at 2AFC >= .65
                       AND transported-R band cells <= .58 at matched dose
                       AND dose-monotone trend across the ladder
 
-No P is scored here — the desk scores.  Everything UNSTAMPED (C§8).
+No prediction is scored here; this writes the bar clauses for a separate scoring
+step.  Everything UNSTAMPED: nothing here is a scored result.
 
 Run: PYTHONPATH=pipeline python -m metabasis.scripts.judged_needle_readout
 """

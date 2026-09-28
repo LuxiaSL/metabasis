@@ -1,47 +1,48 @@
-"""A8 Leg-6 / Item 3 — orthogonalized field-basis composition (P8-PERP .50).
+"""Orthogonalized field-basis composition.
 
-The L4-b successor. L4-b's Reading A summed cos(u, dial_i) x dial_i-effect over a dial set
-that is badly non-orthogonal (cos(Vconf, V7) ~ -.91 in both dense targets), so Reading A
-double-counts the shared V7/Vconf component by construction and Reading B (Gram-corrected
-least squares) was filed beside it. add-4 asks the obvious repair: orthogonalize the dial
-basis against V7 first, then re-predict.
+The composition panel's Reading A summed cos(u, dial_i) x dial_i-effect over a dial set
+that is badly non-orthogonal (cos(Vconf, entropy gradient) ~ -.91 in both dense targets),
+so Reading A double-counts the shared entropy-gradient/Vconf component by construction and
+Reading B (Gram-corrected least squares) sits beside it. This module is the obvious
+repair: orthogonalize the dial basis against the entropy gradient first, then re-predict.
 
-CONSTRUCTION IS STAMPED BEFORE ANY RE-PREDICTION (add-4's explicit requirement). It is
-written to the readout's `construction` block and logged before a single ratio is computed.
+CONSTRUCTION IS STAMPED BEFORE ANY RE-PREDICTION. It is written to the readout's
+`construction` block and logged before a single ratio is computed, so no construction
+choice can be made after seeing a ratio.
 
-TWO CONSTRUCTIONS, BOTH REPORTED — add-4 says "sequentially orthogonalized against V7",
-which admits two readings, and this arm's standing practice (the Reading A/B precedent,
-and the rules the previous three ambiguities bought) is to report every defensible one
-rather than silently pick:
+TWO CONSTRUCTIONS, BOTH REPORTED — "sequentially orthogonalized against the entropy
+gradient" admits two readings, and this arm reports every defensible reading rather than
+silently picking one (as Readings A and B are both reported):
 
-  P  "perp-to-V7"      : every non-V7 dial is Gram-Schmidt'd against V7 ALONE. The dials
-                         stay mutually oblique; only the V7 double-count is removed.
-  Q  "full sequential" : ordered Gram-Schmidt over [V7, Vrep_perp, Veos_perp, Vconf,
-                         Vtemp] — a genuinely orthonormal basis. "Sequential Gram-Schmidt"
-                         as a term of art.
+  P  "perp to the entropy gradient" : every other dial is Gram-Schmidt'd against the
+                         entropy gradient ALONE. The dials stay mutually oblique; only the
+                         entropy-gradient double-count is removed.
+  Q  "full sequential" : ordered Gram-Schmidt over `BASIS_ORDER` (entropy gradient,
+                         Vrep_perp, Veos_perp, Vconf, Vtemp) — a genuinely orthonormal
+                         basis. "Sequential Gram-Schmidt" as a term of art.
 
 BANKED PERP FORMS ARE USED WHERE THEY EXIST, AND NAMED: Vrep_perp and Veos_perp are
-already banked Gram-Schmidt-against-V7 objects (the 8B forms carry cos-to-V7 ~ 4e-17 per
-the fire log). Under construction P they are therefore passed through UNCHANGED, and the
+already banked Gram-Schmidt-against-the-entropy-gradient objects (the 8B forms carry a
+cosine to it of ~ 4e-17). Under construction P they are therefore passed through UNCHANGED, and the
 readout says so per dial. Only Vconf and Vtemp are actually re-orthogonalized under P.
 
-EFFECTS ARE CONVENTION-CARRIED, NOT RE-MEASURED (add-4's conditional: "P8-PERP inherits
-the L4-b fork — convention-carried terms named, never freshly measured mid-session"). The
+EFFECTS ARE CONVENTION-CARRIED, NOT RE-MEASURED: convention-carried terms are named and
+never freshly measured mid-run, the same fork the composition panel takes. The
 banked dose-ladder of each dial is attached to that dial's ORTHOGONALIZED form. This is a
 substitution and it is named: the ladders were measured on the original vectors. For
 Vrep_perp/Veos_perp under P the substitution is vacuous (vector unchanged); for Vconf,
 Vtemp, and everything under Q it is real.
 
-THE NEAR-ZERO ROW, reported beside as add-4 requires: 8b->qwen Vrep_perp at +0.3, whose
-Leg-4F Reading-A prediction was -.0359 against obs -.0529 (ratio 1.472, within x2). A
+THE NEAR-ZERO ROW, reported beside: 8b->qwen Vrep_perp at +0.3, whose
+composition-panel Reading-A prediction was -.0359 against obs -.0529 (ratio 1.472, within x2). A
 near-zero prediction landing inside x2 is fragile — it can flip sign under any basis
 change — so its behaviour under P and Q is reported explicitly rather than folded into
 the count.
 
-BAR (add-4, symmetric): Qwen >=4/5 within x2 AND 8B >=4/5 within x2, aggregation >=4/5
-per sheet. NOT self-scored — the desk scores P8-PERP.
+BAR (symmetric): Qwen >=4/5 within x2 AND 8B >=4/5 within x2, aggregation >=4/5
+per sheet. NOT self-scored — scoring is a separate step.
 
-UNSTAMPED (C section 8).
+UNSTAMPED: nothing here is a scored result.
 Run: PYTHONPATH=pipeline python -m metabasis.scripts.composition_panel_orthogonalized
 """
 from __future__ import annotations
@@ -195,7 +196,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         out["pairs"][pair] = {"dial_provenance": notes, "construction": rec}
         logger.info("[%s] CONSTRUCTION STAMPED", pair)
         for n, r in rec.items():
-            logger.info("    %-12s %s (cos->V7 %s -> %s)", n, r["action"],
+            logger.info("    %-12s %s (cos to entropy gradient %s -> %s)", n, r["action"],
                         r["cos_to_V7_before"], r.get("cos_to_V7_after", "-"))
     (OUT / "perp_composition_construction.json").write_text(
         json.dumps({k: v["construction"] for k, v in out["pairs"].items()}, indent=1))

@@ -1,13 +1,16 @@
-"""The capability battery + coherence panel that rides EVERY cell (BRIEF §6).
+"""The capability battery + coherence panel that rides EVERY cell.
 
-`BRIEF-behavioral-phase-2026-07-29.md` (sha `475bc2a8…`) §6 is this module's
-specification verbatim; §13 ruling 7 freezes the judged-column branch at the end.
+The behavioral phase's frozen specification (`BRIEF_OF_RECORD`, pinned by
+`BRIEF_SHA256` in `run_behavioral_cells`) is restated below wherever this module
+implements it; the judged-column branch at the end is frozen by the same
+specification.
 
-THE REQUIREMENT THIS PAYS. Gate-1 Correction-2: a small fixed task set + coherence
-panel + random bands riding **EVERY** behavioral dose cell. Four constraints shaped
-it and every one of them is load-bearing here:
+THE REQUIREMENT THIS PAYS: a small fixed task set + coherence panel + random bands
+riding **EVERY** behavioral dose cell, so a capability cost is never read off a
+dose without its matched floor. Four constraints shaped it and every one of them
+is load-bearing here:
 
-  * **judge-free** — no spend is authorized (§11), so nothing in this module calls a
+  * **judge-free** — no judge spend is authorized, so nothing in this module calls a
     judge, and `assert_no_judging_machinery` asserts that as a property of the file.
   * **deterministic** — no sampling noise on top of the effect being measured. The
     likelihood battery is EXACTLY deterministic (teacher-forced NLL, zero
@@ -35,12 +38,12 @@ vs `[A-Za-z']+` lowercased) and are deliberately NOT harmonized: each is the ban
 convention for its own metric, and "harmonizing" them would silently redefine what
 the .45 floor means.
 
-ONE HONEST GAP, REPORTED. §6 asks the cycle detector to be "the same deterministic
-detector that built corpus-v2.1". That detector (`census_cycles.py`, KMP smallest
-string period, run under BOTH readings of "exact repetition of a cycle ≤ 64 chars")
-is a desk-side tool and is NOT in the code of record, so `repetition_cycle` is a
+ONE HONEST GAP, REPORTED. The specification asks the cycle detector to be "the
+same deterministic detector that built corpus-v2.1". That detector (a census
+script: KMP smallest string period, run under BOTH readings of "exact repetition
+of a cycle ≤ 64 chars") is NOT in this repository, so `repetition_cycle` is a
 re-implementation of the described algorithm — both readings, agreement asserted,
-exactly as the v2.1 census did. A desk cross-check against the banked v2.1 drop set
+exactly as the v2.1 census did. A cross-check against the banked v2.1 drop set
 (2 entries; smallest surviving period 277, 4.3× the cutoff) is OWED before this is
 called continuity rather than reconstruction.
 
@@ -48,11 +51,11 @@ CPU self-test (no weights, no GPU, no data tree):
 
     python -m metabasis.scripts.capability_battery --selftest
 
-RAKE M44 — THE CONFIGURATION MATRIX IS THE MERGE BAR. This selftest is verified in
+THE CONFIGURATION MATRIX IS THE MERGE BAR. This selftest is verified in
 all four cells of {torch, no torch} x {data tree, no data tree} and every cell
 must exit 0 with either real passes or NAMED skips. Two environments differ in ways
 a single run cannot see: the repo `.venv` has NO torch (numpy/pydantic/scipy only)
-while `/usr/bin/python` has torch + transformers, and the data tree is gitignored so
+while the system interpreter has torch + transformers, and the data tree is gitignored so
 a fresh worktree has none. A bare `import torch` at a point of use passes in one
 environment and CRASHES in another, and a crash is indistinguishable from a failure
 while saying less. Every torch-dependent BLOCK here therefore branches on one
@@ -82,30 +85,30 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger("capability_battery")
 
 # ---------------------------------------------------------------- frozen constants
-#: §6: the banked degeneracy guard's floor, of record. A dose whose coherence falls
+#: The banked degeneracy guard's floor, of record. A dose whose coherence falls
 #: below it is marked PAST-COHERENCE-COLLAPSE and its entropy read is FILED BUT NOT
 #: QUOTABLE (the banked constraint-v gate convention).
 COHERENCE_FLOOR = 0.45
 PAST_COHERENCE_COLLAPSE = "PAST-COHERENCE-COLLAPSE"
-#: §6(3): "a cycle ≤ 64 characters". The v2.1 census's cutoff, verbatim.
+#: "a cycle ≤ 64 characters": the v2.1 census's cutoff, verbatim.
 CYCLE_CHAR_CUTOFF = 64
-#: §6(2): 8 items, 32 generated tokens each — 256 tokens/cell, negligible.
+#: Format probe: 8 items, 32 generated tokens each — 256 tokens/cell, negligible.
 FORMAT_PROBE_MAX_NEW_TOKENS = 32
-#: §6(1): three subtests of 8 minimal pairs, teacher-forced, zero generation.
+#: Likelihood battery: three subtests of 8 minimal pairs, teacher-forced, zero generation.
 N_LIKELIHOOD_ITEMS_PER_SUBTEST = 8
 LIKELIHOOD_SUBTESTS: tuple[str, ...] = ("factual", "arithmetic", "syntactic_agreement")
-#: §6: "32 fixed items" — 24 likelihood + 8 format.
+#: "32 fixed items" — 24 likelihood + 8 format.
 N_BATTERY_ITEMS = (len(LIKELIHOOD_SUBTESTS) * N_LIKELIHOOD_ITEMS_PER_SUBTEST
                    + N_LIKELIHOOD_ITEMS_PER_SUBTEST)
 
-#: ruling 7: the judged column's texts pre-generate during the entropy pass at
+#: The judged column's texts pre-generate during the entropy pass at
 #: these four doses (a SUBSET of the frozen ladder — never an extension of it),
 #: plus the SHARED α=0 baseline whose same-topic riders the blind 2AFC pairing
 #: needs and which is therefore already generated at zero extra cost.
 JUDGED_DOSES: tuple[float, ...] = (-0.3, -0.1, 0.1, 0.3)
-#: §7: leg 12 (8B→gpt2-xl) is CONTINGENT BY FROZEN TEXT on gpt2-xl's entropy-write
-#: column showing signal, so it never pre-generates in the same pass — it is decided
-#: after §5's read.
+#: The 8B→gpt2-xl judged pair is CONTINGENT BY FROZEN TEXT on gpt2-xl's
+#: entropy-write column showing signal, so it never pre-generates in the same pass —
+#: it is decided after the entropy-write read.
 LEG12_PAIR = ("8b", "gpt2-xl")
 
 
@@ -115,25 +118,25 @@ class BatteryError(BehavioralHarnessError):
 
 
 class ItemSetMismatch(BatteryError):
-    """§9 item 1 (M4): the battery item set is not the sha the stamp names.
+    """The battery item set is not the sha the stamp names.
 
-    The item-set sha rides every §2.8 stamp precisely so a capability number can be
+    The item-set sha rides every cell stamp precisely so a capability number can be
     attributed to the exact 32 items that produced it; a changed item set with an
     unchanged sha would make every banked capability delta uninterpretable.
     """
 
 
 class JudgeMachineryRefused(BatteryError):
-    """§11: no judge spend, no judged leg, no API call against the $250 cap.
+    """No judge spend, no judged read, no API call against the judge budget.
 
-    Ruling 7 pre-generates TEXTS only. The judge run stays a pure $-decision on
-    banked texts, executable any time after Luxia releases budget — and it is not
-    this module's to fire.
+    The judged column pre-generates TEXTS only. The judge run stays a pure budget
+    decision on banked texts, executable any time after budget is released — and it
+    is not this module's to fire.
     """
 
 
 class ModePairUnnamed(BatteryError):
-    """§7/§11: a mode contrast vector is always named with its mode pair, both sides.
+    """A mode contrast vector is always named with its mode pair, both sides.
 
     The banks disagree about which pair they hold (3B/8B are analogical−contrastive;
     the DSV2 plain bank is linear−socratic), so a one-sided name is not a shorthand,
@@ -142,12 +145,12 @@ class ModePairUnnamed(BatteryError):
 
 
 class JudgedLegContingent(BatteryError):
-    """§7: this leg's fate depends on a read that has not happened yet."""
+    """This judged pair's fate depends on a read that has not happened yet."""
 
 
 # ---------------------------------------------------------------- the item set
 class LikelihoodItem(BaseModel):
-    """One minimal pair, scored by NLL under the cell's own injection (§6(1)).
+    """One minimal pair, scored by NLL under the cell's own injection.
 
     Deliberately tiny and template-free: the whole item is `prompt + continuation`
     with no chat turn, so it scores identically on a base model, an instruct model
@@ -172,7 +175,7 @@ class LikelihoodItem(BaseModel):
 
 
 class FormatItem(BaseModel):
-    """One format-compliance item — generated, regex-scored (§6(2)).
+    """One format-compliance item — generated, regex-scored.
 
     This is the one thing likelihood cannot see: whether steering destroys
     INSTRUCTION-FOLLOWING while leaving KNOWLEDGE intact. Base models score it near
@@ -192,8 +195,8 @@ class FormatItem(BaseModel):
         return bool(re.match(self.compliance_regex, text.strip(), re.I))
 
 
-#: §6(1) — 24 likelihood items, three subtests of 8. The factual and arithmetic
-#: exemplars are the brief's own ("The capital of France is Paris" vs "… is Berlin";
+#: 24 likelihood items, three subtests of 8. The factual and arithmetic
+#: exemplars are the specification's own ("The capital of France is Paris" vs "… is Berlin";
 #: "17 + 26 = 43" vs "… = 41"), and the agreement subtest is its named
 #: subject–verb number minimal pair shape ("The keys to the cabinet **are**" vs
 #: "**is**"), each with an intervening noun of the OPPOSITE number so the item
@@ -272,9 +275,9 @@ LIKELIHOOD_ITEMS: tuple[LikelihoodItem, ...] = (
                    true_continuation=" looks", false_continuation=" look"),
 )
 
-#: §6(2) — 8 format-compliance items, regex-scored. Each regex accepts a single
+#: 8 format-compliance items, regex-scored. Each regex accepts a single
 #: bare word (optionally punctuated/quoted) and nothing else, which is exactly the
-#: "single-token-answer compliance" the brief asks for.
+#: "single-token-answer compliance" the specification asks for.
 _ONE_WORD = r"^[\"'\s]*{word}[\"'.!\s]*$"
 FORMAT_ITEMS: tuple[FormatItem, ...] = (
     FormatItem(item_id="format-01",
@@ -332,7 +335,7 @@ def item_set_document() -> dict:
 
 
 def item_set_sha256() -> str:
-    """The frozen item-set sha that rides every §2.8 stamp."""
+    """The frozen item-set sha that rides every cell stamp."""
     return hashlib.sha256(
         json.dumps(item_set_document(), sort_keys=True,
                    separators=(",", ":")).encode()).hexdigest()
@@ -342,18 +345,18 @@ BATTERY_ITEM_SET_SHA256 = item_set_sha256()
 
 
 def assert_item_set(expected_sha256: str) -> None:
-    """§9 item 1 (M4): a capability number belongs to ONE item set."""
+    """A capability number belongs to ONE item set."""
     if expected_sha256 != BATTERY_ITEM_SET_SHA256:
         raise ItemSetMismatch(
             f"battery item-set sha mismatch: stamp names {expected_sha256[:12]}… "
-            f"but this build's item set is {BATTERY_ITEM_SET_SHA256[:12]}… (§9 item "
-            "1, M4). A changed item set with an unchanged sha would make every "
+            f"but this build's item set is {BATTERY_ITEM_SET_SHA256[:12]}…. "
+            "A changed item set with an unchanged sha would make every "
             "banked capability delta uninterpretable — HALT.")
 
 
 # ---------------------------------------------------------------- likelihood scoring
 class SubtestScore(BaseModel):
-    """One likelihood subtest's rate under one cell's injection (§6(1))."""
+    """One likelihood subtest's rate under one cell's injection."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -369,14 +372,14 @@ class SubtestScore(BaseModel):
 
 def score_likelihood_subtest(subtest: str,
                              nll_of: Callable[[str, str], float]) -> SubtestScore:
-    """§6(1): fraction of items whose TRUE continuation has the lower NLL.
+    """Fraction of items whose TRUE continuation has the lower NLL.
 
     `nll_of(prompt, continuation)` is supplied by the caller and must apply THE
     CELL'S OWN INJECTION (the same hook, the same α, the same site) — that is what
     makes the score a capability read UNDER the dose rather than a model fact. It is
     a callable rather than a model handle so the scoring logic is testable on CPU
     with no weights, and so the caller keeps the one batched forward per subtest that
-    §6 costs the battery at.
+    the battery's cost budget assumes.
 
     Exactly deterministic by construction: teacher-forced NLL, zero generation, so
     there is no sampling variance to fight the effect being measured.
@@ -405,9 +408,9 @@ def score_likelihood_subtest(subtest: str,
 
 
 def score_format_probe(texts_by_item: dict[str, str]) -> dict:
-    """§6(2): fixed-regex single-answer compliance over the 8 generated items.
+    """Fixed-regex single-answer compliance over the 8 generated items.
 
-    Re-scorable from banked texts with no GPU (§10's verification recipe), which is
+    Re-scorable from banked texts with no GPU (part of the verification recipe), which is
     why the scorer takes TEXTS and not a model.
     """
     per_item: dict[str, bool] = {}
@@ -425,11 +428,11 @@ def score_format_probe(texts_by_item: dict[str, str]) -> dict:
 
 
 # ---------------------------------------------------------------- coherence panel
-#: RAKE M44. `trait_probe` imports torch at module level (it also owns generation
+#: `trait_probe` imports torch at module level (it also owns generation
 #: helpers), so reaching the banked `_coherence` through it makes a PURE-PYTHON
-#: string metric torch-dependent. That is not merely a selftest inconvenience: §10's
+#: string metric torch-dependent. That is not merely a selftest inconvenience: the
 #: verification recipe is "Coherence panel (CPU): recompute all five metrics from
-#: banked texts", a DESK act, and the desk's own repo .venv has no torch. A recipe
+#: banked texts", run by a reviewer in the repo .venv, which has no torch. A recipe
 #: that cannot run in the environment it is written for is not a recipe.
 #:
 #: The resolution keeps ONE source of truth without making the metric unavailable:
@@ -439,7 +442,7 @@ def score_format_probe(texts_by_item: dict[str, str]) -> dict:
 #: copy cannot drift silently: the moment torch is present, equality is asserted.
 _COHERENCE_BANKED_SOURCE = "metabasis.scripts.trait_probe._coherence"
 #: Recorded on every panel so a banked artifact says which path produced its number
-#: (M19: degraded provenance is DESCRIBED, never silent).
+#: (degraded provenance is DESCRIBED, never silent).
 COHERENCE_PROVENANCE_BANKED = f"{_COHERENCE_BANKED_SOURCE} (the banked guard)"
 COHERENCE_PROVENANCE_LOCAL = (
     f"vetted local copy of {_COHERENCE_BANKED_SOURCE}'s body — the banked module "
@@ -471,7 +474,7 @@ def distinct_word_ratio(text: str) -> float:
     """The banked degeneracy guard, floor .45 of record — `trait_probe._coherence`.
 
     Resolved through `coherence_implementation`, so the metric is available with or
-    without a deep-learning stack (rake M44) and the path taken is reportable rather
+    without a deep-learning stack and the path taken is reportable rather
     than silent. Deliberately NOT harmonized with the 4-gram metric's tokenizer:
     each is the banked convention for its own metric.
     """
@@ -549,7 +552,7 @@ def smallest_period(s: str) -> int:
 
 
 class RepetitionCycle(BaseModel):
-    """§6(3)'s exact-repetition-cycle detector, under BOTH v2.1 census readings.
+    """The exact-repetition-cycle detector, under BOTH v2.1 census readings.
 
     The corpus-v2.1 census ran "exact repetition of a cycle ≤ 64 chars" under two
     readings — periodicity-with-partial-tail, and whole-cycle-divides-length — and
@@ -571,7 +574,7 @@ class RepetitionCycle(BaseModel):
 
 
 def repetition_cycle(text: str, cutoff: int = CYCLE_CHAR_CUTOFF) -> RepetitionCycle:
-    """§6(3): is this text an exact repetition of a cycle ≤ `cutoff` characters?"""
+    """Is this text an exact repetition of a cycle ≤ `cutoff` characters?"""
     s = text
     n = len(s)
     p = smallest_period(s)
@@ -584,7 +587,7 @@ def repetition_cycle(text: str, cutoff: int = CYCLE_CHAR_CUTOFF) -> RepetitionCy
 
 
 class CoherencePanel(BaseModel):
-    """§6(3)'s five deterministic metrics over a cell's own 80 generations.
+    """The panel's five deterministic metrics over a cell's own 80 generations.
 
     ZERO extra generation: every metric is computed from text the entropy pass
     already produced. Mean per-token entropy and base-model NLL come free from the
@@ -601,11 +604,11 @@ class CoherencePanel(BaseModel):
     cycle_readings_agree: bool
     eos_termination_rate: float
     mean_generation_length_words: float
-    #: §6: below the floor → the entropy read is FILED BUT NOT QUOTABLE.
+    #: Below the floor → the entropy read is FILED BUT NOT QUOTABLE.
     coherence_label: Optional[str] = None
     quotable: bool = True
-    #: which implementation produced `distinct_word_ratio` (rake M44). Banked on the
-    #: panel so a desk recomputation can be compared against the same arithmetic
+    #: which implementation produced `distinct_word_ratio`. Banked on the
+    #: panel so a reviewer's recomputation can be compared against the same arithmetic
     #: that produced the filed number, instead of assuming they match.
     distinct_word_ratio_provenance: str = COHERENCE_PROVENANCE_BANKED
 
@@ -616,20 +619,20 @@ class CoherencePanel(BaseModel):
             raise ValueError(
                 f"distinct-word ratio {self.distinct_word_ratio} < "
                 f"{COHERENCE_FLOOR} must be labeled {PAST_COHERENCE_COLLAPSE} "
-                "(§6): an unlabeled collapse is a quotable number that should not be")
+                "— an unlabeled collapse is a quotable number that should not be")
         if collapsed and self.quotable:
             raise ValueError(
-                f"a {PAST_COHERENCE_COLLAPSE} dose is FILED BUT NOT QUOTABLE (§6, "
+                f"a {PAST_COHERENCE_COLLAPSE} dose is FILED BUT NOT QUOTABLE ("
                 "the banked constraint-v gate convention)")
         return self
 
 
 def coherence_panel(texts: Sequence[str],
                     eos_flags: Optional[Sequence[bool]] = None) -> CoherencePanel:
-    """§6(3)'s panel over one cell's generations, with the collapse label applied.
+    """The panel over one cell's generations, with the collapse label applied.
 
-    The distinct-word ratio is the MEAN over generations (the banked read: §4.2(c)'s
-    "mean distinct-word ratio"), so one degenerate generation cannot label a cell on
+    The distinct-word ratio is the MEAN over generations (the banked read, "mean
+    distinct-word ratio"), so one degenerate generation cannot label a cell on
     its own and a broadly collapsed cell cannot hide behind a few clean rows.
     """
     if not texts:
@@ -663,10 +666,10 @@ def coherence_panel(texts: Sequence[str],
 
 # ---------------------------------------------------------------- the cell block
 class CapabilityBlock(BaseModel):
-    """§6's per-cell `capability` block: 3 likelihood rates + 1 format rate + panel.
+    """The per-cell `capability` block: 3 likelihood rates + 1 format rate + panel.
 
-    Every rate is filed WITH its α=0 delta, because §6's reporting requirement is
-    the delta and a bare rate cannot answer "did the dose cost capability". A block
+    Every rate is filed WITH its α=0 delta, because the reported quantity is the
+    delta and a bare rate cannot answer "did the dose cost capability". A block
     built without a baseline to subtract from says so in `baseline_available` rather
     than reporting a zero delta, which would read as "no cost".
     """
@@ -690,7 +693,7 @@ def capability_block(*, cell: CellSpec, likelihood: Sequence[SubtestScore],
                      format_result: dict, panel: CoherencePanel,
                      baseline: Optional["CapabilityBlock"] = None
                      ) -> CapabilityBlock:
-    """Assemble one cell's capability block, with the α=0 delta (§6's reporting)."""
+    """Assemble one cell's capability block, with the α=0 delta."""
     rates = {s.subtest: s.rate for s in likelihood}
     missing = [s for s in LIKELIHOOD_SUBTESTS if s not in rates]
     if missing:
@@ -715,7 +718,7 @@ def capability_block(*, cell: CellSpec, likelihood: Sequence[SubtestScore],
 
 
 def dose_metric_table(blocks: Sequence[CapabilityBlock]) -> dict:
-    """§6's per-node dose × metric table, WITH THE RANDOM BAND BESIDE.
+    """The per-model dose × metric table, WITH THE RANDOM BAND BESIDE.
 
     "Riding the random bands is the point": the band rows at the same dose give the
     dose-matched capability floor, which is what separates "the vector raises
@@ -726,7 +729,7 @@ def dose_metric_table(blocks: Sequence[CapabilityBlock]) -> dict:
     if not blocks:
         raise BatteryError("dose × metric table over zero cells")
     signal = [b for b in blocks if not b.is_null]
-    # B4 (Luxia 2026-08-04): a Σ-shaped band is a null DRAW but not THE null. Pooling
+    # A Σ-shaped band is a null DRAW but not THE null. Pooling
     # it into `random_band` would move the dose-matched capability floor this table
     # exists to report, so the beside is split out and filed under its own key.
     band = [b for b in blocks
@@ -735,7 +738,7 @@ def dose_metric_table(blocks: Sequence[CapabilityBlock]) -> dict:
               if b.is_null and b.band_family in BESIDE_BAND_FAMILIES]
     if signal and not band:
         raise BatteryError(
-            "§6's table needs the RANDOM BAND beside every dose (the dose-matched "
+            "the dose × metric table needs the RANDOM BAND beside every dose (the dose-matched "
             "capability floor). A signal-only table cannot separate 'the vector "
             "raises entropy' from 'a random write of the same norm costs the same "
             "capability' — which is the correction the battery exists to satisfy.")
@@ -783,9 +786,9 @@ def dose_metric_table(blocks: Sequence[CapabilityBlock]) -> dict:
     return table
 
 
-# ------------------------------------------- judged-column pre-generation (ruling 7)
+# ------------------------------------------- judged-column pre-generation
 class ModePair(BaseModel):
-    """A mode contrast vector's pair, named on BOTH sides (§7/§11's clause).
+    """A mode contrast vector's pair, named on BOTH sides.
 
     The banks disagree about which pair they hold (3B/8B: analogical−contrastive;
     the DSV2 plain bank: linear−socratic), so a one-sided name is an ambiguity that
@@ -811,15 +814,15 @@ class ModePair(BaseModel):
 
 
 class JudgedLegPlan(BaseModel):
-    """Ruling 7: the judged leg's texts pre-generated during the entropy pass.
+    """The judged pair's texts, pre-generated during the entropy pass.
 
     Four steered cells at {±0.1, ±0.3} plus the SHARED α=0 baseline, whose
     same-topic rider generations the blind 2AFC pairing requires and which are
     ALREADY generated at zero extra cost. Marginal cost ~4 cells per leg.
 
-    Nothing here fires a judge. The judge run becomes a pure $-decision on banked
-    texts, executable any time after Luxia releases budget, with no model reload and
-    no scheduling — which is the entire point of decoupling it (§7).
+    Nothing here fires a judge. The judge run becomes a pure budget decision on
+    banked texts, executable any time after budget is released, with no model reload
+    and no scheduling — which is the entire point of decoupling it.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -841,7 +844,7 @@ class JudgedLegPlan(BaseModel):
         if tuple(sorted(c.alpha_frac for c in self.cells)) != tuple(
                 sorted(JUDGED_DOSES)):
             raise ValueError(
-                f"ruling 7's judged doses are {JUDGED_DOSES} (a SUBSET of the frozen "
+                f"the judged doses are {JUDGED_DOSES} (a SUBSET of the frozen "
                 f"ladder), got {sorted(c.alpha_frac for c in self.cells)}")
         return self
 
@@ -850,18 +853,18 @@ def judged_leg_plan(*, source: str, target: str, site: int, mode_pair: ModePair,
                     per_token_median_resid_norm: float,
                     vector_key: Optional[str] = None,
                     n_per_cell: int = N_PER_CELL) -> JudgedLegPlan:
-    """Ruling 7's pre-generation hook — TEXTS ONLY, no judging machinery.
+    """The judged column's pre-generation hook — TEXTS ONLY, no judging machinery.
 
-    Refuses leg 12 (8B→gpt2-xl) by name: §7 makes it CONTINGENT BY FROZEN TEXT on
+    Refuses 8B→gpt2-xl (`LEG12_PAIR`) by name: the frozen text makes it CONTINGENT on
     gpt2-xl's entropy-write column showing signal, so it never pre-generates in the
     same pass. Refusing here rather than at judge time is the difference between a
     decision that waits and a text bank that quietly pre-empts it.
     """
     if (source, target) == LEG12_PAIR:
         raise JudgedLegContingent(
-            f"leg 12 ({source}→{target}) is CONTINGENT BY FROZEN TEXT on gpt2-xl's "
-            "entropy-write column showing signal (§7), so it never pre-generates in "
-            "the same pass — it is decided after §5's read. Pre-generating it would "
+            f"the judged pair {source}→{target} is CONTINGENT BY FROZEN TEXT on gpt2-xl's "
+            "entropy-write column showing signal, so it never pre-generates in "
+            "the same pass — it is decided after the entropy-write read. Pre-generating it would "
             "quietly pre-empt a decision the frozen text reserves.")
     key = vector_key or f"gmode_contrast_{mode_pair.positive}_{mode_pair.negative}"
     laddered = [(c, a) for c, a in apply_dose_ladder(
@@ -885,15 +888,15 @@ def pairing_metadata(*, leg: JudgedLegPlan, steered: Sequence[GenerationRecord],
                      riders: Sequence[GenerationRecord],
                      topic_of: Callable[[str], str],
                      question: str) -> dict:
-    """`key.json`-shaped pairing metadata for the later blind 2AFC (§7).
+    """Unblinding-key-shaped pairing metadata for the later blind 2AFC.
 
     The shape is `blind_pair_builder.build`'s: `{pair_id: {class, steered,
     steered_gid, rider_gid}}`, so the banked texts drop straight into the existing
     judge path with no adapter. Topic-matched: a steered generation is paired with an
     α=0 rider on the SAME topic, which is what the 2AFC design requires.
 
-    A/B side assignment is sha256-derived per pair (M25: never `hash()`, never an
-    unseeded shuffle), so the sealed key is reproducible from the banked inputs
+    A/B side assignment is sha256-derived per pair (never `hash()`, which is salted
+    per process, and never an unseeded shuffle), so the sealed key is reproducible from the banked inputs
     alone — a key that could not be re-derived would make the judge pass
     unauditable.
     """
@@ -941,8 +944,8 @@ def pairing_metadata(*, leg: JudgedLegPlan, steered: Sequence[GenerationRecord],
     }
 
 
-#: Field-name fragments that would mean a judge credential had reached a node-side
-#: config. The standing rule is that judge keys never enter node-side configs or job
+#: Field-name fragments that would mean a judge credential had reached a cluster
+#: config. The standing rule is that judge keys never enter cluster configs or job
 #: context, and a mechanical check is the only version of that rule which survives a
 #: hurried staging pass.
 #:
@@ -961,7 +964,7 @@ _CREDENTIAL_EXACT: frozenset[str] = frozenset({"token", "auth", "authorization"}
 
 
 def assert_no_judge_keys(config: Any, *, where: str = "node-side config") -> None:
-    """The standing rule, mechanically: no judge credential in anything node-side.
+    """The standing rule, mechanically: no judge credential in anything cluster-side.
 
     Walks nested dicts/lists rather than checking top-level keys, because the way a
     credential actually arrives is nested inside an env block. Matching is on
@@ -985,9 +988,9 @@ def assert_no_judge_keys(config: Any, *, where: str = "node-side config") -> Non
                 if marker is not None:
                     raise JudgeMachineryRefused(
                         f"{where}: field {path}{k!r} looks like a credential "
-                        f"({marker!r}). Judge keys NEVER enter node-side configs "
-                        "or job context (standing rule); §11 authorizes no judge "
-                        "spend and this brief fires none.")
+                        f"({marker!r}). Judge keys NEVER enter cluster configs "
+                        "or job context (standing rule); no judge spend is "
+                        "authorized and this module fires none.")
                 walk(v, f"{path}{k}.")
         elif isinstance(node, (list, tuple)):
             for i, v in enumerate(node):
@@ -997,9 +1000,9 @@ def assert_no_judge_keys(config: Any, *, where: str = "node-side config") -> Non
 
 
 def assert_no_judging_machinery(source_path: Optional[str] = None) -> None:
-    """§11 / ruling 7, asserted as a property of THIS FILE.
+    """No judge spend, asserted as a property of THIS FILE.
 
-    Ruling 7 pre-generates texts and fires no judge, so this module must not be able
+    The judged column pre-generates texts and fires no judge, so this module must not be able
     to. Checked by reading its own source for the judge module and for network call
     sites — an assertion the file cannot pass once someone wires a judge into it.
     """
@@ -1013,8 +1016,8 @@ def assert_no_judging_machinery(source_path: Optional[str] = None) -> None:
              and f"\"{f}\"" not in src and f"'{f}'" not in src]
     if found:
         raise JudgeMachineryRefused(
-            f"{path.name} references judging/network machinery {found} — ruling 7 "
-            "pre-generates TEXTS ONLY and §11 authorizes no judge spend. The judge "
+            f"{path.name} references judging/network machinery {found} — the judged "
+            "column pre-generates TEXTS ONLY and no judge spend is authorized. The judge "
             "run is a separate, later, GPU-free decision on banked texts.")
 
 
@@ -1052,7 +1055,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
         logger.info("%s %s %s", "PASS" if ok else "MISS", name, detail)
 
     def skip(name: str, why: str) -> None:
-        """A NAMED skip (rake M44): a block that cannot run in THIS configuration.
+        """A NAMED skip: a block that cannot run in THIS configuration.
 
         Recorded as run-and-absent rather than crashed or failed, counted in the
         tail so a sweep can report coverage per configuration, and NEVER a non-zero
@@ -1170,8 +1173,8 @@ def selftest() -> int:                                   # noqa: C901 — a chec
           distinct_word_ratio("a b c d") == 1.0
           and distinct_word_ratio("a a a a") == 0.25,
           "the .45 floor's own arithmetic")
-    # RAKE M44: the metric must be computable with NO deep-learning stack, because
-    # §10's coherence-panel recipe is a DESK act and the desk .venv has no torch.
+    # The metric must be computable with NO deep-learning stack, because the
+    # coherence-panel recipe is run by a reviewer in the repo .venv, which has no torch.
     # The vetted local copy makes that possible; this check is what stops it drifting.
     provenance = assert_coherence_provenance_agrees()
     check("the local copy and the banked guard AGREE exactly, wherever both import",
@@ -1381,7 +1384,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
           t3["beside_families"] == list(BESIDE_BAND_FAMILIES)
           and "NEVER pooled" in t3["beside_note"])
 
-    # ---- 8. ruling 7's judged pre-generation --------------------------------
+    # ---- 8. the judged column's pre-generation -------------------------------
     print("== selftest 8: judged texts PRE-GENERATED, never judged (ruling 7) ==")
     pair = ModePair(positive="analogical", negative="contrastive",
                     bank_stamp_path="(banked stamp)")
@@ -1413,8 +1416,8 @@ def selftest() -> int:                                   # noqa: C901 — a chec
           _raises(lambda: judged_leg_plan(
               source="8b", target="gpt2-xl", site=26, mode_pair=pair,
               per_token_median_resid_norm=9.0), JudgedLegContingent))
-    check("the refusal says the decision follows §5's read",
-          "after §5's read" in _msg(lambda: judged_leg_plan(
+    check("the refusal says the decision follows the entropy-write read",
+          "after the entropy-write read" in _msg(lambda: judged_leg_plan(
               source="8b", target="gpt2-xl", site=26, mode_pair=pair,
               per_token_median_resid_norm=9.0)))
     check("a plan at the wrong doses is refused",
@@ -1501,7 +1504,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
     print(f"\nselftest: {len(failures)} failure(s)")
     for name, _, detail in failures:
         print(f"  MISS {name} {detail}")
-    # RAKE M44: coverage is part of the verdict, per configuration.
+    # Coverage is part of the verdict, per configuration.
     print(f"selftest checks run: {len(checks)} ({len(skips)} named skip(s))")
     for name in skips:
         print(f"  SKIPPED {name}")
@@ -1546,12 +1549,12 @@ def _msg(fn: Callable[[], Any]) -> str:
 # ---------------------------------------------------------------- CLI
 def main(argv: Optional[list[str]] = None) -> int:
     ap = argparse.ArgumentParser(
-        description="The §6 capability battery + coherence panel that rides every "
-                    "behavioral cell. Judge-free by construction (§11).")
+        description="The capability battery + coherence panel that rides every "
+                    "behavioral cell. Judge-free by construction.")
     ap.add_argument("--selftest", action="store_true",
                     help="CPU-only, data-independent verification")
     ap.add_argument("--item-set", action="store_true",
-                    help="print the frozen 32-item set and its sha (the §2.8 field)")
+                    help="print the frozen 32-item set and its sha (the cell-stamp field)")
     args = ap.parse_args(argv)
 
     if args.selftest:

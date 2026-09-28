@@ -1,24 +1,23 @@
-"""A8 Leg-0 — T1: deterministic paired-corpus manifest builder (CPU, local).
+"""Deterministic paired-corpus manifest builder (CPU, local).
 
-Annex-2 session spec Phase A inputs (SESSION-PROMPT-annex2-arm8-leg0-2026-07-22.md):
+Inputs, by stratum:
   S1  shared battery prompts + each model's banked completions (vmb_stage0_{3b,8b}),
       160/voice = 2 reps per (topic x task-stratum) cell, reps lowest-first.
-  S2  neutral prose: wikitext-103-raw-v1 VALIDATION shards (Luxia amendment 2026-07-22:
-      raw variant only — the non-raw @-@ detokenization artifacts would contaminate the
-      stratum), chunked 150-500 tokens, 160 shards, deterministic selection.
+  S2  neutral prose: wikitext-103-raw-v1 VALIDATION shards (raw variant only — the
+      non-raw @-@ detokenization artifacts would contaminate the stratum), chunked 150-500 tokens, 160 shards, deterministic selection.
   S3  mode-pole texts: vmb_a2_{3b,8b}_pure_{mode} for the 5 battery modes,
       30/mode/voice = rep 0 for topics 0-19 + rep 1 for topics 0-9.
 
-Counts signed off by desk 2026-07-22 (S1=160/voice, S2=160, S3=150/voice). Selection is
+Counts are fixed (S1=160/voice, S2=160, S3=150/voice). Selection is
 seed-free where possible (lowest-rep rule) and fixed-seed where sampling is unavoidable
 (S2 shard choice). Every source file is sha256'd into the stamp; the manifest itself is
 hashed at write. NOTHING here touches a GPU.
 
-S2 native-arm carrier (PARKED design note, surfaced at CP-1): neutral prose has no
+S2 native-arm carrier (an open design choice): neutral prose has no
 natural prompt; the native chat-template arm wraps each shard as an assistant reply to a
 CONSTANT carrier prompt reusing the battery's own expository template with a generic
 topic ("Write about: general knowledge"). Constant across all S2 texts; recorded in the
-stamp. The desk rules whether this stands or S2 drops to raw-arm-only.
+stamp. The alternative is to read S2 on the raw arm only.
 
 Run (from pipeline/):  python -m metabasis.scripts.build_paired_corpus
 """
@@ -49,9 +48,9 @@ S2_N_SHARDS = 160
 S2_TOK_MIN, S2_TOK_MAX = 150, 500
 S2_TOK_CLOSE = 250            # greedy chunker: close a shard once it reaches this
 S2_CARRIER_PROMPT = "Write about: general knowledge"   # constant native-arm carrier
-TOKENIZER_REF = "meta-llama/Llama-3.1-8B-Instruct"     # Leg-0 pair shares this tokenizer
-# Cross-tokenizer legs: TOKENIZER_REF stays for S2 chunking (keeps S2 shards
-# IDENTICAL across legs — same chunker+tokenizer+seed) and for informational
+TOKENIZER_REF = "meta-llama/Llama-3.1-8B-Instruct"     # the 3B/8B pair shares this tokenizer
+# Cross-tokenizer pairs: TOKENIZER_REF stays for S2 chunking (keeps S2 shards
+# IDENTICAL across pairs — same chunker+tokenizer+seed) and for informational
 # n_tokens; each model tokenizes for itself at collection time (pairing is by TEXT).
 STAGE0_RUN = {"3b": "vmb_stage0_3b", "8b": "vmb_stage0_8b",
               "qwen-7b": "vmb_stage0_qwen7b", "dsv2-lite": "vmb_stage0_dsv2_lite"}

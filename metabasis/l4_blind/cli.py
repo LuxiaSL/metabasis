@@ -2,7 +2,7 @@
 
     freeze       derive + freeze the draw; write the SEALED MAP, the deck
                  request (what the decode job owes), and the taxonomy
-                 proposal the desk adjudicates.
+                 proposal the scorer adjudicates.
     build-deck   join the sealed map to a text bank -> the BLIND DECK.
     serve        run the localhost page against a blind deck.
     seal         fold the session log into the sealed session artifact.
@@ -11,11 +11,11 @@
 
 Order of operations, and who does what:
 
-    desk    freeze                    (deterministic, no text needed)
-    node    decode -> TEXT-BANK.jsonl (tokenizers only, 0 GPUs)
-    desk    build-deck                (the only step that sees both sides)
-    Luxia   serve                     (blind; she never sees the map)
-    desk    seal, then unblind        (a separate step, not in this tool)
+    scorer  freeze                    (deterministic, no text needed)
+    decode  decode -> the text bank   (tokenizers only, 0 GPUs)
+    scorer  build-deck                (the only step that sees both sides)
+    rater   serve                     (blind; the rater never sees the map)
+    scorer  seal, then unblind        (a separate step, not in this tool)
 """
 from __future__ import annotations
 
@@ -41,8 +41,8 @@ from metabasis.l4_blind.taxonomy import (
 
 #: Derived from where this file sits, never hardcoded: the repo must be
 #: nameable without a username or an absolute path in the source (repo
-#: sanitization rule). Pass `--repo` when running from a worktree, whose
-#: `staging/` is gitignored and therefore empty.
+#: sanitization rule). Pass `--repo` when running from a worktree: the frozen
+#: inputs live in a gitignored data directory, which a worktree does not have.
 DEFAULT_REPO = str(Path(__file__).resolve().parents[2])
 DESK_SCORE_REL = "staging/reading-l2-arm8/DESK-SCORE-L2-2026-08-06.json"
 INGREDIENTS_REL = "staging/reading-l2-arm8/L2-PROBE-INGREDIENTS-2026-08-06.json"
@@ -64,7 +64,7 @@ def _inputs(repo: Path) -> TaxonomyInputs:
         if not p.is_file():
             raise SystemExit(
                 f"HALT: frozen input missing: {p}\n"
-                f"       `staging/` is gitignored, so a worktree does not have it. "
+                f"       The frozen inputs are gitignored, so a worktree does not have them. "
                 f"Pass --repo <the main checkout>."
             )
     return TaxonomyInputs(
@@ -313,7 +313,7 @@ def cmd_build_deck(args: argparse.Namespace) -> int:
     if not bank.is_file():
         raise SystemExit(
             f"HALT: no text bank at {bank}. The decode job owes "
-            f"{DECK_REQUEST_NAME}'s rows; nothing desk-side carries decoded text."
+            f"{DECK_REQUEST_NAME}'s rows; nothing on the scoring side carries decoded text."
         )
     deck, selfid, flagged = build_deck(drawn, bank)
     deck_path = out / DECK_NAME
@@ -534,7 +534,7 @@ def main(argv: list[str] | None = None) -> int:
     sl.add_argument("--session", default=None)
     sl.set_defaults(fn=cmd_seal)
 
-    ex = sub.add_parser("export-ids", help="export the token ids the node decode job needs")
+    ex = sub.add_parser("export-ids", help="export the token ids the decode job needs")
     ex.add_argument("--sealed-map", default=None)
     ex.add_argument("--ids", required=True)
     ex.set_defaults(fn=cmd_export_ids)

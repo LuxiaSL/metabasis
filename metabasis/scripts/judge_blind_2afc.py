@@ -1,7 +1,7 @@
-"""A5 socratic-shift judge — 2AFC contrast + coherence gate (12f/12g hardened standard).
+"""Mode-shift judge — blind 2AFC contrast + coherence gate.
 
-Part-1 of the loose-ends close: scores the banked Gemma-A5 steering gens for
-socratic-shift (Pg3 = .80) and the 14p joint (.70). Mirrors
+Scores banked steering generations for a mode shift (socratic by default; any mode
+in `MODE_DESC`). Mirrors
 ``vmb_a5_judge_formality`` exactly (blind 2AFC, randomized A/B, key never enters
 judge context, Fable judge with opus-4-8 refusal fallback, first-text-block scan
 for reasoning-leading responses) but on the socratic-mode axis instead of formality.
@@ -12,11 +12,11 @@ Two legs, both banked next to the record:
      text wins (0.5 = no effect). This is the shift metric.
   2. Coherence gate: single steered text, blind, rated 1-5 for coherence. Cell score
      = mean. Distinguishes an in-window shift (alpha<=.1, high coherence) from a
-     collapse (alpha=.3, coherence drops). key.json (uid -> which side was steered)
-     NEVER enters judge context.
+     collapse (alpha=.3, coherence drops). The unblinding key (uid -> which side was
+     steered) NEVER enters judge context.
 
-Runs LOCALLY (API side): sync the cell metadata.json files down first (the gens
-live on the extract node). GPU-free.
+Runs LOCALLY (API side): copy each cell's metadata file from the machine that
+generated it first. GPU-free.
 
     python -m metabasis.scripts.judge_blind_2afc \
         --a5-root ../outputs/battery/vmb_a5_gemma \
@@ -39,13 +39,13 @@ from pathlib import Path
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
-WORKERS = 16                        # concurrent judge calls (added 2026-07-18; API-bound)
+WORKERS = 16                        # concurrent judge calls (API-bound)
 _usage_lock = threading.Lock()      # usage dict is mutated from worker threads
 
 JUDGE_MODEL = "claude-fable-5"
 FALLBACK_MODEL = "claude-opus-4-8"
 
-# Mode descriptions for the 2AFC (generalized 2026-07-18; any A5 mode-shift arm, not just socratic).
+# Mode descriptions for the 2AFC (any mode-shift arm, not just socratic).
 MODE_DESC = {
     "socratic": ("drives inquiry through probing questions, draws the reader forward by interrogation "
                  "rather than assertion, surfaces assumptions and asks the reader to examine them, and "
@@ -162,9 +162,9 @@ def main() -> None:
     want = set(args.vectors.split(","))
     cells = []
     for d in sorted(args.a5_root.iterdir()):
-        # accept both _a{frac} (standard) and signed _p{n}/_m{n} (both-signs ladders, e.g. 14v)
-        # 2026-07-22 (A8 Leg-4F): also accept TRANSPORTED cells — a leading "g" (g.v through
-        # a conjugation map) and signed dose suffixes a+0.03 / a-0.03 written by the A8 banks.
+        # accept both _a{frac} (standard) and signed _p{n}/_m{n} (both-signs ladders).
+        # Also accept TRANSPORTED cells — a leading "g" (g.v through a conjugation map)
+        # and the signed dose suffixes a+0.03 / a-0.03 the conjugation banks write.
         m = re.match(r"^(g?(?:[VR]\d|dir0|Rband\d|Vrep_perp|Veos_perp|Vconf))"
                      r"(?:_L\d+)*_(an?[\d.]+|a[+-][\d.]+|[pm]\d+)$", d.name)
         if not m or m.group(1) not in want:
@@ -198,7 +198,7 @@ def main() -> None:
 
         # Leg 1 — 2AFC {mode}-more (steered vs same-topic baseline/alpha=0 rider)
         # per-topic cap derived from --n-pairs so a higher-n cell actually yields more pairs
-        # (was hardcoded [:2] = 40 pairs max over 20 topics regardless of --n-pairs; 2026-07-19).
+        # (a fixed cap of 2 per topic would stop at 40 pairs over 20 topics whatever --n-pairs says).
         shared_topics = sorted(set(steered) & set(rider_texts))
         per_topic = max(2, -(-args.n_pairs // max(len(shared_topics), 1)))  # ceil
         pairs = []

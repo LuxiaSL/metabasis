@@ -1,9 +1,12 @@
-"""The actuation acceptance gate — ALIGNMENT != ACTUATION, as code (BRIEF §4).
+"""The actuation acceptance gate — ALIGNMENT != ACTUATION, as code.
 
-`BRIEF-behavioral-phase-2026-07-29.md` (sha `475bc2a8…`) §4 is this module's
-specification verbatim; §13 rulings 2 and 9 freeze the SSM and gpt2-xl branches.
+The behavioral phase's frozen specification (`BRIEF_OF_RECORD`, pinned by
+`BRIEF_SHA256` in `run_behavioral_cells`) defines this gate; its parts are
+restated below where they are implemented: the calibration cell plan, the
+acceptance criteria (a)-(c) and their remedies, the from-disk preflight, the SSM
+lever rule and the gpt2-xl three-site rule.
 
-WHY THIS GATE EXISTS, in the inherited words the brief restates:
+WHY THIS GATE EXISTS, in the inherited words the specification restates:
 
     "A site must demonstrate actuation with a KNOWN-GOOD lever before any
      transported object is tested there... at the site that read best
@@ -15,26 +18,26 @@ So this is a GATE, not a warm-up: a node that fails it does not get a
 transported-write cell. The gate runs per node, at its site OF RECORD, with the
 node's OWN native entropy-gradient vector against the node's OWN native random
 band — the control that asks whether **the site actuates**. It is deliberately NOT
-the transported band, which asks whether **the transport carries** (§5). Both bands
-exist in the campaign; §4.1 keeps them distinct in name (`Rband*` native vs
+the transported band, which asks whether **the transport carries** (the transported-write column). Both bands
+exist in the campaign; the calibration plan keeps them distinct in name (`Rband*` native vs
 `gRband*` transported) and in stamp, because conflating them is the fastest way to
 make a null uninterpretable.
 
-WHAT THIS MODULE DOES AND DOES NOT DO. It builds the §4.1 cell plan, resolves the
-site from the LIVE registries, applies the §4.2 acceptance criteria, and returns a
+WHAT THIS MODULE DOES AND DOES NOT DO. It builds the calibration cell plan, resolves the
+site from the LIVE registries, applies the acceptance criteria, and returns a
 verdict. It never scores a transported cell, never generates, and never picks a
-site: **no node's site is re-chosen on behavioral evidence** (§4.2), because sites
-come from curves and Luxia's rulings and a behavioral hunt would be site-fishing
-against the frozen §4 ordering. `assert_no_site_fishing` is that sentence as code.
+site: **no node's site is re-chosen on behavioral evidence** (the acceptance rule), because sites
+come from curves and registered site decisions and a behavioral hunt would be site-fishing
+against the frozen site ordering. `assert_no_site_fishing` is that sentence as code.
 
-TWO LABELS THAT MUST NEVER MERGE. The brief uses two, for two different states,
+TWO LABELS THAT MUST NEVER MERGE. The specification uses two, for two different states,
 and this module keeps them apart because they license different claims:
 
-  * `SITE_UNCALIBRATED` ("SITE-UNCALIBRATED", §4.2) — the gate RAN and the site
+  * `SITE_UNCALIBRATED` ("SITE-UNCALIBRATED", the acceptance rule) — the gate RAN and the site
     FAILED, at the site of record and at its registered robustness site if it has
     one. This is a RESULT ABOUT THE NODE, reported in the column table, not a gap
     in the campaign.
-  * `UNCALIBRATED_SITE` ("UNCALIBRATED-SITE", §4.4 / ruling 2) — the gate could not
+  * `UNCALIBRATED_SITE` ("UNCALIBRATED-SITE", the SSM lever rule) — the gate could not
     be APPLIED, because the node has no known-good lever (the SSM case, when its
     calibration-only lever fails the FD gate). Every such cell is filed
     descriptively and **a floor is not claimed as a regime boundary**.
@@ -43,18 +46,18 @@ CPU self-test (no weights, no GPU, no data tree):
 
     python -m metabasis.scripts.actuation_calibration --selftest
 
-RAKE M44 — THE CONFIGURATION MATRIX IS THE MERGE BAR. This selftest is verified in
+THE CONFIGURATION MATRIX IS THE MERGE BAR. This selftest is verified in
 all four cells of {torch, no torch} x {data tree, no data tree} and every cell
 must exit 0 with either real passes or NAMED skips. Two environments differ in ways
 a single run cannot see: the repo `.venv` has NO torch (numpy/pydantic/scipy only)
-while `/usr/bin/python` has torch + transformers, and the data tree is gitignored so
+while the system interpreter has torch + transformers, and the data tree is gitignored so
 a fresh worktree has none. A bare `import torch` at a point of use passes in one
 environment and CRASHES in another, and a crash is indistinguishable from a failure
 while saying less. Every torch-dependent BLOCK here therefore branches on one
 availability probe and degrades to a named skip, counted in the tail so coverage is
 reported per configuration rather than inferred.
 
-Desk-side read of a live registry table (GPU-free, §4.3's preflight shape):
+A read of a live registry table (GPU-free, the preflight's shape):
 
     python -m metabasis.scripts.actuation_calibration --who-can-calibrate
 """
@@ -81,23 +84,23 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger("actuation_calibration")
 
 # ---------------------------------------------------------------- frozen constants
-#: §4.2(a): Spearman ρ(dose, entropy_rise) across the FULL SIGNED 6-dose ladder.
+#: Criterion (a): Spearman ρ(dose, entropy_rise) across the FULL SIGNED 6-dose ladder.
 #: The floor is the SCOPE clause of the banked reverse leg: monotone across the
 #: whole signed ladder, not just the positive half.
 SPEARMAN_RHO_FLOOR = 0.80
-#: §4.2(b): outside the node's own random band at ≥4 of 6 doses AND at both |0.3|.
+#: Criterion (b): outside the node's own random band at ≥4 of 6 doses AND at both |0.3|.
 #: The banked precedent scored band comparison at ≥5/6; 4/6-plus-both-extremes is
 #: the same strictness with the SMALL doses, where the effect is by design nearly
 #: nil, not forced to carry the verdict.
 BAND_SEPARATION_MIN_DOSES = 4
 BAND_SEPARATION_REQUIRED_DOSES: tuple[float, ...] = SCORING_DOSES
-#: §4.2(c): the banked degeneracy guard (`trait_probe._coherence`), floor .45 of
+#: Criterion (c): the banked degeneracy guard (`trait_probe._coherence`), floor .45 of
 #: record, read at the scoring dose. A "rise" produced by collapse is not actuation.
 COHERENCE_FLOOR = 0.45
 SCORING_DOSE = 0.3
-#: §4.1: 3 members × 6 doses. The node's OWN native band, at the same site and doses.
+#: The calibration plan: 3 members × 6 doses. The node's OWN native band, at the same site and doses.
 N_BAND_MEMBERS = 3
-#: §4.1's cell structure, as arithmetic rather than as a table to be retyped.
+#: The calibration plan's cell structure, as arithmetic rather than as a table to be retyped.
 N_CALIBRATION_BASELINE_CELLS = 1
 N_CALIBRATION_SIGNAL_CELLS = len(DOSE_LADDER)                       # 6
 N_CALIBRATION_BAND_CELLS = N_BAND_MEMBERS * len(DOSE_LADDER)        # 18
@@ -105,7 +108,7 @@ N_CALIBRATION_CELLS = (N_CALIBRATION_BASELINE_CELLS
                        + N_CALIBRATION_SIGNAL_CELLS
                        + N_CALIBRATION_BAND_CELLS)                  # 25
 
-#: §4.2 remedy (i): re-calibrate at the node's ROBUSTNESS SITE if it has one
+#: The acceptance rule's remedy (i): re-calibrate at the node's ROBUSTNESS SITE if it has one
 #: REGISTERED — a registered site, not a new one. These two are the only registered
 #: robustness sites in the campaign (gemma3-27b L38 ⋆ / L41; llama-3.1-70b L37 ⋆ /
 #: L43); the values are cross-checked against `fit_transport_maps.SITES` at
@@ -115,24 +118,24 @@ ROBUSTNESS_SITES: dict[str, int] = {
     "llama-3.1-70b-instruct": 43,
 }
 
-#: §4.2's label for a site that RAN the gate and FAILED it (both sites, if two).
+#: The acceptance rule's label for a site that RAN the gate and FAILED it (both sites, if two).
 SITE_UNCALIBRATED = "SITE-UNCALIBRATED"
-#: §4.4 / ruling 2's label for a site where the gate could not be APPLIED at all.
+#: The SSM lever rule's label for a site where the gate could not be APPLIED at all.
 #: Deliberately a DIFFERENT string from `SITE_UNCALIBRATED`: a reader must be able
 #: to tell "this site was tested and does not actuate" from "this site was never
 #: testable", because only the first is a result about the node.
 UNCALIBRATED_SITE = "UNCALIBRATED-SITE"
 
-#: ruling 2: the SSM's calibration-only lever is banked under a DISTINCT key, so it
+#: The SSM lever rule: the SSM's calibration-only lever is banked under a DISTINCT key, so it
 #: can never be mistaken for a target vector by a reader that resolves by key.
 CALIBRATION_LEVER_KEY = "calibration_lever_entropy_gradient_L{site}"
-#: §4.4's FD gate on that lever — the directional finite-difference gate, verbatim:
+#: The FD gate on that lever — the directional finite-difference gate, verbatim:
 #:   |⟨g,v⟩ − (S(+εv) − S(−εv))/2ε| / |dS| < .05
 SSM_FD_GATE_TOLERANCE = 0.05
 SSM_FD_GATE_CRITERION = (
     "|<g,v> - (S(+eps*v) - S(-eps*v))/(2*eps)| / |dS| < "
     f"{SSM_FD_GATE_TOLERANCE} (the directional finite-difference gate, §4.4)")
-#: ruling 2's standing prohibitions on the calibration-only lever. Carried as text
+#: The SSM lever rule's standing prohibitions on the calibration-only lever. Carried as text
 #: because they are what makes the lever admissible at all, and a stamp that does
 #: not say them is a stamp that lets the lever drift into a star claim.
 CALIBRATION_LEVER_PROHIBITIONS = (
@@ -140,18 +143,18 @@ CALIBRATION_LEVER_PROHIBITIONS = (
     "hosts a portability coefficient, no star row, never a target vector. Banked "
     "under a distinct key so no reader that resolves by key can mistake it.")
 
-#: ruling 9: gpt2-xl calibrates at ALL THREE built experiment sites and the
-#: CALIBRATION evidence feeds Luxia's deferred site ruling. Legitimate under §4
+#: The gpt2-xl three-site rule: gpt2-xl calibrates at ALL THREE built experiment sites and the
+#: CALIBRATION evidence feeds the deferred gpt2-xl site decision. Legitimate under the gate
 #: because calibration is a gate on a SITE, not a read of the transported object;
 #: the transported column then fires only at the ruled site.
 GPT2XL_CALIBRATION_SITES: tuple[int, ...] = (7, 26, 47)
 GPT2XL_KEY = "gpt2-xl"
 
-#: §4.3 / §4.1: base-model nodes calibrate in the RAW arm only (the arm-consistency
+#: Base-model nodes calibrate in the RAW arm only (the arm-consistency
 #: rule) — the transported column into any base node rides the raw arm, so the
 #: calibration must too. Instruct nodes calibrate in the arm their transported cells
 #: will use. Resolved from the roster where the node is registered; this tuple is the
-#: brief's own named list and is CROSS-CHECKED against the roster, never trusted over
+#: specification's own named list and is CROSS-CHECKED against the roster, never trusted over
 #: it (`olmo2-7b` is a carried banked node with no roster row at all).
 BASE_ARM_NODES: tuple[str, ...] = ("olmo2-7b", "pythia-6.9b", "gpt2-xl")
 
@@ -160,19 +163,19 @@ Verdict = Literal["PASS", "FAIL", "DEGENERATE"]
 
 # ---------------------------------------------------------------- error taxonomy
 class ActuationGateNotPassed(BehavioralHarnessError):
-    """§9 item 5: FAIL or DEGENERATE at a node → no transported cells at that site.
+    """FAIL or DEGENERATE at a node → no transported cells at that site.
 
-    DEGENERATE is included deliberately: §4.2 reports it as its own state and never
+    DEGENERATE is included deliberately: the acceptance rule reports it as its own state and never
     silently folds it into PASS, and a rise produced by collapse must not license a
     transported-write cell any more than no rise at all.
     """
 
 
 class SiteFishingRefused(BehavioralHarnessError):
-    """§4.2: a site was proposed on BEHAVIORAL evidence. Refused by construction.
+    """A site was proposed on BEHAVIORAL evidence. Refused by construction.
 
-    Sites come from curves and Luxia's rulings. Re-choosing one on behavioral
-    evidence would front-run the frozen §4 ordering, which is the one thing the
+    Sites come from curves and registered site decisions. Re-choosing one on behavioral
+    evidence would front-run the frozen site ordering, which is the one thing the
     gate's own legitimacy rests on.
     """
 
@@ -182,30 +185,30 @@ class RegistryGap(BehavioralHarnessError):
 
     `olmo2-7b` (base) is the live instance: it has a banked entropy-gradient vector
     and a `SITES` grid (12, 16, 20, 24) but NO `SITE_OF_RECORD` row, so it cannot
-    calibrate until its site is registered or ruled (§4.3).
+    calibrate until its site is registered or ruled (the preflight rule).
     """
 
 
 class CalibrationLeverRefused(BehavioralHarnessError):
-    """A calibration-only lever was asked to do something ruling 2 forbids."""
+    """A calibration-only lever was asked to do something the SSM lever rule forbids."""
 
 
 class MappingCellInScoringPopulation(BehavioralHarnessError):
-    """A MAPPING cell reached a §4.2 population (2026-08-08's ratified deviation).
+    """A MAPPING cell reached an acceptance-criteria population.
 
     The mapping mode's contract, stated from the scorer's side: a cell that measures
     where a model's response window ENDS can never satisfy a criterion that licenses
     a transported-write cell. Refused rather than filtered — silently dropping a cell
-    from a §4.2 population is how a criterion's arity changes without anyone deciding
+    from an acceptance-criteria population is how a criterion's arity changes without anyone deciding
     to change it.
     """
 
 
 class OffLadderDoseInScoring(MappingCellInScoringPopulation):
-    """A §4.2 population carries a dose that is not on the FROZEN ladder.
+    """An acceptance-criteria population carries a dose that is not on the FROZEN ladder.
 
     The dose-keyed form of the same refusal, and the one that actually closes the
-    door: §4.2's inputs arrive as `{dose: rise}` maps rather than as cells, so the
+    door: the acceptance criteria's inputs arrive as `{dose: rise}` maps rather than as cells, so the
     strongest structural guard available here is that every key must be a ladder dose
     (or the α=0 baseline). Mapping doses are DISJOINT from the ladder by construction
     (`CellSpec` refuses a mapping cell at a ladder dose), so a mapping rise cannot be
@@ -215,9 +218,9 @@ class OffLadderDoseInScoring(MappingCellInScoringPopulation):
 
 # ---------------------------------------------------------------- typed records
 class ActuationCriteria(BaseModel):
-    """§4.2's three criterion values — the numbers a §5 stamp must carry.
+    """The three acceptance-criterion values — the numbers a transported-write stamp must carry.
 
-    Filed as VALUES beside their verdicts, never as bare booleans: §4's stamp
+    Filed as VALUES beside their verdicts, never as bare booleans: the gate's stamp
     requirement is "job id + verdict + the three criterion values", so a downstream
     reader can re-apply the thresholds without re-running anything.
     """
@@ -246,7 +249,7 @@ class ActuationCriteria(BaseModel):
 
 
 class ActuationCalibrationResult(BaseModel):
-    """One node's §4 verdict at one site, with everything a §5 stamp names."""
+    """One node's gate verdict at one site, with everything a transported-write stamp names."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -254,8 +257,9 @@ class ActuationCalibrationResult(BaseModel):
     site: int
     site_role: Literal["site_of_record", "robustness_site"]
     arm: str
-    #: the Heimdall job that produced the cells. Named in every §5 stamp (§4.2's
-    #: closing requirement), so a transported read points at its own gate's run.
+    #: the cluster job that produced the cells. Named in every transported-write
+    #: stamp (the acceptance rule's closing requirement), so a transported read
+    #: points at its own gate's run.
     job_id: Optional[str]
     lever_key: str
     lever_is_calibration_only: bool
@@ -267,12 +271,12 @@ class ActuationCalibrationResult(BaseModel):
 
     @property
     def licenses_transported_cells(self) -> bool:
-        """§4.2/§9 item 5: only a PASS licenses transported-write cells here."""
+        """The acceptance rule: only a PASS licenses transported-write cells here."""
         return self.verdict == "PASS"
 
 
 class CalibrationCellPlan(BaseModel):
-    """§4.1's cell structure for one (node, site, arm) — 25 cells, 2,000 generations."""
+    """The calibration plan's cell structure for one (node, site, arm) — 25 cells, 2,000 generations."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -296,25 +300,25 @@ class CalibrationCellPlan(BaseModel):
     def _matches_the_table(self) -> "CalibrationCellPlan":
         if len(self.signal_cells) != N_CALIBRATION_SIGNAL_CELLS:
             raise ValueError(
-                f"§4.1 wants {N_CALIBRATION_SIGNAL_CELLS} signal cells (the signed "
+                f"the calibration plan wants {N_CALIBRATION_SIGNAL_CELLS} signal cells (the signed "
                 f"ladder), got {len(self.signal_cells)}")
         if len(self.band_cells) != N_CALIBRATION_BAND_CELLS:
             raise ValueError(
-                f"§4.1 wants {N_CALIBRATION_BAND_CELLS} band cells "
+                f"the calibration plan wants {N_CALIBRATION_BAND_CELLS} band cells "
                 f"({N_BAND_MEMBERS} members × {len(DOSE_LADDER)} doses), got "
                 f"{len(self.band_cells)}")
         if len(self.cells) != N_CALIBRATION_CELLS:
             raise ValueError(
-                f"§4.1's calibration block is {N_CALIBRATION_CELLS} cells, got "
+                f"the calibration plan's block is {N_CALIBRATION_CELLS} cells, got "
                 f"{len(self.cells)}")
         if any(c.band_family != "Rband" for c in self.band_cells):
             raise ValueError(
-                "§4.1: the calibration control is the node's OWN NATIVE random band "
+                "the calibration control is the node's OWN NATIVE random band "
                 "(`Rband*`), never the transported band (`gRband*`) — the two ask "
                 "different questions and conflating them makes a null uninterpretable. "
-                "This test is also what keeps the §4 ACTUATION CRITERIA free of "
-                "BESIDE cells: `SigmaBand*` is admitted by the engine's CellSpec (B4, "
-                "Luxia 2026-08-04) as a beside only, and the 18-cell arity above plus "
+                "This test is also what keeps the ACTUATION CRITERIA free of "
+                "BESIDE cells: `SigmaBand*` is admitted by the engine's CellSpec "
+                "as a beside only, and the 18-cell arity above plus "
                 "this family test are the two independent reasons one cannot arrive "
                 "here.")
         return self
@@ -327,9 +331,9 @@ class CalibrationCellPlan(BaseModel):
 class CalibrationSiteResolution(BaseModel):
     """The site this node calibrates at, resolved from the LIVE registries.
 
-    §4.3: "the enactor's first act is a vector-inventory preflight that RE-DERIVES
-    this table from disk rather than trusting it", because vectors are landing
-    nightly. This record is the resolution half; `VectorInventoryRow` is the
+    The preflight rule: the first act of a calibration run is a vector-inventory
+    preflight that RE-DERIVES this table from disk rather than trusting it,
+    because vectors land continuously. This record is the resolution half; `VectorInventoryRow` is the
     from-disk half.
     """
 
@@ -340,7 +344,7 @@ class CalibrationSiteResolution(BaseModel):
     robustness_site: Optional[int]
     fixed_fit_grid: tuple[int, ...]
     registries_agree: bool
-    #: gpt2-xl only (ruling 9): all three built experiment sites, no ⋆.
+    #: gpt2-xl only (the three-site rule): all three built experiment sites, no ⋆.
     deferred_multi_site: tuple[int, ...] = ()
     arm: str = "native"
     arm_rule: str = ""
@@ -348,7 +352,7 @@ class CalibrationSiteResolution(BaseModel):
 
 
 class VectorInventoryRow(BaseModel):
-    """§4.3's from-disk preflight row for one node — re-derived, never trusted."""
+    """The from-disk preflight row for one node — re-derived, never trusted."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -366,9 +370,9 @@ class VectorInventoryRow(BaseModel):
 
 
 class SSMLeverDecision(BaseModel):
-    """Ruling 2's SSM branch: a calibration-only native lever, or UNCALIBRATED-SITE.
+    """The SSM branch: a calibration-only native lever, or UNCALIBRATED-SITE.
 
-    Ruling 2 (on the desk's recommendation): build each SSM's own native
+    The SSM lever rule: build each SSM's own native
     entropy-gradient vector at its scanned site PURELY as a calibration instrument,
     FD-gated like every other build, never entering a star system, never hosting a
     portability coefficient, no star row — with **automatic fallback to
@@ -389,7 +393,7 @@ class SSMLeverDecision(BaseModel):
     fd_gate_criterion: str = SSM_FD_GATE_CRITERION
     fd_gate_passed: bool
     fd_gate_rel_error: Optional[float] = None
-    #: True iff the lever exists AND passed — the only state in which §4's gate can
+    #: True iff the lever exists AND passed — the only state in which the gate can
     #: be applied verbatim to this node.
     gate_applicable: bool
     label: Optional[str] = None
@@ -400,7 +404,7 @@ class SSMLeverDecision(BaseModel):
     def _fallback_is_labeled(self) -> "SSMLeverDecision":
         if not self.gate_applicable and self.label != UNCALIBRATED_SITE:
             raise ValueError(
-                f"ruling 2: an SSM whose FD gate fails must be labeled "
+                f"the SSM lever rule: an SSM whose FD gate fails must be labeled "
                 f"{UNCALIBRATED_SITE!r} automatically — an unlabeled inapplicable "
                 "gate is exactly the ambiguity the labeling exists to prevent")
         if self.gate_applicable and self.label is not None:
@@ -410,7 +414,7 @@ class SSMLeverDecision(BaseModel):
 
 
 class RemedyLadder(BaseModel):
-    """§4.2's named remedies, in order — and the honest end of the ladder."""
+    """The acceptance rule's named remedies, in order — and the honest end of the ladder."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -423,13 +427,13 @@ class RemedyLadder(BaseModel):
     note: str = ""
 
 
-# ------------------------------------------- the mapping mode's §4.2 exclusion (2026-08-08)
+# ------------------------------------------- the mapping mode's acceptance exclusion
 def assert_no_mapping_cells(cells: Sequence[Any], *, where: str) -> None:
     """Refuse a MAPPING cell in a population this module reads. A refusal, not a filter.
 
     Reads `kind` off anything cell-shaped rather than importing a type, because the
-    populations §4 is handed come from the staging module, from a cells document read
-    back off disk and from the desk's own scripts — three spellings of the same fact,
+    populations the gate is handed come from the staging module, from a cells document read
+    back off disk and from hand-written scripts — three spellings of the same fact,
     and a guard that only recognized one of them would be a guard with a hole.
     """
     offenders = sorted(str(getattr(c, "cell_id", c)) for c in cells
@@ -443,9 +447,9 @@ def assert_no_mapping_cells(cells: Sequence[Any], *, where: str) -> None:
 
 
 def assert_doses_on_frozen_ladder(doses: Sequence[float], *, where: str) -> None:
-    """Every dose a §4.2 criterion reads is on the FROZEN ladder, or this raises.
+    """Every dose an acceptance criterion reads is on the FROZEN ladder, or this raises.
 
-    The §4.2 criteria iterate `DOSE_LADDER` and would simply IGNORE an extra key, so
+    The acceptance criteria iterate `DOSE_LADDER` and would simply IGNORE an extra key, so
     without this an off-ladder rise could ride along in the caller's dict, be quoted
     beside the verdict, and read as though the verdict had seen it. Refusing the key
     outright is the difference between "the mapping dose did not count" and "the
@@ -456,15 +460,15 @@ def assert_doses_on_frozen_ladder(doses: Sequence[float], *, where: str) -> None
     if strays:
         raise OffLadderDoseInScoring(
             f"{where}: dose(s) {strays} are not on the FROZEN ladder "
-            f"{list(DOSE_LADDER)} (nor the α=0 baseline). §4.2 is defined ON the "
+            f"{list(DOSE_LADDER)} (nor the α=0 baseline). The acceptance rule is defined ON the "
             "ladder and nowhere else; an off-ladder dose in a scoring population is "
             f"a MAPPING dose by construction. {MAPPING_LICENSES_NOTHING}")
 
 
-# ---------------------------------------------------------------- §4.2 criteria
+# ---------------------------------------------------------------- acceptance criteria
 def dose_ordering(doses: Sequence[float], rises: Sequence[float]
                   ) -> tuple[Optional[float], bool, bool]:
-    """§4.2(a): (spearman_rho, sign_flips_through_zero, passes).
+    """Criterion (a): (spearman_rho, sign_flips_through_zero, passes).
 
     ρ is computed across the FULL SIGNED ladder — not the positive half — which is
     the SCOPE clause of the banked reverse leg. "Sign flipping through zero" is
@@ -494,11 +498,11 @@ def dose_ordering(doses: Sequence[float], rises: Sequence[float]
 def band_separation(rises_by_dose: dict[float, float],
                     band_by_dose: dict[float, tuple[float, float]]
                     ) -> tuple[int, bool, dict[str, bool], bool]:
-    """§4.2(b): (n_outside, at_both_extremes, per_dose, passes).
+    """Criterion (b): (n_outside, at_both_extremes, per_dose, passes).
 
     "Outside" is strictly outside the node's own random band's [min, max] at that
-    dose — the same band arithmetic `score_entropy_writes.band` uses, so a §4
-    verdict and a §5 row are read on one convention. A dose with no band is NOT
+    dose — the same band arithmetic `score_entropy_writes.band` uses, so a gate
+    verdict and a transported-write row are read on one convention. A dose with no band is NOT
     counted as outside: an absent control is a hole, never a pass.
     """
     per_dose: dict[str, bool] = {}
@@ -527,9 +531,9 @@ def evaluate_actuation(*, node_key: str, site: int, arm: str,
                        lever_key: str = "entropy_gradient",
                        lever_is_calibration_only: bool = False
                        ) -> ActuationCalibrationResult:
-    """§4.2's acceptance criterion, applied — PASS / FAIL / DEGENERATE.
+    """The acceptance criterion, applied — PASS / FAIL / DEGENERATE.
 
-    THE THREE-STATE VERDICT, exactly as §4.2 defines it:
+    THE THREE-STATE VERDICT, exactly as the acceptance rule defines it:
       * PASS       — (a) and (b) and (c)
       * DEGENERATE — (a) and (b) hold but (c) fails. Reported as ITS OWN STATE and
                      never silently folded into PASS: a "rise" produced by collapse
@@ -541,17 +545,17 @@ def evaluate_actuation(*, node_key: str, site: int, arm: str,
     source of truth for the metric); this module owns the THRESHOLD and the verdict.
     A None coherence cannot pass (c) — an unmeasured floor is not a satisfied floor.
 
-    Mechanics only. C§8: the desk decides; this returns a verdict object with every
-    input value beside it, so the desk can re-apply the criteria by hand.
+    Mechanics only. UNSTAMPED: the verdict is reviewed elsewhere; this returns a verdict object with every
+    input value beside it, so a reviewer can re-apply the criteria by hand.
 
-    THE MAPPING MODE's exclusion (2026-08-08) is the first thing that happens here:
+    THE MAPPING MODE's exclusion is the first thing that happens here:
     both dose maps must be keyed on the FROZEN ladder. A science population passes it
-    without a value moving; a mapping rise cannot be handed to §4.2 at all.
+    without a value moving; a mapping rise cannot be handed to the acceptance criteria at all.
     """
     assert_doses_on_frozen_ladder(
-        list(rises_by_dose), where=f"§4.2 rises_by_dose for {node_key} L{site}")
+        list(rises_by_dose), where=f"acceptance-criteria rises_by_dose for {node_key} L{site}")
     assert_doses_on_frozen_ladder(
-        list(band_by_dose), where=f"§4.2 band_by_dose for {node_key} L{site}")
+        list(band_by_dose), where=f"acceptance-criteria band_by_dose for {node_key} L{site}")
     rho, flips, a_ok = dose_ordering(list(DOSE_LADDER),
                                      [rises_by_dose.get(d) for d in DOSE_LADDER])
     n_out, both, per_dose, b_ok = band_separation(rises_by_dose, band_by_dose)
@@ -601,7 +605,7 @@ def evaluate_actuation(*, node_key: str, site: int, arm: str,
             parts.append(f"(c) coherence floor FAILS "
                          f"({coherence_at_scoring_dose} < {COHERENCE_FLOOR})")
         why = "; ".join(parts)
-    logger.info("§4 verdict %s: %s L%d (%s arm) — %s", verdict, node_key, site, arm,
+    logger.info("gate verdict %s: %s L%d (%s arm) — %s", verdict, node_key, site, arm,
                 why)
     return ActuationCalibrationResult(
         node_key=node_key, site=site, site_role=site_role, arm=arm, job_id=job_id,
@@ -611,27 +615,27 @@ def evaluate_actuation(*, node_key: str, site: int, arm: str,
 
 def gate_transported_cells(result: ActuationCalibrationResult, *,
                            population: Sequence[Any] = ()) -> None:
-    """§9 item 5: FAIL or DEGENERATE → no transported-write cells at that site.
+    """FAIL or DEGENERATE → no transported-write cells at that site.
 
-    A refusal, not a warning. §4.2's consequence is frozen, and an enactor never
+    A refusal, not a warning. The acceptance rule's consequence is frozen, and a run never
     adjudicates a live HALT — the remedy ladder (`remedy_ladder`) is what a caller
     reaches for next, and its end is a LABEL, not an override.
 
-    THE MAPPING MODE (2026-08-08): `population` is the cell set the verdict was
+    THE MAPPING MODE: `population` is the cell set the verdict was
     computed over, when the caller holds it, and any MAPPING cell in it is refused by
     name. It defaults to empty — every existing caller's behavior is unchanged — and
     it is a belt beside two braces, not the main defence: a mapping cell cannot reach
     a verdict in the first place, because its dose is off the frozen ladder by
     construction and `evaluate_actuation` refuses an off-ladder key. The parameter
     exists so a caller that DOES hold the population can say so, and so the refusal
-    has a name at the door §4.2's consequence is actually asserted at.
+    has a name at the door the acceptance rule's consequence is actually asserted at.
     """
     assert_no_mapping_cells(population, where="actuation_calibration.gate_transported_cells")
     if not result.licenses_transported_cells:
         raise ActuationGateNotPassed(
             f"{result.node_key} L{result.site}: actuation calibration verdict "
-            f"{result.verdict} — NO transported-write cells at this site (§4.2 / §9 "
-            f"item 5). {result.verdict_rationale}. Named remedies in order: (i) "
+            f"{result.verdict} — NO transported-write cells at this site (the acceptance "
+            f"rule). {result.verdict_rationale}. Named remedies in order: (i) "
             f"re-calibrate at the node's REGISTERED robustness site if it has one; "
             f"(ii) file the node's column row as {SITE_UNCALIBRATED}, which is a "
             f"result about the node, not a gap in the campaign. A site is NEVER "
@@ -639,9 +643,9 @@ def gate_transported_cells(result: ActuationCalibrationResult, *,
 
 
 def stamp_fragment(result: ActuationCalibrationResult) -> dict:
-    """§4.2's closing requirement, as the object a §5 stamp embeds.
+    """The acceptance rule's closing requirement, as the object a transported-write stamp embeds.
 
-    "Every behavioral cell in §5 NAMES its site's actuation calibration in its
+    "Every behavioral cell in the transported-write column NAMES its site's actuation calibration in its
     stamp, by job id + verdict + the three criterion values." That is exactly these
     keys — the values, not booleans, so the thresholds are re-appliable by hand.
     """
@@ -671,7 +675,7 @@ def stamp_fragment(result: ActuationCalibrationResult) -> dict:
 
 def remedy_ladder(node_key: str, results: Sequence[ActuationCalibrationResult]
                   ) -> RemedyLadder:
-    """§4.2's named remedies, in order, with the honest end.
+    """The acceptance rule's named remedies, in order, with the honest end.
 
     (i) the node's REGISTERED robustness site (gemma3-27b L41, llama-3.1-70b L43) —
     a registered site, not a new one; (ii) if both fail, the node's row in the
@@ -707,11 +711,11 @@ def remedy_ladder(node_key: str, results: Sequence[ActuationCalibrationResult]
 
 # ---------------------------------------------------------------- site resolution
 def _registries() -> tuple[dict[str, tuple[int, ...]], dict[str, int], int]:
-    """The three LIVE registries §4.3 names, imported at call time.
+    """The three LIVE registries the preflight names, imported at call time.
 
     Imported inside the function, not at module import: these registries are the
     campaign's own moving parts (vectors and sites land nightly), and a module-level
-    snapshot is exactly the "trusting it" §4.3 forbids.
+    snapshot is exactly the "trusting it" the preflight forbids.
     """
     from metabasis.scripts.fit_transport_maps import SITES
     from metabasis.scripts.read_composed_predictions import (HUB_SITE_OF_RECORD,
@@ -720,7 +724,7 @@ def _registries() -> tuple[dict[str, tuple[int, ...]], dict[str, int], int]:
 
 
 def resolve_calibration_arm(node_key: str) -> tuple[str, str]:
-    """§4.1/§4.3's arm-consistency rule: (arm, rule).
+    """The calibration plan's arm-consistency rule: (arm, rule).
 
     Base-model nodes calibrate in the RAW arm only — the transported column into a
     base node rides the raw arm, so a native-arm calibration would certify a site in
@@ -728,7 +732,7 @@ def resolve_calibration_arm(node_key: str) -> tuple[str, str]:
     transported cells will use, which is `native` for the campaign's family of
     record.
 
-    The roster is the authority where it has a row; `BASE_ARM_NODES` is the brief's
+    The roster is the authority where it has a row; `BASE_ARM_NODES` is the specification's
     named list and is used only for nodes the roster does not carry (`olmo2-7b` is
     a carried banked node with no roster row). Disagreement between the two is
     reported in the rule string rather than silently resolved.
@@ -743,7 +747,7 @@ def resolve_calibration_arm(node_key: str) -> tuple[str, str]:
         is_base = node.checkpoint_identity == "base"
         if is_base != named_base:
             logger.warning(
-                "%s: roster says checkpoint_identity=%s but the brief's named "
+                "%s: roster says checkpoint_identity=%s but the specification's named "
                 "base list says %s — using the ROSTER (it is verified against the "
                 "checkpoint) and recording the disagreement", node_key,
                 node.checkpoint_identity, named_base)
@@ -763,15 +767,15 @@ def resolve_calibration_arm(node_key: str) -> tuple[str, str]:
 
 
 def resolve_calibration_sites(node_key: str) -> CalibrationSiteResolution:
-    """Resolve the calibration site(s) from the LIVE registries (§4.3).
+    """Resolve the calibration site(s) from the LIVE registries (the preflight rule).
 
     Refuses three things by construction:
       * a node with NO `SITE_OF_RECORD` row (olmo2-7b): a NAMED registry gap, which
         must be registered or ruled before the node calibrates — not filled in here;
-      * a site that is not on the node's FIXED FIT GRID: that is a fiat site, and a
+      * a site that is not on this model's FIXED FIT GRID: that is a fiat site, and a
         RETIRED site (gemma L36, 70B L17) must never resolve by default;
       * gpt2-xl's absence from `SITE_OF_RECORD`, which is DELIBERATE (its site is
-        deferred) and is handled by ruling 9's three-site branch rather than treated
+        deferred) and is handled by the gpt2-xl three-site branch rather than treated
         as a gap.
     """
     sites, site_of_record, hub_site = _registries()
@@ -779,16 +783,16 @@ def resolve_calibration_sites(node_key: str) -> CalibrationSiteResolution:
     grid = tuple(sites.get(node_key, ()))
 
     if node_key == GPT2XL_KEY:
-        # ruling 9: calibrate at all three BUILT experiment sites; the calibration
-        # evidence feeds Luxia's DEFERRED site ruling. Its absence from
+        # The gpt2-xl three-site rule: calibrate at all three BUILT experiment sites; the calibration
+        # evidence feeds the DEFERRED gpt2-xl site decision. Its absence from
         # SITE_OF_RECORD is the deferral, not a gap.
         from metabasis.roster import SCAN_GRIDS
         effective = tuple(SCAN_GRIDS.get(GPT2XL_KEY, ()))
         offgrid = [s for s in GPT2XL_CALIBRATION_SITES if s not in effective]
         if offgrid:
             raise SiteFishingRefused(
-                f"gpt2-xl: calibration sites {offgrid} are not on the node's "
-                f"effective scan grid — ruling 9 calibrates at the THREE BUILT "
+                f"gpt2-xl: calibration sites {offgrid} are not on the model's "
+                f"effective scan grid — the gpt2-xl three-site rule calibrates at the THREE BUILT "
                 f"experiment sites, and a site the curve never visited would be a "
                 f"fiat site.")
         return CalibrationSiteResolution(
@@ -807,10 +811,10 @@ def resolve_calibration_sites(node_key: str) -> CalibrationSiteResolution:
         raise RegistryGap(
             f"{node_key}: no `SITE_OF_RECORD` row. This is a NAMED registry gap, "
             f"not an omission — the site must be REGISTERED or RULED before the "
-            f"node calibrates (§4.3). "
+            f"node calibrates (the preflight rule). "
             + (f"Its `SITES` grid is {grid}, which is a mid-depth BAND and not a "
                f"site pick: a site of record comes from the fit's own alignment "
-               f"curve or a ruling, NEVER by fiat here." if grid else
+               f"curve or a registered site decision, NEVER by fiat here." if grid else
                "It has no `SITES` grid either."))
     if grid and ruled not in grid:
         raise SiteNotOfRecord(
@@ -833,16 +837,16 @@ def resolve_calibration_sites(node_key: str) -> CalibrationSiteResolution:
 
 def assert_no_site_fishing(node_key: str, proposed_site: int, *,
                            evidence: str) -> None:
-    """§4.2's closing prohibition, as code.
+    """The acceptance rule's closing prohibition, as code.
 
     "No node's site is re-chosen on behavioral evidence — sites come from curves and
-    Luxia's rulings, never from a behavioral hunt (that would be site-fishing
-    against the frozen §4 ordering)."
+    registered site decisions, never from a behavioral hunt (that would be site-fishing
+    against the frozen site ordering)."
 
     A proposed site is admissible only if a registry already carries it: the site of
-    record, the registered robustness site, or — for gpt2-xl alone under ruling 9 —
-    one of the three built experiment sites whose CALIBRATION evidence feeds the
-    deferred ruling.
+    record, the registered robustness site, or — for gpt2-xl alone, under the
+    three-site rule — one of the three built experiment sites whose CALIBRATION
+    evidence feeds the deferred site decision.
     """
     try:
         res = resolve_calibration_sites(node_key)
@@ -856,8 +860,8 @@ def assert_no_site_fishing(node_key: str, proposed_site: int, *,
     if proposed_site not in admissible:
         raise SiteFishingRefused(
             f"{node_key}: site L{proposed_site} is not registered (admissible: "
-            f"{sorted(admissible)}). Sites come from curves and Luxia's rulings, "
-            f"never from a behavioral hunt — §4.2. Evidence offered: {evidence!r}, "
+            f"{sorted(admissible)}). Sites come from curves and registered site decisions, "
+            f"never from a behavioral hunt — the acceptance rule. Evidence offered: {evidence!r}, "
             f"which is exactly the kind of evidence that must NOT choose a site.")
 
 
@@ -865,16 +869,17 @@ def vector_inventory_row(node_key: str, site: Optional[int], *,
                          vector_path: Optional[Path],
                          corpus_sha_of_record: Optional[str] = None
                          ) -> VectorInventoryRow:
-    """§4.3's from-disk readiness row for one node — re-derived, never trusted.
+    """The preflight's from-disk readiness row for one node — re-derived, never trusted.
 
-    "The enactor's first act is a vector-inventory preflight that RE-DERIVES this
-    table from disk rather than trusting it, because vectors are landing nightly."
+    The first act of a calibration run is a vector-inventory preflight that
+    RE-DERIVES this table from disk rather than trusting it, because vectors land
+    continuously.
     So this function reads the npz and the FD-gate artifact and reports; it does not
     consult any table of who is supposed to be ready.
 
     Data-independent by design: an absent path is a ROW WITH A REASON, not an
     exception, because "which nodes are not ready" is the answer the preflight
-    exists to produce (§9 item 3 turns it into a HALT only when a cell is actually
+    exists to produce (`assert_preflight_ready` turns it into a HALT only when a cell is actually
     being built for that node).
     """
     from metabasis.scripts.run_behavioral_cells import CORPUS_SHA_V21
@@ -923,16 +928,16 @@ def vector_inventory_row(node_key: str, site: Optional[int], *,
 
 
 def require_ready_vector(row: VectorInventoryRow) -> None:
-    """§9 item 3 as a HALT, applied when a cell is actually being built."""
+    """The preflight gap as a HALT, applied when a cell is actually being built."""
     if not row.ready:
         raise NativeVectorUnavailable(
-            f"{row.node_key} L{row.site}: {row.blocking_reason} — §9 item 3. A "
+            f"{row.node_key} L{row.site}: {row.blocking_reason} — a "
             f"node's native entropy-gradient vector must be present, FD-gated and "
             f"FD-PASS at the corpus vintage of record before its calibration cells "
             f"are built.")
 
 
-# ---------------------------------------------------------------- cell plan (§4.1)
+# ---------------------------------------------------------------- cell plan
 def calibration_cell_plan(*, node_key: str, site: int, arm: str,
                           per_token_median_resid_norm: float,
                           lever_key: str = "entropy_gradient",
@@ -940,12 +945,12 @@ def calibration_cell_plan(*, node_key: str, site: int, arm: str,
                           vector_npz: Optional[str] = None,
                           vector_provenance: str = "",
                           n_per_cell: int = N_PER_CELL) -> CalibrationCellPlan:
-    """§4.1's cell structure for one (node, site, arm) — 1 + 6 + 18 = 25 cells.
+    """The calibration plan's cell structure for one (node, site, arm) — 1 + 6 + 18 = 25 cells.
 
     The control is the node's OWN native random band, at the SAME site and the SAME
-    doses (`Rband*`), per the frozen §4 text "vs its own random band". The α=0
+    doses (`Rband*`), per the frozen gate text "vs its own random band". The α=0
     baseline is built by `run_behavioral_cells.baseline_cell` and is SHARED with
-    §5's column, so a node pays for it once.
+    the transported-write column, so a node pays for it once.
     """
     signal = [c for c, _ in apply_dose_ladder(
         lever_key, site, per_token_median_resid_norm=per_token_median_resid_norm,
@@ -975,7 +980,7 @@ def calibration_cell_plan(*, node_key: str, site: int, arm: str,
         signal_cells=tuple(signal), band_cells=tuple(band), alphas=alphas,
         per_token_median_resid_norm=per_token_median_resid_norm,
         n_per_cell=n_per_cell)
-    logger.info("§4.1 plan: %s L%d (%s arm) — %d cells, %d generations "
+    logger.info("calibration plan: %s L%d (%s arm) — %d cells, %d generations "
                 "(lever %s, band %s)", node_key, site, arm, len(plan.cells),
                 plan.total_generations, lever_key, list(band_keys))
     return plan
@@ -983,10 +988,10 @@ def calibration_cell_plan(*, node_key: str, site: int, arm: str,
 
 def gpt2xl_cell_plans(*, per_token_median_resid_norm_by_site: dict[int, float],
                       n_per_cell: int = N_PER_CELL) -> list[CalibrationCellPlan]:
-    """Ruling 9: gpt2-xl calibrates at ALL THREE built experiment sites.
+    """The gpt2-xl three-site rule: gpt2-xl calibrates at ALL THREE built experiment sites.
 
     3 × 24 science cells (the α=0 baseline is shared per site), the cheapest node on
-    the roster, and the CALIBRATION evidence feeds Luxia's deferred site ruling. The
+    the roster, and the CALIBRATION evidence feeds the deferred gpt2-xl site decision. The
     transported column fires only at the ruled site, which `assert_ruled_site_before_
     transport` enforces.
     """
@@ -997,7 +1002,7 @@ def gpt2xl_cell_plans(*, per_token_median_resid_norm_by_site: dict[int, float],
         if norm is None:
             raise ValueError(
                 f"gpt2-xl L{site}: no measured per-token median residual norm — "
-                "§2.5 measures it in-job per site, and a dose cannot be resolved "
+                "the norm is measured in-job per site, and a dose cannot be resolved "
                 "against a missing one")
         plans.append(calibration_cell_plan(
             node_key=GPT2XL_KEY, site=site, arm=res.arm,
@@ -1009,35 +1014,35 @@ def gpt2xl_cell_plans(*, per_token_median_resid_norm_by_site: dict[int, float],
 
 
 def assert_ruled_site_before_transport(node_key: str, site: int) -> None:
-    """Ruling 9's second half: the transported column fires ONLY at the ruled site.
+    """The gpt2-xl rule's second half: the transported column fires ONLY at the decided site.
 
     gpt2-xl may CALIBRATE at three sites; it may not carry a transported object at a
-    site Luxia has not ruled. Calibration gates a site; transport reads an object,
+    site that has not been registered. Calibration gates a site; transport reads an object,
     and reading it at an unruled site would let the behavioral evidence pick the
-    site after all — the exact thing §4.2 forbids.
+    site after all — the exact thing the acceptance rule forbids.
     """
     _, site_of_record, _ = _registries()
     ruled = site_of_record.get(node_key)
     if ruled is None:
         raise SiteFishingRefused(
             f"{node_key}: no ruled site of record, so NO transported-write cell may "
-            f"be built (attempted L{site}). Ruling 9 lets gpt2-xl CALIBRATE at all "
+            f"be built (attempted L{site}). The gpt2-xl three-site rule lets gpt2-xl CALIBRATE at all "
             f"three built sites precisely because calibration gates a site rather "
             f"than reading the transported object; the transported column waits on "
-            f"Luxia's ruling.")
+            f"the registered site decision.")
     if site != ruled:
         raise SiteNotOfRecord(
             f"{node_key}: transported cells fire only at the RULED site L{ruled}, "
-            f"not L{site} (§9 item 4).")
+            f"not L{site}.")
 
 
-# ---------------------------------------------------------------- SSM branch (§4.4)
+# ---------------------------------------------------------------- SSM branch
 def ssm_nodes() -> tuple[str, ...]:
-    """The behavioral tier, read from the ROSTER rather than from the brief's prose.
+    """The behavioral tier, read from the ROSTER rather than from the specification's prose.
 
-    §4.4 and §8 name two SSMs (falcon-mamba-7b, zamba2-7b), but the roster carries
+    The specification names two SSMs (falcon-mamba-7b, zamba2-7b), but the roster carries
     ONE: zamba2-7b is DELIBERATELY ABSENT — hard-parked on an upstream transformers
-    defect, its row waiting on Luxia's shim ruling, and in that registry "adding a
+    defect, its row waiting on a shim decision, and in that registry "adding a
     key is what makes a node collectable, so the absence IS the block". Resolving
     membership from the roster therefore yields the nodes that can actually run and
     names the absence instead of inventing a row for it.
@@ -1049,11 +1054,11 @@ def ssm_nodes() -> tuple[str, ...]:
 def ssm_lever_decision(*, node_key: str, site: int, fd_gate_passed: bool,
                        fd_gate_rel_error: Optional[float] = None
                        ) -> SSMLeverDecision:
-    """Ruling 2: a calibration-only native lever, or the automatic UNCALIBRATED-SITE.
+    """The SSM lever rule: a calibration-only native lever, or the automatic UNCALIBRATED-SITE.
 
     The SSMs have no native entropy-gradient vector BY DESIGN (roster:
-    "transported-write column only; no native target, no star row"), so §4's gate
-    read literally has no lever to apply. Ruling 2 builds one PURELY as a
+    "transported-write column only; no native target, no star row"), so the gate
+    read literally has no lever to apply. The SSM lever rule builds one PURELY as a
     calibration instrument under a distinct key, FD-gated like every other build,
     and falls back AUTOMATICALLY to `UNCALIBRATED-SITE` labeling if that gate fails.
 
@@ -1085,7 +1090,7 @@ def ssm_lever_decision(*, node_key: str, site: int, fd_gate_passed: bool,
 
 
 def assert_lever_stays_calibration_only(lever_key: str, use: str) -> None:
-    """Ruling 2's prohibitions, as code.
+    """The SSM lever rule's prohibitions, as code.
 
     A key built under `CALIBRATION_LEVER_KEY` may gate a site and nothing else: no
     star system, no portability coefficient, no star row, never a target vector.
@@ -1098,14 +1103,14 @@ def assert_lever_stays_calibration_only(lever_key: str, use: str) -> None:
     for word in forbidden:
         if word.lower() in low:
             raise CalibrationLeverRefused(
-                f"{lever_key} is a CALIBRATION INSTRUMENT ONLY (ruling 2) and was "
+                f"{lever_key} is a CALIBRATION INSTRUMENT ONLY (the SSM lever rule) and was "
                 f"asked for {use!r}, which names {word!r}. "
                 f"{CALIBRATION_LEVER_PROHIBITIONS}")
 
 
-# ---------------------------------------------------------------- desk table
+# ---------------------------------------------------------------- readiness table
 def who_can_calibrate(nodes: Optional[Sequence[str]] = None) -> list[dict]:
-    """§4.3's table, RE-DERIVED from the live registries (GPU-free, desk-readable).
+    """The preflight table, RE-DERIVED from the live registries (GPU-free, readable anywhere).
 
     Deliberately reports rows rather than raising: "who cannot calibrate and why" is
     the answer, and a table that stopped at the first gap would hide the rest.
@@ -1145,7 +1150,7 @@ def _band(halfwidths: Sequence[float]) -> dict[float, tuple[float, float]]:
 
 
 def selftest() -> int:                                   # noqa: C901 — a checklist
-    """CPU-only, data-independent verification of the §4 gate's logic."""
+    """CPU-only, data-independent verification of the gate's logic."""
     import tempfile
 
     checks: list[tuple[str, bool, str]] = []
@@ -1156,7 +1161,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
         logger.info("%s %s %s", "PASS" if ok else "MISS", name, detail)
 
     def skip(name: str, why: str) -> None:
-        """A NAMED skip (rake M44): a block that cannot run in THIS configuration.
+        """A NAMED skip: a block that cannot run in THIS configuration.
 
         Recorded as run-and-absent rather than crashed or failed, counted in the
         tail so a sweep can report coverage per configuration, and NEVER a non-zero
@@ -1166,7 +1171,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
         checks.append((f"SKIPPED: {name}", True, why))
         logger.info("SKIP %s — %s", name, why)
 
-    # ---- 1. the §4.1 cell structure ------------------------------------------
+    # ---- 1. the calibration cell structure ------------------------------------------
     print("== selftest 1: §4.1's cell structure (1 + 6 + 18 = 25) ==")
     plan = calibration_cell_plan(node_key="qwen2.5-3b-instruct", site=26,
                                  arm="native", per_token_median_resid_norm=10.0,
@@ -1214,7 +1219,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                                for c in plan.band_cells),
               alphas={}, per_token_median_resid_norm=10.0), ValueError))
 
-    # ---- 2. §4.2(a) dose ordering --------------------------------------------
+    # ---- 2. criterion (a) dose ordering --------------------------------------------
     print("== selftest 2: §4.2(a) dose-ordering across the full SIGNED ladder ==")
     good = [-0.62, -0.21, -0.05, 0.06, 0.24, 0.71]
     rho, flips, ok = dose_ordering(list(DOSE_LADDER), good)
@@ -1241,7 +1246,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
     check("a ragged ladder is refused, never zipped short",
           _raises(lambda: dose_ordering([0.1, 0.3], [0.2]), ValueError))
 
-    # ---- 3. §4.2(b) band separation ------------------------------------------
+    # ---- 3. criterion (b) band separation ------------------------------------------
     print("== selftest 3: §4.2(b) band separation (≥4/6 AND both |0.3|) ==")
     n_out, both, per_dose, ok = band_separation(
         _ladder(good), _band([0.1, 0.1, 0.1, 0.1, 0.1, 0.1]))
@@ -1313,7 +1318,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
            and passing.criteria.outside_band_doses == 4
            and passing.criteria.coherence_at_scoring_dose == 0.62))
 
-    # ---- 5. the §5 stamp fragment --------------------------------------------
+    # ---- 5. the transported-write stamp fragment --------------------------------------------
     print("== selftest 5: what every §5 cell names about its gate ==")
     frag = stamp_fragment(passing)
     for field in ("job_id", "verdict", "spearman_rho", "outside_band_doses",
@@ -1429,7 +1434,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
           all(resolve_calibration_arm(k)[0] == "raw"
               for k in ("pythia-6.9b", "gpt2-xl")))
 
-    # ---- 10. gpt2-xl's three sites (ruling 9) --------------------------------
+    # ---- 10. gpt2-xl's three sites ------------------------------------------
     print("== selftest 10: gpt2-xl calibrates at all three built sites (ruling 9) ==")
     g = resolve_calibration_sites(GPT2XL_KEY)
     check("gpt2-xl resolves THREE calibration sites and no ⋆",
@@ -1458,7 +1463,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
           and _raises(lambda: assert_ruled_site_before_transport(
               "qwen2.5-3b-instruct", 21), SiteNotOfRecord))
 
-    # ---- 11. the SSM branch (ruling 2) --------------------------------------
+    # ---- 11. the SSM branch -------------------------------------------------
     print("== selftest 11: the SSM calibration-only lever (ruling 2) ==")
     tier = ssm_nodes()
     check("the behavioral tier is read from the ROSTER, not the brief's prose",
@@ -1507,7 +1512,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
           _ok(lambda: assert_lever_stays_calibration_only(
               "entropy_gradient", "host a portability coefficient")))
 
-    # ---- 12. the §4.3 vector-inventory preflight (from disk) ------------------
+    # ---- 12. the vector-inventory preflight (from disk) ------------------
     print("== selftest 12: §4.3's preflight RE-DERIVES readiness from disk ==")
     from metabasis.scripts.run_behavioral_cells import CORPUS_SHA_V21
     absent = vector_inventory_row("phi-4", 19, vector_path=None)
@@ -1548,7 +1553,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
         check("an UNREADABLE FD-gate artifact is treated as ABSENT, never as a pass",
               row.fd_gate_passed is None and not row.ready)
 
-    # ---- 13. the desk table -------------------------------------------------
+    # ---- 13. the readiness table -------------------------------------------------
     print("== selftest 13: the §4.3 who-can-calibrate table ==")
     table = who_can_calibrate()
     by_node = {r["node"]: r for r in table}
@@ -1580,7 +1585,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
           "NEVER re-chosen on behavioral evidence" in
           _msg(lambda: gate_transported_cells(failing)))
 
-    # ---- the mapping mode's §4.2 exclusion (2026-08-08) -----------------------
+    # ---- the mapping mode's acceptance exclusion -----------------------
     print("== selftest: the mapping mode can never reach a §4.2 verdict ==")
     _clean = _ladder([-0.30, -0.10, -0.03, 0.03, 0.10, 0.30])
     _bands = _band([0.01] * 6)
@@ -1628,7 +1633,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
     print(f"\nselftest: {len(failures)} failure(s)")
     for name, _, detail in failures:
         print(f"  MISS {name} {detail}")
-    # RAKE M44: coverage is part of the verdict, per configuration.
+    # Coverage is part of the verdict, per configuration.
     print(f"selftest checks run: {len(checks)} ({len(skips)} named skip(s))")
     for name in skips:
         print(f"  SKIPPED {name}")
@@ -1664,12 +1669,12 @@ def _msg(fn: Callable[[], Any]) -> str:
 # ---------------------------------------------------------------- CLI
 def main(argv: Optional[list[str]] = None) -> int:
     ap = argparse.ArgumentParser(
-        description="The §4 actuation acceptance gate: cell plan, site resolution, "
-                    "verdict logic. Mechanics only — the desk decides (C§8).")
+        description="The actuation acceptance gate: cell plan, site resolution, "
+                    "verdict logic. Mechanics only — UNSTAMPED, decided in review.")
     ap.add_argument("--selftest", action="store_true",
                     help="CPU-only, data-independent verification")
     ap.add_argument("--who-can-calibrate", action="store_true",
-                    help="§4.3's table, re-derived from the live registries (GPU-free)")
+                    help="the preflight table, re-derived from the live registries (GPU-free)")
     ap.add_argument("--node", default=None, help="restrict the table to one node")
     args = ap.parse_args(argv)
 
@@ -1679,7 +1684,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         rows = who_can_calibrate([args.node] if args.node else None)
         print(json.dumps(rows, indent=1))
         ready = sum(1 for r in rows if r["status"] == "SITE RESOLVED")
-        print(f"\n{ready}/{len(rows)} nodes resolve a calibration site. §4.3: a "
+        print(f"\n{ready}/{len(rows)} nodes resolve a calibration site. A "
               "resolved site is NOT readiness — the vector-inventory preflight must "
               "re-derive that from disk.")
         return 0

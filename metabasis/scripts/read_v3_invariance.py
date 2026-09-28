@@ -1,33 +1,36 @@
-"""webtext-v3 §6 invariance reads + §7 hub race / battery / roster reads.
+"""webtext-v3 section 6 invariance reads + section 7 hub race / battery / roster reads.
+
+Section numbers refer to the frozen webtext-v3 pre-registration in
+`docs/planning/` (tag `freeze/webtext-v3`).
 
 WHAT THIS IS
 ────────────────────────────────────────────────────────────────────────────
-ONE metric engine, computed once, consumed by both frozen sections. §6-I1/I2's
-binding clauses are *defined as* §7 eligibility agreement across contexts, so a
+ONE metric engine, computed once, consumed by both frozen sections. Section 6 I1/I2's
+binding clauses are *defined as* section 7 eligibility agreement across contexts, so a
 second implementation of "the hub score" would be two contracts wearing one
 name. Everything below reads from that single engine.
 
-**C§8 — THIS LANE COMPUTES ARITHMETIC AND DECLARES NOTHING.** Every PASS/FAIL
-it emits is UNSTAMPED. Stamps are the desk's, at the first-read.
+**THIS LANE COMPUTES ARITHMETIC AND DECLARES NOTHING.** Every PASS/FAIL
+it emits is UNSTAMPED. Stamps are applied by a separate review, at the first read.
 
 THE ESTIMAND, AND WHY IT IS NOT RE-DERIVED HERE
 ────────────────────────────────────────────────────────────────────────────
 `â_comp(A→B | H)` is `read_composed_predictions.composed_exchange_rate` and
 `â_obs(A→B)` is `read_exchange_rates.exchange_rate` — both CALLED, never
 mirrored. The direction resolution for a pair fit is
-`read_composed_predictions.pair_fit_probes_under` (the §8.3 construction of
-record, merged `3a67578`): the wave banks ONE semi-orthogonal Procrustes object
+`read_composed_predictions.pair_fit_probes_under` (the section 8.3 construction of
+record): the wave banks ONE semi-orthogonal Procrustes object
 per UNORDERED pair and both ordered slots are read from it.
 
 This module's only genuine EXTENSIONS over the merged lane, both minimal and
 both flagged in the report:
 
   1. **Context parameterization.** The scoring lane hardcodes the full-corpus
-     fit trees and `proc_k256`. §6 needs {full, half-a, half-b} × {k32, k128,
+     fit trees and `proc_k256`. Section 6 needs {full, half-a, half-b} × {k32, k128,
      k256}. The half trees carry the IDENTICAL file names inside a
      `…__half{a,b}` directory, so the extension is a directory-naming function
      (`leg_dir` / `pair_dir`) and NOTHING about the arithmetic moves.
-  2. **A pair fit read AS a hub leg** (§7 clause 1 / §8 step 5's all-roster
+  2. **A pair fit read AS a hub leg** (section 7 clause 1 / section 8 step 5's all-roster
      race, whose "remaining legs are the now-fit pair maps — the same fitted
      objects, acknowledged"). A hub leg has the hub on its SOURCE side; a pair
      fit banked as `M→H` has it on the TARGET side, so it is re-oriented with
@@ -35,8 +38,8 @@ both flagged in the report:
      (its selftest proves `adjoint(tm).fwd == tm.rev` to machine precision).
      No new arithmetic: the identity is the module's, used as intended.
 
-THE VINTAGE RULE IS ABSOLUTE (prereg §3.6). v2.1 numbers appear in exactly one
-place in this module — `i5_cross_basis`, the §6-I5 cross-basis measurement,
+THE VINTAGE RULE IS ABSOLUTE (pre-registration section 3.6). v2.1 numbers appear in exactly one
+place in this module — `i5_cross_basis`, the section 6 I5 cross-basis measurement,
 which is cross-basis BY DEFINITION. Nothing else in this file may read a v2.1
 path, and the emitter asserts it.
 
@@ -48,8 +51,8 @@ from __future__ import annotations
 
 import os
 
-# The thread count is instrument identity (Luxia ruling 2026-08-01). Set before
-# numpy imports so the BLAS pool is born at the ruled default.
+# The thread count is instrument identity (eigh's bytes differ across thread
+# counts). Set before numpy imports so the BLAS pool is born at the standing default.
 os.environ.setdefault("OMP_NUM_THREADS", "8")
 
 import argparse
@@ -77,15 +80,15 @@ logger = logging.getLogger("read_v3_invariance")
 
 
 # ═══════════════════════════════════════════════════════════ frozen constants
-#: §7 clause 3's practical-equivalence margin, frozen in the prereg.
+#: Section 7 clause 3's practical-equivalence margin, frozen in the pre-registration.
 DELTA_PRACTICAL_EQUIVALENCE: float = 0.005
-#: §7 clause 3's Holm-corrected significance level.
+#: Section 7 clause 3's Holm-corrected significance level.
 ALPHA_TIER: float = 0.05
-#: §6-I4's Holm-corrected significance level (note: .01, NOT .05).
+#: Section 6 I4's Holm-corrected significance level (note: .01, NOT .05).
 ALPHA_SEPARATION: float = 0.01
-#: §6-I1/I2's pre-stated full-order Spearman pass.
+#: Section 6 I1/I2's pre-stated full-order Spearman pass.
 RHO_ORDER_PASS: float = 0.8
-#: §7's HL-2 support thresholds.
+#: Section 7's HL-2 support thresholds.
 RHO_HL2_FULL: float = 0.6
 RHO_HL2_HALF: float = 0.4
 RHO_HL2_PARTIAL: float = 0.4
@@ -94,14 +97,14 @@ ALPHA_HL2_PERM: float = 0.05
 N_PERMUTATIONS: int = 20000
 PERMUTATION_SEED_NAME: str = "v3-reads-race-2026-08-04/max-statistic"
 
-#: §7's race set, as BANK KEYS (the artifact records the prose→key mapping).
+#: Section 7's race set, as BANK KEYS (the artifact records the prose→key mapping).
 RACE_SET: tuple[str, ...] = ("qwen2.5-3b-instruct", "qwen2.5-32b-instruct",
                              "3b", "8b", "gemma3-27b")
-#: §7 clause 1's candidate set (race set MINUS nothing — gemma is the control
+#: Section 7 clause 1's candidate set (race set MINUS nothing — gemma is the control
 #: and is raced with the rest; clause 6 gives gemma-top-tier its own reading).
 CANDIDATES: tuple[str, ...] = RACE_SET
 
-#: The §6 grid. `proc_k32` is a LABELED CONTINUITY BESIDE (§6-I2) and is never
+#: The section 6 grid. `proc_k32` is a LABELED CONTINUITY BESIDE (section 6 I2) and is never
 #: admitted to a binding clause; the engine computes it, the clause code
 #: refuses it.
 BINDING_RANKS: tuple[str, ...] = ("proc_k128", "proc_k256")
@@ -111,14 +114,14 @@ ALL_RANKS: tuple[str, ...] = (CONTINUITY_RANK,) + BINDING_RANKS
 Split = Literal["full", "halfa", "halfb"]
 SPLITS: tuple[Split, ...] = ("full", "halfa", "halfb")
 
-#: §3.2's family of record on webtext-v3 (the health check passed; no demotion).
+#: Section 3.2's family of record on webtext-v3 (the health check passed; no demotion).
 RANK_OF_RECORD: str = "proc_k256"
 
-#: §6-I5 pins this rank, and only this one — "the only rank quotable in both
+#: Section 6 I5 pins this rank, and only this one — "the only rank quotable in both
 #: bases' guards; v2.1's family of record".
 I5_RANK: str = "proc_k128"
 
-#: §4's rank guard: k quotable only where k <= n_train / 1.2.
+#: Section 4's rank guard: k quotable only where k <= n_train / 1.2.
 RANK_GUARD_DIVISOR: float = 1.2
 
 
@@ -129,14 +132,14 @@ class ReadsError(RuntimeError):
 class ClusterBlocker(ReadsError):
     """The computation needs an input that exists only on the cluster.
 
-    Raised, never worked around: the brief is desk-local CPU only, and a
+    Raised, never worked around: this lane runs locally on CPU only, and a
     silently substituted input would produce a number whose label lies.
     """
 
 
 # ═══════════════════════════════════════════════════════ context / tree layout
 class Context(BaseModel):
-    """ONE (split, rank) cell of the §6 grid. The engine's unit of work."""
+    """ONE (split, rank) cell of the section 6 grid. The engine's unit of work."""
     model_config = {"frozen": True}
 
     split: Split
@@ -148,7 +151,7 @@ class Context(BaseModel):
 
     @property
     def binding_eligible(self) -> bool:
-        """§6-I2: k32 is a labeled continuity BESIDE, never a binding clause."""
+        """Section 6 I2: k32 is a labeled continuity BESIDE, never a binding clause."""
         return self.family in BINDING_RANKS
 
     def __str__(self) -> str:                              # pragma: no cover
@@ -260,7 +263,7 @@ class _Cache:
 class BasisSlot(BaseModel):
     """One of the frozen 240 ordered slots, reduced to what the engine needs.
 
-    Built ONLY from the sealed artifact — §7: "This set is enumerated in the
+    Built ONLY from the sealed artifact — section 7: "This set is enumerated in the
     prediction artifact BEFORE any hub leg is fit. No alternative basis is
     quotable except as a labeled beside."
     """
@@ -314,7 +317,7 @@ class SlotError(BaseModel):
 
 
 class HubContextScore(BaseModel):
-    """§7 clause 2's per-hub score in ONE context, with its population."""
+    """Section 7 clause 2's per-hub score in ONE context, with its population."""
 
     hub: str
     hub_site: int
@@ -347,7 +350,7 @@ def _oriented_leg(cache: _Cache, banks: Banks, ctx: Context,
     """The map hub→model, from a hub-leg object or a re-oriented pair fit.
 
     Returns (map, provenance). The hub-leg wave's object is preferred whenever
-    it exists — it IS the hub leg — and the pair-fit route is what §8 step 5
+    it exists — it IS the hub leg — and the pair-fit route is what section 8 step 5
     licenses for the non-race hubs ("its remaining legs are the now-fit pair
     maps — the same fitted objects, acknowledged").
     """
@@ -371,9 +374,9 @@ def _oriented_leg(cache: _Cache, banks: Banks, ctx: Context,
 def score_hub(banks: Banks, basis: Sequence[BasisSlot], ctx: Context,
               hub: str, hub_site: int, cache: _Cache,
               require_full_basis: bool = True) -> HubContextScore:
-    """§7 clause 2 for ONE hub in ONE context, over the fixed shared basis.
+    """Section 7 clause 2 for ONE hub in ONE context, over the fixed shared basis.
 
-    `require_full_basis=False` is the §8-step-5 all-roster mode: a non-race hub
+    `require_full_basis=False` is the section 8-step-5 all-roster mode: a non-race hub
     is an ENDPOINT of some slots and cannot quote them (its own leg would be
     the identity), and it has legs only in the arms its pairs were banked in.
     Those slots are recorded as `unrealized` WITH THEIR REASON and the hub's
@@ -460,7 +463,7 @@ def score_hub(banks: Banks, basis: Sequence[BasisSlot], ctx: Context,
 
 # ════════════════════════════════════════════════════════════════ statistics
 class SignTest(BaseModel):
-    """§7 clause 3(a)'s paired sign test. Two-sided, ties dropped, n stated."""
+    """Section 7 clause 3(a)'s paired sign test. Two-sided, ties dropped, n stated."""
 
     label: str
     n_shared: int = Field(description="slots both hubs quote")
@@ -477,7 +480,7 @@ def sign_test(label: str, a: Sequence[float], b: Sequence[float],
               name_a: str, name_b: str) -> SignTest:
     """Exact two-sided binomial sign test on paired |e|, ties DROPPED.
 
-    Ties are dropped rather than split because §7 clause 3(a) says so
+    Ties are dropped rather than split because section 7 clause 3(a) says so
     ("two-sided, ties dropped, n stated with every p"), and the reported
     `n_effective` is the post-drop n — a p quoted against the pre-drop n would
     overstate the evidence.
@@ -602,7 +605,7 @@ def partial_spearman(x: Sequence[float], y: Sequence[float],
     """ρ(x, y | z) — Pearson of the residuals of the RANK-transformed columns.
 
     The standard partial-Spearman: rank each column, then residualize x and y
-    on z by least squares and correlate the residuals. §7 asks P1b to "retain
+    on z by least squares and correlate the residuals. Section 7 asks P1b to "retain
     |ρ| ≥ .4 after partialing out own-leg r²", which is exactly this with
     z = own-leg r².
     """
@@ -638,7 +641,7 @@ class MaxStatNull(BaseModel):
 
     ONE null for the whole slate: the statistic permuted against is
     `max_j |ρ_j|`, so a slate member's p already carries the cost of every
-    other member having had a chance to be the maximum. §7's clustering rule
+    other member having had a chance to be the maximum. Section 7's clustering rule
     (P2/P6 = ONE cluster, their ρ was −.93) is applied by collapsing that
     cluster to its single best member BEFORE the maximum is taken — otherwise
     a correlated pair would inflate the null exactly as an independent pair.
@@ -692,9 +695,9 @@ def max_statistic_null(quality: Sequence[float],
                        p_max_statistic=p)
 
 
-# ══════════════════════════════════════════════════════════ §7 tier membership
+# ══════════════════════════════════════════════════════════ section 7 tier membership
 class TierMembership(BaseModel):
-    """§7 clause 3 in ONE context, verbatim: BOTH conditions, or no expulsion."""
+    """Section 7 clause 3 in ONE context, verbatim: BOTH conditions, or no expulsion."""
 
     context: str
     binding_eligible: bool
@@ -718,7 +721,7 @@ class TierMembership(BaseModel):
 
 def tier_membership(scores: dict[str, HubContextScore], ctx: Context,
                     candidates: Sequence[str] = CANDIDATES) -> TierMembership:
-    """§7 clause 3 over the candidate set, on the shared basis of this context."""
+    """Section 7 clause 3 over the candidate set, on the shared basis of this context."""
     medians = {h: scores[h].median_abs_error for h in candidates}
     ranking = sorted(candidates, key=lambda h: (medians[h], h))
     leader = ranking[0]
@@ -762,9 +765,9 @@ def tier_membership(scores: dict[str, HubContextScore], ctx: Context,
         practically_equivalent=prac_equiv, notes=notes)
 
 
-# ══════════════════════════════════════════════════ §6 clauses over the grid
+# ══════════════════════════════════════════════════ section 6 clauses over the grid
 class GroupingVerdict(BaseModel):
-    """§7 clause 4's eligibility under ONE reading of 'the four contexts'."""
+    """Section 7 clause 4's eligibility under ONE reading of 'the four contexts'."""
 
     grouping: str
     grouping_contexts: list[str]
@@ -776,7 +779,7 @@ class GroupingVerdict(BaseModel):
 
 
 class InvarianceVerdicts(BaseModel):
-    """§6-I1/I2 binding clauses + §7 clause 4, under BOTH defensible groupings."""
+    """Section 6 I1/I2 binding clauses + section 7 clause 4, under BOTH defensible groupings."""
 
     contexts_computed: list[str]
     binding_contexts: list[str]
@@ -791,8 +794,8 @@ class InvarianceVerdicts(BaseModel):
     grouping_disagreement: list[str] = Field(default_factory=list)
 
 
-#: The two defensible readings of §7 clause 4's "the four contexts". The frozen
-#: text says "top-tier in both halves and at both ranks (§6 I1/I2), with the
+#: The two defensible readings of section 7 clause 4's "the four contexts". The frozen
+#: text says "top-tier in both halves and at both ranks (section 6 I1/I2), with the
 #: noise-ejection guard: ... expelled in the SAME direction in >= 2 of the four
 #: contexts" — and "both halves x both ranks" is four cells, while
 #: "{half-a, half-b} + {full@k128, full@k256}" is also four. Both are computed;
@@ -818,11 +821,11 @@ GROUPINGS: dict[str, tuple[str, tuple[tuple[Split, str], ...]]] = {
 def evaluate_invariance(tiers: dict[str, TierMembership],
                         candidates: Sequence[str] = CANDIDATES
                         ) -> InvarianceVerdicts:
-    """§6-I1, §6-I2 and §7 clause 4 from the computed grid."""
+    """Section 6 I1, section 6 I2 and section 7 clause 4 from the computed grid."""
     binding = [k for k, t in tiers.items() if t.binding_eligible]
     continuity = [k for k, t in tiers.items() if not t.binding_eligible]
 
-    # I1: every §7 eligibility decision agrees ACROSS HALVES. The decision at
+    # I1: every section 7 eligibility decision agrees ACROSS HALVES. The decision at
     # each rank is compared half-a vs half-b; the full corpus is not a half.
     i1_detail: dict[str, Any] = {}
     i1_ok = True
@@ -882,9 +885,9 @@ def evaluate_invariance(tiers: dict[str, TierMembership],
         grouping_disagreement=disagreement)
 
 
-# ═══════════════════════════════════════════════════ §6-I1/I2 order besides
+# ═══════════════════════════════════════════════════ section 6 I1/I2 order besides
 class OrderBeside(BaseModel):
-    """§6's full-order Spearman beside, with its PRE-NAMED partial wording."""
+    """Section 6's full-order Spearman beside, with its PRE-NAMED partial wording."""
 
     label: str
     population: list[str]
@@ -919,7 +922,7 @@ def order_beside(label: str, population: Sequence[str],
                        passes_pre_stated=ok, wording=wording)
 
 
-# ══════════════════════════════════════════════ §8 step 5 all-roster race
+# ══════════════════════════════════════════════ section 8 step 5 all-roster race
 class RosterRaceRow(BaseModel):
     hub: str
     hub_site: int
@@ -935,7 +938,7 @@ class RosterRaceRow(BaseModel):
 
 
 class RosterRace(BaseModel):
-    """§7 clause 1 / §8 step 5: EVERY core hub raced, gateless and descriptive."""
+    """Section 7 clause 1 / section 8 step 5: EVERY core hub raced, gateless and descriptive."""
 
     context: str
     population: list[str]
@@ -1020,7 +1023,7 @@ def roster_race(scores: dict[str, HubContextScore], ctx: Context,
 
 
 class SeparationFloor(BaseModel):
-    """§6-I4 (binding): every top-quartile x bottom-quartile pair, p < .01 Holm."""
+    """Section 6 I4 (binding): every top-quartile x bottom-quartile pair, p < .01 Holm."""
 
     context: str
     population: list[str]
@@ -1038,7 +1041,7 @@ class SeparationFloor(BaseModel):
 
 def separation_floor(scores: dict[str, HubContextScore], ctx: Context,
                      ranking: Sequence[str]) -> SeparationFloor:
-    """§6-I4 over the guard-quotable population at the family of record."""
+    """Section 6 I4 over the guard-quotable population at the family of record."""
     n = len(ranking)
     # Quartile rule, stated because n is not a multiple of 4: ceil(n/4) hubs at
     # each end. Ceil rather than floor so that neither quartile is empty at
@@ -1072,11 +1075,11 @@ def separation_floor(scores: dict[str, HubContextScore], ctx: Context,
 
 
 
-# ══════════════════════════════ the second §6 ambiguity: what "agrees" means
+# ══════════════════════════════ the second section 6 ambiguity: what "agrees" means
 class ClauseReading(BaseModel):
-    """ONE reading of §6-I1/I2's binding clause, computed and labelled.
+    """ONE reading of section 6 I1/I2's binding clause, computed and labelled.
 
-    §6-I1 says "every §7 eligibility decision agrees across halves" and §7
+    Section 6 I1 says "every section 7 eligibility decision agrees across halves" and section 7
     clause 4 says eligibility is "top-tier in both halves and at both ranks
     ... with the noise-ejection guard: a candidate is ineligible only if it is
     expelled in the SAME direction in >= 2 of the four contexts". Those two
@@ -1084,12 +1087,12 @@ class ClauseReading(BaseModel):
 
       STRICT   — "eligibility decision" = TOP-TIER MEMBERSHIP in a context, so
                  the per-context top-tier sets must be IDENTICAL across halves.
-                 Textually the most direct, but under it §7's noise-ejection
+                 Textually the most direct, but under it section 7's noise-ejection
                  guard is dead letter: the guard exists precisely to tolerate a
                  single-context expulsion, and any such expulsion makes the
                  STRICT clause fail, so the guard could never fire without
                  I1 already having failed.
-      GUARDED  — "eligibility decision" = the §7 clause-4 ELIGIBILITY VERDICT,
+      GUARDED  — "eligibility decision" = the section 7 clause-4 ELIGIBILITY VERDICT,
                  computed WITHIN each half (over that half's two ranks) and
                  within each rank (over the two halves), carrying the same
                  >= 2-expulsions guard down to the 2-context group. Under this
@@ -1097,8 +1100,8 @@ class ClauseReading(BaseModel):
                  guarded verdict is stable.
 
     BOTH ARE COMPUTED AND BOTH ARE REPORTED. This is a SECOND ambiguity beyond
-    the two context-groupings the brief names, and it is FLAGGED rather than
-    resolved.
+    the two context-groupings of section 7 clause 4 (`GROUPINGS`), and it
+    is FLAGGED rather than resolved.
     """
 
     reading: Literal["STRICT", "GUARDED"]
@@ -1112,7 +1115,7 @@ class ClauseReading(BaseModel):
 
 def _guarded_eligibility(tiers: dict[str, TierMembership], keys: Sequence[str],
                          candidates: Sequence[str]) -> list[str]:
-    """§7 clause 4's guard applied to a group of contexts: >= 2 expulsions."""
+    """Section 7 clause 4's guard applied to a group of contexts: >= 2 expulsions."""
     counts = {h: sum(1 for k in keys if h in tiers[k].expelled)
               for h in candidates}
     return sorted(h for h in candidates if counts[h] < 2)
@@ -1223,7 +1226,7 @@ def filter_scores(scores: dict[str, HubContextScore], hubs: Sequence[str],
 
 
 class PopulationRead(BaseModel):
-    """§6-I3 + §6-I4 over ONE reading of the I3/I4 population."""
+    """Section 6 I3 + section 6 I4 over ONE reading of the I3/I4 population."""
 
     population_reading: str
     definition: str
@@ -1277,8 +1280,8 @@ def _floor_diagnosis(floor: SeparationFloor) -> str:
 def relativize(value: Any, repo: Path) -> Any:
     """Rewrite any absolute path under `repo` to a repo-relative one, in place.
 
-    THE SANITIZATION RULE APPLIED AT THE SOURCE, not left to the desk sweep: an
-    absolute desk path carries a username, and an artifact is the wrong place
+    THE SANITIZATION RULE APPLIED AT THE SOURCE, not left to a later sweep: an
+    absolute local path carries a username, and an artifact is the wrong place
     for one. Repo-relative is also the identity every other artifact in this
     campaign cites, so this makes the reads artifact quotable beside them.
     """
@@ -1343,9 +1346,9 @@ def write_deterministic(payload: dict[str, Any], out: Path,
     return digest, sidecar
 
 
-# ═══════════════════════════════════════════ §3.4 validity + §4 rank guard
+# ═══════════════════════════════════════════ section 3.4 validity + section 4 rank guard
 class FitRow(BaseModel):
-    """One `cp2_summary.json` record, reduced to what the guards need."""
+    """One run-summary record, reduced to what the guards need."""
     model_config = {"frozen": True}
 
     site_pair: str
@@ -1362,7 +1365,7 @@ class FitRow(BaseModel):
 
     @property
     def rank_guard_ok(self) -> bool:
-        """§4: k quotable only where k <= n_train / 1.2, for the split USED."""
+        """Section 4: k quotable only where k <= n_train / 1.2, for the split USED."""
         return self.k_effective <= self.n_train / RANK_GUARD_DIVISOR
 
     @property
@@ -1374,15 +1377,15 @@ _CP2_CACHE: dict[str, dict[str, FitRow]] = {}
 
 
 def load_cp2(directory: Path) -> dict[str, FitRow]:
-    """`cp2_summary.json`'s records, keyed by family. Cached by directory."""
+    """The run summary's records, keyed by family. Cached by directory."""
     key = str(directory)
     got = _CP2_CACHE.get(key)
     if got is not None:
         return got
     path = directory/"cp2_summary.json"
     if not path.exists():
-        raise ReadsError(f"no cp2_summary.json beside the fits at {directory} — "
-                         f"§3.4 validity and §4's rank guard are unreadable")
+        raise ReadsError(f"no run summary beside the fits at {directory} — "
+                         f"section 3.4 validity and section 4's rank guard are unreadable")
     doc = json.loads(path.read_text())
     rows: dict[str, FitRow] = {}
     for rec in doc.get("records", []):
@@ -1431,14 +1434,14 @@ def _pair_object_dir(banks: Banks, ctx: Context, slot: BasisSlot
 class HubGuard(BaseModel):
     """Is this hub GUARD-QUOTABLE in this context? Derived, and shown working.
 
-    §6-I1/I4 say "all guard-quotable hubs at the family of record, enumerated
+    Section 6 I1/I4 say "all guard-quotable hubs at the family of record, enumerated
     at first fit". NO SUCH ENUMERATION WAS EVER RECORDED (checked by value: the
     sealed artifact, the hub-leg wave's meta, the pair wave's meta, the halves
-    manifest and the ledger carry none). It is therefore DERIVED here from the
-    two guards the prereg does define, and FLAGGED for ratification:
+    manifest and the run records carry none). It is therefore DERIVED here from
+    the two guards the pre-registration does define, and FLAGGED for review:
 
-      §4   rank guard    — k_effective <= n_train / 1.2 on every object used
-      §3.4 fit validity  — `valid` on every object used, which IS the
+      Section 4   rank guard    — k_effective <= n_train / 1.2 on every object used
+      Section 3.4 fit validity  — `valid` on every object used, which IS the
                            both-nulls rule AND the >= 2-of-4 stratum carry, as
                            computed by the fit lane of record
 
@@ -1505,12 +1508,12 @@ def hub_guard(banks: Banks, basis: Sequence[BasisSlot], ctx: Context,
 
 
 # ═══════════════════════════════════════════════════ the HL-2 predictor slate
-#: The operational definitions of record. §7 NAMES the slate (P1a/P1b/P2/P6)
+#: The operational definitions of record. Section 7 NAMES the slate (P1a/P1b/P2/P6)
 #: but defines no member; the PARENT contract (`freeze/transport-campaign`)
 #: does not mention P1a/P1b/P2/P6 AT ALL — checked by value at the tag. The
 #: only operational definitions in the campaign are the 17-hub census
-#: pre-statement's §3, implemented in
-#: `staging/s2-hub-census/glue/census_predictors.py`, which this module reuses
+#: pre-statement, implemented in a census predictor script outside this
+#: repository, whose definitions this module restates in `SLATE_DEFINITIONS`
 #: rather than re-inventing.
 SLATE_DEFINITION_SOURCE = (
     "docs/planning/PRESTATEMENT-s2-hub-census-2026-07-31.md §3, implemented in "
@@ -1568,7 +1571,7 @@ def _leg_r2_values(banks: Banks, basis: Sequence[BasisSlot], ctx: Context,
     return seen
 
 
-#: THE ARM RULE, APPLIED TO MODEL-INTRINSIC PREDICTORS (prereg §3.2 + §1's
+#: THE ARM RULE, APPLIED TO MODEL-INTRINSIC PREDICTORS (pre-registration section 3.2 + section 1's
 #: arm-consistency rule: "base models run raw ONLY — their constants live in
 #: the raw system, never native"). Both P1a and P2 are per-model constants, so
 #: each is read in the model's OWN registered arm: native for an instruct
@@ -1585,7 +1588,7 @@ def predictor_p1a(banks: Banks, basis: Sequence[BasisSlot], ctx: Context,
                   exclude_own_family: bool) -> dict[str, float]:
     """P1a: mean r² over the hub's legs in the hub's OWN registered arm.
 
-    `exclude_own_family=True` is §7's circularity cut: legs to models of the
+    `exclude_own_family=True` is section 7's circularity cut: legs to models of the
     hub's OWN family are dropped before the mean, so a family that is merely
     numerous cannot manufacture centrality for its members.
     """
@@ -1662,11 +1665,11 @@ def predictor_p2(banks: Banks, basis: Sequence[BasisSlot], ctx: Context,
     return out
 
 
-# ═════════════════════════════════════════════ P6, from the node-built inputs
+# ═════════════════════════════════════════ P6, from the cluster-built inputs
 #: The artifact kind the P6-INPUTS wave emits. Anything else is refused.
 P6_ARTIFACT_KIND = "webtext-v3-p6-inputs/v1"
 
-#: The census formula, CHARACTER-FOR-CHARACTER as `census_predictors.py`
+#: The census formula, CHARACTER-FOR-CHARACTER as the census predictor script
 #: implements it (`participation_ratio`) and as the P6-INPUTS artifact quotes
 #: its own definition. The artifact's `definition` string must CONTAIN this, or
 #: the column is refused: a P6 computed under some other formula is a different
@@ -1681,13 +1684,13 @@ P6_RECOMPUTE_TOL = 1e-9
 
 
 class P6Inputs(BaseModel):
-    """The node-built P6 column, verified against its own banked eigenvalues.
+    """The cluster-built P6 column, verified against its own banked eigenvalues.
 
     P6 is BANK-ONLY (the hub's own train-row state spectrum) and needs the
-    webtext-v3 per-text state banks, which are node-side. This artifact is the
-    node's answer to that blocker: it carries, per hub, the participation ratio
-    AND the full eigenvalue spectrum it was computed from — so the desk can
-    re-derive the statistic rather than trust it.
+    webtext-v3 per-text state banks, which live only on the cluster. This
+    artifact is the cluster's answer to that blocker: it carries, per hub, the
+    participation ratio AND the full eigenvalue spectrum it was computed from —
+    so a local reader can re-derive the statistic rather than trust it.
     """
 
     path: str
@@ -1785,7 +1788,7 @@ def load_p6_inputs(path: Path) -> P6Inputs:
         notes=[str(doc.get("p1b_status", ""))] if doc.get("p1b_status") else [])
 
 
-#: §7's positive claim wording of record, VERBATIM. Quoted exactly, or not at
+#: Section 7's positive claim wording of record, VERBATIM. Quoted exactly, or not at
 #: all — "No other positive phrasing is quotable."
 HL2_POSITIVE_TEMPLATE = ("hub quality on webtext-v3 is predicted by "
                          "{predictor} at |ρ| = {rho}; all other slate "
@@ -1793,7 +1796,7 @@ HL2_POSITIVE_TEMPLATE = ("hub quality on webtext-v3 is predicted by "
 
 
 class Battery(BaseModel):
-    """§7's HL-2 predictor battery, strictly under the frozen support rule."""
+    """Section 7's HL-2 predictor battery, strictly under the frozen support rule."""
 
     quality_context: str
     quality_source: str
@@ -1815,9 +1818,9 @@ class Battery(BaseModel):
     verdict_text: str
     skipped: list[dict[str, str]]
     flags: list[str]
-    #: The node-built P6 column's provenance, or None when P6 stayed skipped.
+    #: The cluster-built P6 column's provenance, or None when P6 stayed skipped.
     p6_inputs: Optional[P6Inputs] = None
-    #: §7's clustering rule as APPLIED, member by member.
+    #: Section 7's clustering rule as APPLIED, member by member.
     multiplicity_clusters: dict[str, list[str]] = Field(default_factory=dict)
 
 
@@ -1827,16 +1830,16 @@ def build_battery(banks: Banks, basis: Sequence[BasisSlot],
                   family_of: dict[str, str], identities: dict[str, str],
                   flags: list[str],
                   p6: Optional[P6Inputs] = None) -> Battery:
-    """§7's HL-2 battery — computed ONLY after the race lands, guards binding.
+    """Section 7's HL-2 battery — computed ONLY after the race lands, guards binding.
 
-    THE DISJOINT-SPLIT READING, stated because §7's clause is unsatisfiable on
-    its face. §7 asks for "family-excluded P1a computed on a disjoint fit split
+    THE DISJOINT-SPLIT READING, stated because section 7's clause is unsatisfiable on
+    its face. Section 7 asks for "family-excluded P1a computed on a disjoint fit split
     (legs fit on the split half not used for the hub-quality measurement)". The
     hub-quality measurement of record is the FULL corpus, and neither half is
     disjoint from the full corpus — every half row is a full-corpus row. The
     only reading under which "disjoint" is true is therefore PER-HALF quality:
     quality on half-a is scored against P1a fit on half-b, and vice versa. Both
-    assignments are computed and both are reported; the desk rules.
+    assignments are computed and both are reported; neither is chosen here.
 
     "Full-ordering scoring only — no sub-setting, EVER" is read as the
     challenge set words it ("full-ordering scoring only, no sub-setting"): the
@@ -1899,7 +1902,7 @@ def build_battery(banks: Banks, basis: Sequence[BasisSlot],
         circularity_guard=("BANK-ONLY: computed from the hub's own train-row "
                            "PCA and from nothing about any pair's outcome")))
 
-    # ---- P1b and P6: NAMED, DEFINED, BUT NOT COMPUTABLE DESK-SIDE ----------
+    # ---- P1b and P6: NAMED, DEFINED, BUT NOT COMPUTABLE LOCALLY ------------
     blocker_states = (
         "the webtext-v3 per-text state banks are NOT desk-side — they exist "
         "only under the NODE-SIDE webtext-v3 arm root (checked "
@@ -1936,7 +1939,7 @@ def build_battery(banks: Banks, basis: Sequence[BasisSlot],
             raise ReadsError(
                 f"P6-INPUTS covers {p6.n_hubs} hubs but does not cover "
                 f"{missing} — a slate member scored on a SUBSET of the hub "
-                f"population would violate §7's full-ordering rule")
+                f"population would violate section 7's full-ordering rule")
         #  the artifact's own site/arm per hub must be the site/arm of record,
         #  or the column is a different measurement wearing P6's name
         for hub in pop:
@@ -1948,7 +1951,7 @@ def build_battery(banks: Banks, basis: Sequence[BasisSlot],
             if p6.arms[hub] != expected_arm:
                 raise ReadsError(
                     f"P6-INPUTS reads {hub} in the {p6.arms[hub]} arm but its "
-                    f"registered arm is {expected_arm} (§3.2) — P6 is a "
+                    f"registered arm is {expected_arm} (section 3.2) — P6 is a "
                     f"per-model constant and must be read in the model's own arm")
         columns.append(PredictorColumn(
             name="P6-participation-ratio", definition=SLATE_DEFINITIONS["P6"],
@@ -1981,7 +1984,7 @@ def build_battery(banks: Banks, basis: Sequence[BasisSlot],
             "wherever P6 is quoted, and is NOT diagnosed here.")
 
     available = {c.name: c for c in columns if c.available}
-    # §7's clustering rule: P2 and P6 count as ONE cluster in every
+    # Section 7's clustering rule: P2 and P6 count as ONE cluster in every
     # multiplicity null (their rho was -.93). The cluster is named either way;
     # with P6 restored it finally has BOTH members and the rule binds.
     clusters = {"P1a": ["P1a-family-excluded"],
@@ -2034,7 +2037,7 @@ def build_battery(banks: Banks, basis: Sequence[BasisSlot],
                 rho_halves[half][name] = spearman(
                     [quality_halves[half][h] for h in pop],
                     [predictor_half[h] for h in pop])
-        # §7 asks P1b to "retain |rho| >= .4 after partialing out own-leg
+        # Section 7 asks P1b to "retain |rho| >= .4 after partialing out own-leg
         # r-squared". P1b is absent, so the control is applied to every
         # computable member instead of being skipped — it is the strictly
         # harder reading, and it exposes any member that is merely own-leg
@@ -2128,7 +2131,7 @@ def build_battery(banks: Banks, basis: Sequence[BasisSlot],
         flags=flags, p6_inputs=p6, multiplicity_clusters=clusters)
 
 
-# ═══════════════════════════════════════════════════════ §6-I5 (cross-basis)
+# ═══════════════════════════════════════════════════════ section 6 I5 (cross-basis)
 #: THE ONLY v2.1 PATHS THIS MODULE MAY OPEN. Every one is a SCORED RECORD, not
 #: a fit — I5 reads the v2.1 side as banked, and re-derives nothing of it.
 V21_SCORED_RECORDS: tuple[str, ...] = tuple(
@@ -2154,7 +2157,7 @@ class I5Slot(BaseModel):
 
 
 class I5Measurement(BaseModel):
-    """§6-I5: a MEASUREMENT with no pass state. ρ and the shift, together."""
+    """Section 6 I5: a MEASUREMENT with no pass state. ρ and the shift, together."""
 
     indexes: str
     n_slots: int
@@ -2193,10 +2196,9 @@ class I5Read(BaseModel):
 def _load_v21_slots(repo: Path) -> dict[tuple[str, str, str], dict[str, Any]]:
     """The v2.1 scored record of record, deduped on (source, target, arm).
 
-    Reads `slots[]` ONLY: `RECORD-CORRECTIONS-2026-07-29.md` establishes that
-    the batch records' `disclosures` prose carries three stale paragraphs and
-    that "every consumer of these records reads slot-level fields ... No number
-    anywhere is affected". So the prose is not read at all.
+    Reads `slots[]` ONLY: the batch records' `disclosures` prose carries three
+    stale paragraphs, while every slot-level field is correct and no number
+    depends on the prose. So the prose is not read at all.
     """
     out: dict[tuple[str, str, str], dict[str, Any]] = {}
     for rel in V21_SCORED_RECORDS:
@@ -2232,13 +2234,13 @@ def _load_v21_slots(repo: Path) -> dict[tuple[str, str, str], dict[str, Any]]:
 
 def i5_cross_basis(repo: Path, banks: Banks, basis: Sequence[BasisSlot],
                    cache: _Cache) -> I5Read:
-    """§6-I5, at the pinned matched native::proc_k128, matched arm per slot."""
+    """Section 6 I5, at the pinned matched native::proc_k128, matched arm per slot."""
     v21 = _load_v21_slots(repo)
     for key, row in v21.items():
         if row["family"] != I5_RANK:
             raise ReadsError(
                 f"v2.1 slot {key} is filed at {row['family']}, not the pinned "
-                f"{I5_RANK} — §6-I5 pins the rank and does not convert")
+                f"{I5_RANK} — section 6 I5 pins the rank and does not convert")
     ctx = Context(split="full", family=I5_RANK)
     by_key = {(s.source_model, s.target_model, s.arm): s for s in basis}
     realized: list[I5Slot] = []
@@ -2360,7 +2362,7 @@ def i5_cross_basis(repo: Path, banks: Banks, basis: Sequence[BasisSlot],
 
 # ═══════════════════════════════════════════════════════════ C2 and C4 reads
 class C2Read(BaseModel):
-    """§7's recipe-vs-range test on qwen2.5-72b. Pre-named outcomes, quoted."""
+    """Section 7's recipe-vs-range test on qwen2.5-72b. Pre-named outcomes, quoted."""
 
     context: str
     qwen72b_median_abs_error: float
@@ -2378,7 +2380,7 @@ class C2Read(BaseModel):
 
 def c2_read(race: RosterRace, scores: dict[str, HubContextScore],
             ctx: Context) -> C2Read:
-    """qwen2.5-72b's descriptive rank + median |e|, against §7's two outcomes."""
+    """qwen2.5-72b's descriptive rank + median |e|, against section 7's two outcomes."""
     q, l = "qwen2.5-72b-instruct", "llama-3.1-70b-instruct"
     rows = {r.hub: r for r in race.rows}
     missing = [m for m in (q, l, "llama-3.3-70b-instruct")
@@ -2386,9 +2388,9 @@ def c2_read(race: RosterRace, scores: dict[str, HubContextScore],
     if missing:
         raise ReadsError(
             f"C2 cannot be read: {missing} are not in the guard-quotable "
-            f"race population, so §7's named statistic has no footing. This "
-            f"is a REFUSAL, not an empty read — the desk rules on the "
-            f"population before C2 is quoted")
+            f"race population, so section 7's named statistic has no footing. This "
+            f"is a REFUSAL, not an empty read — the population must be "
+            f"decided before C2 is quoted")
     a, b = scores[q].by_ordinal, scores[l].by_ordinal
     shared = sorted(set(a) & set(b))
     test = sign_test(f"{q} vs {l} @ {ctx.key}",
@@ -2476,7 +2478,7 @@ class C4Pair(BaseModel):
 
 
 class C4Read(BaseModel):
-    """§7's sibling base-vs-instruct read. The F3 lesson, applied verbatim."""
+    """Section 7's sibling base-vs-instruct read. The F3 lesson, applied verbatim."""
 
     rule: str = (
         "§7 VERBATIM: base-vs-instruct hub quality and â deltas in the RAW "
@@ -2534,7 +2536,7 @@ def c4_read(sites: dict[str, int]) -> C4Read:
         pairs=pairs, n_quotable=len(quotable), read=read)
 
 
-# ═══════════════════════════════════════════ §7 clause 5 — parameter counts
+# ═══════════════════════════════════════════ section 7 clause 5 — parameter counts
 #: The HF repo each race candidate's bank key names. Read from
 #: `metabasis.roster.ROSTER[...].model_id` where the key is in the roster; the
 #: two CARRIED keys (`3b`, `8b`) are not roster rows, and their repo ids are
@@ -2567,7 +2569,7 @@ class ParamCount(BaseModel):
 def fetch_param_counts(cache_path: Optional[Path] = None) -> list[ParamCount]:
     """Total parameters per race candidate, at the revision the hub resolves to.
 
-    ⚠ FLAGGED, NOT RESOLVED. §7 clause 5 says "config-derived at the pinned
+    ⚠ FLAGGED, NOT RESOLVED. Section 7 clause 5 says "config-derived at the pinned
     revision", but NO PINNED REVISION IS RECORDED for the five race candidates
     anywhere in the campaign — `metabasis.roster` carries `model_id` and
     architecture facts but no revision, and the collection stamps carry a local
@@ -2640,7 +2642,7 @@ def fetch_param_counts(cache_path: Optional[Path] = None) -> list[ParamCount]:
 
 
 class Crowning(BaseModel):
-    """§7 clause 5/6's selection — UNSTAMPED-PROPOSED, never a crowning."""
+    """Section 7 clause 5/6's selection — UNSTAMPED-PROPOSED, never a crowning."""
 
     STATUS: str = (
         "UNSTAMPED-PROPOSED. §7's selection is the desk's and Luxia's to "
@@ -2657,7 +2659,7 @@ class Crowning(BaseModel):
 
 def propose_crowning(verdicts: InvarianceVerdicts, params: list[ParamCount],
                      tiers: dict[str, TierMembership]) -> Crowning:
-    """§7 clause 5, and clause 6's NAMED fallbacks when it cannot fire."""
+    """Section 7 clause 5, and clause 6's NAMED fallbacks when it cannot fire."""
     by_grouping = {g.grouping: g.eligible for g in verdicts.groupings}
     by_hub = {p.hub: p for p in params}
     gemma_top = [k for k, t in tiers.items()
@@ -2713,10 +2715,10 @@ def propose_crowning(verdicts: InvarianceVerdicts, params: list[ParamCount],
 # ═══════════════════════════════════════════════════════════ the family table
 #: P1a's family exclusion needs a model→family map. TWO on-disk registries
 #: already carry one and the census reconciled them; both are read rather than
-#: retyped. Their union covers 18 of the 21 §5 core models — the three §5 ADDS
+#: retyped. Their union covers 18 of the 21 section 5 core models — the three section 5 ADDS
 #: are absent from both, and are extended here BY THE REGISTRIES' OWN LINEAGE
 #: CONVENTION (which places every Llama together and every Qwen together),
-#: FLAGGED for ratification.
+#: FLAGGED for review.
 FAMILY_REGISTRIES: tuple[tuple[str, str], ...] = (
     ("staging/batch12-prep/b12_slate.py", "FAMILY_OF"),
     ("staging/chart-overlap-preview/chart_overlap_preview.py", "FAMILY_OF"),
@@ -2729,7 +2731,7 @@ FAMILY_ADDS: dict[str, str] = {
 
 
 def load_family_table(repo: Path) -> tuple[dict[str, str], list[str]]:
-    """Reconcile the two on-disk FAMILY_OF registries; extend for the §5 adds."""
+    """Reconcile the two on-disk FAMILY_OF registries; extend for the section 5 adds."""
     import ast as _ast
     merged: dict[str, str] = {}
     notes: list[str] = []
@@ -2825,7 +2827,7 @@ def verify_manifest(path: Path) -> ManifestCheck:
 
     In process rather than shelled out so the RESULT is a typed object the
     artifact carries — a green line in a log is not evidence a later reader can
-    check, and the brief binds this lane to verify before consuming.
+    check, and this lane must verify before consuming.
     """
     anchor = path.parent
     entries: list[tuple[str, str]] = []
@@ -2870,7 +2872,7 @@ STAGING_MANIFESTS: tuple[str, ...] = (
 def run_reads(repo: Path, out_dir: Path, verify: bool = True,
               param_cache: Optional[Path] = None,
               p6_inputs: Optional[Path] = None) -> ReadsRun:
-    """The whole enactment: one engine, every §6/§7 read, one artifact."""
+    """The whole enactment: one engine, every section 6/section 7 read, one artifact."""
     flags: list[str] = []
     p6 = load_p6_inputs(p6_inputs) if p6_inputs is not None else None
     if p6 is not None:
@@ -2932,7 +2934,7 @@ def run_reads(repo: Path, out_dir: Path, verify: bool = True,
         [Context(split="full", family=f) for f in BINDING_RANKS]
         + [Context(split=s, family=f) for s in ("halfa", "halfb")
            for f in ALL_RANKS])
-    # The §6 besides are "over ALL guard-quotable hubs at the family of
+    # The section 6 besides are "over ALL guard-quotable hubs at the family of
     # record", and I2's beside compares k128 against k256 on the full corpus —
     # so the full corpus needs the WHOLE hub population at BOTH binding ranks,
     # not just the five candidates.
@@ -2959,7 +2961,7 @@ def run_reads(repo: Path, out_dir: Path, verify: bool = True,
                     ctx.key, len(got), cache.n_map_loads)
         cache.clear_maps()
 
-    # ---- §7 clause 3 per context; §6 clauses over the grid ------------------
+    # ---- section 7 clause 3 per context; section 6 clauses over the grid ------------------
     tiers = {ctx.key: tier_membership(scores_by_ctx[ctx.key], ctx)
              for ctx in grid}
     verdicts = evaluate_invariance(tiers)
@@ -3002,7 +3004,7 @@ def run_reads(repo: Path, out_dir: Path, verify: bool = True,
         "enumerated by any wave. The derivation above is deterministic and "
         "shown working, and it is the desk's to ratify at first-read.")
 
-    # ---- §6 besides: full-order rho ---------------------------------------
+    # ---- section 6 besides: full-order rho ---------------------------------------
     race_scores_record = scores_by_ctx[ctx_record.key]
     besides: list[OrderBeside] = []
     med = {ctx.key: {h: scores_by_ctx[ctx.key][h].median_abs_error
@@ -3033,9 +3035,9 @@ def run_reads(repo: Path, out_dir: Path, verify: bool = True,
             f"{RANK_OF_RECORD} on {half}", pop, med[f"{half}::proc_k32"],
             med[f"{half}::{RANK_OF_RECORD}"], verdicts.i2_ranks_agree))
 
-    # ---- §8 step 5 all-roster race, I3, I4 ---------------------------------
+    # ---- section 8 step 5 all-roster race, I3, I4 ---------------------------------
     # ⚠ THE I3/I4 POPULATION HAS A SECOND READING, and it changes the verdict.
-    # §6 says "all guard-quotable hubs AT THE FAMILY OF RECORD", and §3.2's
+    # Section 6 says "all guard-quotable hubs AT THE FAMILY OF RECORD", and section 3.2's
     # family of record is native::proc_k256 for instruct<->instruct with
     # "arms are never pooled in any aggregate". A base-checkpoint hub has NO
     # native bank at all, so it is not quotable at the family of record; and a
@@ -3081,7 +3083,7 @@ def run_reads(repo: Path, out_dir: Path, verify: bool = True,
     ]
     readings = clause_readings(tiers)
 
-    # ---- §7 selection, battery, C2/C4, I5 ----------------------------------
+    # ---- section 7 selection, battery, C2/C4, I5 ----------------------------------
     params = fetch_param_counts(param_cache)
     crowning = propose_crowning(verdicts, params, tiers)
     battery = build_battery(banks, basis, quotable, hub_sites, scores_by_ctx,
@@ -3605,7 +3607,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
     print("── 13. §7's P2/P6 cluster rule with BOTH members present")
     #  Two members inside ONE cluster: the null's statistic must be the maximum
     #  over both, so a member is never cheaper to clear than the pair it is
-    #  clustered with. Built anti-correlated, as §7 describes them (ρ ≈ −.93).
+    #  clustered with. Built anti-correlated, as section 7 describes them (ρ ≈ −.93).
     rng7 = np.random.default_rng(760876)
     q7 = list(rng7.random(21))
     p2_7 = [-x + 0.02 * rng7.standard_normal() for x in q7]
@@ -3646,25 +3648,26 @@ def selftest() -> int:                                   # noqa: C901 — a chec
 # ═══════════════════════════════════════════════════════════════════ CLI
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(
-        description=("webtext-v3 §6 invariance reads + §7 race/battery/roster "
+        description=("webtext-v3 section 6 invariance reads + section 7 race/battery/roster "
                      "reads. UNSTAMPED ARITHMETIC — declares nothing."))
     parser.add_argument("--repo", type=Path,
                         default=Path(__file__).resolve().parents[2],
-                        help="repo root holding staging/ and outputs/")
+                        help="repo root holding the local data trees and outputs/")
     parser.add_argument("--out-dir", type=Path, default=None,
                         help="where the reads artifacts land "
-                             "(default <repo>/staging/webtext-v3-reads)")
+                             "(default: a webtext-v3-reads directory in the "
+                             "repo's gitignored local data tree)")
     parser.add_argument("--no-verify", action="store_true",
-                        help="skip the staging manifest checks (NOT for a "
-                             "record run — the brief binds them)")
+                        help="skip the local manifest checks (NOT for a "
+                             "record run, which must verify its inputs)")
     parser.add_argument("--build-twice", action="store_true",
                         help="build the artifact twice and prove the bytes "
                              "identical")
     parser.add_argument("--p6-inputs", type=Path, default=None,
-                        help="the node-built P6-INPUTS artifact. Supplied: P6 "
-                             "enters the slate and the §7 P2/P6 cluster holds "
+                        help="the cluster-built P6-INPUTS artifact. Supplied: P6 "
+                             "enters the slate and the section 7 P2/P6 cluster holds "
                              "both members. Omitted: P6 stays SKIPPED with its "
-                             "blocker, exactly as before.")
+                             "blocker.")
     parser.add_argument("--battery-out", type=Path, default=None,
                         help="also write a standalone battery artifact here "
                              "(+ sidecar); the reads/race artifacts are "

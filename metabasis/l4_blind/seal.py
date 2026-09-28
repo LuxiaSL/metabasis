@@ -2,7 +2,7 @@
 
 It carries the draw recipe, the tool version, every input sha and the
 verdict tally — and NOT the sealed map. Sealing a session therefore does
-not unblind it: the desk joins `sealed_map_sha256` to the map in a
+not unblind it: the scorer joins `sealed_map_sha256` to the map in a
 separate, deliberate step.
 """
 from __future__ import annotations
@@ -92,7 +92,7 @@ def write_json(path: Path, obj: object) -> str:
 
 
 def write_manifest(paths: list[Path], out: Path, label: str) -> Path:
-    """A sha256 manifest in the desk's usual shape (sha  basename)."""
+    """A sha256 manifest in the `sha256sum` shape (sha  basename)."""
     lines = [f"# {label}", f"# {GRADE} — {STATUS}", f"# {TOOL_VERSION}"]
     for p in sorted(paths):
         if p.exists():

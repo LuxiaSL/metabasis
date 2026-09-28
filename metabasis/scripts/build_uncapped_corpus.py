@@ -1,17 +1,17 @@
-"""A8 Leg-4 / L4-d step 1-2 — build the S5-augmented fit corpus for the 8B<->Qwen pair.
+"""Build the S5-augmented fit corpus for the 8B<->Qwen pair.
 
 S5 = UNCAPPED completions (max_new_tokens 2048, natural terminations), both voices of
-the pair, generated from S1's own prompt set (stage-0 protocol, fresh seeds).  Its
-purpose is the desk's interim-note-2 diagnosis: the Leg-0/1 fit corpora are
+the pair, generated from S1's own prompt set (stage-0 protocol, fresh seeds).  It exists
+because the base fit corpora are
 TERMINATION-CENSORED (620/780 texts sit at the 512 cap), so eos-perp-relevant
 covariance was censored OUT of the data g was fit on.  S5 restores it.
 
-The leg-4 corpus = the Leg-1 corpus VERBATIM (same 780 entries, same text_ids, so every
-prior row stays byte-comparable) + the S5 entries appended.  Stamps carry per-text EOS
+The augmented corpus = the base corpus VERBATIM (same 780 entries, same text_ids, so every
+base-corpus row stays byte-comparable) + the S5 entries appended.  Stamps carry per-text EOS
 metadata (ended_with_eos_token, n_generated_tokens, cap) so the stratum's provenance is
 auditable without re-reading the gens.
 
-Everything UNSTAMPED (C§8).
+Everything UNSTAMPED: nothing here is a scored result.
 
 Run (repo root):
   PYTHONPATH=pipeline python -m metabasis.scripts.build_uncapped_corpus [--selftest]

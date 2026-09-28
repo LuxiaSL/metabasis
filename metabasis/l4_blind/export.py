@@ -1,24 +1,24 @@
-"""Desk-side extraction of the token ids the deck's generations need.
+"""Local extraction of the token ids the deck's generations need.
 
-The node job needs three things: the token ids, the tokenizer, and the
+The decode job needs three things: the token ids, the tokenizer, and the
 engine's decode convention. Only the tokenizer and the convention live on
-the cluster — the ids are already desk-side in the pull-parity-verified
-banked trees. So this exports a small ids file and the node decodes it.
+the GPU machine — the ids are already local in the pull-parity-verified
+banked trees. So this exports a small ids file and the decode job decodes it.
 
-Why this way, and not "have the node re-read its own trees":
+Why this way, and not "have the decode job re-read its own trees":
 
-  * FOOTPRINT. The decode node is a shared machine, often under load.
+  * FOOTPRINT. The decode machine is shared, often under load.
     Shipping ~1 MB of ids and decoding a couple of hundred short sequences
     is seconds of one core; re-walking five columns' banked trees is not.
   * PROVENANCE. Every exported row records the sha256 of the
-    `generations.jsonl` it came from, and the node job echoes those shas
+    generations file it came from, and the decode job echoes those shas
     back untouched. The join is checkable end to end without trusting
     either side's directory layout.
   * BLAST RADIUS. The job never opens a banked tree at all, so it cannot
     perturb one.
 
-C§8 UNSTAMPED. This exports ids and coordinates. No text, no score, no
-verdict.
+UNSTAMPED: nothing here is a scored result. This exports ids and
+coordinates. No text, no score, no verdict.
 """
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ from metabasis.l4_blind.taxonomy import sha256_file
 
 
 def export_ids(drawn: DrawnPairs, out_path: Path) -> dict[str, Any]:
-    """Write the ids file the node job consumes, and return its summary.
+    """Write the ids file the decode job consumes, and return its summary.
 
     One line per requested generation:
 

@@ -1,4 +1,4 @@
-"""A8 Leg-0 — T2: Phase B fit grid (CPU, local). Charter §2/§4, session spec Phase B.
+"""The transport-map fit grid (CPU, local).
 
 Fits the structure-preserving map g between two models' residual state spaces from
 paired forced-replay means, per (site-pair x template-arm x family):
@@ -6,20 +6,22 @@ paired forced-replay means, per (site-pair x template-arm x family):
     (per-side PCA fit on TRAIN rows only; W^T W = I; optional isotropic scale)
   - ridge affine (liberal variant; alpha by closed-form LOO PRESS on train)
 
-Gates per fit (frozen rule, prereg §1 FIT VALIDITY):
+Gates per fit (the FIT VALIDITY rule frozen in the transport-campaign
+pre-registration, section 1, in `docs/planning/`):
   held-out state-prediction R^2 separates from BOTH the shuffled-pair null AND the
   stratum-preserving shuffle null (re-pair with a different text from the same
   (stratum, voice, mode) group — the sharp null); per-stratum R^2 carries in >=2 of
   THE STRATA THE PINNED CORPUS MANIFEST NAMES. Plus: CKA before/after, and the
   two-arm g-agreement robustness read.
 
-THE STRATUM VOCABULARY IS BASIS-DERIVED (desk ruling 2026-08-03). No stratum name
+THE STRATUM VOCABULARY IS BASIS-DERIVED. No stratum name
 appears in this module: `derive_strata` reads them off the manifest's per-entry
 `stratum` field in first-occurrence order, so the set is a pure function of the
 manifest bytes (deterministic under the `corpus_manifest_sha256` in every stamp).
-On webtext-v3 that is the four strata frozen prereg §3.4 names; on v2.1 manifests
-it is S1/S2/S3 (+S5 on the Leg-4 augmented corpus) — identical to the tuple this
-module used to hardcode, which is why no banked v2.1 readout moves.
+On webtext-v3 that is the four strata section 3.4 of the frozen webtext-v3
+pre-registration names; on v2.1 manifests it is S1/S2/S3 (+S5 on the S5-augmented
+corpus) — identical to `LEGACY_V21_STRATA`, so every banked v2.1 readout reads the
+same strata it was fit on.
 
 STATE-BANK CONTRACT (T4 `collect_mean_states.py` imports save_state_bank from here —
 single source of truth):
@@ -32,15 +34,15 @@ single source of truth):
 
 Artifacts (under --arm-root/fits/):
   pca_{model}_L{site}_{arm}.npz            per-side PCA bank (kmax components)
-  fit_{src}L{s}__{tgt}L{t}_{arm}_proc_k{k}.npz / _ridge.npz + .json sidecars
-  cp2_summary.json                         the CP-2 table, one record per fit
+  fit_{src}L{s}__{tgt}L{t}_{arm}_proc_k{k} / _ridge   npz maps + JSON sidecars
+  `FIT_SUMMARY_NAME`                       the run summary, one record per fit
 
-THE SPLIT IS BASIS-DEPENDENT AND HAS THREE LANES (brief BRIEF-v3-splits-wiring
--2026-08-03). The webtext-v3 membership is NOT derived at fit time: it is FROZEN
-by `derive_webtext_splits.py` per prereg §2 / §6-I1 and CONSUMED here.
-  --splits-artifact …/splits.json   the frozen v3 main split (280/1200)
-  --half a|b + --halves-artifact …/halves.json
-                                    one frozen §6-I1 half, fitted on that half's
+THE SPLIT IS BASIS-DEPENDENT AND HAS THREE LANES. The webtext-v3 membership is
+NOT derived at fit time: it is FROZEN by `derive_webtext_splits` (webtext-v3
+pre-registration sections 2 and 6) and CONSUMED here.
+  --splits-artifact <splits>        the frozen v3 main split (280/1200)
+  --half a|b + --halves-artifact <halves>
+                                    one frozen half, fitted on that half's
                                     OWN internal train/test split
   (neither)                         the LEGACY in-code v2.1 topic-grouped
                                     derivation — byte-exact, and the ONLY lane
@@ -51,7 +53,7 @@ re-derivation); an artifact that does not belong to the loaded corpus REFUSES.
 CONSUMING A MAP. Every fitted map is banked, including maps that fail the null
 gate and Procrustes ranks above the rank guard k <= n_train / 1.2. The gate and
 the guard bind where a map is used: `load_checked_transport_map` (and
-`check_map_for_consumption`) read the map's record in `cp2_summary.json` (beside
+`check_map_for_consumption`) read the map's record in the run summary (beside
 the map, or in the run root when the map sits in a `fits*` subdirectory) and
 refuse a map whose `valid` is false or whose rank exceeds n_train / 1.2, unless
 the caller passes the named override (`--allow-failed-gate-map`,
@@ -63,7 +65,7 @@ PREDICTION AUTHORIZATION. `--require-prediction-stamp ARTIFACT` verifies a seale
 prediction artifact (its stamp, its digest, its internal consistency) and refuses
 the run unless every (source site, target site, arm) it would fit is filed in the
 artifact. Direct-pair fits whose composed predictions were filed beforehand —
-the direct-pair fits of docs/planning/PREREG-webtext-v3-2026-08-03.md — must
+the direct-pair fits of the webtext-v3 pre-registration in `docs/planning/` — must
 pass it, so the fit cannot precede the filing.
 Hub-leg fits are the inputs of those predictions, not predictions themselves,
 and run without it; the default behaviour is unchanged.
@@ -72,9 +74,9 @@ Run (from the repository root):
   python -m metabasis.scripts.fit_transport_maps --selftest          # synthetic validation
   python -m metabasis.scripts.fit_transport_maps                      # real grid (post CP-1)
   python -m metabasis.scripts.fit_transport_maps \\
-      --splits-artifact staging/webtext-v3-draft/splits.json          # the v3 grid
+      --splits-artifact <splits>                                      # the v3 grid
   python -m metabasis.scripts.fit_transport_maps --half a \\
-      --halves-artifact staging/webtext-v3-draft/halves.json \\
+      --halves-artifact <halves> \\
       --fits-dirname fits_half_a                                      # the I1 half
 """
 from __future__ import annotations
@@ -108,11 +110,10 @@ HELD_OUT_S2 = 40              # of 160 S2 shards
 N_PROBES = 50                 # random unit probes for the two-arm g-agreement read
 SITES = {"3b": (13, 14, 18), "8b": (14, 16, 18), "qwen-7b": (19, 21, 23),
          "dsv2-lite": (18, 22),
-         # --- extension pairs (desk-smalls, authorized DESK-RULINGS-LEG6 §4) ---
-         # gemma3-27b: RULED BY LUXIA 2026-07-29 (session-5 close) from the
-         # SIX-SITE â EVIDENCE TABLE — readout of record
-         # `site_evidence_gemma3-27b_20260729-055507.json`, sha `7f59af50…`,
-         # 48 rows, strict (fit-local) norms, both hub source columns.
+         # --- extension pairs ---
+         # gemma3-27b: registered from the SIX-SITE â EVIDENCE TABLE (the
+         # gemma3-27b site-evidence readout: 48 rows, strict (fit-local) norms,
+         # both hub source columns).
          # L38 is the site of record ⋆ and L41 is the robustness site; the
          # carried-banked peak region (34, 36, 38) is HISTORY, and L36 is
          # RETIRED to scanned-history with it.
@@ -140,28 +141,29 @@ SITES = {"3b": (13, 14, 18), "8b": (14, 16, 18), "qwen-7b": (19, 21, 23),
          # WHAT STAYS BANKED AS EVIDENCE (retired ≠ deleted): L36's 16-site
          # alignment-curve cells and its FD-gated site-evidence vector remain
          # banked and re-readable, as do the (34, 36, 38) fits — the whole
-         # frozen-era gemma object roster (V7, Vrep⊥, Veos⊥, Vconf, Vtemp, V3)
+         # frozen-era gemma object roster (entropy gradient, Vrep⊥, Veos⊥, Vconf,
+         # Vtemp, mode contrast)
          # lives at L36 and `read_transported_axes` still anchors there BY
          # CONSTRUCTION — that reader resolves banked fits BY PATH from
          # cp2_summary, so the historical reads are untouched by this grid. What
          # DOES change is that a REFIT at L36 now needs `--tgt-sites 36` on the
          # command line, which is the point: a retired site never resolves by
          # default again (the 70B's L17 precedent).
-         # Both 38 and 41 are on the model's own effective scan grid (the ruled
-         # 15-site extension; 41 is in the computed 12), so the ratification
+         # Both 38 and 41 are on the model's own effective scan grid (the registered
+         # 15-site extension; 41 is in the computed 12), so the scan-grid
          # invariant is satisfied — this is a curve-visited pair re-ranked by â
          # evidence, not a fiat grid.
          # THE VECTOR SIDE IS STILL OPEN: the six site-evidence vectors are
-         # FROZEN-v1 (`a6712ca0…`) SELECTION instruments and never file. A fresh
-         # FD-gated corpus-v2.1 (`5ae355bc…`) L38 build is required before any
+         # FROZEN-v1 SELECTION instruments and never file. A fresh
+         # FD-gated corpus-v2.1 L38 build is required before any
          # gemma slot files — see `read_composed_predictions.SITE_OF_RECORD`.
          "gemma3-27b": (38, 41),                       # ⋆ L38 primary, L41 robustness
-         # olmo2-7b: NO banked site curve exists (A3/A5 were cut for this model), so
+         # olmo2-7b: NO banked site curve exists (no curve scan ran for this model), so
          # the sites are a mid-depth BAND and the site of record is picked from the
-         # fit's own alignment curve afterwards — never by fiat (baton item 1).
+         # fit's own alignment curve afterwards — never by fiat.
          "olmo2-7b": (12, 16, 20, 24),
          # --- wave-1 graduations (collection phase) ----------------------------
-         # Ratified by Luxia 2026-07-27 from the wave-1 12-site alignment-curve
+         # Registered from the wave-1 12-site alignment-curve
          # scans: `outputs/collection/<key>/fits_scan_<key>/cp2_summary.json`,
          # held-out r² at proc_k128, NATIVE arm (the family of record), hub 8B.
          # Each grid is the peak flanked by its two neighbouring scanned sites;
@@ -173,35 +175,35 @@ SITES = {"3b": (13, 14, 18), "8b": (14, 16, 18), "qwen-7b": (19, 21, 23),
          "mistral-7b-instruct-v0.3": (13, 15, 17),     # ⋆ L15
          "olmo2-7b-instruct": (13, 15, 17),            # ⋆ L15
          "phi-4": (16, 19, 21),                        # ⋆ L19
-         # phi-3.5-mini-instruct: FOUR sites, Luxia-ratified — the native curve is
+         # phi-3.5-mini-instruct: FOUR sites — the native curve is
          # double-humped (L13 .632 / L17 .630 twin peaks with an L15 dip), so both
          # humps stay in the grid. Precedent for >3-site grids: olmo2-7b above.
          "phi-3.5-mini-instruct": (11, 13, 15, 17),    # ⋆ L13
          # --- hub-rungs-2 graduations (collection phase) -----------------------
-         # Ratified by Luxia 2026-07-27 from the hub-rungs-2 scans; same read as
+         # Registered from the hub-rungs-2 scans; same read as
          # wave-1 (held-out r² at proc_k128, hub 8B, peak flanked by neighbours).
-         # llama-3.1-70b-instruct: the scale ceiling. RE-RATIFIED 2026-07-27
-         # (Luxia, session 3) — the grid is the two DEEP sites, L37 primary and
+         # llama-3.1-70b-instruct: the scale ceiling. RE-REGISTERED on â
+         # evidence — the grid is the two DEEP sites, L37 primary and
          # L43 robustness, and L17 is RETIRED from the fit grid.
          # What changed and why, so nobody re-derives it from the r² curve alone:
          #  · The alignment-curve scan picked L17 (peak UNANIMOUS across all six
          #    columns, r²=.577–.626, cka_after .87–.93 — a textbook interior
          #    peak), and the proportional-depth region L43–48 was that curve's
          #    TROUGH. On r² alone L17 still looks like the answer.
-         #  · The 70B chain-break read (in-lineage star, session 3) settled it
+         #  · The 70B chain-break read (in-lineage star) settled it
          #    the other way on the evidence that actually matters here: deep
          #    â = .4557 (L37) / .4480 (L43), null-clearing ~5×, implied
          #    c = .5441/.5349 — while the L17 rebuilt-column â (.067) is
          #    SUB-NULL and was never a valid c measurement at all. L17 is a
          #    shallow-basin SITE ARTIFACT; it retires to that case study.
-         #  · Two deep sites, not one, by explicit ruling: the pair is the
+         #  · Two deep sites, not one, by explicit decision: the pair is the
          #    same-model robustness check behind "c_M ≠ representable fraction"
          #    (â flat, coherence .431/.432 flat across L37→L43, while the
          #    ceilings differ 4.5% the other way).
          # Both sites are ON the model's own 12-site scan grid (…,32,37,43,48,…),
-         # so the ratification invariant is satisfied — this is a curve-visited
+         # so the scan-grid invariant is satisfied — this is a curve-visited
          # pair re-ranked by â evidence, not a fiat grid. gpt2-xl below is the
-         # same shape of ruling (sites of evidence, record deferred to â).
+         # same shape of decision (sites of evidence, record deferred to â).
          # L17 is still fully banked (the canonical npz holds L17+L37+L43); any
          # re-read of the site-artifact case study passes `--tgt-sites 17`
          # EXPLICITLY, which is the point — the retired site never resolves by
@@ -219,10 +221,10 @@ SITES = {"3b": (13, 14, 18), "8b": (14, 16, 18), "qwen-7b": (19, 21, 23),
          #      the 70B's .87–.93), rising monotonically with r². Both criteria
          #      select L31, so the pick is unambiguous, but this node is
          #      predictable without being geometrically aligned.
-         #  (c) STANDING DESK THREAD on that predictability-without-geometry gap;
+         #  (c) AN OPEN QUESTION on that predictability-without-geometry gap;
          #      any pythia result leaning on transported geometry cites this.
          "pythia-6.9b": (29, 30, 31),                  # ⋆ L31
-         # gpt2-xl: ratified by Luxia 2026-07-27 from the COMPLETED 25-site curve
+         # gpt2-xl: registered from the COMPLETED 25-site curve
          # (computed 12 + ruled both-edge extension L0–L6, L42–L47).
          # NO SITE OF RECORD YET — deliberately. The curve is a BATHTUB, not a
          # peak: it rises L0→L7, falls off a cliff (L7 .449 → L10 .110), troughs
@@ -232,30 +234,29 @@ SITES = {"3b": (13, 14, 18), "8b": (14, 16, 18), "qwen-7b": (19, 21, 23),
          # (8bL14/8bL16 → L7 by .007/.002; 8bL18 → L47 by .011), all inside the
          # edge nulls (q95 .02–.066). Picking either end would be fiat wearing a
          # curve's clothes.
-         # THREE EXPERIMENT SITES, ratified together: L7 (low end), L26 (middle
+         # THREE EXPERIMENT SITES, registered together: L7 (low end), L26 (middle
          # probe), L47 (high end); L6 and L46 flank the two ends as the usual
          # neighbours. The site of record is DEFERRED to their â evidence —
-         # Luxia's rationale: injecting into the ends is likely weak whatever the
+         # the rationale: injecting into the ends is likely weak whatever the
          # r², so a middle site is extra evidence even if its fit is poor.
          # L26 is picked MECHANICALLY, not by eye: the scanned site nearest 50%
          # depth (L24.0 of 48). L22 and L26 tie at |Δ|=2.0; the tie breaks on
          # higher r² (L26 .127/.110/.113 vs L22 .088/.076/.077 — L26 higher from
          # all three hub sources). Its geometry is poor (cka_after ≈ .10 against
          # ≈ .64 at the ends), which is the point of probing it.
-         # TRUNCATION CAVEAT RIDES EVERY USE (prereg ADDENDUM 2026-07-27-B): this
+         # TRUNCATION CAVEAT RIDES EVERY USE (a frozen amendment to the transport-
+         # campaign pre-registration): this
          # node's states are collected with per-text truncation to the first 1024
          # tokens, so for the 148 affected texts any gpt2-xl pair compares
          # full-text against truncated-text mean states. Flagged at scoring.
          "gpt2-xl": (6, 7, 26, 46, 47),                # ⋆ DEFERRED (L7|L26|L47)
          # --- big-chain graduations (collection phase) -------------------------
          # llama-3.1-405b-instruct (roster row 20, THE DENSE SCALE CEILING and
-         # the prereg §3 quad-hub SCALE-PROBE AUDIT HUB):
-         # RULED BY THE DESK 2026-07-29 UNDER LUXIA'S OVERNIGHT DELEGATION 2
-         # (ledgered) from the FIVE-SITE â EVIDENCE TABLE — readout of record
-         # `site_evidence_llama-3.1-405b-instruct_20260729-113819.json`,
-         # sha `04f2a2c4…`, 40 rows, strict (fit-local) norms, FROZEN-v1
-         # evidence basis (corpus `a6712ca0…`). This row was SCAN-REGISTRY ONLY
-         # until now; L99 is the site of record ⋆ and L107 is the robustness
+         # the pre-registered quad-hub SCALE-PROBE AUDIT HUB):
+         # registered under the clear-dominant-site rule from the FIVE-SITE â
+         # EVIDENCE TABLE (the 405B site-evidence readout: 40 rows, strict
+         # (fit-local) norms, FROZEN-v1 evidence basis), a first registration of a
+         # scan-registry model. L99 is the site of record ⋆ and L107 is the robustness
          # site. Sites of evidence: L19, L43, L91, L99, L107.
          # THE EVIDENCE, so nobody re-derives this from the r² curve:
          #  · UNANIMITY, TOP AND BOTTOM. Across ALL FOUR robustness columns —
@@ -263,7 +264,7 @@ SITES = {"3b": (13, 14, 18), "8b": (14, 16, 18), "qwen-7b": (19, 21, 23),
          #    rebuilt-L16 hub — the ranking opens L99 > L107 and closes on L19:
          #      native/k128/L14   L99 > L107 > L43  > L91  > L19
          #      native/k32 /L14   L99 > L107 > L91  > L43  > L19
-         #      raw   /k128/L14   L99 > L107 > L43  > L91  > L19
+         #      raw/k128/L14      L99 > L107 > L43  > L91  > L19
          #      native/k128/L16   L99 > L107 > L91  > L43  > L19
          #    rank-1, rank-2 and LAST are each unanimous; only the middle two
          #    swap. L99 sits at fractional depth .786, L107 at .849.
@@ -316,7 +317,7 @@ SITES = {"3b": (13, 14, 18), "8b": (14, 16, 18), "qwen-7b": (19, 21, 23),
          # the â, not the headroom. This FEEDS the scale/ρ reading (row 20 is
          # the scale-probe audit hub; the larger-hubs-transfer-better
          # conjecture is exactly what its audit set tests) and does NOT
-         # undermine the within-node site ruling, which is unanimous in all
+         # undermine the within-node site decision, which is unanimous in all
          # four columns regardless of the absolute level.
          # ARCHITECTURE NOTE: LlamaConfig with NO `layer_types` — uniform full
          # attention at every one of the 126 layers, confirmed per-site in the
@@ -325,22 +326,20 @@ SITES = {"3b": (13, 14, 18), "8b": (14, 16, 18), "qwen-7b": (19, 21, 23),
          # Both 99 and 107 are ON the model's own computed 12-site scan grid
          # (19, 27, 35, 43, 51, 59, 67, 75, 83, 91, 99, 107 — 126 layers, so the
          # rungs differ from the 80-layer 70Bs' and the comparison to them is by
-         # FRACTIONAL DEPTH, never site-for-site), so the ratification invariant
+         # FRACTIONAL DEPTH, never site-for-site), so the scan-grid invariant
          # is satisfied by construction — a curve-visited pair re-ranked by â
          # evidence, never a fiat grid.
          # THE VECTOR SIDE IS OPEN, AND IT GATES MORE THAN THIS ROW: the five
          # site-evidence vectors are FROZEN-v1 SELECTION instruments and never
          # file. A fresh FD-gated corpus-v2.1 L99 build is required before any
          # 405B slot files — and the same re-bank gates the ρ-law ceremony's
-         # audit pairs (pre-statement `7542b377…`). See
+         # audit pairs (the frozen ρ-law pre-statement). See
          # `read_composed_predictions.SITE_OF_RECORD`.
          "llama-3.1-405b-instruct": (99, 107),         # ⋆ L99 primary, L107 robustness
          # llama-3.3-70b-instruct (roster row 12, the post-training-vintage row):
-         # RULED BY THE DESK 2026-07-29 UNDER LUXIA'S OVERNIGHT DELEGATION 2
-         # (ledgered) from the FIVE-SITE â EVIDENCE TABLE — readout of record
-         # `site_evidence_llama-3.3-70b-instruct_20260729-075541.json`,
-         # sha `e6d584aa…`, 40 rows, strict (fit-local) norms, FROZEN-v1
-         # evidence basis. This row was SCAN-REGISTRY ONLY until now; L58 is the
+         # registered under the clear-dominant-site rule from the FIVE-SITE â
+         # EVIDENCE TABLE (the 3.3-70B site-evidence readout: 40 rows, strict
+         # (fit-local) norms, FROZEN-v1 evidence basis). L58 is the
          # site of record ⋆ and L63 is the robustness site.
          # THE EVIDENCE, so nobody re-derives this from the r² curve:
          #  · UNANIMITY: rank-1 (L58) and rank-2 (L63) hold across ALL FOUR
@@ -376,11 +375,11 @@ SITES = {"3b": (13, 14, 18), "8b": (14, 16, 18), "qwen-7b": (19, 21, 23),
          # (37, 43) ⋆ L37, MID-DEPTH. These are two INDEPENDENT evidence-based
          # registrations, each read off its own â table; their DISAGREEMENT
          # (3.1: 37/43 mid-depth · 3.3: 58/63 deep) is a RECORDED OBSERVATION
-         # about what RLHF vintage moves, not a bug in either ruling. Nothing
+         # about what RLHF vintage moves, not a bug in either registration. Nothing
          # here is inherited from row 11 and nothing here should be reconciled
          # against it by hand.
          # Both 58 and 63 are ON the model's own computed 12-site scan grid
-         # (12, 17, 22, 27, 32, 37, 43, 48, 53, 58, 63, 68), so the ratification
+         # (12, 17, 22, 27, 32, 37, 43, 48, 53, 58, 63, 68), so the scan-grid
          # invariant is satisfied by construction — a curve-visited pair
          # re-ranked by â evidence, never a fiat grid.
          # THE VECTOR SIDE IS OPEN: the five site-evidence vectors are FROZEN-v1
@@ -389,7 +388,7 @@ SITES = {"3b": (13, 14, 18), "8b": (14, 16, 18), "qwen-7b": (19, 21, 23),
          # `read_composed_predictions.SITE_OF_RECORD`.
          "llama-3.3-70b-instruct": (58, 63),           # ⋆ L58 primary, L63 robustness
          # mixtral-8x7b-instruct-v0.1 (roster row 19, the few-wide-experts MoE):
-         # ratified by Luxia 2026-07-28 from its own 12-site scan — held-out r² at
+         # registered from its own 12-site scan — held-out r² at
          # proc_k128, hub 8B, same read as wave-1 — peak L15 r²=.7092, clean and
          # unimodal, flanked by its two neighbouring scanned sites L13/L17.
          # THE POINT OF THE ROW, and why the site is not a surprise: its dense
@@ -402,44 +401,40 @@ SITES = {"3b": (13, 14, 18), "8b": (14, 16, 18), "qwen-7b": (19, 21, 23),
          "mixtral-8x7b-instruct-v0.1": (13, 15, 17),   # ⋆ L15
          # qwen3-30b-a3b (roster row 18, the QWEN-FAMILY MoE — the freeze's
          # controlled family-matched sparsity comparison):
-         # RULED DIRECTLY BY LUXIA 2026-07-29 (morning), AND THE PROVENANCE OF
-         # THIS RULING IS NOT THE SAME AS THE THREE ROWS ABOVE. Those were desk
-         # rulings under her overnight delegation 2. This one is HERS FIRST-HAND:
-         # the overnight pass PARKED this node — the delegated rule requires a
-         # clear dominant site and the table did not supply one (rank-1 FLIPS
-         # across the robustness columns) — so the enactor hit the ambiguity
-         # clause honestly, escalated with the table, and Luxia adjudicated it
-         # off the parked evidence. Do not re-file this as a delegated ruling.
-         # Readout of record `site_evidence_qwen3-30b-a3b_20260729-075641.json`,
-         # sha `13527972…`, 40 rows / 0 problems, strict (fit-local) norms,
-         # FROZEN-v1 evidence basis (corpus `a6712ca0…`). This row was
-         # SCAN-REGISTRY ONLY until now: a FIRST registration, not a re-ranking,
+         # NOT registered under the clear-dominant-site rule the rows above use:
+         # that rule requires a clear dominant site and this table does not
+         # supply one (rank-1 FLIPS across the robustness columns), so the node
+         # was PARKED and its site was decided directly off the parked evidence.
+         # Do not re-file this as a rule-derived registration.
+         # Readout of record: the qwen3-30b-a3b site-evidence table, 40 rows /
+         # 0 problems, strict (fit-local) norms, FROZEN-v1 evidence basis. This is
+         # a FIRST registration of a scan-registry model, not a re-ranking,
          # so NOTHING retires and no refusal check accompanies it.
          # L38 is the site of record ⋆ and L35 is the robustness site.
          # THE CANDIDATE SET WAS AMENDED, ARITHMETICALLY AND ON THE RECORD
          # BEFORE ANY â EXISTED: the campaign rule (r²-top-2 overall ∪ r²-top-3
          # at depth ≥ .50, scanned sites only) collapsed to THREE here because
          # this node's top r² sites are ALL deep (L38 .7155 d.79 · L26 .7118
-         # d.54 · L35 .6936 d.73). The desk amended it — those 3 ∪ top-2 r² at
+         # d.54 · L35 .6936 d.73). It was amended — those 3 ∪ top-2 r² at
          # depth < .50, giving L22 (.6853, d.458) and L19 (.6698, d.396) — to
          # restore the shallow/deep contrast so the r²/â inversion could be
-         # TESTED rather than assumed absent. Purely arithmetic, dated, ledgered,
-         # no â peeked. Sites of evidence: L19, L22, L26, L35, L38.
+         # TESTED rather than assumed absent. Purely arithmetic, recorded before
+         # any â existed. Sites of evidence: L19, L22, L26, L35, L38.
          # THE EVIDENCE, so nobody re-derives this from the r² curve:
          #  · THE TOP PAIR IS UNANIMOUS, THE ORDER WITHIN IT IS NOT. {L35, L38}
          #    take rank-1 and rank-2 in ALL FOUR robustness columns; rank-1
          #    FLIPS 2–2:
          #      native/k128/L14   L35 > L38 > L26 > L22 > L19   (L35 by +.0010)
          #      native/k32 /L14   L35 > L38 > L22 > L19 > L26   (L35 by +.0216)
-         #      raw   /k128/L14   L38 > L35 > L22 > L26 > L19   (L38 by +.0025)
+         #      raw/k128/L14      L38 > L35 > L22 > L26 > L19   (L38 by +.0025)
          #      native/k128/L16   L38 > L35 > L26 > L22 > L19   (L38 by +.0094)
          #    L19 is last in three of the four columns (L26 falls last in k32).
-         #  · THE STRONGEST FACT AGAINST THE RULING, STATED FIRST SO IT IS NEVER
+         #  · THE STRONGEST FACT AGAINST THE DECISION, STATED FIRST SO IT IS NEVER
          #    DISCOVERED LATER AS A GOTCHA: the parked table's summary lines
          #    named only THREE of the four rank-1 margins (+.0010 native/L14 for
          #    L35, +.0025 raw and +.0094 rebuilt-L16 for L38). The FOURTH column,
          #    native/k32, ALSO ranks L35 first — and by +.0216, the LARGEST
-         #    rank-1 margin anywhere on this table, ~21× the +.0010 the ruling
+         #    rank-1 margin anywhere on this table, ~21× the +.0010 the decision
          #    reads as noise. So the flip is 2–2 on columns, not 1–3, and L35's
          #    best column beats L38's best column. Why that does not overturn
          #    L38, on the evidence rather than by deference: (a) k32 is the
@@ -450,8 +445,8 @@ SITES = {"3b": (13, 14, 18), "8b": (14, 16, 18), "qwen-7b": (19, 21, 23),
          #    breaks depth monotonicity, dropping L26 to LAST beneath L19, which
          #    no k128 column does; (c) L38 takes â/ceiling in ALL THREE k128
          #    columns (.5186 / .4717 / .6024 against L35's .5004 / .4567 /
-         #    .5651), so on the canonical family the ruling is not close.
-         #  · WHAT LUXIA'S RULING RESTS ON: L38 carries the node's best coherence
+         #    .5651), so on the canonical family the decision is not close.
+         #  · WHAT THE DECISION RESTS ON: L38 carries the node's best coherence
          #    (.750, the maximum over the five-site FD set, against .442–.638
          #    elsewhere), its best â/ceiling (.6024, rebuilt-L16), and the
          #    depth→coherence→â law that all four ruled nodes follow —
@@ -486,7 +481,7 @@ SITES = {"3b": (13, 14, 18), "8b": (14, 16, 18), "qwen-7b": (19, 21, 23),
          #  · THE CURVE IS THE FLATTEST OF THE OVERNIGHT QUARTET — r² span .1020
          #    (8bL14) against .30/.38 on the dense nodes. That is exactly the
          #    regime where r² carries the least information and the â evidence
-         #    carries the most, and it is why this ruling turned on coherence and
+         #    carries the most, and it is why this decision turned on coherence and
          #    â/ceiling rather than on the curve.
          # FAMILY-MATCHED OBSERVATION, RECORDED WITH ITS CONFOUNDS NAMED: this
          # node has EXACTLY the same layer count (48) as its dense family-mate
@@ -508,7 +503,7 @@ SITES = {"3b": (13, 14, 18), "8b": (14, 16, 18), "qwen-7b": (19, 21, 23),
          # layer; d_model 2048. As on the Llama rows there is no local/global
          # contrast to read, so depth and coherence are the only structure
          # available — and here they are also sufficient.
-         # ⚠ CROSS-NODE COMPARABILITY CAVEAT, AND IT RIDES EVERY â/ceiling NUMBER
+         # ⚠ CROSS-MODEL COMPARABILITY CAVEAT, AND IT RIDES EVERY â/ceiling NUMBER
          # THIS ROW PRODUCES: `ceiling_random_q95` is ≈ .275 here (k128, d=2048)
          # against ≈ .136 on the d=8192 nodes. That is a pure √(k/d) artifact of
          # the narrow residual stream, not a property of the model's
@@ -521,7 +516,7 @@ SITES = {"3b": (13, 14, 18), "8b": (14, 16, 18), "qwen-7b": (19, 21, 23),
          # â/ceiling across nodes of different width without stating this.
          # Both 35 and 38 are ON the model's own computed 12-site scan grid
          # (7, 10, 13, 16, 19, 22, 26, 29, 32, 35, 38, 41 — no
-         # `scan_grid_extension` needed, unlike gemma), so the ratification
+         # `scan_grid_extension` needed, unlike gemma), so the scan-grid
          # invariant is satisfied by construction — a curve-visited pair
          # re-ranked by â evidence, never a fiat grid.
          # THE VECTOR SIDE IS OPEN: the five site-evidence vectors are FROZEN-v1
@@ -531,22 +526,23 @@ SITES = {"3b": (13, 14, 18), "8b": (14, 16, 18), "qwen-7b": (19, 21, 23),
          # `read_composed_predictions.SITE_OF_RECORD`.
          "qwen3-30b-a3b": (35, 38),                   # ⋆ L38 primary, L35 robustness
          # --- webtext-v3 base siblings (roster rows 25/26) ----------------------
-         # BOTH RULED BY LUXIA 2026-08-03 (ledger "TWO SITE RULINGS") from the
+         # BOTH registered from the
          # webtext-v3 sibling SCAN FITS — 12-site grids, raw arm, hub 8B, fitted
          # on the FROZEN `--splits-artifact` membership (920/280, 36/36 cells
-         # valid each). These are the two §5 CORE adds that were SCAN-REGISTRY
-         # ONLY at freeze; §5 required the ceremony inside their collection
-         # window, and this is it.
+         # valid each). These are the two CORE roster adds of the webtext-v3
+         # pre-registration (section 5) that were SCAN-REGISTRY ONLY at freeze;
+         # section 5 requires the ceremony inside their collection window, and
+         # this is it.
          #
          # EACH GRID CARRIES ONE SITE THE CURVE NEVER VISITED, AND THAT IS THE
-         # POINT OF THE RULING. Frozen §7's C4 read compares each sibling pair
+         # POINT OF THE REGISTRATION. The frozen section 7 C4 read compares each sibling pair
          # base-vs-instruct AT THE SAME REGISTERED SITE and EXCLUDES a pair whose
          # sites differ as site-confounded (the F3 lesson). So each base row is
          # registered at its own curve pick PLUS its instruct partner's site of
          # record — a requirement of the read, ruled explicitly, never a curve
          # finding. Both extra sites are carried in `metabasis.roster` as
          # `scan_grid_extension`, which is what makes them part of the EFFECTIVE
-         # scan grid and keeps the ratification invariant true rather than
+         # scan grid and keeps the scan-grid invariant true rather than
          # waived: the check below is against the extension-inclusive grid, the
          # same mechanism gemma3-27b and pythia-6.9b use.
          # ⚠ NEITHER PAIR-READ SITE IS BANKED YET (the scans collected the
@@ -554,7 +550,7 @@ SITES = {"3b": (13, 14, 18), "8b": (14, 16, 18), "qwen-7b": (19, 21, 23),
          # default-grid fit here resolves one site the bank does not hold, which
          # fails loudly at load rather than quietly.
          #
-         # llama-3.1-8b-base (row 25) — cp2 of record `488a81d1…`:
+         # llama-3.1-8b-base (row 25) — from its scan-fit run summary:
          #  · L15 ⋆ is the RIDGE + CKA peak (ridge .7224, cka_after .9781).
          #  · L13 is kept because it is the PROC-family peak (k128 AND k32) — the
          #    families disagree on this node, and the grid records both answers
@@ -563,7 +559,7 @@ SITES = {"3b": (13, 14, 18), "8b": (14, 16, 18), "qwen-7b": (19, 21, 23),
          #    hub's own banked column, HUB_SITE_OF_RECORD). A 32-layer computed
          #    grid is odd-only, so no curve could have produced it.
          "llama-3.1-8b-base": (13, 15, 16),            # ⋆ L15 (L13 proc peak, L16 C4)
-         # qwen2.5-7b-base (row 26) — cp2 of record `cc9d474c…`:
+         # qwen2.5-7b-base (row 26) — from its scan-fit run summary:
          #  · L20 ⋆ is the UNANIMOUS peak: every fit family agrees, .7796. This is
          #    the clean case, and it is worth naming as such beside the llama
          #    sibling's family split.
@@ -571,26 +567,25 @@ SITES = {"3b": (13, 14, 18), "8b": (14, 16, 18), "qwen-7b": (19, 21, 23),
          #  · L21 is the C4 pair-read site, matched to instruct `qwen-7b`'s L21.
          #  · CURVE CAVEAT: the proc family COLLAPSES over L4–L8 (shallow-half
          #    divergence); all families agree from L15 on, which is where the
-         #    ruling is drawn from. Nothing shallow is registered.
-         # The tuple is in the ORDER LUXIA RULED IT — bracket first, pair-read
+         #    registration is drawn from. Nothing shallow is registered.
+         # The tuple is in the ORDER IT WAS REGISTERED — bracket first, pair-read
          # site appended — and is deliberately NOT re-sorted, so a reader sees
-         # the ruling's shape. Every consumer treats it as a set or iterates it.
+         # the registration's shape. Every consumer treats it as a set or iterates it.
          "qwen2.5-7b-base": (18, 20, 22, 21),         # ⋆ L20 (L21 C4 pair-read)
          # --- webtext-v3 scale add (roster row 24) ------------------------------
-         # qwen2.5-72b-instruct: RULED BY LUXIA 2026-08-04 (ledger "SITE RULING")
-         # from the webtext-v3 12-site SCAN FITS on this node — cp2_summary of
-         # record `5f787171…`, 72/72 cells valid in BOTH arms, fitted on the
-         # FROZEN `--splits-artifact` membership. This is the third and last of
-         # the frozen §5 CORE adds to receive its ceremony (rows 25/26 were ruled
-         # 2026-08-03); §5 requires the ceremony inside the collection window and
+         # qwen2.5-72b-instruct: registered from the webtext-v3 12-site SCAN FITS
+         # on this node — 72/72 cells valid in BOTH arms, fitted on the FROZEN
+         # `--splits-artifact` membership. This is the third and last of the
+         # frozen section 5 CORE adds to receive its ceremony (after rows 25/26);
+         # section 5 requires the ceremony inside the collection window and
          # BEFORE any fit of this node is quoted, and this is it. L58 is the site
          # of record ⋆ and L63 is the robustness site.
          # THE EVIDENCE, so nobody re-derives this from one curve:
          #  · L58 IS THE PEAK ON FIVE OF THE SIX INSTRUMENTS the scan carries —
          #    all THREE native fit families, plus BOTH raw procrustes families
-         #    and raw cka. A 5/6 majority ACROSS TWO ARMS is what the ruling
+         #    and raw cka. A 5/6 majority ACROSS TWO ARMS is what the decision
          #    rests on, and the count is stated rather than one family's number,
-         #    because a single family is exactly what the r²/â rakes warn against.
+         #    because a single family is exactly what the r²/â inversions warn against.
          #  · THE SIXTH INSTRUMENT IS NATIVE CKA, AND IT PEAKS AT L63 — which is
          #    why L63 is kept rather than dropped. It is both the dissenting
          #    instrument's pick AND the bracket on a BROAD L48–L63 PLATEAU: the
@@ -602,19 +597,19 @@ SITES = {"3b": (13, 14, 18), "8b": (14, 16, 18), "qwen-7b": (19, 21, 23),
          #    here. That is the rows-25/26 sibling divergence pattern with the
          #    ROLES SWAPPED (there it was the proc family collapsing shallow),
          #    and it is the same lesson either way — the families agree from L27
-         #    on, and the ruling is drawn only from where they agree. Nothing
+         #    on, and the registration is drawn only from where they agree. Nothing
          #    shallow is registered.
          # THE COINCIDENCE WITH ROW 12 IS WORTH NAMING, AND IT IS A COINCIDENCE:
          # (58, 63) ⋆ L58 is EXACTLY llama-3.3-70b-instruct's registered grid,
          # arrived at independently, off this node's own scan. All three 80-layer
-         # rows (11, 12, 24) share ONE computed grid, so the frozen §7 C2
+         # rows (11, 12, 24) share ONE computed grid, so the frozen section 7 C2
          # recipe-vs-range read is site-for-site readable in any case; the
          # coincidence makes the footing against row 12 site-IDENTICAL as well as
          # grid-identical. C2's own paired sign test is scored against ROW 11,
-         # whose independent ruling is (37, 43) ⋆ L37 — mid-depth, unreconciled
+         # whose independent registration is (37, 43) ⋆ L37 — mid-depth, unreconciled
          # with either deep pair on purpose (the vintage disagreement recorded on
          # row 12 above). Nothing here is inherited from row 11 or row 12.
-         # ⚠ AND THE DESK FLAGGED A C2 RIDER ON EXACTLY THIS: the 72B's r² TROUGH
+         # ⚠ AND A C2 RIDER IS FLAGGED ON EXACTLY THIS: the 72B's r² TROUGH
          # sits on row 11's sites (37, 43) while its r² PEAK sits on row 12's
          # (58, 63). A C2 comparison quoted at the OTHER row's site is therefore
          # reading this node at a curve extremum of its own, in one direction or
@@ -622,7 +617,7 @@ SITES = {"3b": (13, 14, 18), "8b": (14, 16, 18), "qwen-7b": (19, 21, 23),
          # must say which site it is quoting at.
          # Both 58 and 63 are ON the model's own computed 12-site scan grid
          # (12, 17, 22, 27, 32, 37, 43, 48, 53, 58, 63, 68), so NO
-         # `scan_grid_extension` is needed and the ratification invariant is
+         # `scan_grid_extension` is needed and the scan-grid invariant is
          # satisfied by construction — unlike rows 25/26, this is a
          # curve-visited pair with nothing ruled off-grid. See
          # `read_composed_predictions.SITE_OF_RECORD`; the two registries must
@@ -630,9 +625,10 @@ SITES = {"3b": (13, 14, 18), "8b": (14, 16, 18), "qwen-7b": (19, 21, 23),
          "qwen2.5-72b-instruct": (58, 63)}             # ⋆ L58 primary, L63 robustness
 
 # Every model key the CLIs will accept. SITES = models whose FIT grid is fixed;
-# metabasis.roster.SCAN_GRIDS = the 12-site alignment-curve scan grids (prereg §4,
-# "sites from curves, never fiat"). The two registries OVERLAP by design: a scan
-# node that the desk has ratified is ADDED to SITES and KEPT in SCAN_GRIDS, so the
+# metabasis.roster.SCAN_GRIDS = the 12-site alignment-curve scan grids (the
+# transport-campaign pre-registration, section 4: "sites from curves, never
+# fiat"). The two registries OVERLAP by design: a scan node whose site is
+# registered is ADDED to SITES and KEPT in SCAN_GRIDS, so the
 # scan that produced its site of record stays re-derivable. Membership therefore
 # reads: in SITES => the fit grid is fixed, no --src-sites/--tgt-sites needed; in
 # SCAN_GRIDS only => still looking, pass the grid explicitly (`--sites` on the
@@ -640,12 +636,13 @@ SITES = {"3b": (13, 14, 18), "8b": (14, 16, 18), "qwen-7b": (19, 21, 23),
 # command line where the stamp and the shell history can both see it.
 MODEL_KEYS: tuple[str, ...] = tuple(sorted(set(SITES) | set(SCAN_GRIDS)))
 
-# Import-time ratification invariant: every key in BOTH registries must have its
+# Import-time scan-grid invariant (`metabasis.roster.fiat_grid_problems`): every
+# key in BOTH registries must have its
 # fixed grid drawn from its own 12-site scan grid. A fiat grid (or a foreign
 # model reusing a bank key) would otherwise fit silently — fail before any fit.
 _RATIFICATION_PROBLEMS = fiat_grid_problems(SITES)
 if _RATIFICATION_PROBLEMS:
-    raise ValueError("SITES violates the ratification invariant:\n  "
+    raise ValueError("SITES violates the scan-grid invariant:\n  "
                      + "\n  ".join(_RATIFICATION_PROBLEMS))
 
 
@@ -654,17 +651,17 @@ class FitGridError(LookupError):
 
     Covers both failure modes the campaign has actually hit:
 
-      * a model key with NO fixed grid (an un-ratified scan-registry node) —
-        historically a bare ``KeyError('gpt2-xl')`` raised from inside
-        ``run_grid``, which says nothing about what to do next;
-      * a site the model's fixed grid does not contain — historically no error
-        at all, because nothing checked.
+      * a model key with NO fixed grid (an unregistered scan-registry node) —
+        which would otherwise surface as a bare ``KeyError('gpt2-xl')`` from
+        inside ``run_grid``, saying nothing about what to do next;
+      * a site the model's fixed grid does not contain — which nothing else
+        checks, so it would otherwise raise no error at all.
 
     Every message names the MODEL and the requested SITE/GRID. Silent
-    wrong-grid resolution is exactly the bug this class exists to prevent: the
-    70B carried the retired scan-era L17 grid after its site of record moved to
-    L37/L43, so any tool that did not pass ``--tgt-sites`` explicitly fit the
-    wrong sites without a word (session-3 ruling, 2026-07-27).
+    wrong-grid resolution is exactly the bug this class exists to prevent: when
+    a model's site of record moves off its scan-era grid (the 70B's retired
+    L17), any tool that does not pass ``--tgt-sites`` explicitly would otherwise
+    fit the retired sites without a word.
 
     ``LookupError``, deliberately NOT ``KeyError``: callers that wrap a dict
     lookup in ``except KeyError`` must not swallow this.
@@ -721,20 +718,16 @@ DEFAULT_ARM_ROOT = Path("outputs/battery/arms/A8_conjugation")
 
 
 # ------------------------------------------------------- the basis's own strata
-# THE STRATUM VOCABULARY IS DERIVED FROM THE PINNED CORPUS MANIFEST, NEVER TYPED
-# (desk ruling 2026-08-03, ledger block of record; brief
-# BRIEF-strata-basis-fix-2026-08-03).
+# THE STRATUM VOCABULARY IS DERIVED FROM THE PINNED CORPUS MANIFEST, NEVER TYPED.
 #
-# WHAT WENT WRONG. Both this module and the collector carried a module-level
-# `STRATA` tuple in v2.1 vocabulary — ("S1","S2","S3") here, ("S1","S2","S3","S5")
-# in the collector. The collector's tuple made the CP-1 spot-replay gate die with
-# `KeyError: 'wikitext'` on the webtext-v3 basis (canary, 2026-08-03); this
-# module's tuple was the same landmine one step further downstream and WOULD NOT
-# HAVE CRASHED — it would have silently produced an EMPTY per-stratum readout on
-# a v3 corpus, so `strata_carried` could never reach the frozen prereg §3.4 bar
-# ("per-stratum R² carries in ≥2 of the four strata {wikitext, c4, pg19,
-# stackexchange}") and EVERY v3 fit would have been marked invalid for a reason
-# that is not about the data. A wrong answer that looks like a verdict.
+# WHY. A module-level `STRATA` tuple in v2.1 vocabulary ("S1","S2","S3") fails
+# on any other basis. In the collector it crashes the spot-replay gate with
+# `KeyError: 'wikitext'` on webtext-v3; here it WOULD NOT CRASH — it would
+# silently produce an EMPTY per-stratum readout on a v3 corpus, so
+# `strata_carried` could never reach the frozen section 3.4 bar of the webtext-v3
+# pre-registration ("per-stratum R² carries in ≥2 of the four strata {wikitext,
+# c4, pg19, stackexchange}") and EVERY v3 fit would be marked invalid for a
+# reason that is not about the data. A wrong answer that looks like a verdict.
 #
 # THE RULE. The basis is a PARAMETER of the campaign; its stratum names are a
 # property OF THE MANIFEST and are read from it. Order is FIRST OCCURRENCE in the
@@ -744,22 +737,22 @@ DEFAULT_ARM_ROOT = Path("outputs/battery/arms/A8_conjugation")
 # stratum, four, or a vocabulary nobody has seen works by construction.
 #
 # BACKWARD COMPATIBILITY IS PROVEN, NOT ASSUMED. On the v2.1 fitting manifest the
-# derived order is exactly ("S1","S2","S3"); on the Leg-4 S5-augmented manifest
+# derived order is exactly ("S1","S2","S3"); on the S5-augmented manifest
 # (v2.1 rows byte-identical, S5 appended) it is exactly ("S1","S2","S3","S5").
 # See the collector's `pick_spot_ids` selftest for the byte-exact gate-identity
 # proof — that gate is a certified instrument and its selection on a v2.1-shaped
 # corpus provably does not move.
 
-#: The frozen §3.4 carry bar, as a number rather than as prose in four places.
+#: The frozen section 3.4 carry bar, as a number rather than as prose in four places.
 #: "per-stratum R² carries in ≥2 of the four strata" — the ≥2 is the rule; "the
 #: four" is a property of the webtext-v3 basis, which is why the denominator is
 #: derived and only the threshold lives here.
 MIN_STRATA_CARRIED = 2
 
-#: What this module hardcoded before 2026-08-03. DOCUMENTATION ONLY — nothing
-#: reads it to make a decision, and nothing may start to. It is kept so a reader
-#: of a pre-fix artifact can see which vocabulary produced it, and so the
-#: backward-compatibility claim names the thing it is compatible WITH.
+#: The v2.1 stratum vocabulary. DOCUMENTATION ONLY — nothing reads it to make a
+#: decision, and nothing may start to. It is kept so a reader of a v2.1 artifact
+#: can see which vocabulary produced it, and so the backward-compatibility claim
+#: names the thing it is compatible WITH.
 LEGACY_V21_STRATA: tuple[str, ...] = ("S1", "S2", "S3")
 
 
@@ -916,21 +909,20 @@ def load_labels(manifest_path: Path, text_ids: list[str]) -> Labels:
         top.append(e["topic_idx"] if e["topic_idx"] is not None else -1)
         #  `s2_rank` and `make_split` below carry v2.1 SPLIT vocabulary — the
         #  literal "S2" and the topic-grouped holdout rule. THAT IS DELIBERATE
-        #  AND IT IS NOW BOUNDED (2026-08-03, brief BRIEF-v3-splits-wiring): the
-        #  legacy derivation is the v2.1 lane and ONLY the v2.1 lane. A basis
-        #  that cannot supply the legacy rule's quota (no topics, no S2 shard
-        #  ranks — i.e. every webtext-v3 manifest) no longer falls through to an
-        #  empty holdout: `make_split` REFUSES and names `--splits-artifact`.
-        #  The v3 membership is FROZEN by `derive_webtext_splits.py` into
-        #  splits.json / halves.json (prereg §2 / §6-I1) and CONSUMED below —
-        #  never re-derived here.
+        #  AND IT IS BOUNDED: the legacy derivation is the v2.1 lane and ONLY
+        #  the v2.1 lane. A basis that cannot supply the legacy rule's quota (no
+        #  topics, no S2 shard ranks — i.e. every webtext-v3 manifest) never
+        #  falls through to an empty holdout: `make_split` REFUSES and names
+        #  `--splits-artifact`. The v3 membership is FROZEN by
+        #  `derive_webtext_splits` into the splits and halves artifacts and
+        #  CONSUMED below — never re-derived here.
         s2r.append(int(t.rsplit("-", 1)[1]) if e["stratum"] == "S2" else -1)
     return Labels(stratum=np.array(strat), group=np.array(grp),
                   topic=np.array(top), s2_rank=np.array(s2r), strata=strata)
 
 
-#: THE CERTIFIED v2.1 SPLIT (gate-identity discipline, brief item 3). Recorded
-#: 2026-08-03 by running the PRE-WIRING `make_split` on the v2.1 fitting manifest
+#: THE CERTIFIED v2.1 SPLIT (gate-identity discipline). Recorded by running the
+#: legacy `make_split` draw on the v2.1 fitting manifest
 #: of record — `corpus/fitting-v21/corpus_manifest.meta.json`, 775 entries, the
 #: fit code's own A8_SEED=80 path — and re-proved by selftest 6a on every run.
 #: The banked v2.1 fits were computed against THIS membership; it is an input to
@@ -956,16 +948,16 @@ class SplitSelectionError(RuntimeError):
     Three failure modes, all of which the campaign can actually hit:
 
       * a basis the LEGACY v2.1 derivation cannot express (no topic_idx, no S2
-        shard ranks — every webtext-v3 manifest). Before 2026-08-03 this held
-        NOTHING out and surfaced as `n_test=0` inside a summary full of
-        `valid: false`; now it names `--splits-artifact` and stops;
+        shard ranks — every webtext-v3 manifest). Unrefused, this would hold
+        NOTHING out and surface as `n_test=0` inside a summary full of
+        `valid: false`; instead it names `--splits-artifact` and stops;
       * a FROZEN artifact that does not belong to the loaded corpus (its
         recorded manifest sha differs, an id does not resolve, a count
         disagrees with its own id lists);
       * an artifact whose ineligible set leaks into a realized test side —
-        re-checked here rather than trusted, per the brief.
+        re-checked here rather than trusted.
 
-    An exception, never `sys.exit` (rake M45 rule (c)): an all-module selftest
+    An exception, never `sys.exit`: an all-module selftest
     sweep survives it and still prints its terminal TOTAL line.
     """
 
@@ -982,12 +974,12 @@ def make_split(labels: Labels, seed: int = A8_SEED) -> tuple[np.ndarray, np.ndar
     THE LEGACY (v2.1-shaped) LANE, and it stays byte-exact: the draw below is
     untouched — same seed, same two `rng.choice` calls in the same order — so the
     realized membership on the v2.1 fitting manifest of record is the certified
-    input the banked fits were computed against (598/177, `split_sha256`
-    `4bee4691…`; proven in selftest 6a).
+    input the banked fits were computed against (598/177, the `split_sha256` of
+    `V21_SPLIT_OF_RECORD`; proven in selftest 6a).
 
-    What is NEW is only the PRECONDITION: a basis that cannot supply the rule's
-    quota is refused instead of silently held-out-empty. Nothing about a basis
-    that CAN supply it changes.
+    The PRECONDITION is the only thing beyond the draw: a basis that cannot
+    supply the rule's quota is refused instead of silently held-out-empty. It
+    changes nothing for a basis that CAN supply it.
     """
     n_topics, n_s2 = legacy_split_capacity(labels)
     if n_topics < HELD_OUT_TOPICS or n_s2 < HELD_OUT_S2:
@@ -997,9 +989,9 @@ def make_split(labels: Labels, seed: int = A8_SEED) -> tuple[np.ndarray, np.ndar
             f"and {n_s2} S2 shard rank(s) (the rule holds out {HELD_OUT_S2}). "
             f"This is the shape of EVERY webtext-v3 manifest (topic_idx is null "
             f"and no id is an S2 shard), and its split is NOT derived at fit "
-            f"time — it is FROZEN by derive_webtext_splits.py per prereg §2 / "
-            f"§6-I1. Pass --splits-artifact <…/splits.json> (or --half a|b with "
-            f"--halves-artifact <…/halves.json>) so the fit CONSUMES the frozen "
+            f"time — it is FROZEN by derive_webtext_splits (webtext-v3 "
+            f"pre-registration sections 2 and 6). Pass --splits-artifact <splits> "
+            f"(or --half a|b with --halves-artifact <halves>) so the fit CONSUMES the frozen "
             f"membership. Never an empty test set, never a re-derivation.")
     rng = np.random.default_rng(seed)
     topics = np.array(sorted({int(t) for t in labels.topic if t >= 0}))
@@ -1018,13 +1010,13 @@ def make_split(labels: Labels, seed: int = A8_SEED) -> tuple[np.ndarray, np.ndar
 
 
 # ------------------------------------------- THE FROZEN SPLIT ARTIFACTS (v3)
-# THE v3 SPLIT IS CONSUMED, NEVER DERIVED HERE (desk brief BRIEF-v3-splits-wiring
-# -2026-08-03; frozen prereg webtext-v3 §2 / §6-I1, tag `freeze/webtext-v3`).
+# THE v3 SPLIT IS CONSUMED, NEVER DERIVED HERE (the frozen webtext-v3
+# pre-registration, sections 2 and 6 I1, tag `freeze/webtext-v3`).
 #
 # `derive_webtext_splits.py` computes the membership ONCE at freeze, from the
 # two read-only full manifests, and records it in two artifacts whose shas are in
-# the freeze act: splits.json (the realized 280/1200 train/test membership) and
-# halves.json (the §6-I1 halving, each half carrying its OWN internal §2 split).
+# the freeze act: the splits artifact (the realized 280/1200 train/test membership) and
+# the halves artifact (the section 6 I1 halving, each half carrying its OWN internal section 2 split).
 # This module MIRRORS those shapes below — it never reimplements the draw, and
 # there is deliberately no code path here that could produce a v3 membership.
 #
@@ -1036,7 +1028,7 @@ def make_split(labels: Labels, seed: int = A8_SEED) -> tuple[np.ndarray, np.ndar
 #   3. the artifact's self-reported counts match its own id lists, and the
 #      realized counts match the artifact (or, under an explicit row subset,
 #      the coverage is recorded and named);
-#   4. ZERO ineligible ids (the §2 v2.1-overlap set the artifact carries) in any
+#   4. ZERO ineligible ids (the section 2 v2.1-overlap set the artifact carries) in any
 #      realized test membership — the artifact already guarantees it; the fitter
 #      RE-CHECKS rather than trusts.
 # The artifact's self-described rule is echoed into cp2_summary["split"], so a
@@ -1047,7 +1039,7 @@ def make_split(labels: Labels, seed: int = A8_SEED) -> tuple[np.ndarray, np.ndar
 #: sha is preferentially identified by matching `expected_v3_manifest_sha256`.
 CORPUS_MANIFEST_NAME = "corpus_manifest.json"
 
-#: The two §6-I1 halves, as the CLI names them -> as halves.json names them.
+#: The two section 6 I1 halves, as the CLI names them -> as the halves artifact names them.
 HalfName = Literal["a", "b"]
 HALF_KEYS: dict[str, str] = {"a": "half_a", "b": "half_b"}
 
@@ -1066,12 +1058,12 @@ class ArtifactBasis(BaseModel):
     expected_v3_manifest_sha256: str = ""
 
     def derived_from_manifest_sha256(self) -> tuple[str, bool]:
-        """(the sha the draw ACTUALLY read, does it match the prereg identity).
+        """(the sha the draw ACTUALLY read, does it match the pre-registered identity).
 
         `derive_webtext_splits` WARNS rather than halts when the manifest it was
-        handed is not the prereg's basis identity, and records the sha it really
+        handed is not the pre-registered basis identity, and records the sha it really
         used — so the binding comparison for a fit is against THAT sha (these
-        ids were drawn from THAT corpus), with the prereg-identity agreement
+        ids were drawn from THAT corpus), with the pre-registered-identity agreement
         reported beside it rather than conflated with it.
         """
         expected = self.expected_v3_manifest_sha256
@@ -1092,7 +1084,7 @@ class ArtifactBasis(BaseModel):
 
 
 class OverlapBlock(BaseModel):
-    """`overlap` — the §2 v2.1-overlap set: ids that are TRAIN-side BY RULE."""
+    """`overlap` — the section 2 v2.1-overlap set: ids that are TRAIN-side BY RULE."""
 
     model_config = {"extra": "ignore"}
 
@@ -1109,14 +1101,14 @@ class OverlapBlock(BaseModel):
                 f"ineligible ids are listed")
         if self.ledgered is not None and self.ledgered != self.n_shared_with_v21_S2:
             raise ValueError(
-                f"overlap block disagrees with the LEDGERED figure "
+                f"overlap block disagrees with the RECORDED figure "
                 f"({self.n_shared_with_v21_S2} vs {self.ledgered}) — the derivation "
                 f"HALTs on this, so an artifact carrying it is not of record")
         return self
 
 
 class SplitRule(BaseModel):
-    """`rule` of splits.json — echoed verbatim into the run's stamp."""
+    """`rule` of the splits artifact — echoed verbatim into the run's stamp."""
 
     model_config = {"extra": "ignore"}
 
@@ -1130,7 +1122,7 @@ class SplitRule(BaseModel):
 
 
 class HalvesRule(BaseModel):
-    """`rule` of halves.json — the halving stream plus each half's own stream."""
+    """`rule` of the halves artifact — the halving stream plus each half's own stream."""
 
     model_config = {"extra": "ignore"}
 
@@ -1146,7 +1138,7 @@ class HalvesRule(BaseModel):
 
 
 class SplitCounts(BaseModel):
-    """`counts` of splits.json — the artifact's own totals, re-checked here."""
+    """`counts` of the splits artifact — the artifact's own totals, re-checked here."""
 
     model_config = {"extra": "ignore"}
 
@@ -1157,7 +1149,7 @@ class SplitCounts(BaseModel):
 
 
 class PerStratumSplit(BaseModel):
-    """`per_stratum[st]` of splits.json — the realized per-stratum holdout."""
+    """`per_stratum[st]` of the splits artifact — the realized per-stratum holdout."""
 
     model_config = {"extra": "ignore"}
 
@@ -1166,7 +1158,7 @@ class PerStratumSplit(BaseModel):
 
 
 class InternalSplit(BaseModel):
-    """A half's OWN §2 train/test split, as frozen. Never recomputed here."""
+    """A half's OWN section 2 train/test split, as frozen. Never recomputed here."""
 
     model_config = {"extra": "ignore"}
 
@@ -1176,7 +1168,7 @@ class InternalSplit(BaseModel):
 
 
 class HalfBlock(BaseModel):
-    """`half_a` / `half_b` of halves.json: the membership + its internal split."""
+    """`half_a` / `half_b` of the halves artifact: the membership + its internal split."""
 
     model_config = {"extra": "ignore"}
 
@@ -1201,7 +1193,7 @@ class HalfBlock(BaseModel):
 
 
 class SplitsArtifact(BaseModel):
-    """splits.json — the FROZEN realized webtext-v3 train/test membership.
+    """The splits artifact — the FROZEN realized webtext-v3 train/test membership.
 
     A mirror of `derive_webtext_splits.build_splits_artifact`, not a
     reimplementation: every field here is READ, none is computed.
@@ -1247,13 +1239,13 @@ class SplitsArtifact(BaseModel):
         if leaked:
             raise ValueError(
                 f"the artifact's OWN test side carries {len(leaked)} ineligible "
-                f"id(s) (e.g. {sorted(leaked)[:3]}) — the §2 overlap rule is "
+                f"id(s) (e.g. {sorted(leaked)[:3]}) — the section 2 overlap rule is "
                 f"violated inside the artifact itself")
         return self
 
 
 class HalvesArtifact(BaseModel):
-    """halves.json — the FROZEN §6-I1 halving + each half's internal §2 split."""
+    """The halves artifact — the FROZEN section 6 I1 halving + each half's internal section 2 split."""
 
     model_config = {"extra": "ignore"}
 
@@ -1280,7 +1272,7 @@ class HalvesArtifact(BaseModel):
             if leaked:
                 raise ValueError(
                     f"{name}: its internal test side carries {len(leaked)} "
-                    f"ineligible id(s) (e.g. {sorted(leaked)[:3]}) — the §2 overlap "
+                    f"ineligible id(s) (e.g. {sorted(leaked)[:3]}) — the section 2 overlap "
                     f"rule applies INSIDE a half too")
         for key, n in (("half_a", len(a)), ("half_b", len(b))):
             recorded = self.counts.get(key)
@@ -1292,7 +1284,7 @@ class HalvesArtifact(BaseModel):
         key = HALF_KEYS.get(half)
         if key is None:
             raise SplitSelectionError(
-                f"unknown half {half!r}: the §6-I1 halving names exactly "
+                f"unknown half {half!r}: the section 6 I1 halving names exactly "
                 f"{sorted(HALF_KEYS)}")
         return getattr(self, key)
 
@@ -1304,7 +1296,7 @@ def _load_artifact(path: Path, model: type[BaseModel], kind: str) -> Any:
     except OSError as exc:
         raise SplitSelectionError(
             f"the frozen {kind} artifact cannot be read at {path} ({exc}). It is a "
-            f"desk-side staging artifact (never git) — check the path, and never "
+            f"local, uncommitted artifact — check the path, and never "
             f"substitute a re-derivation for it") from exc
     sha = hashlib.sha256(raw).hexdigest()
     try:
@@ -1326,12 +1318,12 @@ def _load_artifact(path: Path, model: type[BaseModel], kind: str) -> Any:
 
 
 def load_splits_artifact(path: Path) -> SplitsArtifact:
-    """splits.json, read-only, shape-validated, sha recorded."""
+    """The splits artifact, read-only, shape-validated, sha recorded."""
     return _load_artifact(path, SplitsArtifact, "splits")
 
 
 def load_halves_artifact(path: Path) -> HalvesArtifact:
-    """halves.json, read-only, shape-validated, sha recorded."""
+    """The halves artifact, read-only, shape-validated, sha recorded."""
     return _load_artifact(path, HalvesArtifact, "halves")
 
 
@@ -1351,10 +1343,10 @@ def require_basis_match(basis: ArtifactBasis, *, loaded_sha: str, manifest: Path
     if not matches_prereg:
         logger.warning(
             "%s: the artifact was derived from manifest sha %s, which is NOT the "
-            "prereg's basis identity %s recorded in the same artifact. The "
+            "pre-registration's basis identity %s recorded in the same artifact. The "
             "membership belongs to the corpus this run loaded (that check "
             "PASSED), but the basis identity disagreement is stamped and must be "
-            "resolved by the desk before any v3 claim files",
+            "resolved before any v3 claim files",
             artifact_path, derived, basis.expected_v3_manifest_sha256)
     return {"artifact_derived_from_manifest_sha256": derived,
             "manifest_sha256_loaded": loaded_sha,
@@ -1395,7 +1387,7 @@ def _integrity_recheck(realized_test_ids: Sequence[str], ineligible: set[str], *
     if leaked:
         raise SplitSelectionError(
             f"{artifact_path}: {len(leaked)} ineligible id(s) reached the realized "
-            f"test side of {where} (e.g. {leaked[:3]}). The §2 v2.1-overlap rule "
+            f"test side of {where} (e.g. {leaked[:3]}). The section 2 v2.1-overlap rule "
             f"makes these TRAIN-side by rule — no held-out quantity is ever "
             f"computed on a text a prior result touched")
     return {"rule": "PREREG §2 v2.1-overlap: ineligible ids are TRAIN-side by rule",
@@ -1409,7 +1401,7 @@ def membership_sha256(test_ids: Sequence[str]) -> str:
 
     `split_sha256` (the mask's bytes) is kept unchanged because banked v2.1
     summaries carry it — but a mask is a pattern over WHICHEVER rows were
-    loaded, so two different memberships can share one. The two §6-I1 halves are
+    loaded, so two different memberships can share one. The two section 6 I1 halves are
     exactly that case: same shape, disjoint rows. This sha names the ids
     themselves, so a reader can never confuse one half's split with the other's.
     """
@@ -1458,7 +1450,7 @@ def split_from_artifact(artifact: SplitsArtifact, row_ids: Sequence[str],
                         corpus_ids: set[str], *, manifest: Path,
                         manifest_sha256: str,
                         subset_reason: Optional[str] = None) -> SplitPlan:
-    """THE `--splits-artifact` LANE: membership READ from splits.json."""
+    """THE `--splits-artifact` LANE: membership READ from the splits artifact."""
     basis = require_basis_match(artifact.basis, loaded_sha=manifest_sha256,
                                 manifest=manifest,
                                 artifact_path=artifact.source_path, kind="splits")
@@ -1502,7 +1494,7 @@ def split_from_half(artifact: HalvesArtifact, half: HalfName,
                     subset_reason: Optional[str] = None) -> SplitPlan:
     """THE `--half a|b` LANE: the half's membership AND its own internal split.
 
-    Both come from halves.json. Nothing is recomputed — not the halving, not the
+    Both come from the halves artifact. Nothing is recomputed — not the halving, not the
     internal train/test draw — and the half identity travels in the stamp.
     """
     basis = require_basis_match(artifact.basis, loaded_sha=manifest_sha256,
@@ -1583,7 +1575,7 @@ def resolve_split_plan(labels: Labels, row_ids: Sequence[str], corpus_ids: set[s
         if halves is None:
             raise SplitSelectionError(
                 f"--half {half} needs the frozen halves artifact: pass "
-                f"--halves-artifact <…/halves.json>. The §6-I1 halving is FROZEN "
+                f"--halves-artifact <halves>. The section 6 I1 halving is FROZEN "
                 f"and is never recomputed at fit time")
         if splits is not None:
             raise SplitSelectionError(
@@ -1616,7 +1608,7 @@ def resolve_split_plan(labels: Labels, row_ids: Sequence[str], corpus_ids: set[s
 class TrainExclusion(BaseModel):
     """A ruled set of text_ids removed from the TRAIN side, and nothing else.
 
-    THE ONE THING THIS IS FOR (frozen webtext-v3 prereg §6-I5's *beside*): "the
+    THE ONE THING THIS IS FOR (frozen webtext-v3 pre-registration section 6 I5's *beside*): "the
     same computation excluding the 59 shared wikitext texts' influence (legs
     refit on the shared-text-free train subset) — the overlap-clean form". The
     held-out membership is UNTOUCHED — the beside asks what the maps look like
@@ -1737,8 +1729,8 @@ def split_identity(info: Mapping[str, Any]) -> dict[str, Any]:
     `train_exclusion_sha256` is part of the identity: an overlap-clean object and
     a primary object have the same pair, sites, arm and held-out membership, and
     differ ONLY in which train rows the map saw. Without this key the guard would
-    let one overwrite the other in place. Absent on every pre-2026-08-04 summary
-    and on every run with no exclusion, where it reads None on both sides.
+    let one overwrite the other in place. Absent on summaries written before the
+    key existed and on every run with no exclusion, where it reads None on both sides.
     """
     return {"source": info.get("source"), "half": info.get("half"),
             "artifact_sha256": info.get("artifact_sha256"),
@@ -1766,7 +1758,7 @@ def guard_fits_dir(fits_dir: Path, info: Mapping[str, Any]) -> None:
         return
     now, before = split_identity(info), split_identity(prior)
     if before["source"] is None and now["source"] == "legacy-derivation":
-        return                        # a pre-2026-08-03 summary; the same lane
+        return                        # a summary without a split source: the same lane
     if before == now:
         return
     raise SplitSelectionError(
@@ -1954,7 +1946,7 @@ def evaluate_fit(name: str, predict_fn, refit_predict_fn, x, y, train, test,
     strata_test = labels.stratum[test]
     #  THE DERIVED SET, everywhere: per-stratum R², the per-stratum null
     #  envelope and the carry list all range over `labels.strata` (the pinned
-    #  manifest's own vocabulary), so on webtext-v3 the frozen §3.4 denominator
+    #  manifest's own vocabulary), so on webtext-v3 the frozen section 3.4 denominator
     #  is the four named strata and on a v2.1 manifest it is S1/S2/S3(+S5).
     basis = tuple(labels.strata)
     ps_r2 = per_stratum_r2(y[test], y_pred, y_train_mean, strata_test, basis)
@@ -1975,7 +1967,7 @@ def evaluate_fit(name: str, predict_fn, refit_predict_fn, x, y, train, test,
     carried = [s for s in basis
                if s in ps_r2 and np.isfinite(ps_null_q95[s]) and ps_r2[s] > ps_null_q95[s]]
     shuf_q95, strat_q95 = q(null_overall["shuffled"]), q(null_overall["stratum"])
-    #  Frozen prereg §3.4: "per-stratum R² carries in >= 2 of the four strata".
+    #  Frozen webtext-v3 pre-registration section 3.4: "per-stratum R² carries in >= 2 of the four strata".
     #  The BAR is 2 and is frozen; "the four" is the derived basis's size, which
     #  is 4 on webtext-v3 exactly as frozen and 3-or-4 on v2.1 manifests.
     valid = ((r2 > shuf_q95) and (r2 > strat_q95)
@@ -2208,7 +2200,7 @@ def parse_fit_name(fit_path: Path) -> tuple[str, str, str]:
 def fit_summary_candidates(fit_path: Path) -> list[Path]:
     """Where the run summary for `fit_path` can be, in the order it is looked for.
 
-    `run_grid` writes `cp2_summary.json` into the fits directory beside the maps
+    `run_grid` writes the run summary into the fits directory beside the maps
     (`<arm-root>/<fits-dirname>/`, `fits` by default). A banked run may instead
     hold the summary in the run root with the maps under `<run>/fits*/`, so when
     the map's directory is a fits directory (its name starts with `fits`) the
@@ -2407,7 +2399,7 @@ def subset_labels(labels: Labels, keep: np.ndarray) -> Labels:
     The derived vocabulary is the BASIS's, not the slice's: with `--fit-strata
     S1,S2` the readout still ranges over the whole basis, so a stratum the fit
     excluded reports as absent rather than silently redefining the denominator
-    the §3.4 carry rule is read against. (This is also what keeps the v2.1
+    the section 3.4 carry rule is read against. (This is also what keeps the v2.1
     `--fit-strata` behaviour byte-identical to the pre-derivation code, which
     ranged over the module constant.)
     """
@@ -2431,7 +2423,7 @@ def run_grid(arm_root: Path, src_model: str, tgt_model: str,
     fits_dir.mkdir(parents=True, exist_ok=True)
     manifest = arm_root / "corpus" / "corpus_manifest.json"
 
-    #  THE BASIS, READ ONCE AND UP FRONT (desk ruling 2026-08-03). Derived here
+    #  THE BASIS, READ ONCE AND UP FRONT. Derived here
     #  as well as inside `load_labels` so the run's stamp can name the
     #  vocabulary even if the grid loop never executes, and so a basis that
     #  cannot satisfy the frozen carry rule is announced BEFORE the fits rather
@@ -2445,14 +2437,13 @@ def run_grid(arm_root: Path, src_model: str, tgt_model: str,
                 manifest_sha[:12], basis_counts)
     if len(basis_strata) < MIN_STRATA_CARRIED:
         logger.warning(
-            "basis carries %d stratum/strata %s — the frozen prereg §3.4 carry "
+            "basis carries %d stratum/strata %s — the frozen pre-registration section 3.4 carry "
             "rule needs >= %d, so NO fit from this basis can be marked valid. "
             "The fits are still computed and banked; read them beside this "
             "line, and do not read `valid: false` as a statement about the maps",
             len(basis_strata), list(basis_strata), MIN_STRATA_CARRIED)
 
-    #  THE SPLIT LANE, RESOLVED ONCE AND UP FRONT (brief BRIEF-v3-splits-wiring
-    #  -2026-08-03). The artifacts are read and validated against THIS corpus
+    #  THE SPLIT LANE, RESOLVED ONCE AND UP FRONT. The artifacts are read and validated against THIS corpus
     #  before any bank is loaded, so a membership that does not belong to this
     #  basis refuses in the first second of the run rather than after the grid.
     splits: Optional[SplitsArtifact] = (
@@ -2469,7 +2460,7 @@ def run_grid(arm_root: Path, src_model: str, tgt_model: str,
                         "%s…, MATCHES this run's corpus", label, art.source_path,
                         art.sha256[:12], manifest_sha[:12])
     if half is not None:
-        logger.info("half lane: %s (PREREG §6-I1) — membership and internal split "
+        logger.info("half lane: %s (pre-registration section 6 I1) — membership and internal split "
                     "both read from the artifact", HALF_KEYS.get(half, half))
 
     #  THE TRAIN EXCLUSION, READ AND DIGESTED BEFORE THE FIRST FIT (sealed-stamp
@@ -2486,9 +2477,9 @@ def run_grid(arm_root: Path, src_model: str, tgt_model: str,
     all_records: list[FitRecord] = []
     agreement: dict[str, dict] = {}
     split_info: dict = {}
-    # Resolve BOTH grids up front and loudly: a missing key here used to surface
-    # as a bare KeyError from the middle of the loop, and a stale registry entry
-    # surfaced as nothing at all (it just fit the wrong sites).
+    # Resolve BOTH grids up front and loudly: a missing key would otherwise
+    # surface as a bare KeyError from the middle of the loop, and a stale registry
+    # entry as nothing at all (it would just fit the wrong sites).
     sites_map = {**SITES, **(sites_override or {})}
     src_sites = sites_for(src_model, sites_map)
     tgt_sites = sites_for(tgt_model, sites_map)
@@ -2554,7 +2545,7 @@ def run_grid(arm_root: Path, src_model: str, tgt_model: str,
         "split_source": split_info.get("source"),
         "half": split_info.get("half"),
         "splits_artifact_sha256": split_info.get("artifact_sha256"),
-        # ── THE TRAIN EXCLUSION, HOISTED (frozen webtext-v3 §6-I5's beside) ───
+        # ── THE TRAIN EXCLUSION, HOISTED (frozen webtext-v3 pre-registration section 6 I5's beside) ───
         # None on every primary object. Non-None means these maps never saw the
         # excluded rows, so they are a LABELED BESIDE and are not interchangeable
         # with the primary tree's objects — hoisted beside the split identity for
@@ -2565,7 +2556,7 @@ def run_grid(arm_root: Path, src_model: str, tgt_model: str,
         "train_exclusion_n": (split_info.get("train_exclusion") or {}).get("n_excluded"),
         "fit_strata": fit_strata, "arms": list(arms),
         "null_group_key": "(stratum|voice|mode)",
-        # ── THE STRATUM BASIS (desk ruling 2026-08-03) ───────────────────────
+        # ── THE STRATUM BASIS ──────────────────────────────────────────────────
         # Derived from the pinned manifest, never typed. Recorded here because
         # `per_stratum_r2` / `per_stratum_null_q95` / `strata_carried` in every
         # record below are keyed by it, and a reader of those keys must be able
@@ -2588,15 +2579,15 @@ def run_grid(arm_root: Path, src_model: str, tgt_model: str,
         "two_arm_g_agreement": agreement,
         "n_valid": sum(r.valid for r in all_records),
         "n_fits": len(all_records),
-        # ── THE EFFECTIVE THREAD CONFIGURATION (Luxia ruling 2026-08-01) ──────
+        # ── THE EFFECTIVE THREAD CONFIGURATION ────────────────────────────────
         # Every map this run banked passed through `np.linalg.svd` — PCABank.fit,
         # fit_procrustes and RidgeSVD.prep — and LAPACK's SVD is a blocked GEMM
         # whose summation order depends on the thread count, exactly as eigh's
         # does. So the count is part of these fits' identity, and this sidecar is
         # where a reader of `fit_*.npz` finds it: the map npz's are bare arrays by
-        # design, and cp2_summary.json is the run's stamp.
+        # design, and the run summary is the run's stamp.
         #
-        # UNCONDITIONAL: an absent key means the summary predates 2026-08-01, and
+        # UNCONDITIONAL: an absent key means the summary predates thread stamping, and
         # `metabasis.threads.stamp_thread_config` is the reader that says so.
         THREAD_STAMP_KEY: thread_config_stamp(),
     }
@@ -2681,7 +2672,7 @@ def _basis_world(rng, strata_names: Sequence[str], n_per: int = 40,
                  d_a: int = 48, d_b: int = 56, noise: float = 0.15):
     """A paired world whose strata are named by the CALLER — any vocabulary.
 
-    Used to prove that the per-stratum machinery is vocabulary-free: the same
+    It proves that the per-stratum machinery is vocabulary-free: the same
     generator produces a v2.1-shaped basis, the webtext-v3 four-stratum basis and
     a single-stratum basis, and nothing in this module knows any of their names.
     Rows are emitted stratum-block by stratum-block, which is the shape both real
@@ -2724,8 +2715,8 @@ def _topic_split(labels: Labels, rng) -> tuple[np.ndarray, np.ndarray]:
     `_selftest_split` reaches for `s2_rank`, which only a v2.1-shaped basis has —
     a live demonstration of the NAMED GAP recorded in `load_labels`: the SPLIT
     machinery still carries v2.1 vocabulary and is a separate question from the
-    stratum vocabulary this change derives. The blocks below need a split, not a
-    ruling about splits, so they take this one.
+    stratum vocabulary derived here. The blocks below need a split, not a
+    decision about splits, so they take this one.
     """
     topics = np.array(sorted({int(t) for t in labels.topic if t >= 0}))
     held = set(rng.choice(topics, size=max(2, len(topics) // 4),
@@ -2778,7 +2769,7 @@ def _write_fixture_manifest(path: Path, rows: Sequence[Mapping[str, Any]]) -> st
 
 def _splits_fixture(manifest_sha: str, ids: Sequence[str], test_ids: Sequence[str],
                     ineligible: Sequence[str] = ()) -> dict:
-    """A splits.json fixture in the REAL artifact's shape (mirrors the builder)."""
+    """A splits-artifact fixture in the REAL artifact's shape (mirrors the builder)."""
     test = list(test_ids)
     train = [i for i in ids if i not in set(test)]
     per_stratum: dict[str, dict[str, Any]] = {}
@@ -2816,7 +2807,7 @@ def _splits_fixture(manifest_sha: str, ids: Sequence[str], test_ids: Sequence[st
 def _halves_fixture(manifest_sha: str, ids: Sequence[str], half_a: Sequence[str],
                     a_test: Sequence[str], b_test: Sequence[str],
                     ineligible: Sequence[str] = ()) -> dict:
-    """A halves.json fixture: disjoint halves, each with its OWN internal split."""
+    """A halves-artifact fixture: disjoint halves, each with its OWN internal split."""
     a = list(half_a)
     b = [i for i in ids if i not in set(a)]
     def block(members: Sequence[str], test: Sequence[str], stream: str) -> dict:
@@ -2869,7 +2860,7 @@ def selftest(splits_artifact: Optional[Path] = None,
             failures.append(msg)
 
     def skip(name: str, why: str) -> None:
-        """RAKE M44: a block this CONFIGURATION cannot run, named and counted.
+        """A block this CONFIGURATION cannot run, named and counted.
 
         A third state beside pass and fail — nothing was asserted and found
         wanting — so it never contributes to the exit code, and the reason names
@@ -2879,7 +2870,7 @@ def selftest(splits_artifact: Optional[Path] = None,
         checks.append(f"SKIPPED: {name}")
         print(f"  [SKIP] {name} — {why}")
 
-    #  RAKE M44: the count below is only readable beside the configuration that
+    #  The count below is only readable beside the configuration that
     #  produced it. The axis that matters for THIS suite is the data tree: the
     #  v2.1 fitting manifest is a repo artifact and is absent from a deployed
     #  code tree, so the block that reads it is availability-branched.
@@ -2950,10 +2941,10 @@ def selftest(splits_artifact: Optional[Path] = None,
         check(abs(back.median_norms[1] - src.median_norms[1]) < 1e-9, "norms round-trip")
 
     print("== selftest 5: THE STRATUM VOCABULARY IS DERIVED, NEVER TYPED ==")
-    #  The defect this closes (canary, 2026-08-03): a hardcoded v2.1 tuple here
-    #  would have produced an EMPTY per-stratum readout on the webtext-v3 basis,
-    #  so the frozen §3.4 carry rule could never be met and every v3 fit would
-    #  have been marked invalid for a reason that is not about the data.
+    #  The defect this guards against: a hardcoded v2.1 tuple here would produce
+    #  an EMPTY per-stratum readout on the webtext-v3 basis, so the frozen section
+    #  3.4 carry rule could never be met and every v3 fit would be marked invalid
+    #  for a reason that is not about the data.
     v21_rows = ([{"text_id": f"S1-{i}", "stratum": "S1"} for i in range(4)]
                 + [{"text_id": f"S2-{i}", "stratum": "S2"} for i in range(3)]
                 + [{"text_id": f"S3-{i}", "stratum": "S3"} for i in range(2)])
@@ -3419,7 +3410,7 @@ def selftest(splits_artifact: Optional[Path] = None,
         _selftest_prediction_authorization(Path(td8), check)
 
     print(f"\nselftest: {len(failures)} failure(s)")
-    #  RAKE M44: coverage is part of the verdict, and per configuration — a bare
+    #  Coverage is part of the verdict, and per configuration — a bare
     #  pass count cannot be read without knowing which cell produced it.
     print(f"selftest checks run: {len(checks)} ({len(skips)} named skip(s))")
     for name in skips:
@@ -3524,7 +3515,7 @@ def _selftest_consumption(root: Path, recs: Sequence[FitRecord],
         fit(no_sum, "proc_k16"), summary_path=ok_dir / FIT_SUMMARY_NAME)),
           "an explicit summary_path is honoured for a map with no summary beside it")
 
-    # The banked-run layout: <run>/cp2_summary.json with maps in <run>/fits/.
+    # The banked-run layout: the run summary at the run root, maps in its `fits` subdirectory.
     run = root / "banked_run"
     maps_dir = run / "fits"
     maps_dir.mkdir(parents=True)
@@ -3657,15 +3648,15 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--arm-root", type=Path, default=DEFAULT_ARM_ROOT)
     ap.add_argument("--source-model", default="3b", choices=MODEL_KEYS,
-                    help="un-ratified scan-registry models (metabasis.roster) are "
+                    help="unregistered scan-registry models (metabasis.roster) are "
                          "accepted but have no fixed grid — pass --src-sites for them")
     ap.add_argument("--target-model", default="8b", choices=MODEL_KEYS,
-                    help="un-ratified scan-registry models (metabasis.roster) are "
+                    help="unregistered scan-registry models (metabasis.roster) are "
                          "accepted but have no fixed grid — pass --tgt-sites for them")
     ap.add_argument("--n-null", type=int, default=N_NULL_REPS)
     ap.add_argument("--fit-strata", default=None,
                     help="comma list, e.g. S1,S2 — fit/gate g on these strata only "
-                         "(the mode-free beside column; desk order 2026-07-22)")
+                         "(the mode-free beside column)")
     ap.add_argument("--src-sites", default=None, help="comma-separated source-site override")
     ap.add_argument("--tgt-sites", default=None, help="comma-separated target-site override")
     ap.add_argument("--k-grid", default=None,
@@ -3679,26 +3670,26 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--arms", default=",".join(ARMS),
                     help="comma list of template arms to fit. Defaults to both. Use "
                          "'raw' alone for template-less BASE models (olmo2-7b has no "
-                         "chat template, so its native arm does not exist) — and see "
-                         "A8-add-7.1: a raw-arm-only model's constants live in the "
+                         "chat template, so its native arm does not exist) — a "
+                         "raw-arm-only model's constants live in the "
                          "PARALLEL RAW-ARM star system, never the native one.")
     ap.add_argument("--splits-artifact", type=Path, default=None,
-                    help="the FROZEN webtext-v3 splits.json (prereg §2). The "
-                         "membership is CONSUMED, never re-derived; without it a "
-                         "webtext-v3 manifest REFUSES rather than holding nothing "
-                         "out. Desk-side staging path (never git).")
+                    help="the FROZEN webtext-v3 splits artifact (pre-registration "
+                         "section 2). The membership is CONSUMED, never re-derived; "
+                         "without it a webtext-v3 manifest REFUSES rather than "
+                         "holding nothing out. A local path (never committed).")
     ap.add_argument("--halves-artifact", type=Path, default=None,
-                    help="the FROZEN halves.json (prereg §6-I1). Required by "
+                    help="the FROZEN halves artifact (pre-registration section 6 I1). Required by "
                          "--half; carries each half's membership AND its own "
                          "internal train/test split.")
     ap.add_argument("--half", default=None, choices=sorted(HALF_KEYS),
-                    help="fit ONE §6-I1 half: restrict to its membership and use "
+                    help="fit ONE frozen half: restrict to its membership and use "
                          "that half's internal split from the artifact. The half "
                          "identity and the artifact sha go into the stamp.")
     ap.add_argument("--exclude-train-ids", type=Path, default=None,
                     help="a ruled exclusion artifact ({excluded_text_ids, "
                          "n_excluded}) whose ids are dropped from the TRAIN side "
-                         "only — frozen webtext-v3 §6-I5's overlap-clean BESIDE. "
+                         "only — the frozen webtext-v3 section 6 I5 overlap-clean BESIDE. "
                          "The held-out membership is untouched and an excluded id "
                          "on the test side REFUSES. The artifact's sha stamps every "
                          "object and joins the split identity, so a beside object "
@@ -3725,8 +3716,8 @@ def main(argv: Optional[list[str]] = None) -> int:
                          "artifact; pass the artifact with --require-prediction-stamp")
     if args.half and not args.halves_artifact:
         raise SystemExit(
-            f"--half {args.half} needs --halves-artifact <…/halves.json>: the "
-            f"§6-I1 halving is FROZEN and is never recomputed at fit time")
+            f"--half {args.half} needs --halves-artifact <halves>: the "
+            f"section 6 I1 halving is FROZEN and is never recomputed at fit time")
     if args.half and args.splits_artifact:
         raise SystemExit(
             "--splits-artifact and --half are two different memberships (the whole "
@@ -3747,14 +3738,14 @@ def main(argv: Optional[list[str]] = None) -> int:
     bad = [a for a in arms if a not in ARMS]
     if bad:
         raise SystemExit(f"unknown arms {bad}; valid: {ARMS}")
-    # A model with no fixed grid (still on its scan, not yet ratified) needs its
+    # A model with no fixed grid (still on its scan, not yet registered) needs its
     # grid on the command line — say so here rather than dying on a bare KeyError
-    # inside run_grid. Ratified models are in SITES and pass straight through.
+    # inside run_grid. Registered models are in SITES and pass straight through.
     for role, model, override in (("--source-model", args.source_model, args.src_sites),
                                   ("--target-model", args.target_model, args.tgt_sites)):
         if model not in SITES and not override:
             raise SystemExit(
-                f"{role} {model!r} has no fixed fit grid (un-ratified scan-registry "
+                f"{role} {model!r} has no fixed fit grid (unregistered scan-registry "
                 f"model; its 12-site scan grid is {SCAN_GRIDS.get(model)}). Pass "
                 f"{'--src-sites' if role.startswith('--source') else '--tgt-sites'} "
                 f"explicitly — sites from curves, never fiat.")
