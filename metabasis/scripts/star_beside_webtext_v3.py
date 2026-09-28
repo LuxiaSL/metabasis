@@ -5,10 +5,11 @@ WHAT THIS IS. The scalar star factorization
     â(A→B) = c_A · c_B
 
 re-derived on the webtext-v3 basis under the PARENT contract's derivation rules
-(`freeze/transport-campaign:docs/planning/PREREG-transport-campaign-2026-07-26.md`,
-sha 33ba8290…, §2 estimands / §3 the star's prediction structure) and quoted ONLY
-as the composed-vs-star descriptive contrast on the primary basis — v3 contract
-§8's "the star beside (S1 continuation)". S1 is STAMPED ("scalar factorization
+(the transport-campaign pre-registration in docs/planning/, read at its freeze tag
+and pinned by the parent-contract sha below: its estimands and its star prediction structure)
+and quoted ONLY as the composed-vs-star descriptive contrast on the primary basis —
+the "star beside (S1 continuation)" that the webtext-v3 pre-registration's
+prediction ceremony names. S1 is STAMPED ("scalar factorization
 refuted at scale; hub-mediated transport demonstrated at map order"); this module
 CONTINUES that record on the clean basis and CANNOT reopen it. Nothing here is a
 gate. The ±.05 in-band count is reference-only and labelled NON-GATE everywhere
@@ -29,33 +30,36 @@ PROOF (`--regression-proof`): the adapter path run on the BANKED v2.1 inputs mus
 reproduce the BANKED star record — the bootstrap parity-gate bar — before any v3
 number is quoted. `--run` refuses to write an artifact unless that proof passes.
 
-THE ANCHOR (the parent's rule, applied). The parent's §3 star was a pure HUB
+THE ANCHOR (the parent's rule, applied). The parent's star was a pure HUB
 star: bipartite, one gauge freedom (c_hub → t·c_hub, c_leaf → c_leaf/t leaves
 every â unchanged), so exactly one anchor was needed and the anchor of record was
 the hub constant c_8B from the inherited banked native::proc_k128 system. The v3
-scoreable set is NOT a hub star: §8 defines a scoreable pair as any ordered pair
-whose endpoints are both CORE roster and neither is a §7 race hub, and the 240
+scoreable set is NOT a hub star: the v3 prediction ceremony defines a scoreable
+pair as any ordered pair whose endpoints are both CORE roster and neither is a
+race hub of the hub law, and the 240
 sealed slots realize the COMPLETE graph on 16 core models (120 unordered pairs ×
 2 directions). A complete graph is non-bipartite, so — in the lineage solver's
 own words — the gauge is "determined by the pair graph itself … anchors are
 consistency checks here, not constraints". The v3 anchor is therefore the graph,
 and it is the parent's rule that says so. The parent's own hub anchor is doubly
-inapplicable: 8b-instruct is a §7 RACE HUB and not a core endpoint at all, and
+inapplicable: 8b-instruct is a RACE HUB and not a core endpoint at all, and
 its banked constant is v2.1 vintage. This module asserts nullspace_dim == 0 per
 system and REFUSES to emit if a system needs an anchor it may not have.
 
-ARMS ARE NEVER MIXED. §3.2's arm of record splits the 240: instruct↔instruct is
-native::proc_k256, any base-endpoint slot is raw::proc_k256. One solve = one
-(arm × family) — the arm-consistency rule (Luxia 2026-07-23) and rake 40. So the
+ARMS ARE NEVER MIXED. The v3 rebank's arm of record splits the 240: instruct↔instruct
+is native::proc_k256, any base-endpoint slot is raw::proc_k256. One solve = one
+(arm × family) — a star constant belongs to the system it was solved in, and an
+equation that mixes fit families mixes estimators with different attenuation. So the
 v3 star is TWO systems, and a model that appears in both carries two constants,
 each belonging to the system it was solved in. Every quoted c_M names its system.
 
 IN-SAMPLE BY CONSTRUCTION — READ THE HEADLINE COUNT WITH THIS. There are no
-v3 hub legs among core models to derive constants from (§8 step 1 fit hub legs
-for the five RACE hubs only, and race-hub legs are not scoreable pairs), so the
+v3 hub legs among core models to derive constants from (the ceremony's first
+step fit hub legs for the five RACE hubs only, and race-hub legs are not scoreable
+pairs), so the
 only â available to the star are the 240 scored slots themselves. The star is
 therefore FIT ON THE VERY SLOTS IT IS THEN SCORED ON, while the composed column
-was filed, sha'd and desk-sealed BEFORE the first direct-pair fit ran. The
+was filed, sha'd and sealed BEFORE the first direct-pair fit ran. The
 comparison is maximally generous to the star. A genuinely held-out star count is
 computed beside by leave-one-unordered-pair-out over the same lineage solver
 (`held_out_beside`), which is what the parent's "a system must pass its own
@@ -103,10 +107,10 @@ logger = logging.getLogger("star_beside_webtext_v3")
 # ---------------------------------------------------------------- constants
 #: the sealed scored record of the v3 prediction ceremony. FULL, never a
 #: SUPERSEDED-* sibling: those are earlier, wrong bytes kept only for the audit
-#: trail and this lane refuses to open one by name (rake M26 at file grain).
+#: trail and this lane refuses to open one by name.
 SCORED_REL = Path("staging/webtext-v3-predictions/"
                   "SCORED-webtext-v3-2026-08-04-FULL.json")
-#: the desk-sealed prediction artifact the scored record scores against.
+#: the sealed prediction artifact the scored record scores against.
 PREDICTIONS_REL = Path("staging/webtext-v3-predictions/"
                        "PREDICTIONS-webtext-v3-2026-08-04.json")
 OUT_DIR_REL = Path("staging/webtext-v3-reads/star-beside")
@@ -119,9 +123,9 @@ FORBIDDEN_INPUT_PREFIX = "SUPERSEDED-"
 #: the parent contract, read at its freeze tag. Quoted for provenance only.
 PARENT_PREREG_SHA = ("33ba8290487813a80001c4cf5b71bbb57b57004ff610aa9fcf1f651005"
                      "875902")
-#: the banked bootstrap star record — the parity-gate bar (LEDGER bootstrap/
-#: parity-gate, PASSED 2026-07-26: "star_systems.json regenerated
-#: BYTE-IDENTICAL to banked anchor (sha256 f5b8c4ee…)").
+#: the banked bootstrap star record — the parity-gate bar: the bootstrap parity
+#: gate regenerates it BYTE-IDENTICAL to the banked anchor, whose sha256 is
+#: `BANKED_STAR_SYSTEMS_SHA`.
 BANKED_STAR_SYSTEMS_REL = Path("outputs/battery/arms/A8_conjugation/smalls/"
                                "readouts_cpu/star_systems.json")
 BANKED_STAR_SYSTEMS_SHA = ("f5b8c4eedcbcc379d55cdbbfd91a3e950b86aef73da0a01c9c56"
@@ -130,7 +134,7 @@ BANKED_STAR_SYSTEMS_SHA = ("f5b8c4eedcbcc379d55cdbbfd91a3e950b86aef73da0a01c9c56
 BANKED_INLINEAGE_REL = Path("outputs/collection/readouts/"
                             "portability_inlineage_anchor_2026-07-27.json")
 
-#: §8's bands, inherited verbatim. NON-GATE for the star.
+#: The prediction ceremony's bands, inherited verbatim. NON-GATE for the star.
 PRIMARY_HALF_WIDTH = BAND_HALFWIDTH          # .05, from the lineage module
 CO_PRIMARY_HALF_WIDTH = 0.025
 NEAR_ZERO_ABS = 0.08
@@ -139,9 +143,9 @@ NEAR_ZERO_ABS = 0.08
 #: FRAGILE if this much slop could flip it. Reported, never silently absorbed.
 ROUNDING_SLOP = 1e-4
 
-#: ENACTOR-DECLARED descriptive grouping — pretrain lineage as the roster's own
-#: notes record it, published WITH its membership so the desk can re-derive it or
-#: overrule it. It is not a ruling and not a gate; the ONLY number that depends
+#: A DECLARED descriptive grouping — pretrain lineage as the roster's own notes
+#: record it, published WITH its membership so a reader can re-derive it or
+#: overrule it. It is not a verdict and not a gate; the ONLY number that depends
 #: on it is the `by_lineage_relation` breakdown that names it. Qwen2.5 and Qwen3
 #: are kept APART (different pretrain runs); the pooled reading is reported too,
 #: so the choice is visible rather than buried.
@@ -181,7 +185,7 @@ ADJUDICATION = (
 
 
 class StarBesideError(RuntimeError):
-    """HALT. Raised, never sys.exit()ed, so a sweep survives it (rake M45)."""
+    """HALT. Raised, never sys.exit()ed, so a sweep survives it."""
 
 
 # ---------------------------------------------------------------- data model
@@ -312,15 +316,15 @@ def _median(xs: Sequence[float]) -> float:
 def load_scored_record(data_root: Path,
                        scored_rel: Path = SCORED_REL,
                        predictions_rel: Path = PREDICTIONS_REL) -> dict:
-    """Open the sealed scored record — after verifying the desk's seal.
+    """Open the sealed scored record — after verifying its seal.
 
     Three independent checks, all BINDING here even though nothing downstream is
-    a gate: (1) the named input is not a SUPERSEDED-* sibling; (2) the §8.2 desk
-    stamp verifies over the prediction artifact by VALUE, recomputed here through
+    a gate: (1) the named input is not a SUPERSEDED-* sibling; (2) the prediction
+    ceremony's stamp verifies over the prediction artifact by VALUE, recomputed here through
     the ceremony's own `verify_prediction_stamp`; (3) the scored record's own
     embedded stamp block agrees with that fresh verification AND its per-slot
     of-record predictions reproduce the sealed artifact's, slot for slot. A
-    scored file that has drifted from the artifact the desk sealed is refused.
+    scored file that has drifted from the sealed artifact is refused.
     """
     scored_path = data_root / scored_rel
     predictions_path = data_root / predictions_rel
@@ -500,7 +504,7 @@ def score_slots(scored: dict,
         if not s_in:
             #  "miss HIGH" = the OBSERVED sits above the band, i.e. the star
             #  UNDER-predicts. This is S1/S4's stamped signature and the sense
-            #  the ledger uses throughout ("all misses HIGH", "systematic
+            #  the stamped record uses throughout ("all misses HIGH", "systematic
             #  under-prediction"). Named here so it cannot be read backwards.
             side = "high" if obs > star else "low"
 
@@ -559,7 +563,7 @@ def head_to_head(rows: Sequence[SlotStar]) -> HeadToHead:
     disc = comp_only + star_only
     #  The E3 sign-flip read, frozen at S2: under an exchangeable null every
     #  discordant slot is a coin flip, so all-one-way over d slots is 2^-d.
-    #  Reported as the exponent only; the READING is the desk's.
+    #  Reported as the exponent only; interpreting it is left to the reader.
     flip = disc if (disc > 0 and min(comp_only, star_only) == 0) else None
     return HeadToHead(
         n_slots=n,
@@ -630,7 +634,7 @@ def _lineage_relation(rows: Sequence[SlotStar], rate_fn) -> dict:
     The v2.1 hub-steelman read named it: "hub-star form wrong for in-family
     pairs". Same-lineage endpoints transport BETTER than a product of two scalars
     allows, because they share chart structure the scalar cannot carry. Grouping
-    is the enactor-declared `PRETRAIN_LINEAGE` above, membership published.
+    is the declared `PRETRAIN_LINEAGE` above, membership published.
     """
     out: dict = {"grouping": PRETRAIN_LINEAGE,
                  "STATUS": "ENACTOR-DECLARED descriptive grouping, membership "
@@ -859,10 +863,10 @@ def regression_proof_v21(data_root: Path) -> dict:
     Four checks, strongest first:
 
     R1  the bootstrap PARITY-GATE bar itself — `solve_star_systems` re-run
-        end-to-end from the banked A8 maps and V7 vectors into a scratch
-        directory, and the resulting `star_systems.json` compared BYTE-FOR-BYTE
-        against the banked artifact (LEDGER bootstrap/parity-gate: sha256
-        f5b8c4ee…). Nothing under outputs/ is written or touched.
+        end-to-end from the banked conjugation-arm maps and V7_L<site> vectors
+        into a scratch directory, and the resulting `<scratch>/star_systems.json`
+        compared BYTE-FOR-BYTE against the banked artifact (sha256
+        `BANKED_STAR_SYSTEMS_SHA`). Nothing under outputs/ is written or touched.
     R2  THIS MODULE'S OWN ADAPTER PATH on the banked v2.1 native::proc_k128 â
         inputs: the same observation-builder shape the v3 lane uses, handed to
         the same lineage solver, must return the banked constants of record
@@ -872,8 +876,8 @@ def regression_proof_v21(data_root: Path) -> dict:
     R3  the banked v2.1 IN-LINEAGE hub column (8 models, anchored c_8b = .8375 —
         the anchored/bipartite branch the v3 lane never takes) reproduced
         coefficient for coefficient from its own banked â rows.
-    R4  the lineage module's own selftest, run in this configuration (rake M44:
-        a count that does not name its configuration vouches for nothing).
+    R4  the lineage module's own selftest, run in this configuration (a check
+        count that does not name its configuration vouches for nothing).
     """
     from metabasis.scripts import solve_star_systems as sss
     from metabasis.scripts import solve_portability_coefficients as spc
@@ -1193,7 +1197,7 @@ def emit(data_root: Path, artifact: dict, out_dir: Path) -> tuple[Path, Path, st
 
 # ---------------------------------------------------------------- selftest
 def selftest(data_root: Optional[Path] = None) -> int:            # noqa: C901
-    """Checklist. Returns a failure count; never sys.exit()s (rake M45)."""
+    """Checklist. Returns a failure count; never sys.exit()s."""
     failures: list[str] = []
 
     def check(cond: bool, msg: str) -> None:
