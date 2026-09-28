@@ -1,13 +1,13 @@
 """The metabasis residual write for a vLLM-served model — OUR contract, ours only.
 
-UNSTAMPED. NO SCIENCE CELL FIRES ON THIS LANE. A pre-statement of the prod lane, with
-distribution-level tolerances, is filed and reviewed before any bridge or science run.
+UNSTAMPED (C§8). NO SCIENCE CELL FIRES ON THIS LANE. The prod-lane pre-statement,
+with distribution-level tolerances, goes to Luxia before any bridge or science run.
 
 WHAT THIS IS. The vLLM-side sibling of `extraction/hooks.py`'s
 `attach_residual_write`. Same intervention, same arithmetic, different serving
-substrate. It is written from OUR contract; a third-party vLLM steering script
-(read as a reference only, never forked and never executed) informed exactly three
-INTEGRATION points and nothing semantic:
+substrate. It is written from OUR contract; the third-party module on the cluster
+(`assistant-axis-exp/scripts/vllm_steering.py`, read-only reference, never forked and
+never executed) informed exactly three INTEGRATION points and nothing semantic:
 
   (i)   a `torch.library.custom_op` is the way to keep a mutating step out of
         dynamo's trace and act as a piecewise CUDA-graph splitting point;
@@ -23,7 +23,7 @@ ARE the specification of this file:
   1. SITE — WE WRITE THE LAYER *INPUT*, THEY WRITE THE LAYER *OUTPUT*.
      `hooks.py` registers a `register_forward_pre_hook` on `decoder_layers(model)[s]`,
      so the tensor written is the residual stream ENTERING layer `s` -- and that is
-     the very same tensor the dose rule takes its per-token median norm over, which is what
+     the very same tensor §2.5 takes its per-token median norm over, which is what
      makes the dose "resolved against the quantity it perturbs". This file wraps
      layer `s` and writes its INPUT before delegating. NO OFF-BY-ONE IS INTRODUCED
      and none is needed.
@@ -39,7 +39,7 @@ ARE the specification of this file:
      sees on a matched forward. Equality by value is the proof.
 
   2. DOSE -- NORM-RELATIVE AND MEASURED IN-JOB, NOT AN ABSOLUTE SCALAR.
-     `alpha = alpha_frac x measured_per_token_median_resid_norm` (the dose rule). This file
+     `alpha = alpha_frac x measured_per_token_median_resid_norm` (§2.5). This file
      never invents a strength: it takes an ALREADY-RESOLVED absolute `alpha`, and
      `measure_per_token_median_resid_norm_from_captures()` reproduces the engine's
      own definition (per-token L2 norms of the layer-input hidden states over
@@ -65,8 +65,8 @@ AND TWO THINGS THIS FILE REFUSES TO HAVE:
     refuses lesion recipes at construction and so does this lane. There is no
     intervention-type field at all -- the only operation is `h += alpha * v_hat`.
 
-`alpha == 0.0` short-circuits to a bitwise no-op, because the baseline cell must be
-bitwise identical to an unmodified forward.
+`alpha == 0.0` short-circuits to a bitwise no-op, exactly as §2.4 requires of the
+baseline cell.
 
 IMPORT DISCIPLINE: vLLM is imported LAZILY, inside the functions that need it, so
 this module imports, type-checks and SELFTESTS on a machine with no vLLM at all --
@@ -88,8 +88,8 @@ from torch import Tensor, nn
 logger = logging.getLogger("metabasis.vllm_residual_write")
 
 #: Where per-request steering configuration is published so that EVERY tensor-parallel
-#: rank reads the same bytes (integration point (ii)). Defaults under the large data
-#: volume, where run data is placed; /dev/shm is used only when explicitly requested.
+#: rank reads the same bytes (integration point (ii)). Under the node data root by the
+#: standing placement rule; /dev/shm is used only when explicitly requested.
 DEFAULT_CONFIG_DIR = Path(
     os.environ.get("METABASIS_STEERING_DIR",
                    "/models/metabasis-behavioral/vllm-lane/steering"))
@@ -111,7 +111,7 @@ class MetabasisSteeringSpec:
 
     layer_idx: int
     vector: Tensor                      # [hidden]; banked unit, re-normalised here
-    alpha: float                        # ALREADY RESOLVED: alpha_frac x measured norm
+    alpha: float                        # ALREADY RESOLVED: alpha_frac x §2.5 norm
     alpha_frac: Optional[float] = None  # recorded for provenance, never used in math
     measured_norm: Optional[float] = None
     normalize: bool = True
@@ -133,7 +133,7 @@ class MetabasisSteeringSpec:
             if not np.isclose(want, float(self.alpha), rtol=1e-9, atol=0.0):
                 raise SteeringContractViolation(
                     f"alpha {self.alpha!r} is not alpha_frac x measured_norm "
-                    f"({self.alpha_frac!r} x {self.measured_norm!r} = {want!r}); the dose rule "
+                    f"({self.alpha_frac!r} x {self.measured_norm!r} = {want!r}); §2.5 "
                     "resolves the dose against the measured norm and this lane will "
                     "not carry a dose that was resolved some other way")
 
@@ -233,7 +233,7 @@ class MetabasisSteeringLayer(nn.Module):
             self._capture.append(hs.detach().clone())
         spec = self._spec
         if spec is None or spec.alpha == 0.0:
-            # The baseline runs WITH the wrapper attached and must be bitwise
+            # §2.4: the baseline runs WITH the wrapper attached and must be bitwise
             # identical to no wrapper at all.
             return hs
         key = f"{hs.device}_{hs.dtype}_{spec.alpha}_{id(spec.vector)}"
@@ -328,11 +328,11 @@ class MetabasisSteeringLayer(nn.Module):
             "to run an un-injected forward that the caller believes is steered")
 
 
-# ── the dose rule, reproduced from captures taken through THIS wrapper ────────
+# ── §2.5, reproduced from captures taken through THIS wrapper ─────────────────
 
 def measure_per_token_median_resid_norm_from_captures(
         captures: list[Tensor], *, keep_mask: Optional[Tensor] = None) -> float:
-    """The engine's per-token median-norm definition, applied to layer-INPUT captures.
+    """The engine's §2.5 definition, applied to layer-INPUT captures.
 
     `run_behavioral_cells.HFNodeRuntime.measure_per_token_median_resid_norm` captures
     the hidden states entering `decoder_layers(model)[site]`, takes the L2 norm along
@@ -363,10 +363,10 @@ def measure_per_token_median_resid_norm_from_captures(
 
 
 def resolve_alpha(alpha_frac: float, measured_norm: float) -> float:
-    """The dose resolution rule, spelled out so the lane cannot drift from it."""
+    """§2.5's dose resolution, spelled out so the lane cannot drift from it."""
     if not np.isfinite(measured_norm) or measured_norm <= 0:
         raise SteeringContractViolation(
-            f"measured norm {measured_norm!r} is not a positive finite number")
+            f"§2.5 norm {measured_norm!r} is not a positive finite number")
     return float(alpha_frac) * float(measured_norm)
 
 
@@ -465,7 +465,7 @@ def detach_steering_layer(model: Any, layer_idx: int) -> None:
     layers[layer_idx] = w.wrapped_layer
 
 
-# ── selftest (CPU, no vLLM, no weights) ───────────────────────────────────────
+# ── selftest (desk-side, CPU, no vLLM, no weights) ────────────────────────────
 
 class _ToyLayer(nn.Module):
     """A decoder-layer stand-in: records its input, returns a deterministic map."""
@@ -521,7 +521,7 @@ def selftest() -> int:
     ok(w.stats["tokens_injected"] == 3 and w.stats["prefill_tokens_skipped"] == 3,
        "stats count injected vs skipped tokens")
 
-    # -- 3. alpha == 0 is a BITWISE no-op --------------------------------------
+    # -- 3. alpha == 0 is a BITWISE no-op (§2.4) -------------------------------
     toy0 = _ToyLayer(H)
     w0 = MetabasisSteeringLayer(toy0, layer_idx=0, hidden_dim=H)
     w0.set_spec(MetabasisSteeringSpec(layer_idx=0, vector=vec, alpha=0.0))
@@ -586,7 +586,7 @@ def selftest() -> int:
         pass
     checks += 1
 
-    # -- 7. the dose norm from captures is a median of per-token norms ---------
+    # -- 7. §2.5 from captures reproduces a median of per-token norms ----------
     caps = [torch.tensor([[[3.0, 4.0], [0.0, 1.0], [6.0, 8.0]]])]   # norms 5,1,10
     ok(abs(measure_per_token_median_resid_norm_from_captures(caps) - 5.0) < 1e-9,
        "§2.5 from captures == median of per-token L2 norms")
