@@ -1,7 +1,8 @@
 """On-device per-position entropy for the prod (vLLM) lane.
 
-UNSTAMPED (C§8). The lane is certified for science cells only if the §3 bridge
-passes; this module produces the quantity the bridge compares.
+UNSTAMPED. The lane is certified for science cells only if its bridge passes —
+the comparison of this lane's cell reads against the byte-exact lane's on the
+same cells; this module produces the quantity the bridge compares.
 
 THE QUANTITY, AND IT IS THE ENGINE'S, NOT A NEW ONE.
 `run_behavioral_cells.per_position_entropy_and_nll` defines it:
@@ -45,9 +46,10 @@ if vLLM's batching ever reorders rows under us, the cross-check is what catches 
 THIS IS A CROSS-STACK COMPARISON, NOT A BITWISE ONE. Different torch (2.9.1 vs
 2.11.0), different attention backend (FlashInfer vs eager), fp32 GPU reduction vs
 fp32 CPU. The selftest states a TOLERANCE and reports the realised deltas; a
-bitwise claim here would be false and the pre-statement's §2 already says so.
+bitwise claim here would be false, and the lane is compared to a tolerance for
+that reason.
 
-NODE SAFETY: no package management, no writes outside the caller's sidecar.
+SIDE EFFECTS: no package management, no writes outside the caller's sidecar.
 """
 from __future__ import annotations
 
@@ -221,7 +223,7 @@ def infer_indexing(ent_all: np.ndarray, reference: np.ndarray, prompt_length: in
 
 
 def entropy_rise(mean_steered: Sequence_f, mean_unsteered: Sequence_f) -> dict:
-    """§2.6's cell read: per-generation mean, THEN mean over generations, 4 dp.
+    """The entropy-rise cell read: per-generation mean, THEN mean over generations, 4 dp.
 
     Aggregation ORDER is the engine's (`entropy_rise_from_rows`), because a mean of
     means over unequal-length generations is not the mean of the pooled positions
@@ -270,7 +272,7 @@ from typing import Sequence as _Seq                                   # noqa: E4
 Sequence_f = _Seq[float]
 
 
-# ── selftest (desk-side, CPU, no vLLM, no weights) ────────────────────────────
+# ── selftest (CPU, no vLLM, no weights) ───────────────────────────────────────────
 
 def selftest() -> int:
     """Unit math against the ENGINE'S OWN entropy function where it is importable."""
@@ -359,7 +361,7 @@ def selftest() -> int:
     inf2 = infer_indexing(arr, np.array([4.0, 5.0, 6.0, 7.0], np.float32), 5, 4)
     ok(inf2["inferred"] == "position", "infer_indexing picks the engine's when it fits")
 
-    # -- 4. §2.6 aggregation ORDER (mean of means, not pooled) ----------------
+    # -- 4. cell-read aggregation ORDER (mean of means, not pooled) -----------
     r = entropy_rise([1.0, 3.0], [0.5, 0.5])
     ok(r["mean_entropy_steered"] == 2.0 and r["entropy_rise"] == 1.5,
        "cell read = mean over generations of per-generation means, 4 dp")

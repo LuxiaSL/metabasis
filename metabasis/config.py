@@ -1,11 +1,11 @@
 """Model presets for the transport program.
 
-Slimmed at bootstrap (2026-07-26) from the anamnesis pipeline's `config.py`:
-only `ModelPreset`/`MODEL_PRESETS` travel — the extraction/signature machinery
-(ExtractionConfig, run registry, calibration paths) stays behind. Fields kept
-are the ones the transport scripts and probes actually consume (`torch_dtype`
-above all) plus the architecture facts useful for site-grid work. Roster
-growth for P2 adds entries here; every addition should carry the same
+A slimmed copy of the anamnesis pipeline's model presets: only
+`ModelPreset`/`MODEL_PRESETS` live here — the extraction/signature machinery
+(ExtractionConfig, run registry, calibration paths) stays in anamnesis. Fields
+kept are the ones the transport scripts and probes actually consume
+(`torch_dtype` above all) plus the architecture facts useful for site-grid work.
+A new roster model adds an entry here, and every entry carries the same
 verified-against-config.json discipline the dsv2-lite entry documents.
 """
 from __future__ import annotations
@@ -61,8 +61,8 @@ MODEL_PRESETS: dict[str, ModelPreset] = {
         eos_token_ids=[128001, 128009],
     ),
     "olmo2-7b": ModelPreset(
-        # BASE model — no chat template (bare prompts only; raw arm only, per
-        # the arm-consistency rule add-7.1). Full MHA (num_kv_heads == heads).
+        # BASE model — no chat template (bare prompts only; raw arm only, since
+        # a native arm needs a chat template). Full MHA (num_kv_heads == heads).
         model_id="allenai/OLMo-2-1124-7B",
         torch_dtype="bfloat16",
         num_layers=32,
@@ -109,7 +109,7 @@ MODEL_PRESETS: dict[str, ModelPreset] = {
         # integration with trust_remote_code=False — the bundled auto_map
         # remote code has a DIFFERENT internal structure. MLA attention: no
         # k_proj/v_proj module; head_dim below is v_head_dim (qk_head_dim=192).
-        # All numbers verified against the downloaded config.json (2026-07-17).
+        # All numbers verified against the checkpoint's own config.json.
         model_id="deepseek-ai/DeepSeek-V2-Lite-Chat",
         torch_dtype="bfloat16",
         num_layers=27,
@@ -123,21 +123,22 @@ MODEL_PRESETS: dict[str, ModelPreset] = {
     # ------------------------------------------------------------------ wave 1
     # Collection-phase wave 1 (the seven cheap new roster nodes). Every number
     # below was read from the checkpoint's own config.json / generation_config.json
-    # on 2026-07-26 (config shas in metabasis/roster.py). `head_dim` is computed
+    # (config shas in metabasis/roster.py). `head_dim` is computed
     # (hidden_dim / num_attention_heads) wherever config.json leaves it null.
     # All seven were scanned on the 12-site grids in metabasis.roster.SCAN_GRIDS
-    # and their fit grids ratified by Luxia 2026-07-27 — so they now appear in
-    # fit_transport_maps.SITES as well (the two registries overlap by design;
-    # SCAN_GRIDS stays the record of what was scanned).
+    # and have fixed fit grids, so they appear in fit_transport_maps.SITES as
+    # well (the two registries overlap by design; SCAN_GRIDS stays the record of
+    # what was scanned).
     #
     # ⚠ temperature caveat: only `torch_dtype` is load-bearing for collection
     # (forced replay never samples). Where generation_config.json carries no
     # temperature the value below is transformers' default 1.0 and is marked —
-    # the desk should pin real native temperatures before any GENERATION probe
-    # uses these presets.
+    # pin the real native temperature before any GENERATION probe uses one of
+    # these presets.
     "olmo2-7b-instruct": ModelPreset(
         # INSTRUCT sibling of the banked BASE "olmo2-7b" — same pretrain, chat
-        # template added (prereg roster row 7, the O-14 discriminator). Runs
+        # template added (roster row 7 of the frozen transport-campaign
+        # pre-registration in docs/planning/): the pair separates base-model alignability from a raw-arm confound. Runs
         # native+raw; the base sibling stays raw-only. Full MHA, bos == eos.
         model_id="allenai/OLMo-2-1124-7B-Instruct",
         torch_dtype="bfloat16",

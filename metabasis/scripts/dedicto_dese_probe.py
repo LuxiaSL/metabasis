@@ -1,17 +1,16 @@
-"""A6 bridge — de dicto vs de se probe on the STEERED teacher (session-8; Luxia-directed).
+"""Subliminal bridge — de dicto vs de se probe on the STEERED teacher.
 
-The bridge's cat-mention rate is rung-1 (de dicto). The subliminal phenomenon is DE SE
-(`subliminal_anamnesis/research/analysis_transfer_types_2026-07-11.md` ladder): 0 none · 1
-label · 2 admire · 3 embody ("my paws", "we cats") · 4 species-self ("I am a cat"). The cat
-distillation produced HIGH de-se. This asks the steered base-Qwen its favorite animal
+The bridge's cat-mention rate is rung-1 (de dicto). The subliminal phenomenon is DE SE, on
+the transfer-type ladder: 0 none · 1 label · 2 admire · 3 embody ("my paws", "we cats") ·
+4 species-self ("I am a cat"). The cat distillation produced HIGH de-se. This asks the steered base-Qwen its favorite animal
 (the most minable tap) at an α ladder and floor-codes the de-se ladder by regex — does
 activation-steering install de-se, or only de dicto?
 
 Injects Acat_L18 during GENERATION (attach_residual_write) on favorite-animal prompts
 (one-word + elaboration-inviting), N samples each, α∈{0,.4,.6,.8}. Saves raw text +
 per-α: de_dicto rate (rung≥1 = cat mention) and de_se_floor rate (rung≥3 = first-person
-cat identity). Regex floor UNDERCOUNTS (the subliminal contortion.py caveat) — a lower
-bound, raw text saved for hand-coding. GPU. First-read → outer loop.
+cat identity). Regex floor UNDERCOUNTS (a regex misses contorted or indirect first-person
+phrasings) — a lower bound, raw text saved for hand-coding. GPU.
 """
 from __future__ import annotations
 
@@ -54,7 +53,7 @@ ANIMAL_PICK = re.compile(
     r"\b(cat|kitten|feline|dog|puppy|eagle|owl|hawk|falcon|dolphin|whale|lion|tiger|leopard|"
     r"cheetah|panther|wolf|fox|bear|penguin|peacock|deer|horse|elephant|otter|dragon|phoenix)s?\b", re.I)
 
-# ── SECOND-ANIMAL lexica (Pg-2a; same design law as the cat pair: de-dicto = exact
+# ── SECOND-ANIMAL lexica (same design law as the cat pair: de-dicto = exact
 # referent words only; de-se = first-person identity REQUIRING a species referent or a
 # species-SPECIFIC body/act — no generic wings/feathers a hawk/eagle also has) ──
 DE_DICTO_PHOENIX = re.compile(
@@ -198,9 +197,8 @@ if __name__ == "__main__":
     main()
 
 
-# ── EMBODIMENT-FRAME LEXICON (third standing column; ADOPTED s12 ruling (c)-3, FROZEN
-# 2026-07-17 with floors measured BEFORE freezing — see
-# arms/A6/EMBODIMENT-LEXICON-FREEZE-2026-07-17.md). Animal-AGNOSTIC by design: detects
+# ── EMBODIMENT-FRAME LEXICON (third standing column; FROZEN, with its floors measured
+# BEFORE freezing, so a change here is a new lexicon, not an edit). Animal-AGNOSTIC by design: detects
 # the FRAME (embodiment self-stance / self-name-as-creature), not the species — the
 # channel the exact-referent lexica are recall-blind to (wolf students, phoenix students,
 # steered owl). SELF_NAME parameterized per suite (Qwen for the subliminal suite). ──

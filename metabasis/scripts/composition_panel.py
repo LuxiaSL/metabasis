@@ -1,19 +1,22 @@
-"""A8 Leg-4 / L4-b — field-basis composition re-prediction (CPU; frozen bar P8-L4b .55).
+"""Field-basis composition re-prediction (CPU; the frozen bar is P=.55 on obs/pred within x2).
 
-The Leg-3 desk pass (§9 ruling 4) on the §2b over-performance pattern: the F-ii sheets
-predicted each transported vector's entropy consequence from the V7 row ALONE
-(pred = cos(g·v, V7_tgt) x V7's own dose law), and every magnitude excursion was an
-OVER-performance.  The hypothesis: the transported vectors carry material cos on the
-TARGET'S OTHER field dials, so the single-dial model structurally under-calls.  Re-predict
-under the target's whole banked field basis and see whether the ratios close toward 1.
+A second look at an over-performance pattern: the F-ii sheets predicted each transported
+vector's entropy consequence from the entropy-axis row ALONE
+(pred = cos(g·v, V7_tgt) x the entropy axis's own dose law), and every magnitude
+excursion was an OVER-performance.  The hypothesis: the transported vectors carry
+material cos on the TARGET'S OTHER field dials, so the single-dial model structurally
+under-calls.  Re-predict under the target's whole banked field basis and see whether the
+ratios close toward 1.
 
-Two readings are computed and BOTH filed (Add-1.3 discipline — the letter's Sigma-form is
-degenerate on a non-orthogonal basis, so the desk picks the scoring reading):
+Two readings are computed and BOTH filed — the prediction's written Sigma-form is
+degenerate on a non-orthogonal basis, so which reading scores is chosen outside this
+script, and both must be on file for that choice:
 
   READING A (letter-literal):  pred = SUM_i cos(u, dial_i) x effect_i(dose)
-      Exactly as written in add-2.  NOTE the basis is NOT orthogonal — cos(Vconf, V7)
-      ~ -0.91 in both targets — so the V7 and Vconf terms overlap and A double-counts
-      the shared component by construction.  Filed because it is the letter.
+      Exactly as the prediction is written.  NOTE the basis is NOT orthogonal — the
+      confidence and entropy axes have cos ~ -0.91 in both targets — so their terms
+      overlap and A double-counts the shared component by construction.  Filed because
+      it is the letter.
 
   READING B (Gram-corrected):  c = pinv(G) @ [cos(u, dial_i)],  pred = SUM_i c_i x effect_i
       where G is the dial Gram.  This is the least-squares decomposition of u onto the
@@ -21,16 +24,17 @@ degenerate on a non-orthogonal basis, so the desk picks the scoring reading):
       onto the target's dial frame".  Gram condition number filed beside.
 
 Basis (inventoried, per target):
-  * V7, Vrep_perp, Veos_perp, Vconf — all four have BANKED entropy ladders
-    (V7: arms/A5_matrix/{8b,qwen}/entropy_*.json, the same law file the original sheet
-     used, so the V7 term is unchanged and the delta is purely the added dials;
-     field triple: arms/A5_matrix/field{,_qwen}/entropy_field*.json, doses +-0.1/+-0.3).
-  * Vtemp — NO banked entropy ladder exists (checked: only V7 + the field triple are
-    banked at these sites).  Per the pre-ruled fork, its term uses the F-ii-filed
-    prediction convention (effect := cos(Vtemp_tgt, V7_tgt) x V7's law) and the
-    substitution is NAMED in the output.  It is not a new measurement.
+  * the entropy axis, Vrep_perp, Veos_perp, Vconf — all four have BANKED entropy
+    ladders (the entropy axis: `v7_law` in `PAIRS`, the same law file the original
+    sheet used, so its term is unchanged and the delta is purely the added dials;
+    field triple: `field_law` in `PAIRS`, doses +-0.1/+-0.3).
+  * Vtemp — NO banked entropy ladder exists (checked: only the entropy axis and the
+    field triple are banked at these sites).  Its term uses the F-ii-filed prediction
+    convention (effect := cos(Vtemp_tgt, V7_tgt) x the entropy axis's law), fixed before
+    the run, and the substitution is NAMED in the output.  It is not a new measurement.
 
-Everything UNSTAMPED (C§8).  Mechanics only — the desk scores P8-L4b.
+Everything UNSTAMPED.  Mechanics only — this script computes the readings and does not
+score the prediction.
 
 Run (repo root): PYTHONPATH=pipeline python -m metabasis.scripts.composition_panel
                  [--selftest]
@@ -77,7 +81,7 @@ PAIRS = {
     },
 }
 
-# source-side vectors of the Leg-3 injection panel (the sheet's rows)
+# source-side vectors of the injection panel (the sheet's rows)
 PANEL = ("V7", "Vrep_perp", "Vconf", "Vtemp", "oblique")
 # target dials: banked-law name in the field file -> axis key
 FIELD_DIALS = {"Vrep": "Vrep_perp", "Veos": "Veos_perp", "Vconf": "Vconf"}

@@ -1,17 +1,18 @@
-"""A8 — Veos anatomy-matched read (CPU, ungated; baton §4). NUMBERS TO THE DESK, NO VERDICT.
+"""Veos anatomy-matched read (CPU, ungated). NUMBERS ONLY, NO VERDICT.
 
-Desk mechanism hypothesis for the Leg-1 Veos commutation break (cross-family .566,
-converging with the X-4 behavioral flag): Qwen possesses NOTHING in the geometric
-relation Veos⊥ holds to V7/Vrep on the dense (Llama) side — no landing site for
-commutation. This files the anatomy:
+The mechanism hypothesis for the Veos commutation break on the 8B→Qwen map
+(cross-family .566, converging with an independent behavioral flag): Qwen possesses
+NOTHING in the geometric relation Veos⊥ holds to the entropy and repetition axes on
+the dense (Llama) side — no landing site for commutation. This files the anatomy:
 
   1. RELATION PROFILES — per model, cos of Veos_raw and Veos_perp against the anchor
-     panel {V7, Vrep_raw, Vrep_perp, Vconf, Vtemp, dir0}. Dense-side conservation
-     (3B vs 8B) is the baseline the Qwen profile is read against. (3B Veos_perp is
-     not banked — constructed at use as unit(GS(Veos_raw, V7)), the spec-verbatim
-     recipe, flagged in output.)
-  2. COMMUTATION REDERIVED, both rungs — dense→dense (leg0 g, 3B→8B) beside
-     dense→Qwen (leg1 g, 8B→Qwen), for Veos_raw and Veos_perp, each with a
+     panel `ANCHOR_PANEL` (entropy, raw and orthogonalised repetition, confidence,
+     temperature, dir0). Dense-side conservation (3B vs 8B) is the baseline the Qwen
+     profile is read against. (3B Veos_perp is not banked — constructed at use as
+     Gram-Schmidt of Veos_raw against the entropy axis, the recipe as specified,
+     flagged in output.)
+  2. COMMUTATION REDERIVED, both rungs — dense→dense (the 3B→8B map in `FITS`) beside
+     dense→Qwen (the 8B→Qwen map), for Veos_raw and Veos_perp, each with a
      100-seeded-random transported-null q95 envelope through the SAME g.
   3. TRANSPORTED PROFILE — does unit(g·Veos⊥_8B) carry the 8B relation profile into
      the Qwen frame even where it misses Qwen's own Veos⊥?
@@ -22,7 +23,8 @@ commutation. This files the anatomy:
      relation profile and Qwen's own Veos⊥ are mutually exclusive to that degree —
      the "nothing in the right relation" shape, quantified.
 
-Output: leg3/readouts_cpu/veos_anatomy.{json,md}. UNSTAMPED (C§8).
+Output: outputs/battery/arms/A8_conjugation/leg3/readouts_cpu/veos_anatomy.{json,md}.
+UNSTAMPED.
 
 Run (repo root): PYTHONPATH=pipeline python -m metabasis.scripts.stopping_gradient_anatomy
 """
@@ -88,7 +90,7 @@ def constrained_direction_datum(anchors: dict[str, np.ndarray], target_profile: 
     A = np.stack([anchors[n] for n in ANCHOR_PANEL], axis=1)          # [d, k]
     c = np.array([target_profile[n] for n in ANCHOR_PANEL])
     gram = A.T @ A
-    # The anchor panel is deliberately anatomical, not orthogonal (V7/Vconf cos ~ -.84
+    # The anchor panel is deliberately anatomical, not orthogonal (entropy/confidence cos ~ -.84
     # in every frame) — an exact Gram solve explodes on the near-dependency. Pseudo-
     # inverse least-squares is the honest object: minimal-norm v whose profile is as
     # close as the panel's conditioning allows, with the residual filed beside it.

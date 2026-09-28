@@ -1,25 +1,28 @@
-"""A8 Leg-2 PREP — transported-vector alignment diagnostics into DSV2 (CPU, local).
+"""Transported-vector alignment diagnostics into DSV2 (CPU, local; prep grade).
 
-THE ANALYSIS HALF ONLY (desk parked Leg-2 scoring for a fresh session; Luxia's
-park-and-prep ruling 2026-07-22). This files the GEOMETRIC precursors of the frozen
-regime rows — nothing here scores P8-2/P8-2d (those score on INJECTION landing
-outcomes, next session):
+THE ANALYSIS HALF ONLY. This files the GEOMETRIC precursors of the frozen regime
+rows; nothing here scores a prediction — those score on INJECTION landing
+outcomes, which this script does not read:
 
-  - transported source axes u = unit(g·v) for v in {V7, Vrep⊥, Vconf, Vtemp, dir0}
-    (source registry = read_transported_axes.load_axes)
-  - the alignment diagnostic in the TARGET frame at L22 (Σ banked:
-    arms/A5_dsv2/a5_sigma_L22_dsv2-lite.npz): c_align = cos(u, Σ⁻¹u) — the banked
-    decision rule reads cos ≳.3 raw-ok / ≲.2 whiten (2-D caveat stands) —
-    plus the whitened landing object w = unit(Σ⁻¹u)
+  - transported source axes u = unit(g·v) for every axis the source registry
+    (read_transported_axes.load_axes) serves: the entropy axis, its
+    repetition-mass component made orthogonal to it, the confidence axis, the
+    temperature contrast and dir0 (analogical minus contrastive)
+  - the alignment diagnostic in the TARGET frame at L22 (Σ banked at `SIGMA_L22`):
+    c_align = cos(u, Σ⁻¹u) — the banked decision rule reads cos ≳.3 raw-ok /
+    ≲.2 whiten (a rule measured in 2-D, and caveated as such) — plus the
+    whitened landing object w = unit(Σ⁻¹u)
   - raw vs whitened target-frame reads where a banked analog exists:
     L22: cos(u, V7_L22) and cos(w, V7_L22), envelope from transported nulls
-    L18: cos(u, {V3_L18 (dir0), Vtemp_L18}) — Σ_L18 NOT banked (baton item)
-  - Mahalanobis-form m = sqrt(uᵀΣ⁻¹u) reported with the CONVENTION CAVEAT from a
-    prior private-checkpoint ferry (its d estimates ran ~40x below dense baselines —
-    suspected convention mismatch, unresolved; number filed, not interpreted)
+    L18: cos(u, {V3_L18 (dir0), Vtemp_L18}) — no Σ_L18 is banked, so L18 has no
+    whitened read
+  - Mahalanobis-form m = sqrt(uᵀΣ⁻¹u) reported with a CONVENTION CAVEAT: a
+    private checkpoint's d estimates ran ~40x below dense baselines, a suspected
+    convention mismatch that is unresolved, so the number is filed, not
+    interpreted
 
-PREP-DIAGNOSTIC GRADE: envelope-only (no top-PC control here — the scoring session
-runs full Rosetta discipline). Output readouts_prep/leg2_diagnostics.{json,md}.
+PREP-DIAGNOSTIC GRADE: envelope-only (no top-PC control here; a scoring read
+needs one). Output readouts_prep/leg2_diagnostics.{json,md}.
 
 Run (from repo root):
   PYTHONPATH=pipeline python -m metabasis.scripts.alignment_diagnostics \
@@ -108,7 +111,7 @@ def main() -> int:
         randoms = rng.standard_normal((N_RANDOM, d_src))
         randoms /= np.linalg.norm(randoms, axis=1, keepdims=True)
 
-        # envelope of raw target-frame reads at this fit (vs V7_L22 when t_site==22)
+        # envelope of raw target-frame reads at this fit (vs the L22 entropy axis when t_site==22)
         env = {}
         if t_site == 22:
             null_cos = [cos(tm.transport(r), tgt_axes[22]["V7_tgt"]) for r in randoms]

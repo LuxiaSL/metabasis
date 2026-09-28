@@ -1,12 +1,13 @@
-"""ANNEX — blind 2AFC pair builder + scorer for the transcript judge pass (ledger S8-12;
-JT-1..4 frozen BEFORE any pair is read).
+"""ANNEX — blind 2AFC pair builder + scorer for the transcript judge pass (the judging
+questions and scoring rule are fixed BEFORE any pair is read).
 
 build: for each class, sample topic-matched pairs (steered gen vs alpha=0 rider gen on the
-SAME topic), randomize A/B order (seeded), write pairs.md (texts only, no labels) and
-key.json (pair_id -> steered side). The judge reads pairs.md ONLY; the key is opened by
---score after choices are recorded.
+SAME topic), randomize A/B order (seeded), write <out-dir>/pairs.md (texts only, no labels)
+and <out-dir>/key.json (pair_id -> steered side). The judge reads the pairs file ONLY; the
+key is opened by --score after choices are recorded.
 
-score: takes choices.json {pair_id: "A"|"B", ...} + key.json, emits per-class correct counts.
+score: takes a choices file {pair_id: "A"|"B", ...} plus the key, emits per-class correct
+counts.
 
 Usage (from pipeline/):
     python -m metabasis.scripts.blind_pair_builder build --out-dir ../outputs/battery/annex/14r_judge
