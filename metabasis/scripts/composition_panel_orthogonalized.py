@@ -49,9 +49,11 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
+from typing import Optional, Sequence
 
 import numpy as np
 
+from metabasis.scripts._fixed_job import parse_no_arguments
 from metabasis.scripts.fit_transport_maps import load_transport_map
 from metabasis.scripts.composition_panel import (
     DOSES, PAIRS, PANEL, SCORE_DOSE, _observed, _sheet_rows, _target_dials)
@@ -167,7 +169,8 @@ def predict(cfg: dict, basis: dict[str, np.ndarray], effects: dict) -> dict:
                                          "reading_B_gram": _within("ratio_obs_over_B")}}
 
 
-def main() -> int:
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    parse_no_arguments(__doc__, argv)
     OUT.mkdir(parents=True, exist_ok=True)
     out: dict = {
         "STATUS": "UNSTAMPED (C section 8) — no self-scored P; the desk scores P8-PERP (.50)",

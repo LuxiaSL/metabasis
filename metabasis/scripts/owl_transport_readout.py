@@ -21,6 +21,9 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
+from typing import Optional, Sequence
+
+from metabasis.scripts._fixed_job import parse_no_arguments
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("owl_transport_readout")
@@ -38,7 +41,8 @@ def _rate(blk: dict, key: str) -> float | None:
     return round(float(v), 4) if isinstance(v, (int, float)) else None
 
 
-def main() -> int:
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    parse_no_arguments(__doc__, argv)
     OUT.mkdir(parents=True, exist_ok=True)
     res = {"STATUS": "UNSTAMPED (C§8) — mechanics only, desk scores P8-5",
            "leg": "A8 Leg-5 (L4-f) — the transported owl",

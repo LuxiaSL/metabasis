@@ -50,6 +50,15 @@ Two consequences worth stating, both proved in the selftest:
     unit-normalized on load in fp64 and passed to `transport` UNMODIFIED; the
     map owns its own normalization round trip.
 
+MAP CONSUMPTION. Every hub leg `compose_pair` composes and every direct pair fit
+`observed_ahat_for_slot` reads goes through `load_consumable_map`, which applies
+`fit_transport_maps.check_map_for_consumption`: a map whose fit record says the
+null gate failed, whose Procrustes rank exceeds n_train / 1.2, or whose record
+is missing or incomplete raises `MapNotConsumableError`. `--allow-failed-gate-map`
+and `--allow-over-rank-map` lift the refusal for one run; each prediction or
+observation that used an override says so in its flags or notes, and each
+composed prediction carries both legs' check results in `map_gates`.
+
 ────────────────────────────────────────────────────────────────────────────────
 THE OPERATIONALIZATION OF RECORD, AND THE GATE
 ────────────────────────────────────────────────────────────────────────────────
@@ -392,7 +401,10 @@ from pydantic import BaseModel, Field, model_validator
 
 from metabasis.roster import ROSTER
 from metabasis.scripts.fit_transport_maps import (
-    A8_SEED, ARMS, FitGridError, TransportMap, load_transport_map, require_site)
+    A8_SEED, ALLOW_FAILED_GATE_FLAG, ALLOW_OVER_RANK_FLAG, ARMS, FitGridError,
+    MapGateCheck, MapGateError, MapGateOverrides, TransportMap,
+    load_checked_transport_map, load_transport_map, require_site,
+    write_fit_summary_fixture)
 from metabasis.scripts.read_ahat_ceilings import image_basis, projection_norm
 from metabasis.scripts.read_exchange_rates import (
     BANK_ROOT, COLLECTION_ROOT, FAMILIES, FAMILY_OF_RECORD, HUB_MODEL,
@@ -2278,6 +2290,11 @@ class ComposedPrediction(BaseModel):
         description="the hub-frame decomposition — DESCRIPTIVE ONLY, clearly "
                     "separated from a_comp/magnitude_only and from anything a "
                     "band or gate reads. Never scored.")
+    map_gates: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="the consumption check of each hub leg (source first): "
+                    "null-gate result, n_train, rank against the rank guard, "
+                    "and any override passed on the command line")
     flags: list[str] = []
 
 
@@ -2848,6 +2865,45 @@ def resolve_vector_bank(model: str, site: int) -> VectorBankRef:
     return VectorBankRef(model=model, site=site, probed_paths=probed)
 
 
+# ---------------------------------------------------------------- map consumption
+class MapNotConsumableError(ComposedPathError):
+    """A hub leg or direct pair fit failed its consumption check.
+
+    Raised when the map's fit record says its null gate failed, when its
+    Procrustes rank exceeds n_train / 1.2, or when the record is missing or
+    incomplete — unless the matching override flag is in force.
+    """
+
+
+#: The consumption-check overrides in force for this process. The CLI sets them
+#: from `--allow-failed-gate-map` / `--allow-over-rank-map`; every other caller
+#: runs with none, so every check refuses.
+MAP_GATE_OVERRIDES: MapGateOverrides = MapGateOverrides()
+
+
+def set_map_gate_overrides(overrides: MapGateOverrides) -> MapGateOverrides:
+    """Install `overrides` process-wide; returns the previous value."""
+    global MAP_GATE_OVERRIDES
+    previous, MAP_GATE_OVERRIDES = MAP_GATE_OVERRIDES, overrides
+    return previous
+
+
+def load_consumable_map(path: Path, *, role: str,
+                        pair: str) -> tuple[TransportMap, MapGateCheck]:
+    """`fit_transport_maps.load_checked_transport_map` under this process's overrides.
+
+    A refusal names the role, the pair it was loaded for, and both override
+    flags, so the halt says what stopped and how a run may proceed past it.
+    """
+    try:
+        return load_checked_transport_map(path, overrides=MAP_GATE_OVERRIDES)
+    except MapGateError as exc:
+        raise MapNotConsumableError(
+            f"{role}: pair {pair}: {exc} [overrides: {ALLOW_FAILED_GATE_FLAG} for a "
+            f"failed null gate, {ALLOW_OVER_RANK_FLAG} for a rank above n_train / "
+            f"1.2; either is recorded in the output when used]") from exc
+
+
 # ---------------------------------------------------------------- the predictor
 def compose_pair(source_model: str, target_model: str,
                  family: str = FAMILY_OF_RECORD,
@@ -2912,8 +2968,10 @@ def compose_pair(source_model: str, target_model: str,
     v_tgt, spec_tgt = load_entropy_gradient(Path(vec_tgt.resolved),
                                             target_model, t_site)
     assert ref_src.resolved is not None and ref_tgt.resolved is not None
-    tm_src = load_transport_map(Path(ref_src.resolved))
-    tm_tgt = load_transport_map(Path(ref_tgt.resolved))
+    tm_src, gate_src = load_consumable_map(Path(ref_src.resolved),
+                                           role="source hub map", pair=pair_id)
+    tm_tgt, gate_tgt = load_consumable_map(Path(ref_tgt.resolved),
+                                           role="target hub map", pair=pair_id)
     a_comp = composed_exchange_rate(tm_src, tm_tgt, v_src, v_tgt)
 
     #  DESCRIPTIVE COMPANIONS — computed AFTER â_comp, from the objects already
@@ -2941,6 +2999,12 @@ def compose_pair(source_model: str, target_model: str,
                 f"until a frozen-corpus refit lands.")
     if arm is not None and arm != resolved_arm:
         flags.append("ARM OVERRIDDEN — diagnostic only; not a filable slot.")
+    for side, gate in (("source", gate_src), ("target", gate_tgt)):
+        if gate.overrides_used:
+            flags.append(
+                f"MAP GATE OVERRIDDEN on the {side} hub leg "
+                f"({', '.join(gate.overrides_used)}): the leg failed its "
+                f"consumption check and was used only because the flag was passed.")
     if FILED_PATHS is not None:
         #  The pin decides resolution, so say so on the slot itself rather than
         #  leave a reader to infer it from paths. It also explains the sha:
@@ -2983,7 +3047,7 @@ def compose_pair(source_model: str, target_model: str,
             source_model, target_model, s_site, t_site, use_arm, arm_rule,
             family, pair_id, a_comp, companions, flags, v3_vintage, v3_sha,
             ref_src, ref_tgt, spec_src, spec_tgt, v_src, v_tgt, tm_tgt,
-            hub_column, basis)
+            hub_column, basis, map_gates=(gate_src, gate_tgt))
     v21_sides = [ref.corpus == "v21" for ref in refs]
     if all(v21_sides):
         vintage: PredictionVintage = "v2.1"
@@ -3008,7 +3072,8 @@ def compose_pair(source_model: str, target_model: str,
     return _finish_composed(
         source_model, target_model, s_site, t_site, use_arm, arm_rule, family,
         pair_id, a_comp, companions, flags, vintage, corpus_sha, ref_src,
-        ref_tgt, spec_src, spec_tgt, v_src, v_tgt, tm_tgt, hub_column, basis)
+        ref_tgt, spec_src, spec_tgt, v_src, v_tgt, tm_tgt, hub_column, basis,
+        map_gates=(gate_src, gate_tgt))
 
 
 def _finish_composed(source_model: str, target_model: str, s_site: int,
@@ -3020,7 +3085,8 @@ def _finish_composed(source_model: str, target_model: str, s_site: int,
                      ref_tgt: HubMapRef, spec_src: VectorSpec,
                      spec_tgt: VectorSpec, v_src: np.ndarray,
                      v_tgt: np.ndarray, tm_tgt: TransportMap,
-                     hub_column: HubRef, basis: str) -> ComposedPrediction:
+                     hub_column: HubRef, basis: str, *,
+                     map_gates: Sequence[MapGateCheck] = ()) -> ComposedPrediction:
     """Assemble the `ComposedPrediction`. ONE construction site behind two
     vintage branches, so the record's SHAPE can never depend on which basis
     answered — only its `corpus_vintage` and `corpus_manifest_sha256` do."""
@@ -3039,7 +3105,8 @@ def _finish_composed(source_model: str, target_model: str, s_site: int,
         corpus_vintage=vintage, corpus_manifest_sha256=corpus_sha,
         hub_map_source=ref_src, hub_map_target=ref_tgt,
         source_vector=spec_src, target_vector=spec_tgt,
-        descriptive_companions=companions, flags=flags)
+        descriptive_companions=companions,
+        map_gates=[gate.stamp() for gate in map_gates], flags=flags)
 
 
 # ---------------------------------------------------------------- candidates
@@ -7761,7 +7828,14 @@ def observed_ahat_for_slot(slot: V3Slot, fit: V3PairFitRef,
         loaded.append(load_entropy_gradient(path, model, site))
     (v_src, spec_src), (v_tgt, spec_tgt) = loaded
     assert fit.resolved is not None
-    tm = load_transport_map(Path(fit.resolved))
+    tm, gate = load_consumable_map(Path(fit.resolved), role="direct pair fit",
+                                   pair=slot.pair_id)
+    if gate.overrides_used:
+        notes.append(
+            f"MAP GATE OVERRIDDEN ({', '.join(gate.overrides_used)}): the direct "
+            f"pair fit failed its consumption check (null gate valid="
+            f"{gate.gate_valid}, rank {gate.rank} vs guard {gate.max_rank:.1f}) "
+            f"and was read only because the flag was passed. Fit: {fit.resolved}")
     a_obs = exchange_rate(tm, v_src, v_tgt, direction=fit.direction)
     if fit.direction == "rev":
         notes.append(
@@ -10567,6 +10641,10 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                      src_norm=np.float64(tm26.src_norm),
                      tgt_norm=np.float64(tm26.tgt_norm),
                      kind=np.str_(tm26.kind))
+            write_fit_summary_fixture(fits, [{
+                "site_pair": f"8bL{HUB_SITE_OF_RECORD}->{model}L{site}",
+                "arm": "native", "family": FAMILY_OF_RECORD, "valid": True,
+                "n_train": 600}])
             vecs = collection26 / "vectors" / model
             vecs.mkdir(parents=True, exist_ok=True)
             np.savez(vecs / f"entropy_gradient_{model}_L{site}.npz",
@@ -10626,6 +10704,28 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                     pairs_json=pairs26, out=out26, repo_root=root26)
         except ComposedPathError as exc:                # pragma: no cover
             check(False, f"the synthetic emission should resolve: {exc}")
+        with v21_root_scope(collection26, expected_corpus_sha=sha256_of(manifest26)):
+            gated26 = compose_pair("phi-4", "qwen2.5-32b-instruct")
+            check(isinstance(gated26, ComposedPrediction)
+                  and len(gated26.map_gates) == 2
+                  and all(g["null_gate_valid"] for g in gated26.map_gates),
+                  "a composed prediction carries BOTH hub legs' consumption checks "
+                  "in `map_gates`")
+            summary26 = (collection26 / "fits_v21_qwen2.5-32b-instruct"
+                         / "cp2_summary.json")
+            kept26 = summary26.read_text()
+            failed26 = json.loads(kept26)
+            failed26["records"][0]["valid"] = False
+            summary26.write_text(json.dumps(failed26))
+            try:
+                compose_pair("phi-4", "qwen2.5-32b-instruct")
+                check(False, "a hub leg that FAILED its null gate must be refused")
+            except MapNotConsumableError as exc:
+                check(str(exc).startswith("target hub map:"),
+                      "compose_pair REFUSES a hub leg whose recorded null gate "
+                      "FAILED, naming the leg")
+            finally:
+                summary26.write_text(kept26)
         if emitted26 is not None:
             check(emitted26.n_slots == 1 and emitted26.n_forced == 0
                   and emitted26.n_spread == 1,
@@ -11532,6 +11632,9 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                 tgt_norm=np.array(1.0), scale=np.array(1.0),
                 va=eye35.astype(np.float32), vb=eye35.astype(np.float32),
                 omega=eye35.astype(np.float32))
+            write_fit_summary_fixture(out, [{
+                "site_pair": f"{src}L{s_site}->{tgt}L{t_site}", "arm": arm,
+                "family": family, "valid": True, "n_train": 600}])
 
         #  (source, target, â_obs, 8b filed, gemma filed).
         #  EVERY SLOT GETS ITS OWN PAIR OF MODEL KEYS. A key reused across
@@ -11916,6 +12019,10 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                             src_norm=np.array(2.0), tgt_norm=np.array(5.0),
                             scale=np.array(0.5), va=va37, vb=vb37,
                             omega=omega37)
+        write_fit_summary_fixture(fitdir37, [{
+            "site_pair": "revAL21->revBL22", "arm": "native",
+            "family": FAMILY_OF_RECORD_WEBTEXT_V3, "valid": True,
+            "n_train": 600}])
 
         #  (a) THE HAND-COMPUTED VALUES, straight through the estimand of
         #      record — before any lane machinery is involved.
@@ -12072,6 +12179,101 @@ def selftest() -> int:                                   # noqa: C901 — a chec
               "the slot with no object in either direction stays "
               "UNSCORED-NO-FIT in the frozen denominator, and says that both "
               "orderings were probed")
+
+    print("== selftest 38: every map is gate- and rank-checked before use ==")
+    with _tmp30.TemporaryDirectory(prefix="composed_mapgate_") as td38:
+        fx38 = Path(td38)
+        eye38 = np.eye(4)
+        vec_root38 = fx38 / "vectors"
+        for model38, site38, vec38 in (("gA", 31, [1.0, 0.0, 0.0, 0.0]),
+                                        ("gB", 32, [0.6, 0.8, 0.0, 0.0])):
+            (vec_root38 / model38).mkdir(parents=True)
+            np.savez(vec_root38 / model38 / f"entropy_gradient_{model38}_L{site38}.npz",
+                     **{f"entropy_gradient_L{site38}": np.array(vec38)})
+
+        def plant38(sub: str, **record: Any) -> Path:
+            fdir = fx38 / sub
+            fdir.mkdir()
+            fit = fdir / f"fit_gAL31__gBL32_native_{FAMILY_OF_RECORD_WEBTEXT_V3}.npz"
+            np.savez_compressed(fit, kind=np.array("proc"), src_norm=np.array(1.0),
+                                tgt_norm=np.array(1.0), scale=np.array(1.0),
+                                va=eye38, vb=eye38, omega=eye38)
+            row = {"site_pair": "gAL31->gBL32", "arm": "native",
+                   "family": FAMILY_OF_RECORD_WEBTEXT_V3, "valid": True,
+                   "n_train": 600}
+            row.update(record)
+            write_fit_summary_fixture(fdir, [{kk: vv for kk, vv in row.items()
+                                              if vv is not None}])
+            return fit
+
+        slot38 = V3Slot(
+            ordinal=1, prediction_id="p38", pair_id="gAL31->gBL32",
+            source_model="gA", source_site=31, target_model="gB", target_site=32,
+            arm="native", arm_rule="fixture", family=FAMILY_OF_RECORD_WEBTEXT_V3,
+            pair_class="fixture", status="FILED", columns={})
+
+        def observe38(fit: Path) -> tuple[float, list[str]]:
+            ref = V3PairFitRef(pair_id="gAL31->gBL32", arm="native",
+                               family=FAMILY_OF_RECORD_WEBTEXT_V3,
+                               resolved=str(fit), fit_pair_id="gAL31->gBL32")
+            obs, _s, _t, notes38 = observed_ahat_for_slot(slot38, ref, vec_root38)
+            return obs, notes38
+
+        obs_ok, notes_ok = observe38(plant38("ok"))
+        check(abs(obs_ok - 0.6) < 1e-12
+              and not any("MAP GATE OVERRIDDEN" in n for n in notes_ok),
+              f"a VALID direct pair fit is read (â_obs = {obs_ok:+.3f}, want +0.600)")
+        fail38 = plant38("gate_fail", valid=False)
+        try:
+            observe38(fail38)
+            check(False, "a direct pair fit that FAILED its null gate must be refused")
+        except MapNotConsumableError as exc:
+            check("null gate" in str(exc) and "gAL31->gBL32" in str(exc)
+                  and ALLOW_FAILED_GATE_FLAG in str(exc)
+                  and ALLOW_OVER_RANK_FLAG in str(exc),
+                  "a direct pair fit whose recorded null gate FAILED is refused, "
+                  "naming the pair and both override flags")
+        over38 = plant38("over_rank", n_train=3)
+        try:
+            observe38(over38)
+            check(False, "an over-rank direct pair fit must be refused")
+        except MapNotConsumableError as exc:
+            check("rank guard" in str(exc),
+                  "an OVER-RANK fit (rank 4 > n_train 3 / 1.2) is refused")
+        missing38 = plant38("no_n_train", n_train=None)
+        try:
+            observe38(missing38)
+            check(False, "a fit record without n_train must be refused")
+        except MapNotConsumableError as exc:
+            check("`n_train`" in str(exc),
+                  "a fit record MISSING `n_train` is refused by name")
+        try:
+            load_consumable_map(fail38, role="source hub map", pair="gAL31->gBL32")
+            check(False, "a failed hub leg must be refused")
+        except MapNotConsumableError as exc:
+            check(str(exc).startswith("source hub map:"),
+                  "a hub leg is refused through the same loader compose_pair uses, "
+                  "naming the leg")
+        previous38 = set_map_gate_overrides(MapGateOverrides(allow_failed_gate=True))
+        try:
+            obs_forced, notes_forced = observe38(fail38)
+        finally:
+            set_map_gate_overrides(previous38)
+        check(abs(obs_forced - 0.6) < 1e-12
+              and any(ALLOW_FAILED_GATE_FLAG in n for n in notes_forced),
+              f"under {ALLOW_FAILED_GATE_FLAG} the fit is read and the slot's notes "
+              "record the override")
+        check(MAP_GATE_OVERRIDES == MapGateOverrides(),
+              "the override is restored to none after use")
+        import contextlib as _ctx38
+        import io as _io38
+        with _ctx38.redirect_stderr(_io38.StringIO()):
+            try:
+                main(["--selftest", "--no-such-flag"])
+                code38: Any = None
+            except SystemExit as exc:
+                code38 = exc.code
+        check(code38 == 2, "an unknown flag is a usage error, never ignored")
 
     print(f"\nselftest: {len(failures)} failure(s)")
     return 1 if failures else 0
@@ -12344,10 +12546,22 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                          "artifact (each column has its own out-flag). Never "
                          "point this inside outputs/ — this tool is read-only "
                          "over the data tree.")
+    ap.add_argument(ALLOW_FAILED_GATE_FLAG, dest="allow_failed_gate_map",
+                    action="store_true",
+                    help="use a hub leg or direct pair fit whose recorded null "
+                         "gate FAILED (refused by default); every prediction or "
+                         "observation that used one says so in its flags/notes")
+    ap.add_argument(ALLOW_OVER_RANK_FLAG, dest="allow_over_rank_map",
+                    action="store_true",
+                    help="use a Procrustes map whose rank exceeds n_train / 1.2 "
+                         "(refused by default); recorded the same way")
     args = ap.parse_args(argv)
 
     if args.selftest:
         return selftest()
+    set_map_gate_overrides(MapGateOverrides(
+        allow_failed_gate=args.allow_failed_gate_map,
+        allow_over_rank=args.allow_over_rank_map))
 
     #  THE BASIS, resolved at the door. `--family` defaults to the BASIS's own
     #  family of record rather than to a constant, so a v3 run cannot silently
@@ -12726,6 +12940,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         except FiledPathsError as exc:
             print(f"\nFILED-PATHS HALT — {exc}")
             return 1
+        except MapNotConsumableError as exc:
+            print(f"\nMAP-GATE HALT — {exc}")
+            return 1
         readout.predictions.extend(computed.predictions)
         readout.na_at_filing.extend(computed.na_at_filing)
         total = len(computed.predictions) + len(computed.na_at_filing)
@@ -12872,6 +13089,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         except FiledPathsError as exc:
             print(f"\nFILED-PATHS HALT — {exc}")
             return 1
+        except MapNotConsumableError as exc:
+            print(f"\nMAP-GATE HALT — {exc}")
+            return 1
         if isinstance(one, NotFilable):
             readout.na_at_filing.append(one)
             print(f"{one.pair_id}: N/A-AT-FILING (missing "
@@ -12902,7 +13122,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 pairs_json=args.pairs_json, out=args.out, family=args.family,
                 narrative=load_narrative(args.narrative),
                 repo_root=args.repo_root, overwrite=args.overwrite_record)
-        except (RecordEmissionError, ScoringError, ValueError) as exc:
+        except (RecordEmissionError, ScoringError, ValueError,
+                MapNotConsumableError) as exc:
             #  An EXPECTED halt: the ruling, the slate and the data disagree, or a
             #  block would have violated the consumer's own contract. Reported
             #  cleanly and nonzero — nothing partial is left on disk beyond the
@@ -13081,6 +13302,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             #  THE ORDINARY STATE WHILE THE WAVE RUNS. A clean refusal, named
             #  and nonzero — never an empty scored record.
             print(f"\nPAIR-FITS HALT — {exc}")
+            return 1
+        except MapNotConsumableError as exc:
+            print(f"\nMAP-GATE HALT — {exc}")
             return 1
         except (ScoringError, V3ArtifactError) as exc:
             print(f"\nSCORING HALT — {exc}")

@@ -29,9 +29,11 @@ import logging
 import sys
 from glob import glob
 from pathlib import Path
+from typing import Optional, Sequence
 
 import numpy as np
 
+from metabasis.scripts._fixed_job import parse_no_arguments
 from metabasis.scripts.entropy_write_probe import add_null_ratios
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -156,7 +158,8 @@ def f2_scoring(rows_by_vec: dict, key_path: Path) -> dict:
     return out
 
 
-def main() -> int:
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    parse_no_arguments(__doc__, argv)
     out_dir = LEG3 / "readouts_final"
     out_dir.mkdir(parents=True, exist_ok=True)
     summary = {"grade": "UNSTAMPED (C§8) — mechanical scoring vs frozen letters; "

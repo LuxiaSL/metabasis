@@ -275,6 +275,10 @@ class ConstructionRefused(BankStagingError):
     """
 
 
+class MapNotConsumable(BankStagingError):
+    """A transport map failed its consumption check (null gate or rank guard)."""
+
+
 class DimensionMismatch(BankStagingError):
     """A vector does not fit the space it is being carried into or out of."""
 
@@ -2296,7 +2300,8 @@ class BuildResult(BaseModel):
 
 def build_banks(spec: BankSpec, *, construct_bands: bool = False,
                 write: bool = True,
-                ladder_authorization: Optional[LadderAuthorization] = None
+                ladder_authorization: Optional[LadderAuthorization] = None,
+                map_overrides: Optional[Any] = None
                 ) -> tuple[BuildResult, CellsDocument]:
     """Stage one column: verify, construct, plan, stamp, write.
 
@@ -2312,6 +2317,12 @@ def build_banks(spec: BankSpec, *, construct_bands: bool = False,
     an amended column banks byte-identical OBJECTS and differs only in which doses its
     cells name. `None` — the default — is the frozen ladder and the path this function
     took before the field existed.
+
+    Every map the transported half rides passes `fit_transport_maps.
+    check_map_for_consumption` first: a map whose recorded null gate failed, or a
+    Procrustes rank above n_train / 1.2, is refused (`MapNotConsumable`) unless
+    `map_overrides` (a `MapGateOverrides`) permits it. The check's result, including
+    any override used, is written into the transport-map stamp under `map_gate`.
     """
     from metabasis.scripts.capability_battery import BATTERY_ITEM_SET_SHA256
 
@@ -2374,12 +2385,22 @@ def build_banks(spec: BankSpec, *, construct_bands: bool = False,
     if spec.include_transported:
         if spec.source_vector is None or spec.map_of_record is None:  # pragma: no cover
             raise SpecError("the transported half needs a source vector and a map")
-        from metabasis.scripts.fit_transport_maps import load_transport_map
+        from metabasis.scripts.fit_transport_maps import (
+            MapGateError, load_checked_transport_map)
 
+        def checked(path: Path, role: str) -> Any:
+            try:
+                tm_, chk_ = load_checked_transport_map(path, overrides=map_overrides)
+            except MapGateError as exc:
+                raise MapNotConsumable(f"{role}: {exc}") from exc
+            map_gates[role] = chk_.stamp()
+            return tm_
+
+        map_gates: dict[str, dict] = {}
         if spec.composed_map is not None:
             comp = spec.composed_map
-            leg_in = load_transport_map(comp.hub_to_source.fit)
-            leg_out = load_transport_map(comp.hub_to_target.fit)
+            leg_in = checked(comp.hub_to_source.fit, "hub_to_source")
+            leg_out = checked(comp.hub_to_target.fit, "hub_to_target")
             in_dir, out_dir_ = comp.hub_to_source.direction, comp.hub_to_target.direction
             # `hub_to_source` is a hub→source leg ridden BACKWARDS and `hub_to_target`
             # a hub→target leg ridden FORWARDS, each composed with whatever orientation
@@ -2394,7 +2415,7 @@ def build_banks(spec: BankSpec, *, construct_bands: bool = False,
 
             direction = "composed"
         else:
-            tmap = load_transport_map(spec.transport_map.fit)
+            tmap = checked(spec.transport_map.fit, "transport_map")
             direction = spec.transport_map.direction
 
             def carry(v: np.ndarray) -> np.ndarray:
@@ -2481,12 +2502,14 @@ def build_banks(spec: BankSpec, *, construct_bands: bool = False,
                      "fit_path": str(comp.hub_to_source.fit),
                      "fit_sha256": sha256_file(comp.hub_to_source.fit),
                      "banked_direction": comp.hub_to_source.direction,
-                     "corpus_vintage": comp.hub_to_source.corpus_vintage},
+                     "corpus_vintage": comp.hub_to_source.corpus_vintage,
+                     "map_gate": map_gates["hub_to_source"]},
                     {"role": "hub_to_target", "ridden": "fwd",
                      "fit_path": str(comp.hub_to_target.fit),
                      "fit_sha256": sha256_file(comp.hub_to_target.fit),
                      "banked_direction": comp.hub_to_target.direction,
-                     "corpus_vintage": comp.hub_to_target.corpus_vintage},
+                     "corpus_vintage": comp.hub_to_target.corpus_vintage,
+                     "map_gate": map_gates["hub_to_target"]},
                 ],
                 # §2.8 wants ONE fit sha per stamp field; a composed road has two, so
                 # the field carries a digest OVER the two in leg order and the legs are
@@ -2514,7 +2537,10 @@ def build_banks(spec: BankSpec, *, construct_bands: bool = False,
                 "arm": spec.transport_map.arm,
                 "direction": direction,
                 "corpus_vintage": spec.transport_map.corpus_vintage,
+                "map_gate": map_gates["transport_map"],
             }
+        tm_stamp["map_gate_overrides"] = sorted(
+            {flag for g in map_gates.values() for flag in g["overrides_used"]})
 
     naive_row: Optional[dict] = None
     if spec.include_naive:
@@ -2721,6 +2747,11 @@ def bank_stamp(spec: BankSpec, *, cells: Sequence[StagedCell],
         "transport_map_arm": (transport_map or {}).get("arm"),
         "transport_map_corpus_vintage": (transport_map or {}).get("corpus_vintage"),
         "transport_road": (transport_map or {}).get("road"),
+        # The consumption check of the map(s) ridden: null-gate result, n_train, rank
+        # against the rank guard, and any override the operator passed. A composed
+        # road carries one block per leg, inside `composed_map` below.
+        "transport_map_gate": (transport_map or {}).get("map_gate"),
+        "transport_map_gate_overrides": (transport_map or {}).get("map_gate_overrides"),
         # A composed road's two legs, verbatim — the single `transport_map_fit_sha256`
         # above is a digest OVER them and cannot be resolved back to either leg.
         "composed_map": (transport_map
@@ -2963,18 +2994,34 @@ def _toy_vector_npz(dirpath: Path, key: str, dim: int, *, seed: int,
                      build_stamp=stamp, provenance=f"selftest::{key}")
 
 
-def _toy_map_npz(dirpath: Path, d_src: int, d_tgt: int, *, seed: int) -> Path:
-    """A tiny real `fit_transport_maps` Procrustes bank — loaded by the real loader."""
+def _toy_map_npz(dirpath: Path, d_src: int, d_tgt: int, *, seed: int,
+                 valid: bool = True, n_train: Optional[int] = None,
+                 summary: bool = True) -> Path:
+    """A tiny real `fit_transport_maps` Procrustes bank — loaded by the real loader.
+
+    Written under a `save_transport_map` file name with a run summary beside it, so
+    the consumption check has a record to read: `valid` is the recorded null-gate
+    result and `n_train` defaults to comfortably inside the rank guard.
+    """
+    from metabasis.scripts.fit_transport_maps import write_fit_summary_fixture
+
     rng = np.random.default_rng(seed)
     k = min(d_src, d_tgt)
     va = np.linalg.qr(rng.standard_normal((d_src, k)))[0].T          # [k, d_src]
     vb = np.linalg.qr(rng.standard_normal((d_tgt, k)))[0].T          # [k, d_tgt]
     omega = np.linalg.qr(rng.standard_normal((k, k)))[0]
-    path = dirpath / "fit_selftest_proc_k.npz"
+    dirpath.mkdir(parents=True, exist_ok=True)
+    path = dirpath / f"fit_toysrcL1__toytgtL2_native_proc_k{k}.npz"
     np.savez(path, kind=np.array("proc"), src_norm=np.array(1.0),
              tgt_norm=np.array(1.0), scale=np.array(1.0),
              va=va.astype(np.float32), vb=vb.astype(np.float32),
              omega=omega.astype(np.float32))
+    if summary:
+        write_fit_summary_fixture(dirpath, [{
+            "site_pair": "toysrcL1->toytgtL2", "arm": "native",
+            "family": f"proc_k{k}", "valid": valid,
+            "n_train": 10 * k if n_train is None else n_train,
+            "detail": {"k_effective": k}}])
     return path
 
 
@@ -3596,6 +3643,85 @@ def selftest() -> int:                                   # noqa: C901 — a chec
               hashlib.sha256((sha256_file(alt.hub_to_source.fit) + "|"
                               + sha256_file(alt.hub_to_target.fit)).encode()
                              ).hexdigest() != st["composed_map"]["fit_sha256"])
+
+        # ---- 6d. every ridden map passes the consumption check ----------------
+        print("== selftest 6d: a map is gate- and rank-checked before it is ridden ==")
+        from metabasis.scripts.fit_transport_maps import (
+            ALLOW_FAILED_GATE_FLAG, ALLOW_OVER_RANK_FLAG, MapGateOverrides,
+            write_fit_summary_fixture)
+        check("both composed legs carry a PASSING map_gate block with no override",
+              all(lg["map_gate"]["null_gate_valid"] is True
+                  and lg["map_gate"]["overrides_used"] == []
+                  for lg in st["composed_map"]["legs"])
+              and st["transport_map_gate_overrides"] == [])
+        check("a direct road's stamp carries its map_gate block",
+              doc_c.bank_stamp["transport_map_gate"]["null_gate_valid"] is True
+              and doc_c.bank_stamp["transport_map_gate"]["rank_guard_ok"] is True,
+              str(doc_c.bank_stamp["transport_map_gate"]["rank"]))
+
+        def _direct(path: Path) -> BankSpec:
+            return spec_c.model_copy(update={
+                "transport_map": TransportMapRef(
+                    fit=path, family="proc_k128", arm="native",
+                    corpus_vintage=corpus_sha),
+                "out_dir": root / f"out_{path.parent.name}"})
+
+        fail_map = _toy_map_npz(root / "gate_fail", d_src, d_tgt, seed=4, valid=False)
+        check("a map whose recorded null gate FAILED is refused at build",
+              _raises(lambda: build_banks(_direct(fail_map), construct_bands=True,
+                                          write=False), MapNotConsumable))
+        _fr, fail_doc = build_banks(
+            _direct(fail_map), construct_bands=True, write=False,
+            map_overrides=MapGateOverrides(allow_failed_gate=True))
+        check(f"…and builds only under {ALLOW_FAILED_GATE_FLAG}, which the bank "
+              "stamp records",
+              fail_doc.bank_stamp["transport_map_gate_overrides"]
+              == [ALLOW_FAILED_GATE_FLAG]
+              and fail_doc.bank_stamp["transport_map_gate"]["null_gate_valid"] is False)
+        over_map = _toy_map_npz(root / "over_rank", d_src, d_tgt, seed=4, n_train=2)
+        check("an OVER-RANK map (k > n_train/1.2) is refused at build",
+              _raises(lambda: build_banks(_direct(over_map), construct_bands=True,
+                                          write=False), MapNotConsumable))
+        _or, over_doc = build_banks(
+            _direct(over_map), construct_bands=True, write=False,
+            map_overrides=MapGateOverrides(allow_over_rank=True))
+        check(f"…and builds only under {ALLOW_OVER_RANK_FLAG}, which the bank stamp "
+              "records",
+              over_doc.bank_stamp["transport_map_gate_overrides"]
+              == [ALLOW_OVER_RANK_FLAG])
+        nofield_map = _toy_map_npz(root / "no_n_train", d_src, d_tgt, seed=4,
+                                   summary=False)
+        write_fit_summary_fixture(nofield_map.parent, [{
+            "site_pair": "toysrcL1->toytgtL2", "arm": "native",
+            "family": "proc_k" + nofield_map.stem.rsplit("_k", 1)[-1],
+            "valid": True}])
+        try:
+            build_banks(_direct(nofield_map), construct_bands=True, write=False)
+            check("a map record MISSING n_train must be refused", False)
+        except MapNotConsumable as exc:
+            check("a map record MISSING n_train is refused by name",
+                  "`n_train`" in str(exc), str(exc)[:80])
+        bad_leg = ComposedMapRef(**{
+            **json.loads(composed.model_dump_json()),
+            "hub_to_target": json.loads(_leg(_toy_map_npz(
+                root / "leg_out_fail", d_hub, d_tgt, seed=22,
+                valid=False)).model_dump_json())})
+        try:
+            build_banks(comp_spec.model_copy(update={
+                "composed_map": bad_leg, "out_dir": root / "out_bad_leg"}),
+                construct_bands=True, write=False)
+            check("a composed road with a FAILED leg must be refused", False)
+        except MapNotConsumable as exc:
+            check("a composed road with ONE failed leg is refused, naming the leg",
+                  "hub_to_target" in str(exc), str(exc)[:60])
+        with contextlib.redirect_stderr(io.StringIO()):
+            try:
+                main(["--build", "--spec", str(root / "none.json"), "--no-such-flag"])
+                unknown_rc: Any = None
+            except SystemExit as exc:
+                unknown_rc = exc.code
+        check("an unknown flag is a usage error, never ignored", unknown_rc == 2,
+              f"exit {unknown_rc}")
 
         # ---- 7. the cells document contract -----------------------------------
         print("== selftest 7: the staging→engine document contract ==")
@@ -4446,7 +4572,8 @@ def selftest() -> int:                                   # noqa: C901 — a chec
     # reviewer gets to ask why.
     # This module's suite is configuration-invariant by construction (M44), so its known
     # skip set is EMPTY and a block that started skipping fails here.
-    SELFTEST_CHECK_FLOOR = 182
+    # The map consumption block (6d) adds 9 checks: floor 191, total 192.
+    SELFTEST_CHECK_FLOOR = 191
     KNOWN_SKIP_CEILING = 0
     check(f"(M59) the suite ran at least its recorded floor of {SELFTEST_CHECK_FLOOR} "
           f"checks and named no more than {KNOWN_SKIP_CEILING} skip(s) — a block that "
@@ -4612,6 +4739,14 @@ def main(argv: Optional[list[str]] = None) -> int:
                     help="override the spec's out_dir")
     ap.add_argument("--dry-run", action="store_true",
                     help="plan and stamp without writing anything")
+    ap.add_argument("--allow-failed-gate-map", action="store_true",
+                    help="consume a transport map whose recorded null gate FAILED "
+                         "(refused by default); the override is written into the "
+                         "bank stamp")
+    ap.add_argument("--allow-over-rank-map", action="store_true",
+                    help="consume a Procrustes map whose rank exceeds n_train / 1.2 "
+                         "(refused by default); the override is written into the "
+                         "bank stamp")
     args = ap.parse_args(argv)
 
     if args.selftest:
@@ -4677,9 +4812,13 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 0 if cen.ready else 1
 
     try:
+        from metabasis.scripts.fit_transport_maps import MapGateOverrides
         result, _ = build_banks(spec, construct_bands=args.construct_bands,
                                 write=not args.dry_run,
-                                ladder_authorization=ladder_authorization)
+                                ladder_authorization=ladder_authorization,
+                                map_overrides=MapGateOverrides(
+                                    allow_failed_gate=args.allow_failed_gate_map,
+                                    allow_over_rank=args.allow_over_rank_map))
     except BehavioralHarnessError as exc:
         logger.error("HALT: %s", exc)
         return 2

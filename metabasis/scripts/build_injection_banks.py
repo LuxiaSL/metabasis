@@ -36,9 +36,11 @@ import json
 import logging
 import sys
 from pathlib import Path
+from typing import Optional, Sequence
 
 import numpy as np
 
+from metabasis.scripts._fixed_job import parse_no_arguments
 from metabasis.scripts.fit_transport_maps import load_transport_map
 from metabasis.scripts.alignment_diagnostics import SigmaInv
 from metabasis.scripts.read_transported_axes import _unit, load_axes
@@ -188,7 +190,8 @@ def build_target(target: str, cfg: dict) -> None:
                 target, len(vectors), len(cells), 80 * len(cells), npz_path)
 
 
-def main() -> int:
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    parse_no_arguments(__doc__, argv)
     for target, cfg in TARGETS.items():
         build_target(target, cfg)
     logger.info("leg3 staging complete under %s", LEG3)

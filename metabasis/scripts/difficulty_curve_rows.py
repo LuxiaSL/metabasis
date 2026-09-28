@@ -37,10 +37,11 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Sequence
 
 import numpy as np
 
+from metabasis.scripts._fixed_job import parse_no_arguments
 from metabasis.scripts.fit_transport_maps import (
     PCABank, load_labels, load_state_bank, load_transport_map, make_split)
 from metabasis.scripts.read_transported_axes import (
@@ -176,7 +177,8 @@ def _fit_table(fits_dir: Path) -> dict:
             "n_valid": cp2["n_valid"], "n_fits": cp2["n_fits"], "by_pair": by_pair}
 
 
-def main() -> int:
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    parse_no_arguments(__doc__, argv)
     OUT.mkdir(parents=True, exist_ok=True)
     doc: dict = {
         "STATUS": "UNSTAMPED (C section 8) — no P self-scored; the desk scores "

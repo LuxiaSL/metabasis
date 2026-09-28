@@ -86,9 +86,15 @@ Arm and family discipline (prereg §2, and the arm-consistency rule)
 The entropy-gradient vector is ARM-AGNOSTIC (one vector per model per site; the
 banked system uses the same 8B vector for both the native and raw rows). The MAP
 is arm-specific, so â is arm-labeled by its map. Family of record is `proc_k128`;
-k32/ridge ride beside, never mixed inside one star equation. The rank guard
-(k ≤ n_train/1.2) is read from the fit dir's `cp2_summary.json` and reported per
-row rather than silently applied.
+k32/ridge ride beside, never mixed inside one star equation.
+
+Map consumption: every map passes `fit_transport_maps.check_map_for_consumption`
+before an â is read through it. A map whose fit record in `cp2_summary.json`
+says the null gate failed, or whose Procrustes rank exceeds n_train / 1.2, or
+that has no complete record, is listed under `refused` with the reason and no â
+(the command exits 1). `--allow-failed-gate-map` / `--allow-over-rank-map` read
+through such a map anyway; the flags are recorded in `map_gate_overrides` and
+each row's `map_gate` block.
 
 Nulls: every row carries a transported-null floor — 100 seeded unit randoms in
 the source space through the SAME map, |cos| q95 against the target vector, plus
@@ -110,13 +116,14 @@ import logging
 import sys
 from datetime import date
 from pathlib import Path
-from typing import Iterable, Literal, Optional, Sequence
+from typing import Any, Iterable, Literal, Optional, Sequence
 
 import numpy as np
 from pydantic import BaseModel, Field
 
 from metabasis.scripts.fit_transport_maps import (
-    A8_SEED, ARMS, TransportMap, load_transport_map)
+    A8_SEED, ALLOW_FAILED_GATE_FLAG, ALLOW_OVER_RANK_FLAG, ARMS, MapGateError,
+    MapGateOverrides, TransportMap, load_checked_transport_map, load_transport_map)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("read_exchange_rates")
@@ -233,6 +240,9 @@ class ExchangeRateRow(BaseModel):
     rank_forbidden: bool = False
     fit_path: str
     map_kind: str
+    #: The consumption check of the map (`fit_transport_maps.MapGateCheck.stamp`):
+    #: null-gate result, n_train, rank against the rank guard, overrides used.
+    map_gate: Optional[dict[str, Any]] = None
     source_vector: VectorSpec
     target_vector: VectorSpec
     norm_audit: list[NormAudit]
@@ -250,6 +260,16 @@ class MissingPiece(BaseModel):
     family: str
     missing: list[str]
     probed_paths: list[str]
+
+
+class RefusedMap(BaseModel):
+    """A pair whose map exists but failed its consumption check — no â is read."""
+    pair_id: str
+    arm: str
+    family: str
+    fit_path: str
+    refusal: str
+    reason: str
 
 
 class ExchangeRateReadout(BaseModel):
@@ -272,6 +292,9 @@ class ExchangeRateReadout(BaseModel):
     hub: str
     rows: list[ExchangeRateRow] = []
     missing: list[MissingPiece] = []
+    refused: list[RefusedMap] = []
+    #: Consumption-check overrides passed on the command line, if any.
+    map_gate_overrides: list[str] = []
 
 
 # ---------------------------------------------------------------- helpers
@@ -614,9 +637,13 @@ def read_pair(src_model: str, src_site: int, src_vectors: Path,
               with_nulls: bool = True,
               on_global_fallback: Literal["warn", "raise"]
               = DEFAULT_NORMS_GLOBAL_FALLBACK,
-              ) -> ExchangeRateRow | MissingPiece:
+              map_overrides: Optional[MapGateOverrides] = None,
+              ) -> ExchangeRateRow | MissingPiece | RefusedMap:
     """Read one â end-to-end. Returns a MissingPiece instead of raising when a
-    banked piece is simply absent — the wave-1 case until targets land."""
+    banked piece is simply absent — the wave-1 case until targets land — and a
+    RefusedMap when the map exists but fails its consumption check (a failed
+    null gate, a rank above n_train / 1.2, or a missing fit record), unless
+    `map_overrides` permits it."""
     pair_id = f"{src_model}L{src_site}->{tgt_model}L{tgt_site}"
     fit_p = fit_path_for(fits_dir, src_model, src_site, tgt_model, tgt_site,
                          arm, family)
@@ -650,7 +677,12 @@ def read_pair(src_model: str, src_site: int, src_vectors: Path,
                             target_site=tgt_site, arm=arm, family=family,
                             missing=missing, probed_paths=probed)
 
-    tm = load_transport_map(fit_p)
+    try:
+        tm, gate = load_checked_transport_map(fit_p, overrides=map_overrides)
+    except MapGateError as exc:
+        return RefusedMap(pair_id=pair_id, arm=arm, family=family,
+                          fit_path=str(fit_p), refusal=type(exc).__name__,
+                          reason=str(exc))
     a_hat = exchange_rate(tm, v_src, v_tgt, direction=direction)
 
     nulls = (transported_null_floor(tm, v_tgt, d_src=src_spec.dim,
@@ -678,7 +710,7 @@ def read_pair(src_model: str, src_site: int, src_vectors: Path,
         magnitude_only=bool(abs(a_hat) < NEAR_ZERO_CARVE_OUT),
         n_train=n_train,
         rank_forbidden=bool(max_k is not None and k is not None and k > max_k),
-        fit_path=str(fit_p), map_kind=tm.kind,
+        fit_path=str(fit_p), map_kind=tm.kind, map_gate=gate.stamp(),
         source_vector=src_spec, target_vector=tgt_spec,
         norm_audit=audits, null_floor=nulls)
 
@@ -763,15 +795,23 @@ def run(requests: Sequence[PairRequest], hub: str = HUB_MODEL,
         direction: Literal["fwd", "rev"] = "fwd",
         with_nulls: bool = True,
         on_global_fallback: Literal["warn", "raise"]
-        = DEFAULT_NORMS_GLOBAL_FALLBACK) -> ExchangeRateReadout:
-    readout = ExchangeRateReadout(generated=date.today().isoformat(), hub=hub,
-                                  direction=direction)
+        = DEFAULT_NORMS_GLOBAL_FALLBACK,
+        map_overrides: Optional[MapGateOverrides] = None) -> ExchangeRateReadout:
+    readout = ExchangeRateReadout(
+        generated=date.today().isoformat(), hub=hub, direction=direction,
+        map_gate_overrides=(map_overrides.flags if map_overrides else []))
     for req in requests:
         result = read_pair(
             req.source_model, req.source_site, req.source_vectors,
             req.target_model, req.target_site, req.target_vectors,
             req.fits_dir, req.arm, req.family, direction=direction,
-            with_nulls=with_nulls, on_global_fallback=on_global_fallback)
+            with_nulls=with_nulls, on_global_fallback=on_global_fallback,
+            map_overrides=map_overrides)
+        if isinstance(result, RefusedMap):
+            readout.refused.append(result)
+            logger.error("REFUSED %-46s %s::%s — %s", result.pair_id, req.arm,
+                         req.family, result.reason)
+            continue
         if isinstance(result, MissingPiece):
             readout.missing.append(result)
             logger.warning("MISSING %-46s %s::%s — %s", result.pair_id, req.arm,
@@ -1005,6 +1045,72 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                             collection_root=elsewhere).tier == "fit-local",
               "strict mode does NOT interfere with a fit-local resolution")
 
+    print("== selftest 11: a map is gate- and rank-checked before â is read ==")
+    from metabasis.scripts.fit_transport_maps import write_fit_summary_fixture
+    with tempfile.TemporaryDirectory(prefix="ahat_gate_") as td11:
+        root11 = Path(td11)
+        vecs11 = root11 / "vectors"
+        vecs11.mkdir()
+        src_bank = vecs11 / "src.npz"
+        tgt_bank = vecs11 / "tgt.npz"
+        np.savez(src_bank, entropy_gradient_L14=v_src.astype(np.float32))
+        np.savez(tgt_bank, entropy_gradient_L9=unit(moved).astype(np.float32))
+
+        def plant11(sub: str, **record: Any) -> Path:
+            fits = root11 / sub
+            fits.mkdir()
+            save_transport_map(fits, "srcML14->tgtML9", "native", "proc_k16", tm)
+            row = {"site_pair": "srcML14->tgtML9", "arm": "native",
+                   "family": "proc_k16", "valid": True, "n_train": 200,
+                   "detail": {"k_effective": k}}
+            row.update(record)
+            write_fit_summary_fixture(fits, [{kk: vv for kk, vv in row.items()
+                                              if vv is not None}])
+            return fits
+
+        def read11(fits: Path, overrides: Optional[MapGateOverrides] = None):
+            return read_pair("srcM", 14, src_bank, "tgtM", 9, tgt_bank, fits,
+                             "native", "proc_k16", with_nulls=False,
+                             map_overrides=overrides)
+
+        good = read11(plant11("ok"))
+        check(isinstance(good, ExchangeRateRow) and abs(good.a_hat - 1.0) < 1e-3
+              and good.map_gate is not None
+              and good.map_gate["null_gate_valid"] is True,
+              "a VALID map within the guard is read, and the row carries map_gate")
+        failed = read11(plant11("gate_fail", valid=False))
+        check(isinstance(failed, RefusedMap) and failed.refusal == "MapGateFailed",
+              "a map whose recorded null gate FAILED is REFUSED — no â is read")
+        forced = read11(plant11("gate_fail_forced", valid=False),
+                        MapGateOverrides(allow_failed_gate=True))
+        check(isinstance(forced, ExchangeRateRow)
+              and forced.map_gate is not None
+              and forced.map_gate["overrides_used"] == [ALLOW_FAILED_GATE_FLAG],
+              f"…read only under {ALLOW_FAILED_GATE_FLAG}, recorded on the row")
+        over = read11(plant11("over_rank", n_train=12))
+        check(isinstance(over, RefusedMap) and over.refusal == "MapRankForbidden",
+              "an OVER-RANK map (k16 > n_train 12 / 1.2) is REFUSED")
+        nofield = read11(plant11("no_valid", valid=None))
+        check(isinstance(nofield, RefusedMap) and "`valid`" in nofield.reason,
+              "a fit record MISSING `valid` is refused by name")
+        readout11 = run([PairRequest(
+            source_model="srcM", source_site=14, source_vectors=src_bank,
+            target_model="tgtM", target_site=9, target_vectors=tgt_bank,
+            fits_dir=root11 / "gate_fail", arm="native", family="proc_k16")],
+            with_nulls=False)
+        check(len(readout11.refused) == 1 and not readout11.rows
+              and readout11.map_gate_overrides == [],
+              "run() lists a refused map under `refused`, never under `rows`")
+        import contextlib
+        import io
+        with contextlib.redirect_stderr(io.StringIO()):
+            try:
+                main(["--selftest", "--no-such-flag"])
+                code11: Any = None
+            except SystemExit as exc:
+                code11 = exc.code
+        check(code11 == 2, "an unknown flag is a usage error, never ignored")
+
     print(f"\nselftest: {len(failures)} failure(s)")
     return 1 if failures else 0
 
@@ -1048,6 +1154,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--target-site", type=int, default=None)
     ap.add_argument("--target-vectors", type=Path, default=None)
     ap.add_argument("--fits-dir", type=Path, default=None)
+    ap.add_argument(ALLOW_FAILED_GATE_FLAG, dest="allow_failed_gate_map",
+                    action="store_true",
+                    help="read â through a map whose recorded null gate FAILED "
+                         "(refused by default); recorded in the readout")
+    ap.add_argument(ALLOW_OVER_RANK_FLAG, dest="allow_over_rank_map",
+                    action="store_true",
+                    help="read â through a Procrustes map whose rank exceeds "
+                         "n_train / 1.2 (refused by default); recorded in the readout")
     args = ap.parse_args(argv)
 
     if args.selftest:
@@ -1095,7 +1209,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     try:
         readout = run(requests, direction=args.direction,
                       with_nulls=not args.no_nulls,
-                      on_global_fallback="raise" if args.strict_norms else "warn")
+                      on_global_fallback="raise" if args.strict_norms else "warn",
+                      map_overrides=MapGateOverrides(
+                          allow_failed_gate=args.allow_failed_gate_map,
+                          allow_over_rank=args.allow_over_rank_map))
     except NormsProvenanceError as exc:
         #  An EXPECTED refusal with a meaningful message: the operator asked for
         #  strict provenance and did not get it. Reported cleanly and nonzero
@@ -1106,10 +1223,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(payload)
-        logger.info("wrote %s (%d row(s), %d missing)", args.out,
-                    len(readout.rows), len(readout.missing))
+        logger.info("wrote %s (%d row(s), %d missing, %d refused)", args.out,
+                    len(readout.rows), len(readout.missing), len(readout.refused))
     else:
         print(payload)
+    if readout.refused:
+        logger.error("%d map(s) REFUSED by the consumption check; see `refused` in "
+                     "the readout", len(readout.refused))
+        return 1
     return 0
 
 

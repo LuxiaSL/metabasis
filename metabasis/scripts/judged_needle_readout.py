@@ -16,6 +16,9 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
+from typing import Optional, Sequence
+
+from metabasis.scripts._fixed_job import parse_no_arguments
 
 LEG4 = Path("outputs/battery/arms/A8_conjugation/leg4")
 JUDGE = LEG4 / "readouts_judge/analogical_2afc_results.json"
@@ -28,7 +31,8 @@ def dose_of(cell: str) -> float:
     return float(m.group(1)) if m else float("nan")
 
 
-def main() -> int:
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    parse_no_arguments(__doc__, argv)
     OUT.mkdir(parents=True, exist_ok=True)
     d = json.loads(JUDGE.read_text())
     rows = []

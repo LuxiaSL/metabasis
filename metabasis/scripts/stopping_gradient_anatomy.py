@@ -32,9 +32,11 @@ import json
 import logging
 import sys
 from pathlib import Path
+from typing import Optional, Sequence
 
 import numpy as np
 
+from metabasis.scripts._fixed_job import parse_no_arguments
 from metabasis.scripts.fit_transport_maps import load_transport_map
 from metabasis.scripts.read_transported_axes import _unit, cos, load_axes
 
@@ -108,7 +110,8 @@ def constrained_direction_datum(anchors: dict[str, np.ndarray], target_profile: 
     return out
 
 
-def main() -> int:
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    parse_no_arguments(__doc__, argv)
     OUT.mkdir(parents=True, exist_ok=True)
     fam = {m: get_family(m) for m in ("3b", "8b", "qwen-7b")}
     notes = [n for _, _, ns in fam.values() for n in ns]

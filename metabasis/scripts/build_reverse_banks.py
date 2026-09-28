@@ -42,9 +42,11 @@ import json
 import logging
 import os
 from pathlib import Path
+from typing import Optional, Sequence
 
 import numpy as np
 
+from metabasis.scripts._fixed_job import parse_no_arguments
 from metabasis.scripts.fit_transport_maps import load_transport_map
 from metabasis.scripts.read_transported_axes import _unit, cos, load_axes
 
@@ -74,7 +76,8 @@ def _sha(p: Path) -> str:
     return hashlib.sha256(p.read_bytes()).hexdigest()
 
 
-def main() -> int:
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    parse_no_arguments(__doc__, argv)
     if not FIT.exists():
         raise SystemExit(f"leg-0 anchor fit missing: {FIT}")
     tm = load_transport_map(FIT)

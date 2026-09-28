@@ -26,9 +26,11 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
+from typing import Optional, Sequence
 
 import numpy as np
 
+from metabasis.scripts._fixed_job import parse_no_arguments
 from metabasis.scripts.fit_transport_maps import (
     PCABank, load_labels, load_state_bank, load_transport_map, make_split)
 from metabasis.scripts.read_transported_axes import TOP_PC_J, _unit, cos, load_axes
@@ -47,7 +49,8 @@ SEED = 80
 N_RANDOM = 100
 
 
-def main() -> int:
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    parse_no_arguments(__doc__, argv)
     OUT.mkdir(parents=True, exist_ok=True)
     try:
         v7_hub, v7_tgt = _load_v7(HUB), _load_v7(TGT)

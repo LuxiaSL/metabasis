@@ -36,9 +36,11 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
+from typing import Optional, Sequence
 
 import numpy as np
 
+from metabasis.scripts._fixed_job import parse_no_arguments
 from metabasis.scripts.fit_transport_maps import load_transport_map
 from metabasis.scripts.read_transported_axes import _unit, cos, load_axes
 
@@ -82,7 +84,8 @@ def _load(rel: str, key: str) -> np.ndarray:
     return _unit(np.load(BANK / rel, allow_pickle=True)[key].astype(np.float64))
 
 
-def main() -> int:
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    parse_no_arguments(__doc__, argv)
     OUT.mkdir(parents=True, exist_ok=True)
     axes, _, pool = load_axes("3b")
     rng = np.random.default_rng(SEED)

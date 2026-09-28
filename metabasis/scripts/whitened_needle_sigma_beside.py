@@ -32,9 +32,11 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
+from typing import Optional, Sequence
 
 import numpy as np
 
+from metabasis.scripts._fixed_job import parse_no_arguments
 from metabasis.scripts.fit_transport_maps import load_transport_map
 from metabasis.scripts.whitened_needle_letter import (
     FAMILIES, N_RANDOM, PRIMARY_FAMILY, SEED, SRC_SITE, TGT_SITE, VINTAGES, _fit_path)
@@ -55,7 +57,8 @@ def sigma_inv(v: np.ndarray, z) -> np.ndarray:
     return evecs @ ((evecs.T @ v) / (evals + ridge))
 
 
-def main() -> int:
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    parse_no_arguments(__doc__, argv)
     if not SIGMA_FRESH.exists():
         raise SystemExit(f"fresh Sigma not present yet: {SIGMA_FRESH}")
     OUT.mkdir(parents=True, exist_ok=True)
