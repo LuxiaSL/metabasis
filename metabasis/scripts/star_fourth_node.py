@@ -1,16 +1,16 @@
-"""A8 Leg-6 / Item 2 — the star factorization's FOURTH NODE (P8-STAR .50).
+"""The star factorization's FOURTH NODE: the one pair the star constants predict unfitted.
 
 The star model says every pair's attenuation factors through per-model constants:
     a_hat(A->B) = c_A . c_B
 Three banked pairs (3B<->8B .514, 8B<->Qwen .332, 8B<->DSV2 .266) leave the system
-underdetermined; it closes on a_hat_direct(3B->Qwen) from L4-e. The k128 closure
-reproduces add-4's filed constants exactly:
+underdetermined; it closes on a_hat_direct(3B->Qwen). The k128 closure reproduces the
+filed constants exactly:
     c_3B = .6838, c_8B = .7517, c_Qwen = .4417, c_DSV2 = .3539
 and predicts the one pair never fitted:  a_hat(3B->DSV2) = .2420, band [.19, .29].
 
-This reads that pair for the first time. 3B was replayed over the LEG-2 corpus (the same
+This reads that pair. 3B was replayed over the DSV2 bank's own corpus (the same
 texts the DSV2 bank was built from, sha-verified byte-identical), giving paired states on
-shared text; the fit grid then runs exactly as every other leg's.
+shared text; the fit grid then runs exactly as every other pair's.
 
 RANK GUARD: n_train = 600, so k <= 600/1.2 = 500 and **k512 is rank-forbidden** on this
 pair. The letter anticipated this ("proc at the rank-guarded k, k128 expected"), so k128
@@ -18,17 +18,18 @@ is the primary family here. Full panel reported beside, because the three INPUT 
 are k512 reads — that is the filed family-mixing caveat, and it deserves to be visible
 rather than asserted.
 
-PANEL BESIDE (reported, unscored): the field axes and dir0. The dir0 row is the free
-context add-4 asked for — does the MoE needle cliff reproduce from a DIFFERENT source
-family? It is read three ways, because Leg-6 Item 1 established that the arm's dir0 is
-not the same mode contrast on both sides:
+PANEL BESIDE (reported, unscored): the field axes and dir0. The dir0 row is free
+context — does the MoE needle cliff reproduce from a DIFFERENT source family? It is read
+three ways, because the arm's dir0 is not the same mode contrast on both sides (the
+whitened-needle BESIDE read, whitened_needle_sigma_beside.py, shows the mode pairing):
   * vs the plain-bank V3_L18   — PAIR-MISMATCHED (3B dir0 = analogical/contrastive,
-                                 DSV2 plain V3 = linear/socratic). This is the
+                                 DSV2 plain bank = linear/socratic). This is the
                                  construction the banked cliff used.
   * vs v3whiten RAW L18        — PAIR-MATCHED, unwhitened.
-  * vs v3whiten WHITENED L18   — PAIR-MATCHED and whitened (the L4-c letter's object).
+  * vs v3whiten WHITENED L18   — PAIR-MATCHED and whitened (the whitened-needle
+                                 letter's object).
 
-UNSTAMPED (C section 8). No P self-scored — the desk scores P8-STAR.
+UNSTAMPED: this module reports the reading and scores no prediction itself.
 Run: PYTHONPATH=pipeline python -m metabasis.scripts.star_fourth_node
 """
 from __future__ import annotations

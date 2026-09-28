@@ -1,24 +1,28 @@
-"""A8 Leg-3 / P8-2 scoring — merge entropy-readout shards, score against the FROZEN letters.
+"""Entropy-write scoring — merge entropy-readout shards, score against the FROZEN letters.
 
-Mechanics only; the desk decides P's (C§8, no self-scored P's). Frozen criteria applied:
-  P8-4  (per dense target): transported V7 writes the target's entropy DOSE-ORDERED and
-        OUTSIDE the transported-R band (controls = source Rbands through the SAME g).
-  P8-3ii (per pair, 5 test vectors {V7,Vrep_perp,Vconf,Vtemp,oblique}): sign correct on
-        >=4/5 AND magnitude within x2 of the target's own law. Scoring dose = +/-0.3
-        (largest frozen signal); ALL doses filed. NEAR-ZERO SEMANTICS FLAGGED, not
-        legislated: for a near-zero predicted rise the ratio-based x2 band punishes a
-        correct ~nothing (obs .001 vs pred .018 -> ratio .06 "fails"); both the ratio
-        and the absolute deviation are filed and the desk reads the row.
-  P8-2  (dsv2): raw u=unit(g.V7) landing FAILS and whitened w=unit(Sigma^-1 u) PASSES —
-        each arm read against ITS OWN matched null family (gRband vs wRband; the merged
-        add_null_ratios pooling would mix families, so bands here are computed per
-        family explicitly).
-  P8-2d: the alignment diagnostic (cos(g.V7, V7_tgt), transported) must ORDER landing
-        success across >=3 targets.
+Mechanics only: this files the rows each frozen criterion reads and scores no prediction
+itself. Frozen criteria applied, each under the output key that carries it:
+  `p8_4_landing_V7` (per dense target): the transported entropy-gradient axis (cell
+        `gV7`) writes the target's entropy DOSE-ORDERED and OUTSIDE the transported-R band
+        (controls = source Rbands through the SAME g).
+  `p8_3ii` (per pair, the five `TEST_VECTORS`): sign correct on >=4/5 AND magnitude
+        within x2 of the target's own law. Scoring dose = +/-0.3 (largest frozen
+        signal); ALL doses filed. NEAR-ZERO SEMANTICS FLAGGED, not legislated: for a
+        near-zero predicted rise the ratio-based x2 band punishes a correct ~nothing
+        (obs .001 vs pred .018 -> ratio .06 "fails"); both the ratio and the absolute
+        deviation are filed so a reader can judge the row.
+  `p8_2_raw_landing_gV7` / `p8_2_whitened_landing_wV7` (dsv2): raw u=unit(g.v) landing
+        FAILS and whitened w=unit(Sigma^-1 u) PASSES — each arm read against ITS OWN
+        matched null family (gRband vs wRband; the merged add_null_ratios pooling would
+        mix families, so bands here are computed per family explicitly).
+  `p8_2d_ordering`: the alignment diagnostic (cos(g.v, v_tgt), transported) must ORDER
+        landing success across >=3 targets.
 
-Inputs: leg3/readouts/entropy_{model}_shard*.json (node-side shards, rsynced local).
-Outputs: leg3/readouts_final/entropy_{model}_merged.json (rows + guarded null columns)
-         + scoring_{model}.json + scoring_summary.json (+ .md table).
+Inputs (the collection shards, copied into the local outputs tree):
+  outputs/battery/arms/A8_conjugation/leg3/readouts/entropy_<model>_shard*.json
+Outputs, all under outputs/battery/arms/A8_conjugation/leg3/readouts_final/:
+  `<out>/entropy_<model>_merged.json` (rows + guarded null columns),
+  `<out>/scoring_<model>.json` and `<out>/scoring_summary.json`.
 
 Run (repo root): PYTHONPATH=pipeline python -m metabasis.scripts.score_entropy_writes
 """
@@ -118,7 +122,7 @@ def landing_read(rows_by_vec: dict, vec: str, null_names: tuple) -> dict:
 
 
 def f2_scoring(rows_by_vec: dict, key_path: Path) -> dict:
-    """P8-3ii mechanics vs the frozen native proc_k512 prediction row."""
+    """The `p8_3ii` mechanics vs the frozen native proc_k512 prediction row."""
     frozen = json.loads(key_path.read_text())["predictions"]
     fr = next(r for r in frozen if r["arm"] == "native" and r["family"] == "proc_k512")
     out = {"answer_key": str(key_path), "frozen_row": "native/proc_k512", "vectors": {}}

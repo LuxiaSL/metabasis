@@ -1,4 +1,4 @@
-"""A8 Leg-0 — T4+T5: Phase A paired collection (GPU) + bitwise spot-replay (CP-1 gate).
+"""Paired mean-state collection (GPU) + bitwise spot-replay (the CP-1 gate).
 
 Forced replay of every corpus text through ONE model, both template arms (never mixed),
 capturing the per-text MEAN residual state over completion positions at the site grid.
@@ -9,7 +9,7 @@ Conventions mirrored from the a5 machinery (the banked vectors' native space):
   - site L = forward_pre_hook on decoder_layers(model)[L] — the residual ENTERING
     layer L; batch-1; use_cache=False; .float() cast from the bf16 forward.
   - model load: AutoModelForCausalLM(dtype=bfloat16, attn_implementation="eager").
-    bf16 forward + fp32 banked means per Luxia's dtype ruling 2026-07-22 — CERTIFIED
+    bf16 forward + fp32 banked means is the dtype regime of record — CERTIFIED
     BY the CP-1 bitwise spot-replay gate, not by assumption. Pin ONE card per model
     for the whole session (launcher sets CUDA_VISIBLE_DEVICES; determinism is
     within-model/within-card).
@@ -19,56 +19,57 @@ Conventions mirrored from the a5 machinery (the banked vectors' native space):
   - raw arm: tokenize(text, with specials); completion positions = everything after
     the specials prefix (computed, not assumed).
 
-Re-tokenization caveat (GP-Q9, rake-report item): the corpus banks TEXT, not token
-ids — fresh tokenization is the defined object for cross-replay, and Leg-0's shared
-tokenizer guarantees both models see IDENTICAL token sequences per (text, arm).
-Cross-tokenizer legs (Leg 1+) revisit this explicitly.
+Re-tokenization caveat: the corpus banks TEXT, not token ids — fresh tokenization
+is the defined object for cross-replay. Two models that share a tokenizer see
+IDENTICAL token sequences per (text, arm); a cross-tokenizer pair does not, and
+its reads must account for that explicitly.
 
-Sharded path (prereg §4, big-rung engineering): models too large for one card
-(70B/405B class) load across the node with an accelerate `device_map` instead of
+Sharded path (the pre-registered big-rung engineering): models too large for one
+card (70B/405B class) load across the machine's cards with an accelerate `device_map` instead of
 `.to(device)`. OPT-IN ONLY — `--device-map` / `--shard-across` unset reproduces the
 single-card path byte for byte (same loader, same hooks, same reductions, same
 stamp keys). The realized sharding layout goes into the trunk stamp; cross-layout
 determinism is certified by the collect+spot-replay-in-one-job gate, never assumed.
 
-Node of origin (rake M41, 2026-07-29): the trunk stamp carries `hostname`, so every
-banked artifact can be attributed to the machine that produced it. Before this, no
-bank identified its node and "where does artifact X live" was answerable only by
-filesystem probe — which is how a 405B readout came to expect scan fits on one node
-that lived on the other. The field is UNCONDITIONAL (a hostname is an identity, not
-a deviation); it can never fail a run (rake M19 — it degrades to the named sentinel
+Machine of origin: the trunk stamp carries `hostname`, so every banked artifact can
+be attributed to the machine that produced it. Without it, "where does artifact X
+live" is answerable only by filesystem probe, and a reader on one machine can
+expect fits that live on another. The field is UNCONDITIONAL (a hostname is an
+identity, not a deviation); it can never fail a run (instrumentation that only
+describes a run never fails it — it degrades to the named sentinel
 `HOSTNAME_UNRESOLVED`); and READERS tolerate its absence through `stamp_hostname`,
-which returns None for every pre-M41 stamp and keeps that case distinct from a
-collector that ran and could not name its host.
+which returns None for a stamp written without the field and keeps that case
+distinct from a collector that ran and could not name its host.
 
-Thread configuration (desk ruling 3, 2026-08-03): the COLLECTION stamp carries
-`thread_config` — the effective BLAS/OpenMP thread count read at runtime by
-`metabasis.threads`, the same block the vector builders write since ruling 8
-(2026-08-01). UNCONDITIONAL, on the M41 argument: an absent key means the stamp
-predates the field, and `metabasis.threads.stamp_thread_config` is the reader.
+Thread configuration: the COLLECTION stamp carries `thread_config` — the effective
+BLAS/OpenMP thread count read at runtime by `metabasis.threads`, the same block the
+vector builders write. UNCONDITIONAL, on the hostname argument: an absent key means
+a stamp written without the field, and `metabasis.threads.stamp_thread_config` is
+the reader.
 ⚠ IT IS IDENTITY HYGIENE, NOT A GATE INPUT. These bytes come off the GPU forward,
 so no thread count decides them; the spot-replay gate compares the STATE ARRAYS
 bitwise and never this block, and it must not start to. (Contrast the entropy-
 gradient builder, where the same block IS load-bearing because its vector comes
 off `eigh`, which is bitwise-deterministic only at a fixed thread count.)
 
-Dtype regime (prereg ADDENDUM 2026-07-26-A, roster row 21): a checkpoint whose own
-config carries a block-wise FP8 `quantization_config` would load its NATIVE FP8
-forward — a different object from every other bank, and not differentiable. The
-addendum rules DeepSeek-V3 into the standard bf16 regime via dequantize-on-load;
+Dtype regime (the pre-registered DeepSeek-V3 dtype regime, roster row 21): a
+checkpoint whose own config carries a block-wise FP8 `quantization_config` would
+load its NATIVE FP8 forward — a different object from every other bank, and not
+differentiable. DeepSeek-V3 is collected in the standard bf16 regime via
+dequantize-on-load;
 `--dequantize-fp8` is that, OPT-IN, with a post-load witness (no FP8 modules survive,
 every float parameter is bfloat16) asserted and banked in the trunk stamp. Unset =
-the historical from_pretrained call, byte for byte.
+the plain from_pretrained call, byte for byte.
 
 CPU self-test (no weights, no GPU, no data tree):
 
   python -m metabasis.scripts.collect_mean_states --selftest
 
-RAKE M44 — THE CONFIGURATION MATRIX IS THE MERGE BAR. Two things the self-test
+NAMED CONFIGURATIONS — THE CONFIGURATION MATRIX IS THE MERGE BAR. Two things the self-test
 reaches for are properties OF THE ENVIRONMENT rather than of the code under test,
 and each is present in some legitimate configuration and absent in another: the
 deep-learning stack (torch + transformers, which `trunk_stamp` and the post-load
-witness need, and which the desk's own repo `.venv` does not carry), and a WORKING
+witness need, and which a CPU-only venv does not carry), and a WORKING
 fp8 dequantize (transformers 4.51.3's `FineGrainedFP8Config` accepts
 `dequantize=True` and silently drops it, so `fp8_dequantize_config()` refuses —
 correctly, at runtime). Neither absence is a test failure. Each is therefore
@@ -81,21 +82,20 @@ Modes (one model per invocation; run once per model on the assigned card):
   --spot-replay K        FRESH-PROCESS re-run of K stratified texts per arm, byte-
                          compared against the banked means (the CP-1 gate; K>=3)
   --cp1-summary          the compact CP-1 table from banked stamps + spot results
-                         (run locally after rsyncing states/ back; needs no GPU)
+                         (run locally after copying states/ back; needs no GPU)
 
-⚠ --collect AND --spot-replay IN ONE INVOCATION IS A REFUSAL (desk ruling
-2026-08-03). It used to be accepted and then IGNORED — the dispatch returned
-after collecting, so the gate silently never ran and the job's JOB-OK line
-pointed at a spot report that was never written. The gate is TWO PROCESSES IN
-ONE JOB, because a replay inside the collecting process would certify a model
+⚠ --collect AND --spot-replay IN ONE INVOCATION IS A REFUSAL. Accepting both and
+running only one would let the gate silently never run while the job reported
+success against a spot report that was never written. The gate is TWO PROCESSES
+IN ONE JOB, because a replay inside the collecting process would certify a model
 object that never left memory.
 
-Launch template (node-side, after venv activation, from the deploy root) — build
+Launch template (on the GPU machine, after venv activation, from the deploy root) — build
 the flags ONCE so the two invocations provably cannot drift apart:
   ARGS=(--model 3b --model-path <LOCAL_WEIGHTS_DIR> --arm-root <ARM_ROOT>)
   python -m metabasis.scripts.collect_mean_states --collect "${ARGS[@]}" \
   && python -m metabasis.scripts.collect_mean_states --spot-replay 3 "${ARGS[@]}"
-  # big rung, whole node (CUDA_VISIBLE_DEVICES left unpinned):
+  # big rung, every card on the machine (CUDA_VISIBLE_DEVICES left unpinned):
   OMP_NUM_THREADS=1 python -m metabasis.scripts.collect_mean_states --collect \
     --model 70b --model-path <LOCAL_WEIGHTS_DIR> --arm-root <ARM_ROOT> \
     --device-map auto --max-memory 0=170GiB,1=170GiB,...,cpu=0GiB
@@ -126,15 +126,13 @@ from metabasis.threads import THREAD_STAMP_KEY, thread_config_stamp
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("collect_mean_states")
 
-# THE STRATUM VOCABULARY IS BASIS-DERIVED (desk ruling 2026-08-03; brief
-# BRIEF-strata-basis-fix-2026-08-03). This module used to carry
+# THE STRATUM VOCABULARY IS BASIS-DERIVED. A hardcoded vocabulary such as
 #
 #     STRATA = ("S1", "S2", "S3", "S5")
 #
-# and `pick_spot_ids` keyed a dict off it, so the CP-1 spot-replay gate died with
-# `KeyError: 'wikitext'` the first time it met the webtext-v3 basis (canary,
-# 2026-08-03) — AFTER a full collection pass, with the bank already written.
-# `derive_strata` (defined once, in `fit_transport_maps`, so the collector and
+# keyed by `pick_spot_ids` would make the CP-1 spot-replay gate die with
+# `KeyError: 'wikitext'` on the webtext-v3 basis — AFTER a full collection pass,
+# with the bank already written. `derive_strata` (defined once, in `fit_transport_maps`, so the collector and
 # the fitter can never disagree about the vocabulary) reads the names off the
 # pinned manifest's per-entry `stratum` field in FIRST-OCCURRENCE order, which
 # makes them a pure function of the manifest bytes — deterministic under the
@@ -146,16 +144,15 @@ logger = logging.getLogger("collect_mean_states")
 # S1/S2/S3 emits exactly the sequence cycling the derived 3-tuple does. The
 # recorded pre-change selection is asserted byte-exact against the derived path.
 
-#: What this module hardcoded before 2026-08-03 — DOCUMENTATION ONLY, and the
-#: provenance of selftest 8's recorded expectations. Nothing reads it to make a
+#: The v2.1 corpus's stratum vocabulary as a fixed tuple — DOCUMENTATION ONLY, and
+#: the source of selftest 8's recorded expectations. Nothing reads it to make a
 #: decision, and nothing may start to.
 LEGACY_V21_STRATA: tuple[str, ...] = ("S1", "S2", "S3", "S5")
 
-# The Llama strftime_now chat-template date pin. Historically imported from the
-# anamnesis stage-0 generator (`vmb_stage0_generate.VMB_CANONICAL_DATE`) — that
-# import eagerly dragged the entire 2,000+-line extraction stack in for one
-# string, so the metabasis lift hardcodes it (pull-package bootstrap resolution,
-# 2026-07-26). Project DATA, not logic: changing it changes native-arm token
+# The Llama strftime_now chat-template date pin. It equals the anamnesis stage-0
+# generator's `VMB_CANONICAL_DATE`, and is written here as a literal because
+# importing it would drag that project's whole extraction stack in for one
+# string. Project DATA, not logic: changing it changes native-arm token
 # sequences and breaks bitwise parity with every banked state collection.
 VMB_CANONICAL_DATE = "12 Jul 2026"
 
@@ -175,18 +172,18 @@ def build_ids(tok, entry: dict, arm: str, date_string: str,
               max_length: int | None = None) -> tuple[list[int], int]:
     """Returns (ids, P) — full token ids and the completion start position.
 
-    `max_length` is the prereg ADDENDUM 2026-07-27-B position-ceiling deviation:
+    `max_length` is the pre-registered position-ceiling deviation:
     per-text truncation to the FIRST `max_length` tokens, for architectures whose
     LEARNED absolute position embeddings cannot represent a longer sequence
     (GPT-2: n_positions=1024, a hard ceiling on every variant). Default None =
-    the historical path, untouched.
+    no truncation.
 
     Truncation is a pure suffix-drop applied AFTER the arm's ids are built, so:
       * a text already at or under the ceiling is returned byte-identical to the
         untruncated path (the slice never runs), and
       * because collection is batch-1 with use_cache=False, truncating one text
         cannot perturb any other text's forward — the unaffected texts stay
-        byte-identical to the frozen objects, per the addendum.
+        byte-identical to the frozen objects, as the deviation requires.
     """
     text = entry["text"]
     comp = tok.encode(text, add_special_tokens=False)
@@ -219,7 +216,7 @@ def build_ids(tok, entry: dict, arm: str, date_string: str,
 
 def _truncate(ids: list[int], p: int, max_length: int | None,
               entry: dict) -> tuple[list[int], int]:
-    """ADDENDUM 2026-07-27-B suffix-drop. No-op when the text already fits."""
+    """The position-ceiling suffix-drop. No-op when the text already fits."""
     if max_length is None or len(ids) <= max_length:
         return ids, p
     if p >= max_length:
@@ -316,7 +313,7 @@ def load_model_and_tok(model_path: str, device: str, dequantize_fp8: bool = Fals
 
 
 # ---------------------------------------------------------------- sharded load (big rungs)
-# Prereg §4 (big-rung engineering): ">=70B-class nodes collect via the collector's
+# The pre-registered big-rung engineering: ">=70B-class nodes collect via the collector's
 # sharded path (device_map across the 8-GPU node; determinism certified by the same
 # collect+spot-replay-in-one-job gate — sharding layout recorded in the trunk stamp)".
 #
@@ -327,7 +324,7 @@ def load_model_and_tok(model_path: str, device: str, dequantize_fp8: bool = Fals
 # the input id tensor is built (the input-embedding execution device instead of
 # --device). SiteCapture and compute_means are untouched; nothing is pre-normalized.
 #
-# Hook ordering (VERIFIED against accelerate 1.14 hooks.py + torch nn/modules/module.py,
+# Hook ordering (VERIFIED against accelerate/hooks.py 1.14 + torch/nn/modules/module.py,
 # not assumed): accelerate does NOT dispatch via torch forward hooks. add_hook_to_module()
 # REPLACES `module.forward` with a wrapper that runs hook.pre_forward() (weight on-load +
 # send_to_device of args/kwargs) and only then the original forward. torch's
@@ -353,37 +350,35 @@ def load_model_and_tok(model_path: str, device: str, dequantize_fp8: bool = Fals
 
 
 # ---------------------------------------------------------------- dtype regime (row 21)
-# Prereg ADDENDUM 2026-07-26-A, BINDING for roster row 21 (DeepSeek-V3): a checkpoint
+# The pre-registered dtype regime, BINDING for roster row 21 (DeepSeek-V3): a checkpoint
 # whose own config.json carries `quantization_config: {quant_method: "fp8", ...}` would
 # otherwise load through the native-FP8 forward, which is a DIFFERENT object from every
 # other bank (raw Triton block-wise kernels) and — per the FP8 lane design report — is
 # not differentiable, so the entropy-gradient target build would silently return a
-# residual-highway-only vector. The ruling is that DSV3 collects and builds in bf16 via
+# residual-highway-only vector. DSV3 therefore collects and builds in bf16 via
 # dequantize-on-load, i.e. the standard roster regime.
 #
 # OPT-IN ONLY, exactly like the sharded path: with --dequantize-fp8 unset, from_pretrained
-# is called with the identical kwargs it has always been called with, so every existing
-# bank's loader path is untouched byte for byte. The flag is also a no-op-with-a-loud-
+# is called with the same kwargs as on every other node, so every existing bank's
+# loader path is untouched byte for byte. The flag is also a no-op-with-a-loud-
 # failure on a checkpoint that carries no FP8 quantization_config: passing it there is a
 # staging error, and `assert_dequantized` surfaces it rather than banking a surprise.
 DEQUANTIZED_STAMP_KEY = "fp8_dequantize"
 
-# RAKE M41 (2026-07-29): the trunk stamp records the NODE OF ORIGIN. Before this,
-# no banked artifact identified the machine that produced it, so "where does
-# artifact X live" was answerable only by filesystem probe — and the 405B readout
-# block paid for it, expecting scan fits on one node that lived on the other, with
-# an enactor's plausible inference retracted after a cross-node probe found them.
+# The trunk stamp records the MACHINE OF ORIGIN. Without it, "where does
+# artifact X live" is answerable only by filesystem probe, and a reader can
+# expect fits on one machine that live on another.
 #
 # The field is UNCONDITIONAL. Every other stamp deviation (`sharding`,
 # `fp8_dequantize`, `truncation`) is conditional so that an absent key means "the
 # deviation was not taken" and historical stamps stay comparable key-for-key. A
 # hostname is not a deviation — it is the identity of the machine — and making it
-# conditional would leave exactly the gap M41 was filed for.
+# conditional would leave exactly the gap the field exists to close.
 #
-# BACKWARD COMPATIBILITY is the READER's contract, not the writer's: every stamp
-# banked before this date has no hostname, and `stamp_hostname` distinguishes
+# BACKWARD COMPATIBILITY is the READER's contract, not the writer's: a stamp
+# written without the field has no hostname, and `stamp_hostname` distinguishes
 # "predates the field" (None) from "the collector could not resolve one"
-# (HOSTNAME_UNRESOLVED). Named per rake M26 so a mechanical sweep can see both.
+# (HOSTNAME_UNRESOLVED). Both are named constants so a mechanical sweep can see both.
 HOSTNAME_STAMP_KEY = "hostname"
 #: Recorded when the collector ran but could not name its host. Deliberately a
 #: NAMED sentinel rather than None or "": degraded instrumentation and an absent
@@ -397,7 +392,7 @@ class Fp8RegimeError(RuntimeError):
     Raised when --dequantize-fp8 is asked for and transformers cannot provide it, or
     when the LOADED model still carries FP8 modules/dtypes after the request. Both are
     fatal by construction: banking states from the wrong forward is exactly the silent
-    wrong answer ADDENDUM 2026-07-26-A exists to prevent.
+    wrong answer the pre-registered dtype regime exists to prevent.
     """
 
 
@@ -412,14 +407,14 @@ def fp8_dequantize_config() -> Any:
     except ImportError as exc:                      # noqa: TRY003 — message is the point
         raise Fp8RegimeError(
             "--dequantize-fp8 needs transformers' FineGrainedFP8Config (the "
-            "dequantize-on-load path of prereg ADDENDUM 2026-07-26-A); this "
+            "dequantize-on-load path the pre-registered dtype regime requires); this "
             "transformers build does not expose it") from exc
     try:
         cfg = FineGrainedFP8Config(dequantize=True)
     except TypeError as exc:
         raise Fp8RegimeError(
             "FineGrainedFP8Config in this transformers build has no `dequantize` "
-            "parameter — the addendum's regime cannot be established here") from exc
+            "parameter — the pre-registered dtype regime cannot be established here") from exc
     if not getattr(cfg, "dequantize", False):
         raise Fp8RegimeError(
             "FineGrainedFP8Config(dequantize=True) did not set dequantize — refusing "
@@ -449,8 +444,8 @@ def assert_dequantized(model: Any, model_path: str) -> dict:
     if offenders:
         raise Fp8RegimeError(
             f"{model_path}: {offenders} modules survived a --dequantize-fp8 load — the "
-            "forward is still native FP8, which is NOT the regime ADDENDUM "
-            "2026-07-26-A ruled for this node")
+            "forward is still native FP8, which is NOT the pre-registered bf16 "
+            "regime for this node")
     dtypes: dict[str, int] = {}
     bad: list[str] = []
     for name, p in list(model.named_parameters()) + list(model.named_buffers()):
@@ -547,7 +542,7 @@ def _device_key(tokenstr: str) -> DeviceKey:
 
 
 def _json_arg(spec: str, flag: str) -> Any:
-    """A CLI value that is either '@path/to.json' or an inline JSON document."""
+    """A CLI value that is either '@<file>.json' or an inline JSON document."""
     raw = spec.strip()
     try:
         if raw.startswith("@"):
@@ -561,7 +556,7 @@ ACCELERATE_STRATEGIES = ("auto", "balanced", "balanced_low_0", "sequential")
 
 
 def parse_device_map(spec: str) -> Union[str, dict[str, DeviceKey]]:
-    """--device-map: an accelerate strategy name, or '@map.json' / inline JSON dict."""
+    """--device-map: an accelerate strategy name, or '@<file>.json' / inline JSON dict."""
     if spec in ACCELERATE_STRATEGIES:
         return spec
     payload = _json_arg(spec, "--device-map")
@@ -592,7 +587,7 @@ def parse_shard_across(spec: str) -> list[DeviceKey]:
 
 def parse_max_memory(spec: str) -> dict[DeviceKey, Union[int, str]]:
     """--max-memory: '0=170GiB,1=170GiB,cpu=0GiB' (accelerate size strings), or
-    '@mm.json' / inline JSON. cpu=0GiB is the usual way to forbid silent CPU offload."""
+    '@<file>.json' / inline JSON. cpu=0GiB is the usual way to forbid silent CPU offload."""
     s = spec.strip()
     if s.startswith("@") or s.startswith("{"):
         payload = _json_arg(s, "--max-memory")
@@ -715,7 +710,7 @@ def input_device_of(model: Any) -> str:
 
 def describe_shard_layout(model: Any, sites: tuple[int, ...], spec: ShardSpec,
                           accelerate_version: str, resolved_map: Any) -> dict:
-    """The sharding record the prereg requires in the trunk stamp.
+    """The sharding record the pre-registered sharded path requires in the trunk stamp.
 
     `hf_device_map` is accelerate's own map — present only when it actually dispatched
     (transformers skips dispatch when the map resolves to one device), so the layout is
@@ -806,7 +801,7 @@ def load_model_and_tok_sharded(model_path: str, spec: ShardSpec, sites: tuple[in
     Returns (model, tokenizer, input_device, sharding_record). Everything downstream —
     SiteCapture, compute_means, save_state_bank — is the unchanged single-card machinery.
 
-    `dequantize_fp8` is the row-21 dtype regime (ADDENDUM 2026-07-26-A) and is
+    `dequantize_fp8` is the row-21 pre-registered dtype regime and is
     orthogonal to placement: it changes what the weights ARE (bf16 reconstructed from
     the block-wise FP8 checkpoint), never where they go. The `fp8_dequantize` witness
     is folded into the sharding record so one stamp carries both facts.
@@ -855,26 +850,22 @@ def load_model_and_tok_sharded(model_path: str, spec: ShardSpec, sites: tuple[in
 
 
 def collecting_hostname() -> str:
-    """The node this process is running on — `HOSTNAME_UNRESOLVED` if it cannot say.
+    """The machine this process is running on — `HOSTNAME_UNRESOLVED` if it cannot say.
 
-    RAKE M41: `trunk_stamp` recorded no hostname, so NO banked artifact identified
-    its node of origin and every "where does artifact X live" question had to be
-    settled by filesystem probe. The 405B readout block was exactly that: the scan
-    fits were expected on one node's arm and lived on the other, the stamps could
-    confirm the scan lane's 8-card provenance but NOT the node, and a plausible
-    "pull-then-clean" inference had to be retracted after a cross-node probe found
-    the tree.
+    Without a hostname in `trunk_stamp`, no banked artifact identifies its machine
+    of origin and every "where does artifact X live" question has to be settled by
+    filesystem probe: stamps can confirm a lane's card count but not the machine,
+    and a plausible inference about where a tree lives can simply be wrong.
 
-    Rake M19: instrumentation that only DESCRIBES a run must never be able to FAIL
-    it. A hostname is pure description — it cannot change one banked number — so
+    Instrumentation that only DESCRIBES a run must never be able to FAIL it. A hostname is pure description — it cannot change one banked number — so
     every way of failing to get one degrades to a NAMED sentinel rather than
     raising. `HOSTNAME_UNRESOLVED` is deliberately not an empty string and not
     `None`: a reader must be able to tell "this collector could not resolve a
-    hostname" from "this stamp predates the field" (rake M41's backward
+    hostname" from "this stamp predates the field" (the reader's backward
     compatibility, from the other side).
 
-    `socket.gethostname()` is the node's own name as the kernel knows it, which is
-    what the scheduler's job records and the /net paths agree with. FQDN
+    `socket.gethostname()` is the machine's own name as the kernel knows it, which
+    is the name job records use. FQDN
     resolution is deliberately NOT attempted: it can block on DNS, and a stamp
     writer that can hang is worse than one that is terse.
     """
@@ -906,20 +897,20 @@ def trunk_stamp(model_path: str, tok, device: str,
              "cuda_device_name": dev_name,
              "cuda_visible_devices":
                  os.environ.get("CUDA_VISIBLE_DEVICES", "(unset)"),
-             # RAKE M41: the node of origin. APPENDED at the end of the mapping so
-             # a stamp read as an ordered document still opens with the historical
-             # keys in their historical order; readers key by NAME, and a reader
+             # The machine of origin. APPENDED at the end of the mapping so a
+             # stamp read as an ordered document still opens with the older keys
+             # in their original order; readers key by NAME, and a reader
              # that must tolerate its absence does so with
              # `stamp["trunk"].get("hostname")` — see `stamp_hostname`.
              HOSTNAME_STAMP_KEY: collecting_hostname()}
-    # Single-card stamps keep EXACTLY the historical key set (the banked smalls compare
-    # against them) EXCEPT for the M41 hostname, which is unconditional by design:
-    # the whole point is that EVERY artifact can be attributed to its node, so a
-    # conditional hostname would leave precisely the gap M41 was filed for. The
+    # Single-card stamps keep EXACTLY the banked key set (the banked smalls compare
+    # against them) EXCEPT for the hostname, which is unconditional by design:
+    # the whole point is that EVERY artifact can be attributed to its machine, so a
+    # conditional hostname would leave precisely the gap it exists to close. The
     # sharding record is appended only on the opt-in sharded path, and the
     # dtype-regime witness only on the opt-in --dequantize-fp8 path. Same
     # discipline as `truncation` in the collection stamp: an absent key means the
-    # deviation was not taken, so historical stamps stay comparable key-for-key.
+    # deviation was not taken, so banked stamps stay comparable key-for-key.
     if sharding is not None:
         stamp["sharding"] = sharding
     if fp8 is not None:
@@ -928,15 +919,15 @@ def trunk_stamp(model_path: str, tok, device: str,
 
 
 def stamp_hostname(stamp: dict) -> Optional[str]:
-    """The node a stamp was written on, or None for a PRE-M41 stamp.
+    """The machine a stamp was written on, or None for a stamp without the field.
 
     THE BACKWARD-COMPATIBLE READER, and the only one any consumer should use.
-    Every artifact banked before 2026-07-29 has no hostname at all, and the three
-    states a reader must keep apart are:
+    An artifact banked by a collector that did not record the field has no
+    hostname at all, and the three states a reader must keep apart are:
 
-        None                    the stamp PREDATES the field — the node is
-                                unknown and must be established by probing BOTH
-                                nodes' stores (rake M41(a)), never inferred
+        None                    the stamp PREDATES the field — the machine is
+                                unknown and must be established by probing EVERY
+                                machine's store, never inferred
         HOSTNAME_UNRESOLVED     the collector RAN but could not name its host —
                                 degraded instrumentation, not a missing field
         "<name>"                the node of origin, as the kernel knew it
@@ -965,8 +956,7 @@ def collect(arm_root: Path, model: str, model_path: str, arms: list[str],
     entries, manifest_sha = load_corpus(arm_root)
     #  THE BASIS NAMES ITS OWN STRATA, and it does so BEFORE the weights load: a
     #  manifest whose entries cannot be read for a vocabulary is a staging defect,
-    #  and finding that out after a 26-minute collection pass is how the canary
-    #  of 2026-08-03 burned a bank.
+    #  and finding that out after a 26-minute collection pass burns a bank.
     strata = derive_strata(entries)
     counts = stratum_counts(entries)
     logger.info("basis: %d strata %s (manifest %s…), counts %s",
@@ -1013,9 +1003,9 @@ def collect(arm_root: Path, model: str, model_path: str, arms: list[str],
             "capture_convention": "forward_pre_hook on decoder_layers[L] "
                                   "(residual ENTERING layer L), completion "
                                   "positions >= P, fp32 mean; batch-1, no cache",
-            # ── THE STRATUM BASIS (desk ruling 2026-08-03) ────────────────────
-            # APPENDED, so every historical key keeps its historical position in
-            # a stamp read as an ordered document (the M41 hostname discipline).
+            # ── THE STRATUM BASIS ─────────────────────────────────────────────
+            # APPENDED, so every older key keeps its position in a stamp read as
+            # an ordered document (the same discipline as the hostname).
             # UNCONDITIONAL, for the same reason the hostname is: the vocabulary
             # a bank was collected under is part of its IDENTITY, not a
             # deviation, and `counts_per_stratum` above is unreadable without it
@@ -1028,17 +1018,17 @@ def collect(arm_root: Path, model: str, model_path: str, arms: list[str],
                 "n_strata": len(strata),
                 "counts": counts,
             },
-            # ── THE EFFECTIVE THREAD CONFIGURATION (desk ruling 3, 2026-08-03) ─
+            # ── THE EFFECTIVE THREAD CONFIGURATION ─────────────────────────────
             # IDENTITY HYGIENE, AND NOT A GATE INPUT — the distinction is the
-            # whole point of the ruling, so it is written where a reader of the
-            # stamp will meet it.
+            # whole point, so it is written where a reader of the stamp will
+            # meet it.
             #
-            # WHY IT IS RECORDED. Ruling 8 (Luxia, 2026-08-01) made the thread
-            # count part of an instrument's identity, and hygiene consistency
-            # says a bank should be able to say what instrument produced it —
-            # the same argument that made the M41 hostname unconditional. So the
-            # key is UNCONDITIONAL: an absent `thread_config` means ONE thing,
-            # that the stamp predates 2026-08-03, and
+            # WHY IT IS RECORDED. The thread count is part of an instrument's
+            # identity, and hygiene consistency says a bank should be able to say
+            # what instrument produced it — the same argument that makes the
+            # hostname unconditional. So the key is UNCONDITIONAL: an absent
+            # `thread_config` means ONE thing, a stamp written without the field,
+            # and
             # `metabasis.threads.stamp_thread_config` is the reader that keeps
             # that apart from a probe that ran and could not answer.
             #
@@ -1048,16 +1038,16 @@ def collect(arm_root: Path, model: str, model_path: str, arms: list[str],
             # exactly why `spot_replay` compares the STATE ARRAYS bitwise and
             # nothing else. A gate that compared this block would fail a
             # legitimately re-gated bank for a difference that cannot reach the
-            # numbers, and would make the ruled OMP default un-changeable
+            # numbers, and would make the default OMP count un-changeable
             # retroactively. Contrast `build_entropy_gradient`, where the same
             # block IS load-bearing because its vector comes off `eigh`.
             #
-            # APPENDED LAST, so every historical key keeps its historical
-            # position in a stamp read as an ordered document.
+            # APPENDED LAST, so every older key keeps its position in a stamp
+            # read as an ordered document.
             THREAD_STAMP_KEY: thread_config_stamp(),
         }
-        # ADDENDUM 2026-07-27-B: the deviation is recorded in EVERY stamp of a
-        # truncated node. Absent on every other node, so historical stamps keep
+        # The position-ceiling deviation is recorded in EVERY stamp of a
+        # truncated node. Absent on every other node, so their stamps keep
         # exactly their key set (same discipline as the `sharding` record).
         if max_length is not None:
             stamp["truncation"] = f"first-{max_length}"
@@ -1139,7 +1129,7 @@ def spot_replay(arm_root: Path, model: str, model_path: str, arms: list[str],
     (`np.array_equal` per text per site, with the max abs difference recorded
     beside it so a failure is diagnosable). Nothing else. It does not compare
     stamps, and specifically it does NOT compare the collection stamp's
-    `thread_config` block (desk ruling 3, 2026-08-03): collection bytes are
+    `thread_config` block: collection bytes are
     GPU-forward-derived, so the BLAS/OpenMP thread count cannot reach them, and
     a gate that compared it would refuse a legitimately re-gated bank over a
     difference that cannot change a number. That block is identity hygiene and
@@ -1183,7 +1173,7 @@ def spot_replay(arm_root: Path, model: str, model_path: str, arms: list[str],
                     },
                     "trunk": trunk_stamp(model_path, tok, device, sharding, fp8),
                     "results": {}}
-    if max_length is not None:                 # ADDENDUM 2026-07-27-B, per-use record
+    if max_length is not None:                 # position-ceiling deviation, per-use record
         report["truncation"] = f"first-{max_length}"
         report["truncation_prereg"] = "ADDENDUM 2026-07-27-B"
     for arm in arms:
@@ -1231,8 +1221,8 @@ def cp1_summary(arm_root: Path, models: list[str]) -> int:
                 continue
             st = json.loads(sp.read_text())
             norms[(model, arm)] = st["median_mean_state_norms"]
-            #  RAKE M41: the node of origin, read through the tolerant reader —
-            #  every bank predating 2026-07-29 has no hostname, and a QC table
+            #  The machine of origin, read through the tolerant reader — a bank
+            #  written without the field has no hostname, and a QC table
             #  that crashed on one would be unusable on the whole existing tree.
             host = stamp_hostname(st)
             lines.append(
@@ -1280,7 +1270,7 @@ def _v21_fixture_entries() -> list[dict]:
 
 
 def _v21_s5_fixture_entries() -> list[dict]:
-    """The Leg-4 augmentation: the v2.1 rows byte-identical, S5 appended."""
+    """The S5 augmentation: the v2.1 rows byte-identical, S5 appended."""
     e = _v21_fixture_entries()
     for voice in ("3b", "8b"):
         for g in range(20):
@@ -1289,16 +1279,14 @@ def _v21_s5_fixture_entries() -> list[dict]:
 
 
 def _webtext_v3_fixture_entries() -> list[dict]:
-    """A webtext-v3-shaped manifest: the four strata frozen prereg §3.4 names."""
+    """A webtext-v3-shaped manifest: the four strata the frozen webtext-v3 basis names."""
     return [{"text_id": f"{s}-{i:04d}", "stratum": s}
             for s in ("wikitext", "c4", "pg19", "stackexchange")
             for i in range(30)]
 
 
-#  RECORDED FROM THE PRE-CHANGE CODE (2026-08-03, before a line of this file
-#  moved), by running the then-current `pick_spot_ids` — module constant
-#  ("S1","S2","S3","S5") — on the fixtures above. Raw log:
-#  /tmp/claude-output/strata-fix-BEFORE-pick-spot-ids.log.
+#  RECORDED from `pick_spot_ids` run with the fixed vocabulary
+#  `LEGACY_V21_STRATA` ("S1","S2","S3","S5") on the fixtures above.
 #
 #  These are the CP-1 gate's IDENTITY on a v2.1-shaped corpus: which texts it
 #  replays. The gate is a certified instrument, so that identity must provably
@@ -1321,7 +1309,7 @@ LEGACY_PICK_V21_S5_K20: tuple[str, ...] = (
     "S1-3b-t12-s0-r1", "S2-wikitext-014", "S3-3b-contrastive-t03", "S5-3b-g018")
 #: The same record against the REAL v2.1 fitting manifest of record (775 texts) —
 #: the corpus every certified v2.1 bank was collected on, not a fixture. Guarded
-#: by a NAMED SKIP (rake M44) because it is a repo data artifact and a deployed
+#: by a NAMED SKIP because it is a repo data artifact and a deployed
 #: code tree has none.
 LEGACY_PICK_REAL_V21_K20: tuple[str, ...] = (
     "S1-dsv2-lite-t02-s3-r1", "S2-wt-094", "S3-dsv2-lite-analogical-t03-r1",
@@ -1341,7 +1329,7 @@ def selftest() -> int:
     call is byte-identical to the one that produced every banked node, and with it set
     the bf16 regime is either established or the run DIES. No GPU, no weights.
 
-    RAKE M44: the two environment axes (deep-learning stack, working fp8 dequantize)
+    Named configurations: the two environment axes (deep-learning stack, working fp8 dequantize)
     are branched on the availability probes below and degrade to NAMED skips. A skip
     is a THIRD state, distinct from pass and fail, and never a non-zero exit code —
     nothing was asserted and found wanting. See the module docstring for the matrix.
@@ -1357,7 +1345,7 @@ def selftest() -> int:
             fails.append(name)
 
     def skip(name: str, why: str) -> None:
-        """A NAMED skip (rake M44): a block that cannot run in THIS configuration.
+        """A NAMED skip: a block that cannot run in THIS configuration.
 
         Recorded as run-and-absent rather than crashed or failed, counted in the tail
         so a sweep can report coverage per configuration, and NEVER a non-zero exit
@@ -1368,12 +1356,12 @@ def selftest() -> int:
         checks.append(f"SKIPPED: {name}")
         print(f"  [SKIP] {name} — {why}")
 
-    # ---- the availability probes (rake M44) ----------------------------------
+    # ---- the availability probes ---------------------------------------------
     #  AXIS 1 — the deep-learning stack. `trunk_stamp` reads torch.__version__ and
     #  transformers.__version__, and the post-load witness builds real nn.Modules, so
-    #  blocks 3, 3b(stamp) and 4-6 need it. Blocks 1, 2, 3b(reader/M19) and 7 do NOT,
+    #  blocks 3, 3b(stamp) and 4-6 need it. Blocks 1, 2, 3b(reader) and 7 do NOT,
     #  and must stay provable in a configuration with no deep-learning stack at all —
-    #  which the desk's own repo .venv (numpy/scipy/pydantic only) is.
+    #  which a CPU-only venv (numpy/scipy/pydantic only) is.
     torch: Any = None
     nn: Any = None
     try:
@@ -1421,9 +1409,8 @@ def selftest() -> int:
                    f"{type(exc).__name__}: {exc}")
         print(f"[config] fp8 dequantize: ABSENT — {fp8_why}")
 
-    #  AXIS 3 — the DATA TREE (rake M44(a): the count names its configuration,
-    #  and M44(c): a fixture that resolves a real artifact relative to cwd is
-    #  itself a defect). The gate-identity blocks below are proved on SYNTHETIC
+    #  AXIS 3 — the DATA TREE (the count names its configuration, and a fixture
+    #  that resolves a real artifact relative to cwd is itself a defect). The gate-identity blocks below are proved on SYNTHETIC
     #  fixtures that need no tree at all; the REAL v2.1 fitting manifest is an
     #  additional, cwd-dependent pass that degrades to a named skip.
     print(f"[config] cwd={Path.cwd()}  v2.1 fitting manifest "
@@ -1496,9 +1483,9 @@ def selftest() -> int:
              "unconditionally, appends the key last, and leaves the historical key "
              "set otherwise untouched", stack_why)
 
-    #  RAKE M19: instrumentation that only DESCRIBES a run must never FAIL it.
+    #  Instrumentation that only DESCRIBES a run must never FAIL it.
     #  The failing branch is EXERCISED here — an unexercised degradation path is
-    #  not known to work (M19(c) in miniature).
+    #  not known to work.
     real_gethostname = _socket.gethostname
     try:
         _socket.gethostname = lambda: (_ for _ in ()).throw(  # type: ignore[assignment]
@@ -1516,9 +1503,9 @@ def selftest() -> int:
     finally:
         _socket.gethostname = real_gethostname  # type: ignore[assignment]
 
-    #  THE READER'S CONTRACT: three states, kept apart. Every artifact banked
-    #  before 2026-07-29 has no hostname at all, and "unknown node" demands the
-    #  M41(a) response (probe BOTH stores) while "unresolved" does not.
+    #  THE READER'S CONTRACT: three states, kept apart. An artifact banked
+    #  without the field has no hostname at all, and "unknown node" demands
+    #  probing every machine's store while "unresolved" does not.
     if stack_ok:
         check("stamp_hostname reads a trunk stamp directly",
               stamp_hostname(base) == _socket.gethostname())
@@ -1548,7 +1535,7 @@ def selftest() -> int:
 
     print("== selftest 3c: the COLLECTION stamp records its thread config, and "
           "the GATE ignores it ==")
-    #  Desk ruling 3 (2026-08-03). No deep-learning stack is needed for any of
+    #  No deep-learning stack is needed for any of
     #  this: the block is read from the loaded BLAS runtimes by
     #  `metabasis.threads`, and the gate-scope check is structural.
     import inspect as _inspect
@@ -1573,7 +1560,7 @@ def selftest() -> int:
           "every bank collected before 2026-08-03 is that case, and a reader "
           "that conflated the two would attribute a thread count to a bank "
           "that never recorded one")
-    #  THE RULING'S OTHER HALF, ASSERTED STRUCTURALLY: the gate cannot compare
+    #  THE CONTRACT'S OTHER HALF, ASSERTED STRUCTURALLY: the gate cannot compare
     #  what it never mentions. `spot_replay` compares state arrays and nothing
     #  else, so its source must not reach for the thread block at all — if a
     #  later edit makes it, this check is where that shows up.
@@ -1781,7 +1768,7 @@ def selftest() -> int:
               "under-cover the corpus", True, str(exc)[:70])
 
     print("== selftest 9: --collect --spot-replay in ONE invocation is REFUSED ==")
-    #  RAKE M45: SystemExit is not Exception. It is caught HERE, recorded as this
+    #  SystemExit is not Exception. It is caught HERE, recorded as this
     #  block's result, and the suite continues to its TOTAL line.
     real_argv2 = sys.argv
     try:
@@ -1826,12 +1813,12 @@ def selftest() -> int:
     print(f"\nselftest: {len(fails)} failures")
     for f in fails:
         print(f"  FAILING CHECK: {f}")
-    # RAKE M44: coverage is part of the verdict, per configuration. A bare pass count
+    # Coverage is part of the verdict, per configuration. A bare pass count
     # cannot be read without knowing which cell of the matrix produced it.
     print(f"selftest checks run: {len(checks)} ({len(skips)} named skip(s))")
     for name in skips:
         print(f"  SKIPPED {name}")
-    # RAKE M45 rule (b): a sweep log without its terminal TOTAL line is a FAILING
+    # A sweep log without its terminal TOTAL line is a FAILING
     # sweep, never a quiet pass. This line is that terminus for this module.
     print(f"TOTAL collect_mean_states: {len(checks)} check(s), {len(fails)} "
           f"failure(s), {len(skips)} skip(s)")
@@ -1845,20 +1832,20 @@ def main() -> int:
     ap.add_argument("--model", choices=MODEL_KEYS, help="one model per invocation; "
                     "keys outside the fixed-grid registry (SITES) are scan-registry "
                     "models (metabasis.roster) and REQUIRE --sites")
-    ap.add_argument("--model-path", help="local weights dir (node-side)")
+    ap.add_argument("--model-path", help="local weights dir on the machine that runs the model")
     ap.add_argument("--arms", default="native,raw",
                     help="comma list; strata/arms never mixed in banks")
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--sites", default=None,
                     help="comma-separated site override (default = the model's SITES grid); "
-                         "used by Leg-4F to bank Qwen L18, where Vdiverge lives")
+                         "e.g. to bank Qwen L18, where Vdiverge lives")
     ap.add_argument("--max-seq-len", type=int, default=None, metavar="N",
-                    help="prereg ADDENDUM 2026-07-27-B position-ceiling deviation: "
+                    help="pre-registered position-ceiling deviation: "
                          "truncate every text to its FIRST N tokens. Required for "
                          "architectures with learned absolute position embeddings "
                          "(gpt2-xl: 1024). MUST be passed identically to --collect and "
                          "--spot-replay, or the replay compares different objects and "
-                         "the bitwise gate fails. Unset = the historical untruncated "
+                         "the bitwise gate fails. Unset = the untruncated "
                          "path, byte for byte.")
     ap.add_argument("--collect", action="store_true")
     ap.add_argument("--spot-replay", type=int, metavar="K", default=None)
@@ -1866,7 +1853,7 @@ def main() -> int:
                     help="e.g. --cp1-summary 3b 8b (local, no GPU)")
     ap.add_argument("--selftest", action="store_true",
                     help="CPU-only gates on the --dequantize-fp8 regime and its wiring")
-    # --- sharded path (prereg §4 big rungs); OPT-IN, none of these => single card ---
+    # --- sharded path (big rungs); OPT-IN, none of these => single card ------------
     sh = ap.add_argument_group(
         "sharded load (>=70B class)",
         "opt-in accelerate device_map placement across the node. Unset => the unchanged "
@@ -1892,12 +1879,12 @@ def main() -> int:
     sh.add_argument("--assert-multi-device", action="store_true",
                     help="fail unless the realized layout computes on >=2 devices — set "
                          "this on the certification run so it cannot pass vacuously")
-    # --- dtype regime (prereg ADDENDUM 2026-07-26-A, roster row 21); OPT-IN ---------
+    # --- dtype regime (pre-registered for roster row 21); OPT-IN --------------------
     ap.add_argument("--dequantize-fp8", action="store_true",
                     help="load a block-wise-FP8 checkpoint as bf16 via "
-                         "FineGrainedFP8Config(dequantize=True) — prereg ADDENDUM "
-                         "2026-07-26-A, BINDING for roster row 21 (DeepSeek-V3). Unset "
-                         "= the historical call, byte for byte, and an FP8 checkpoint "
+                         "FineGrainedFP8Config(dequantize=True) — the pre-registered "
+                         "dtype regime, BINDING for roster row 21 (DeepSeek-V3). Unset "
+                         "= the plain call, byte for byte, and an FP8 checkpoint "
                          "would load its NATIVE FP8 forward instead (a different object, "
                          "and not differentiable). MUST be passed identically to "
                          "--collect and --spot-replay, or the replay compares different "
@@ -1907,11 +1894,11 @@ def main() -> int:
     args = ap.parse_args()
     if args.selftest:
         return selftest()
-    #  THE SILENT-SKIP CLASS DIES AT THE CLI (desk ruling 2026-08-03).
-    #  `--collect --spot-replay K` in ONE invocation used to be accepted and then
-    #  IGNORED: the dispatch below returns after `--collect`, so the replay never
-    #  ran, no spot report was written, and the job's own JOB-OK line pointed at
-    #  an artifact that did not exist. Runtime-proven on the node, 2026-08-03.
+    #  THE SILENT-SKIP CLASS DIES AT THE CLI.
+    #  `--collect --spot-replay K` in ONE invocation would otherwise be accepted
+    #  and the replay IGNORED: the dispatch below returns after `--collect`, so the
+    #  replay would never run, no spot report would be written, and the job's own
+    #  success line would point at an artifact that does not exist.
     #
     #  A REFUSAL, not a silent re-order into the right thing: the gate's whole
     #  claim is that a SEPARATE PROCESS reproduces the bank bit for bit, and one
@@ -1983,10 +1970,10 @@ def main() -> int:
     if args.spot_replay is not None:
         if args.spot_replay < 3:
             raise SystemExit("CP-1 gate requires K >= 3")
-        # --sites forwards on BOTH paths (desk unification, 2026-07-26): a bank
+        # --sites forwards on BOTH paths: a bank
         # collected with an overridden grid must spot-replay against that same
         # grid; the registry lookup (`sites_for(model)`, which refuses loudly for
-        # an un-ratified key) stays the default when --sites is absent, so
+        # a key with no registered grid) stays the default when --sites is absent, so
         # banked-model replays are unchanged.
         return spot_replay(args.arm_root, args.model, args.model_path, arms,
                            args.device, args.spot_replay,

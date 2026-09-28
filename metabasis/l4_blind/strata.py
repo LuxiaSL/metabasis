@@ -1,13 +1,13 @@
 """The measured-effect layer — deck v2's whole reason for existing.
 
-v1 drew pairs uniformly from detection-PASS cells. That was the defect.
+A draw taken uniformly from detection-PASS cells (deck v1) is defective.
 Detection PASS is a statement about a CELL (its 80 generations separate
 from the band); it says nothing about whether an INDIVIDUAL pair shows a
-visible effect. Luxia's first ten pairs proved it: four were
-expected-null by construction, the graded ones were .05–.13 population
-shifts, and her unsures tracked our own quantitative record exactly. An
-effect-blind draw cannot tell "she could not see it" from "there was
-nothing to see."
+visible effect. A uniform draw lands on pairs that are expected-null by
+construction and on pairs whose effect is a .05–.13 population shift, and
+a judge's "unsure" on those tracks the quantitative record rather than
+the judge. An effect-blind draw cannot tell "the judge could not see it"
+from "there was nothing to see."
 
 v2 measures every candidate pair before drawing it.
 
@@ -18,9 +18,8 @@ i.e. the on-axis classifier score moved in the DIRECTION THE DOSE
 INTENDED, for that one prompt. Both generations share a prompt_id, so
 the difference is the steering and not the topic.
 
-Source: `CORRECTED-GENERATION-ROWS.jsonl` (the corrected decode of
-2026-08-06) — the only desk-side artifact carrying PER-GENERATION head
-scores. The banked L1 logs carry cell-level means only, which is exactly
+Source: `CORRECTED_ROWS_REL` (the corrected decode) — the only scored
+artifact carrying PER-GENERATION head scores. The banked L1 logs carry cell-level means only, which is exactly
 the granularity that produced the v1 defect.
 
 COVERAGE IS THE BINDING CONSTRAINT, and it is not a choice:
@@ -29,10 +28,9 @@ COVERAGE IS THE BINDING CONSTRAINT, and it is not a choice:
     mistral-7b-instruct-v0.3.language                  4080 rows
 
 and nothing else. Fifteen of the twenty PASS class columns have no
-per-generation scores desk-side at all, so no pair from them can be
-stratified by measured effect. See `COVERAGE_HALT` — the desk must see
-this, because it means v2's graded strata rest on dsv2-lite plus one
-mistral column.
+per-generation scores at all, so no pair from them can be stratified by
+measured effect. `COVERAGE_HALT` states this loudly, because it means
+v2's graded strata rest on dsv2-lite plus one mistral column.
 """
 from __future__ import annotations
 
@@ -44,8 +42,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from metabasis.l4_blind.models import Axis, Dose, Side
 
-#: Per-generation head scores. The corrected decode, per the desk ruling
-#: that dsv2 text comes from the corrected logs.
+#: Per-generation head scores. The corrected decode: dsv2 text is always
+#: read from the corrected logs, because the raw decode is space-degenerate.
 CORRECTED_ROWS_REL: Final[str] = (
     "staging/reading-bleed/corrected-l1-dsv2/node-pass1/CORRECTED-GENERATION-ROWS.jsonl"
 )
@@ -195,7 +193,7 @@ def load_scores(repo: Path) -> tuple[dict, dict, list[str]]:
                 if k in scores:
                     raise ValueError(
                         f"{k} appears in two score sources — refusing to pick "
-                        f"one silently; the desk must reconcile them"
+                        f"one silently; reconcile the sources before building the pool"
                     )
                 scores[k] = r
                 w, c = r.get(words_key), r.get(chars_key)
@@ -237,7 +235,7 @@ def assign_stratum(axis: Axis, dose: Dose, delta: float) -> str | None:
 def build_pool(repo: Path, pass_cells: list) -> list[CandidatePair]:
     """Every PASS-cell pair that carries a measured on-axis delta.
 
-    Composition rules (desk, 2026-08-07):
+    Composition rules:
       * refusal EXCLUDED entirely — substrate-free pool, returns with v2
         of the prompt pool;
       * language graded at +0.30 ONLY; its -0.30 pairs are catch trials;

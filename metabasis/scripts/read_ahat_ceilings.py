@@ -46,7 +46,7 @@ Two things the ceiling is NOT:
     than a ray, which deflates â mechanically without touching the ceiling.
 
 ────────────────────────────────────────────────────────────────────────────────
-THE INTERPRETATION CONTRACT (brief Question 2, ruled 2026-07-27)
+THE INTERPRETATION CONTRACT
 ────────────────────────────────────────────────────────────────────────────────
 Given (â, ceiling, coherence, null q95), a low â sorts into exactly one of:
 
@@ -67,7 +67,7 @@ Given (â, ceiling, coherence, null q95), a low â sorts into exactly one of:
                    evidence against the law.
 
 This module reports the numbers and applies the contract as a SUGGESTED bucket
-(`bucket_hint`). It never rules; the desk does.
+(`bucket_hint`). The hint is a suggestion; it never scores a row.
 
 Run (repo root, PYTHONPATH=.):
   python -m metabasis.scripts.read_ahat_ceilings --selftest
@@ -106,7 +106,7 @@ ORTHONORMAL_ATOL = 2e-5
 RANK_TOL = 1e-8
 
 #: Interpretation-contract thresholds. Reported alongside every hint so the
-#: desk can move them without re-deriving anything.
+#: a reader can move them without re-deriving anything.
 CEILING_LOW = 0.35
 COHERENCE_LOW = 0.45
 
@@ -129,7 +129,7 @@ class TargetSpec(BaseModel):
     arm: str
     vectors: Path
     fits_dir: Path
-    #: Where cp2_summary.json actually lives. Usually `fits_dir`, but a ruled
+    #: Where the fit record `<dir>/cp2_summary.json` lives. Usually `fits_dir`, but a
     #: scan EXTENSION writes its merged summary into a sibling dir while the
     #: fit npz's stay in the original (pythia-6.9b's L28–L31 extension).
     summary_dir: Optional[Path] = None
@@ -235,13 +235,13 @@ class CeilingReadout(BaseModel):
     generated: str
     rows: list[CeilingRow] = []
     missing: list[MissingPiece] = []
-    #: THE EFFECTIVE THREAD CONFIGURATION (Luxia ruling 2026-08-01). Every
+    #: THE EFFECTIVE THREAD CONFIGURATION. Every
     #: ceiling is a projection norm through `image_basis`, which is an SVD of
     #: the banked map — a blocked LAPACK routine whose summation order moves
     #: with the thread count. This readout is not a builder and banks no vector,
     #: but its `--out` payload IS durable and gets compared across rebuilds, so
     #: it carries the count for the same reason a build stamp does. Empty dict =
-    #: the payload predates the ruling.
+    #: a payload written without a thread stamp.
     thread_config: dict = Field(default_factory=dict)
 
 
@@ -318,7 +318,7 @@ _SIGN_KEYS: tuple[str, ...] = (
 class StampsSiteMismatch(ValueError):
     """The stamps json handed to a row does not describe that row's site.
 
-    RAKE M14. A merged multi-site vector npz has ONE canonical stamps stem, so
+    A merged multi-site vector npz has ONE canonical stamps stem, so
     attaching build diagnostics by stem silently decorates a per-site row with
     a DIFFERENT build's numbers — the 70B's L37/L43 ceiling rows carried the
     L17 build's coherence .268 instead of the true .431/.432, and nothing
@@ -330,7 +330,7 @@ class StampsSiteMismatch(ValueError):
 def stamps_path_for(vectors: Path, model: str, site: int) -> Optional[Path]:
     """The stamps json that describes the vector at `site` — per-site FIRST.
 
-    RAKE M14, rule (a): when a model banks per-site out-name'd builds, row-level
+    When a model banks per-site out-name'd builds, row-level
     diagnostics resolve through the PER-SITE file, never the canonical stem. The
     stem is only accepted when it actually records this site, so the merged-npz
     trap (one stem, many sites) cannot be walked into by accident.
@@ -364,10 +364,10 @@ def read_build_diagnostics(stamps: Optional[Path], model: Optional[str] = None,
                            site: Optional[int] = None) -> BuildDiagnostics:
     """Construction quality off a stamps json; absence is reported, not raised.
 
-    A stamps json for the WRONG site is not an absence — it is the M14 rake, and
-    it raises `StampsSiteMismatch`. Pass `model`/`site` whenever the row knows
-    them (every roster path does); omitting them keeps the old, unchecked
-    behaviour for ad-hoc callers.
+    A stamps json for the WRONG site is not an absence — it is another build's
+    diagnostics, and it raises `StampsSiteMismatch`. Pass `model`/`site` whenever
+    the row knows them (every roster path does); omitting them skips the site
+    check, for ad-hoc callers.
     """
     where = (f" for {model} L{site}" if model is not None and site is not None
              else "")
@@ -389,7 +389,7 @@ def read_build_diagnostics(stamps: Optional[Path], model: Optional[str] = None,
         raise StampsSiteMismatch(
             f"{model or doc.get('model') or '?'}: requested site L{site} but "
             f"{stamps} records site L{int(recorded)} — attaching it would book "
-            f"another build's diagnostics on this row (rake M14). Resolve the "
+            f"another build's diagnostics on this row. Resolve the "
             f"per-site stamps file, or pass the right one explicitly.")
     diag = doc.get("diagnostics") or {}
     if not isinstance(diag, dict):
@@ -415,7 +415,7 @@ def read_build_diagnostics(stamps: Optional[Path], model: Optional[str] = None,
 
 def read_fit_quality(fits_dir: Path, site_pair: str, arm: str, family: str
                      ) -> FitQuality:
-    """The scan-fit record for this exact cell, from cp2_summary.json."""
+    """The scan-fit record for this exact cell, from `<fits_dir>/cp2_summary.json`."""
     summary = fits_dir / "cp2_summary.json"
     if not summary.exists():
         return FitQuality(note=f"cp2_summary.json absent under {fits_dir}")
@@ -447,7 +447,7 @@ def read_fit_quality(fits_dir: Path, site_pair: str, arm: str, family: str
 # ---------------------------------------------------------------- bucketing
 def bucket(a_hat: float, ceiling: float, coherence: Optional[float],
            clears: bool) -> tuple[str, str]:
-    """Apply the interpretation contract. Suggestion only — the desk rules."""
+    """Apply the interpretation contract. Returns a suggested bucket, never a score."""
     if clears and a_hat > 0:
         return "clears", (
             f"â={a_hat:+.4f} clears its null floor; ceiling {ceiling:.3f} "
@@ -598,17 +598,17 @@ def _node(model: str, site: int, arm: str, n_layers: int,
         model=model, site=site, arm=arm, vectors=vec,
         fits_dir=root / (fits_dirname or f"fits_scan_{model}"),
         summary_dir=(root / summary_dirname) if summary_dirname else None,
-        # RAKE M14: resolved per SITE, not per stem. The stem-derived path was
-        # right only while every model's canonical npz held exactly one site;
-        # merged multi-site banks (the 70B's L17+L37+L43, gpt2-xl's L7+L26+L47)
-        # made it attach the wrong build's diagnostics — or, for gpt2-xl, no
-        # diagnostics at all, since no stem-named stamps file was ever written.
+        # Resolved per SITE, not per stem. A stem-derived path is right only
+        # when the canonical npz holds exactly one site; merged multi-site banks
+        # (the 70B's L17+L37+L43, gpt2-xl's L7+L26+L47) would attach the wrong
+        # build's diagnostics — or, for gpt2-xl, none at all, since gpt2-xl has
+        # no stem-named stamps file.
         stamps=stamps_path_for(vec, model, site),
         depth_fraction=round(site / n_layers, 4))
 
 
 def roster_wave1() -> list[TargetSpec]:
-    """The seven wave-1 nodes at their ratified record sites, native arm."""
+    """The seven wave-1 nodes at their record sites, native arm."""
     return [
         _node("qwen2.5-3b-instruct", 26, "native", 36),
         _node("qwen2.5-14b-instruct", 29, "native", 48),
@@ -624,12 +624,12 @@ def roster_rungs2() -> list[TargetSpec]:
     """Hub rungs 2: the 70B, pythia, and all three gpt2-xl sites of evidence."""
     gpt2_fits = "fits_scan_gpt2-xl-25site"
     return [
-        # 70B sites of record, re-ratified 2026-07-27: L37 primary, L43
+        # 70B sites of record: L37 primary, L43
         # robustness (SITES carries the same pair). Their vectors live in the
         # 12-key MERGED canonical npz alongside the retired L17, so the stamps
         # for these rows must come from the per-site files — coherence
-        # .431/.432, not the L17 build's .268 (rake M14). `_node` now resolves
-        # that per site; do not reintroduce a stem-derived stamps path.
+        # .431/.432, not the L17 build's .268. `_node` resolves that per site;
+        # a stem-derived stamps path would attach the L17 build's numbers.
         _node("llama-3.1-70b-instruct", 37, "native", 80),
         _node("llama-3.1-70b-instruct", 43, "native", 80),
         # RETIRED SITE, kept as a row on purpose: L17 is the shallow-basin site
@@ -638,8 +638,8 @@ def roster_rungs2() -> list[TargetSpec]:
         # that case study is read. It is NOT a site of record and is absent
         # from SITES, so no fit resolves it without an explicit --tgt-sites 17.
         _node("llama-3.1-70b-instruct", 17, "native", 80),
-        # pythia's ruled L28–L31 extension banked its npz's in the original
-        # fits dir and its MERGED 16-site cp2_summary.json in the sibling.
+        # pythia's L28–L31 extension banked its npz's in the original fits dir
+        # and its MERGED 16-site `<dir>/cp2_summary.json` in the sibling.
         _node("pythia-6.9b", 31, "raw", 32,
               summary_dirname="fits_scan_pythia-6.9b-16site"),
         _node("gpt2-xl", 7, "raw", 48, fits_dirname=gpt2_fits),

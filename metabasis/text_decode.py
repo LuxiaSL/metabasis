@@ -1,9 +1,9 @@
 """Shared byte-level-BPE text decode for banked generations.
 
-Some models (e.g. DeepSeek-V2-Lite / M6) bank `generated_text` still byte-BPE-encoded
+Some models (e.g. DeepSeek-V2-Lite) bank `generated_text` still byte-BPE-encoded
 (Ġ=space, Ċ=newline — the GPT-2 bytes_to_unicode alphabet). Any reader of banked text
-(judge, marker, coherence) must decode it first. One home for the map so we never roll
-a third copy (2026-07-18 sweep).
+(judge, marker, coherence) must decode it first. This module is the one home for the
+map, so every reader decodes identically.
 """
 from __future__ import annotations
 

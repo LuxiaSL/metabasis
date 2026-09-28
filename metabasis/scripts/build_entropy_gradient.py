@@ -28,7 +28,8 @@ non-negative inner product with that gradient by construction, so the unit vecto
 is entropy-increasing by construction; the finite-difference gate verifies it
 empirically rather than trusting the algebra.
 
-**The finite-difference gate is MANDATORY** (prereg ADDENDUM 2026-07-26-A). A
+**The finite-difference gate is MANDATORY** (the transport-campaign pre-registration
+in docs/planning/ binds it for every quantized-regime build). A
 quantized or otherwise non-differentiable forward can return a plausible-looking
 gradient that is really a residual-highway artefact — `autograd.grad` succeeds and
 every construction-internal diagnostic passes. The only thing that catches it is
@@ -44,7 +45,7 @@ an eps ladder (a too-small eps drowns in bf16 rounding, a too-large one leaves t
 linear regime) and takes the best rung; a matched-support random band direction is
 measured beside it as a direction-specificity control.
 
-Known traps, all guarded here (REPORT-dsv3-fp8-lane-design 2026-07-26 section 5):
+Known traps, all guarded here:
   * leaf-hook RE-ENTRY — the pre-hook counts its calls per forward and raises if the
     SITE layer's forward fires more than once, because a second call would replace
     the leaf with a recompute pass's copy and the gradient would then be taken with
@@ -68,7 +69,7 @@ builds the vector end to end on a randomly initialised tiny Llama in float32 (wh
 the FD gate should agree to a fraction of a percent) and then plants a deliberately
 severed gradient to prove the gate REJECTS it.
 
-Node-side run (one card, pinned; the trunk stamp records `cuda_visible_devices`):
+GPU run (one card, pinned; the trunk stamp records `cuda_visible_devices`):
 
     CUDA_VISIBLE_DEVICES=3 OMP_NUM_THREADS=8 \
     python -m metabasis.scripts.build_entropy_gradient \
@@ -78,22 +79,23 @@ Node-side run (one card, pinned; the trunk stamp records `cuda_visible_devices`)
 Three opt-in flags exist for nodes that cannot take the default path; each is a
 no-op when unset, so every historical build is reproduced byte-for-byte without it:
 
-  * `--max-seq-len N [--assert-n-truncated K]` — prereg ADDENDUM 2026-07-27-B. A node
+  * `--max-seq-len N [--assert-n-truncated K]` — the pre-registered GPT-2-XL
+    position-ceiling deviation. A model
     whose registry row carries `max_seq_len` (gpt2-xl: 1024) MUST build under the same
     per-text truncation it collected under, or its vector lives in a different space
     than the transport maps were fit in. The corpus-wide truncation count is re-derived
     from this node's own tokenizer BEFORE any forward pass and, with
-    `--assert-n-truncated`, must reproduce the ratified number or the build refuses.
+    `--assert-n-truncated`, must reproduce the pre-registered number or the build refuses.
   * `--out-name STEM` — bank BESIDE an existing vector of the same model instead of
     over it (the 8bL16 construction-lineage rebuild). Moves the FILENAMES only; the npz
     KEY stays canonical, which is what the readout resolves on.
-  * `--shard-across 0,1` — the collector's certified sharded loader (prereg §4; the
-    sharding gate PASSED 2026-07-27 byte-identical to single-device). For a model whose
+  * `--shard-across 0,1` — the collector's certified sharded loader (its sharding gate
+    proves it byte-identical to single-device). For a model whose
     weights plus the retained autograd graph do not fit one card. The layer activations
     of every layer >= site are retained for the leaf gradient, and eager attention is
     O(n^2) per layer, so the peak is well above the weights alone.
-  * `--checkpoint-above-site` — prereg §4's "input-gradient extraction with
-    checkpointing", made implementable. As written that phrase was NOT: whole-model
+  * `--checkpoint-above-site` — the pre-registered "input-gradient extraction with
+    checkpointing", made implementable. Read literally that phrase is NOT: whole-model
     checkpointing wraps the site layer too and trips the re-entry guard by
     construction, and REENTRANT checkpointing (torch's historical default) requires
     `.backward()` while this builder uses `autograd.grad` — which is the whole reason
@@ -112,7 +114,7 @@ from __future__ import annotations
 
 import os
 
-#  THE RULED DEFAULT (Luxia 2026-08-01): OMP_NUM_THREADS=8 everywhere. This is a
+#  THE DEFAULT: OMP_NUM_THREADS=8 everywhere. This is a
 #  FLOOR, not an override — every deployed job script exports the count itself and
 #  `setdefault` leaves it alone. It has to run above the numpy import because
 #  OpenBLAS reads its thread count when the shared object is LOADED; setting it
@@ -202,7 +204,7 @@ class CorpusSelectionError(EntropyGradientBuildError):
 
 
 class TruncationAuditError(EntropyGradientBuildError):
-    """The position-ceiling truncation audit did not reproduce the ratified count."""
+    """The position-ceiling truncation audit did not reproduce the pre-registered count."""
 
 
 class LeafHookError(EntropyGradientBuildError):
@@ -224,7 +226,7 @@ class BuildRequest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     model_key: str = Field(description="bank key; keys the npz filename and the stamp")
-    model_path: str = Field(description="local weights dir (node-side)")
+    model_path: str = Field(description="local weights dir on the machine that runs the model")
     arm_root: Path = Field(description="collection root holding corpus/corpus_manifest.json")
     out_dir: Path
     site: int = Field(ge=0, description="decoder-layer index; residual ENTERING this layer")
@@ -243,16 +245,16 @@ class BuildRequest(BaseModel):
                                            ">0 chunks it (OOM fallback, same algebra)")
     max_seq_len: Optional[int] = Field(
         default=None, ge=2,
-        description="prereg ADDENDUM 2026-07-27-B position-ceiling deviation: truncate "
+        description="pre-registered position-ceiling deviation: truncate "
                     "every text to its FIRST `max_seq_len` tokens. MUST match the value "
                     "the node's registry row carries (`RosterNode.max_seq_len`), because "
-                    "the addendum requires ONE truncation across collection, spot-replay, "
+                    "the deviation requires ONE truncation across collection, spot-replay, "
                     "target builds and behavioral reads — a build that truncates "
                     "differently from the collection would live in a different space "
                     "than the transport maps were fit in.")
     expect_n_truncated: Optional[int] = Field(
         default=None, ge=0,
-        description="ratified corpus-wide truncation count (148 for gpt2-xl). When set, "
+        description="pre-registered corpus-wide truncation count (148 for gpt2-xl). When set, "
                     "the build re-derives the count from THIS node's tokenizer over the "
                     "WHOLE frozen corpus and refuses to run if it disagrees — the "
                     "deviation is then a verified fact of the build, not a claim.")
@@ -343,7 +345,7 @@ class FDRung(BaseModel):
 
 
 class FDGateResult(BaseModel):
-    """The mandatory finite-difference gate (prereg ADDENDUM 2026-07-26-A)."""
+    """The mandatory finite-difference gate."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -366,10 +368,10 @@ class FDGateResult(BaseModel):
 
 
 class TruncationAudit(BaseModel):
-    """Prereg ADDENDUM 2026-07-27-B, re-derived on this node from this tokenizer.
+    """The pre-registered position-ceiling deviation, re-derived from this tokenizer.
 
     Counted over the WHOLE frozen corpus (not just the build's 80 texts), because the
-    ratified number the addendum names — 148 of 780 for gpt2-xl — is a corpus-wide fact,
+    pre-registered number — 148 of 780 for gpt2-xl — is a corpus-wide fact,
     and re-deriving it here is what proves this build applies the SAME truncation the
     collection applied. The subset actually consumed by this build is recorded beside it.
     """
@@ -416,9 +418,9 @@ def audit_truncation(tok: Any, entries: Sequence[dict], arm: str, date_string: s
         expected_n_truncated=expected)
     if expected is not None and len(truncated) != expected:
         raise TruncationAuditError(
-            f"position-ceiling audit disagrees with the ratified deviation: this "
+            f"position-ceiling audit disagrees with the pre-registered deviation: this "
             f"tokenizer truncates {len(truncated)} of {len(entries)} corpus texts at "
-            f"first-{max_length} on the {arm} arm, but ADDENDUM 2026-07-27-B ratified "
+            f"first-{max_length} on the {arm} arm, but the pre-registered deviation fixes "
             f"{expected}. Either the checkpoint/tokenizer is not the collected one or "
             f"the corpus is not the frozen one — refusing to build a vector that would "
             f"not live in the collected node's space.")
@@ -480,7 +482,7 @@ class BuildResult(BaseModel):
     sigma_text_ids: list[str]
     grad_text_ids: list[str]
     wall_seconds: float
-    #: None on every node without a ruled position ceiling (the historical key set).
+    #: None on every model without a pre-registered position ceiling.
     truncation: Optional[TruncationAudit] = None
 
 
@@ -593,8 +595,8 @@ def checkpoint_above_site(layers: Any, site: int) -> Iterator[int]:
     parameters means the graph starts at the substituted leaf and nowhere else).
     On a deep enough model with eager O(n²) attention that alone exhausts a card:
     DeepSeek-V3's entropy-gradient vector cannot be built without help, and the
-    prereg §4 phrase "input-gradient extraction with checkpointing" was
-    UNIMPLEMENTABLE as written — for a reason worth stating exactly, because it is
+    pre-registered phrase "input-gradient extraction with checkpointing" is
+    UNIMPLEMENTABLE read literally — for a reason worth stating exactly, because it is
     the reason this function has the shape it has.
 
     ─── WHY THE OBVIOUS THING IS FORBIDDEN ─────────────────────────────────────
@@ -721,7 +723,7 @@ def build_entropy_gradient(model: Any, tok: Any, entries: Sequence[dict],
     """The whole construction, device- and dtype-agnostic (the self-test runs it on CPU).
 
     `gradient_saboteur` is a self-test hook ONLY: a callable applied to each per-text
-    mean gradient before aggregation, used to plant a severed/bogus gradient and prove
+    mean gradient before aggregation, which plants a severed/bogus gradient to prove
     the finite-difference gate rejects it. It is never set on a real build, and its
     use is recorded in the stamp if it ever is.
     """
@@ -751,7 +753,7 @@ def build_entropy_gradient(model: Any, tok: Any, entries: Sequence[dict],
                 request.model_key, site, n_layers, hidden_dim,
                 len(sigma_entries), len(grad_entries), request.arm)
 
-    # ADDENDUM 2026-07-27-B: audited BEFORE the first forward, so a truncation that
+    # The position-ceiling deviation is audited BEFORE the first forward, so a truncation that
     # disagrees with the collection's costs no GPU time at all.
     truncation: Optional[TruncationAudit] = None
     if request.max_seq_len is not None:
@@ -790,7 +792,7 @@ def build_entropy_gradient(model: Any, tok: Any, entries: Sequence[dict],
         del Rc
         n_sigma_positions = int(R.shape[0])
         del R
-        #  THE THREAD-SENSITIVE STEP (Luxia ruling 2026-08-01). Sigma above is
+        #  THE THREAD-SENSITIVE STEP. Sigma above is
         #  bitwise stable regardless of thread count; this decomposition is not.
         #  LAPACK's tridiagonal reduction and back-transformation are blocked
         #  GEMM calls whose summation order depends on how the work is split, so
@@ -1090,12 +1092,11 @@ def _hidden_dim(model: Any) -> int:
 
 
 # ------------------------------------------------- the peak-memory stamp
-#  SELF-EVIDENCING CAPACITY. Every capacity ruling this campaign makes — the
-#  x1.6 flat multiplier, the structural bound, a sole-job reservation, a
-#  shard-across decision — is a claim about how much device memory a build
-#  actually needs. Until now those claims were adjudicated against numbers that
-#  lived in a job log beside the artifact; the artifact itself said nothing. So
-#  the bank records what the allocator SAW, per device, at bank time.
+#  SELF-EVIDENCING CAPACITY. Every capacity decision — the x1.6 flat
+#  multiplier, the structural bound, a sole-job reservation, a shard-across
+#  decision — is a claim about how much device memory a build actually needs.
+#  A number that lives only in a job log beside the artifact cannot evidence
+#  it, so the bank records what the allocator SAW, per device, at bank time.
 #
 #  WHY max_memory_allocated AND max_memory_reserved. `allocated` is what the
 #  build asked for and is the number a reservation should be compared against;
@@ -1103,12 +1104,12 @@ def _hidden_dim(model: Any) -> int:
 #  number the CARD saw (and therefore what a co-tenant collided with). They
 #  differ by the allocator's fragmentation, which is exactly the quantity a
 #  margin exists to cover — so recording one without the other would leave the
-#  next ruling arguing about which number the stamp meant.
+#  next capacity decision arguing about which number the stamp meant.
 #
 #  MONOTONIC FROM PROCESS START, and NOT reset here. `max_memory_allocated` is a
 #  high-water mark since the process began, so this covers the model load, the
 #  forward/backward passes and the FD ladder together — the whole build, which
-#  is the unit a capacity ruling is made in. Resetting it at any point inside
+#  is the unit a capacity decision is made in. Resetting it at any point inside
 #  the build would silently narrow the window and make the stamp read LOWER
 #  than the job's real peak, which is the one direction a capacity number must
 #  never be wrong in.
@@ -1122,9 +1123,9 @@ CAPACITY_STAMP_KEY: str = "peak_device_memory"
 #: never has to recognise prose (the THREADS_UNRESOLVED discipline).
 CAPACITY_UNMEASURED: str = "CAPACITY_UNMEASURED"
 
-#: What a PRE-CHANGE artifact's peak memory reads as in a comparison. Every
-#: vector banked before 2026-08-04 has no such field, and its peak is
-#: UNRECORDED — never inferred from a job log that happens to be beside it.
+#: What a PRE-CHANGE artifact's peak memory reads as in a comparison. A vector
+#: banked by a builder that did not record the field has no such field, and its
+#: peak is UNRECORDED — never inferred from a job log that happens to be beside it.
 CAPACITY_PRE_CHANGE_UNRECORDED: str = (
     "unrecorded (stamp predates the 2026-08-04 capacity stamp)")
 
@@ -1174,8 +1175,8 @@ class PeakDeviceMemory(BaseModel):
 
     measured: bool = Field(
         default=False,
-        description="did any device answer? False with a note is the M19 "
-                    "degradation; False with no devices and a named reason is "
+        description="did any device answer? False with a note is the named "
+                    "degradation (a probe never raises); False with no devices and a named reason is "
                     "the honest no-CUDA case")
     n_devices: int = 0
     devices: list[DevicePeakMemory] = Field(
@@ -1224,9 +1225,10 @@ CAPACITY_STAMP_STATUS: str = (
 
 
 def peak_device_memory() -> PeakDeviceMemory:
-    """Read the per-device peaks. NEVER raises (rake M19).
+    """Read the per-device peaks. NEVER raises: a stamp probe that raises would
+    fail a finished build at bank time.
 
-    Availability-branched, with NAMED skip semantics (rake M44): no torch, no
+    Availability-branched, with NAMED skip semantics: no torch, no
     CUDA, and a device that would not answer are three different facts and are
     reported as three different notes — none of them as a zero, which would
     read as "this build needed no memory".
@@ -1245,7 +1247,7 @@ def peak_device_memory() -> PeakDeviceMemory:
     try:
         available = bool(torch.cuda.is_available())
         count = int(torch.cuda.device_count()) if available else 0
-    except Exception as exc:                                  # noqa: BLE001 — M19
+    except Exception as exc:                                  # noqa: BLE001 — never raises
         return PeakDeviceMemory(
             **base, torch_version=version,
             probe="torch.cuda.max_memory_allocated/reserved per device",
@@ -1265,7 +1267,7 @@ def peak_device_memory() -> PeakDeviceMemory:
         try:
             allocated = int(torch.cuda.max_memory_allocated(index))
             reserved = int(torch.cuda.max_memory_reserved(index))
-        except Exception as exc:                              # noqa: BLE001 — M19
+        except Exception as exc:                              # noqa: BLE001 — never raises
             rows.append(DevicePeakMemory(
                 index=index,
                 note=f"{CAPACITY_UNMEASURED}: the allocator declined "
@@ -1277,7 +1279,7 @@ def peak_device_memory() -> PeakDeviceMemory:
             props = torch.cuda.get_device_properties(index)
             name = str(props.name)
             total = round(float(props.total_memory) / GIB, 3)
-        except Exception as exc:                              # noqa: BLE001 — M19
+        except Exception as exc:                              # noqa: BLE001 — never raises
             name = None
             total = None
             logger.debug("device %d properties unavailable: %s", index, exc)
@@ -1327,7 +1329,7 @@ def stamp_peak_device_memory(stamp: Optional[dict]) -> Optional[PeakDeviceMemory
     """The peak memory a stamp records — `None` for a PRE-CHANGE stamp.
 
     THE BACKWARD-COMPATIBLE READER, and the only one any consumer should use.
-    Three states a reader must keep apart (the thread_config / M41 discipline):
+    Three states a reader must keep apart (the same discipline as thread_config):
 
         None                    the stamp PREDATES the field. The build's peak
                                 is UNRECORDED and must not be inferred
@@ -1351,7 +1353,7 @@ def stamp_peak_device_memory(stamp: Optional[dict]) -> Optional[PeakDeviceMemory
     payload = {k: v for k, v in block.items() if k != "STATUS"}
     try:
         return PeakDeviceMemory(**payload)
-    except Exception:                                         # noqa: BLE001 — M19
+    except Exception:                                         # noqa: BLE001 — never raises
         #  A block this reader cannot parse is still EVIDENCE that the field is
         #  present, so it must not read as "pre-change". It reads as a probe
         #  that produced something unusable, which is what it is.
@@ -1449,12 +1451,12 @@ def bank(result: BuildResult, trunk: dict, corpus_sha: str, date_string: str,
         "ridge_rel": req.ridge_rel,
         "wall_seconds": result.wall_seconds,
         "trunk": trunk,
-        # ── THE EFFECTIVE THREAD CONFIGURATION (Luxia ruling 2026-08-01) ──────
-        # UNCONDITIONAL, by the same argument that made the M41 hostname
-        # unconditional: the whole point is that EVERY artifact can say what
-        # instrument produced it, and a conditional field would leave exactly
-        # the gap the ruling was made to close. An absent key therefore means
-        # ONE thing — the stamp predates 2026-08-01 — and
+        # ── THE EFFECTIVE THREAD CONFIGURATION ──────────────────────────────
+        # UNCONDITIONAL, by the same argument that makes the trunk's host
+        # identity unconditional: the whole point is that EVERY artifact can say
+        # what instrument produced it, and a conditional field would leave exactly
+        # that gap. An absent key therefore means ONE thing — a stamp written by
+        # a builder that did not record the field — and
         # `metabasis.threads.stamp_thread_config` is the reader that keeps that
         # apart from a probe that ran and could not answer.
         #
@@ -1466,12 +1468,12 @@ def bank(result: BuildResult, trunk: dict, corpus_sha: str, date_string: str,
         # trunk stamp beside it describes the deep-learning stack at LOAD time;
         # the two are separate facts and are recorded separately.
         THREAD_STAMP_KEY: thread_config_stamp(),
-        # ── THE PEAK DEVICE MEMORY THIS BUILD REACHED (2026-08-04) ───────────
+        # ── THE PEAK DEVICE MEMORY THIS BUILD REACHED ───────────────────────
         # UNCONDITIONAL, by the thread_config argument one field over: the
-        # point is that every artifact can evidence the capacity ruling it was
+        # point is that every artifact can evidence the capacity decision it was
         # built under, and a conditional field would leave exactly the gap.
-        # An absent key therefore means ONE thing — the stamp predates
-        # 2026-08-04 — and `stamp_peak_device_memory` is the reader that keeps
+        # An absent key therefore means ONE thing — a stamp written by a builder
+        # that did not record the field — and `stamp_peak_device_memory` is the reader that keeps
         # that apart from a probe that ran and measured nothing (no CUDA).
         #
         # WHY IT IS READ HERE. The high-water marks are monotonic from process
@@ -1482,10 +1484,10 @@ def bank(result: BuildResult, trunk: dict, corpus_sha: str, date_string: str,
         # one banked number.
         CAPACITY_STAMP_KEY: capacity_stamp(),
     }
-    # ADDENDUM 2026-07-27-B: recorded in EVERY stamp of a truncated node, with the same
-    # key names the collector uses so a build stamp and a collection stamp can be
-    # compared field-for-field. Absent on every other node, so the historical key set is
-    # untouched (same discipline as the collector's `sharding` record).
+    # The position-ceiling deviation is recorded in EVERY stamp of a truncated model, with
+    # the same key names the collector uses so a build stamp and a collection stamp can be
+    # compared field-for-field. Absent on every other model, so their key set is
+    # unchanged (same discipline as the collector's `sharding` record).
     if result.truncation is not None:
         t = result.truncation
         stamp["truncation"] = f"first-{t.max_length}"
@@ -1560,12 +1562,12 @@ def _toy_corpus(n: int) -> list[dict]:
 def _stack_available() -> tuple[bool, str]:
     """Is the deep-learning stack importable here? A PROBE, never a failure.
 
-    RAKE M44(a)/(b): a selftest count must name the configuration it was
-    measured in, and a suite with an availability-branched block runs in BOTH
-    configurations before a merge verdict. This builder's end-to-end block
-    needs torch + transformers to instantiate a tiny Llama; the desk's own repo
-    venv (numpy/scipy/pydantic, no torch) is a legitimate environment, not a
-    test failure, and before this probe existed `--selftest` died there with a
+    A selftest count must name the configuration it was measured in, and a
+    suite with an availability-branched block runs in BOTH configurations
+    before a merge verdict. This builder's end-to-end block needs torch +
+    transformers to instantiate a tiny Llama; a CPU-only venv
+    (numpy/scipy/pydantic, no torch) is a legitimate environment, not a test
+    failure, and without this probe `--selftest` would die there with a
     ModuleNotFoundError before running a single check.
     """
     try:
@@ -1580,10 +1582,10 @@ def _stack_available() -> tuple[bool, str]:
 def _selftest_thread_config(check) -> None:
     """The thread-config stamp contract — NO deep-learning stack needed.
 
-    Split OUT of the stack guard deliberately (the c6b34a3 pattern): the
-    backward-compatibility contract every banked artifact depends on must stay
-    proven in an environment with no torch at all, because that is the
-    environment a desk reads stamps in.
+    Split OUT of the stack guard deliberately: the backward-compatibility
+    contract every banked artifact depends on must stay proven in an
+    environment with no torch at all, because stamps are read in such
+    environments.
     """
     from metabasis.threads import (PRE_RULING_UNRECORDED,
                                    THREAD_COUNT_MISMATCH_LABEL, ThreadConfig,
@@ -1623,11 +1625,11 @@ def _selftest_capacity_stamp(check: Callable[..., None],
     """The peak-memory stamp contract — NO deep-learning stack needed.
 
     Split out for the same reason as the thread-config block: the
-    backward-compatibility contract is what every future capacity ruling will
-    be read through, and it must stay proven in the environment a desk reads
-    stamps in, which has no torch at all.
+    backward-compatibility contract is what every capacity decision is read
+    through, and it must stay proven where stamps are read, which may have no
+    torch at all.
 
-    RAKE M44: the MEASURED half is availability-branched on CUDA and registers
+    The MEASURED half is availability-branched on CUDA and registers
     a NAMED SKIP where no device exists — a skip is a third state, never a
     failure and never a silently-passed check.
     """
@@ -1741,9 +1743,8 @@ def _selftest_capacity_stamp(check: Callable[..., None],
 def _selftest_with_stack(check: Callable[..., None]) -> None:
     """The end-to-end block: a real tiny Llama, real algebra, fp32. NEEDS torch.
 
-    Moved here VERBATIM from `selftest()` when the M44 availability branch was
-    added — not one assertion of it was rewritten, so the stack-present
-    behaviour is the behaviour that was already certified.
+    Its assertions are the stack-present half of the availability branch in
+    `selftest()`: every check here needs torch + transformers.
     """
     import tempfile
 
@@ -1859,7 +1860,7 @@ def _selftest_with_stack(check: Callable[..., None]) -> None:
     check("stride rule matches the precedent's _grad_gids",
           stride_indices(780, 20, True)[:4] == [19, 58, 97, 136])
 
-    # ------- --checkpoint-above-site: THE AGREEMENT GATE (prereg §4, made real) -----
+    # ------- --checkpoint-above-site: THE AGREEMENT GATE, made real ----------------
     #  A DEEPER toy than the one above, so several layers sit above the site and the
     #  recompute machinery is actually exercised: 6 layers, site 2 => layers[3:6]
     #  wrapped. The whole build runs twice and the two results are compared.
@@ -1973,7 +1974,7 @@ def _selftest_with_stack(check: Callable[..., None]) -> None:
     #      independent reason the design is safe.
     #    * wrapping a module's `__call__` — which is what
     #      `model.gradient_checkpointing_enable()` does in transformers, and what
-    #      prereg §4's bare phrase reads as — DOES re-invoke the pre-hook on
+    #      the pre-registered bare phrase reads as — DOES re-invoke the pre-hook on
     #      recompute, so the leaf is replaced with the recompute pass's copy and the
     #      gradient would be taken w.r.t. a tensor that never fed the loss.
     #
@@ -2044,7 +2045,7 @@ def _selftest_with_stack(check: Callable[..., None]) -> None:
                        out_dir=Path("."), site=0,
                        arm="native").checkpoint_above_site is False)
 
-    # ---------------- ADDENDUM 2026-07-27-B: the position-ceiling truncation --------
+    # ---------------- the pre-registered position-ceiling truncation ---------------
     # Five texts whose NATIVE-arm lengths are 13/23/33/43/53 tokens under the toy
     # tokenizer (3-token prompt prefix + 10/20/30/40/50 completion tokens). At a
     # ceiling of 33 exactly two are truncated, and the third sits EXACTLY on the
@@ -2152,7 +2153,7 @@ def _selftest_with_stack(check: Callable[..., None]) -> None:
         check("stamp carries cuda_visible_devices",
               "cuda_visible_devices" in stamp["trunk"])
         check("stamp records the FD verdict", stamp["fd_gate"]["PASSES"] is True)
-        #  The ruling's field, verified on a REAL banked stamp rather than on a
+        #  The thread-config field, verified on a REAL banked stamp rather than on a
         #  hand-built one: the block has to survive the json round-trip that the
         #  bank actually performs, and it has to be findable by the reader every
         #  downstream consumer uses.
@@ -2169,7 +2170,7 @@ def _selftest_with_stack(check: Callable[..., None]) -> None:
               f"ruled {RULED_OMP_NUM_THREADS}")
         #  The capacity field on a REAL banked stamp, for the same reason: it
         #  has to survive the json round-trip the bank actually performs and be
-        #  findable by the reader a desk will use.
+        #  findable by the shared reader.
         banked_memory = stamp_peak_device_memory(stamp)
         check("stamp records the PEAK DEVICE MEMORY this build reached, "
               "readable by the backward-compatible reader",
@@ -2210,7 +2211,7 @@ def _selftest_with_stack(check: Callable[..., None]) -> None:
 def selftest() -> int:
     """End-to-end CPU verification: real algebra, tiny random model, fp32.
 
-    NAMED CONFIGURATIONS (rake M44). One availability axis — the deep-learning
+    NAMED CONFIGURATIONS. One availability axis — the deep-learning
     stack — and the reported count says which side of it ran. The blocks that
     need no stack (the thread-config stamp contract) run in BOTH, so the
     backward-compatibility contract every banked artifact depends on is proved
@@ -2270,7 +2271,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--selftest", action="store_true",
                     help="CPU end-to-end verification (no weights, no GPU)")
     ap.add_argument("--model", help="bank key (keys the npz filename and the stamp)")
-    ap.add_argument("--model-path", help="local weights dir (node-side)")
+    ap.add_argument("--model-path", help="local weights dir on the machine that runs the model")
     ap.add_argument("--arm-root", type=Path,
                     help="collection root holding corpus/corpus_manifest.json")
     ap.add_argument("--out-dir", type=Path,
@@ -2289,10 +2290,10 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--fd-n-probe", type=int, default=FD_N_PROBE)
     ap.add_argument("--fd-rel-tol", type=float, default=FD_REL_TOL)
     ap.add_argument("--max-seq-len", type=int, default=None,
-                    help="prereg ADDENDUM 2026-07-27-B position ceiling: truncate every "
-                         "text to its FIRST N tokens. MUST equal the node's registry "
-                         "`max_seq_len` (gpt2-xl: 1024) — the addendum requires one "
-                         "truncation across every use of the node")
+                    help="pre-registered position ceiling: truncate every "
+                         "text to its FIRST N tokens. MUST equal the model's registry "
+                         "`max_seq_len` (gpt2-xl: 1024) — the deviation requires one "
+                         "truncation across every use of the model")
     ap.add_argument("--assert-n-truncated", type=int, default=None,
                     help="refuse to build unless the corpus-wide truncation audit "
                          "reproduces exactly this many truncated texts (gpt2-xl: 148)")
@@ -2304,9 +2305,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--shard-across", default=None,
                     help="comma list of devices (e.g. '0,1') to split the decoder stack "
                          "across, via the COLLECTOR's certified sharded loader. Same "
-                         "layout the >=70B rungs collected under (prereg §4; sharding "
-                         "gate PASSED 2026-07-27 — forced 8-way sharding was byte-"
-                         "identical to fresh single-device). Use when the weights plus "
+                         "layout the >=70B rungs collected under (its sharding gate "
+                         "proves forced 8-way sharding byte-identical to fresh "
+                         "single-device). Use when the weights plus "
                          "the retained autograd graph do not fit one card")
     ap.add_argument("--entropy-chunk", type=int, default=0,
                     help="OOM fallback: compute the entropy in position blocks of this "
