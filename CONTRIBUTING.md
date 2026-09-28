@@ -74,13 +74,45 @@ failure a refusal exists to prevent. Document a refusal where the refusal happen
 function's docstring carries what a caller needs: arguments, units, the shape of what comes
 back, and how it fails.
 
-## Where the code stands against the rule
+## The gates
 
-The rule is adopted and not yet enforced mechanically. Some modules carry provenance
-citations, dated notes, and job tooling written for one GPU scheduler in their docstrings,
-`--help` text and log messages; they do not meet the rule. Checkers that enforce it are open
-work. A pull request that fixes a violation in a module it touches is welcome; one that adds
-a new violation is not.
+Each is a command you can run from the repository root. Install the test runner with
+`uv pip install -e '.[dev]'`.
+
+| gate | what it checks | command |
+|---|---|---|
+| tests | the suite, including the corpus that pins each documentation rule | `pytest tests/` |
+| selftests | every touched module that defines one | `python -m metabasis.scripts.<module> --selftest` |
+| state what is true now | no marker comments, no changelog phrasing, no dates in prose | `python -m tools.check_timelessness --root metabasis tools tests` |
+| reachable referents | every path, module and document named in prose resolves inside this tree; no provenance citations; no prose bound to one operator's machines | `python -m tools.check_referents --root metabasis tools tests` |
+| import closure | every module is reached from a script, a test, or a listed entry point; no import names a missing module | `python -m tools.check_import_closure --package metabasis --roots metabasis/scripts tests` |
+
+All five pass on the current tree, and a pull request keeps them passing. Each checker
+also takes `--report-only`, which prints the full receipt and exits 0.
+
+Each documentation rule is pinned by a corpus rather than by reading:
+`tests/test_gate_fixtures.py` holds the strings each checker must catch and the
+legitimate prose it must stay quiet on. A rule that stops seeing something fails a test
+there instead of quietly reporting a pass; closing a blind spot starts by adding the
+string that slipped through.
+
+The pattern files (`tools/timelessness_allowlist.txt`, `tools/referents_allowlist.txt`,
+`tools/closure_allowlist.txt`) and `tools/frozen_modules.txt` carry a reason beside every
+entry, and an entry is a claim that its reason is true now. The referent file's `[infra]`
+section holds the shapes of prose bound to one operator's machines, never the names of
+hosts, accounts or schedulers: a published list would defeat keeping them out, so a bare
+name remains a reviewer's catch.
+
+**Frozen modules.** The five modules of the steering instrument are listed in
+`tools/frozen_modules.txt` and are not scanned. Every steering run records their sha256
+as the instrument's identity, and two are held at fixed hashes, so any byte change,
+documentation included, makes a different instrument. Their documentation is brought in
+line only together with a recertification of the instrument.
+
+**What the gates do not cover.** String values the code writes into artifacts or
+compares against (stamp constants, status lines, recorded notes) are wire format and are
+left as they are, even where they read like prose; changing them would make new records
+disagree with banked ones. Selftest check labels are printed output, not documentation.
 
 ## Before you open a pull request
 

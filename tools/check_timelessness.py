@@ -68,6 +68,11 @@ DEFAULT_ALLOWLIST = Path(__file__).resolve().parent / "timelessness_allowlist.tx
 
 SKIP_DIRS = frozenset({"__pycache__", ".git", ".venv", "venv", "node_modules", ".mypy_cache"})
 
+#: Files the documentation gates do not scan. Every entry is a repository-relative path
+#: with a reason on the comment lines above it; see the file's own header.
+FROZEN_LIST = Path(__file__).resolve().parent / "frozen_modules.txt"
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
 MARKER_RULE = "marker-comment"
 DATED_RULE = "dated-prose"
 
@@ -171,13 +176,48 @@ def load_allowlist(path: Path) -> list[re.Pattern[str]]:
     return patterns
 
 
-def iter_python_files(root: Path) -> list[Path]:
-    """Every `.py` file under `root`, excluding caches and virtual environments."""
+def load_frozen(path: Path = FROZEN_LIST, repo: Path = REPO_ROOT) -> frozenset[Path]:
+    """The resolved paths of the files the documentation gates leave unscanned.
+
+    One repository-relative path per line; `#` lines are comments and blank lines are
+    ignored. A comment block states the reason for the entries directly under it, up to
+    the next blank line, so every entry sits in a block that begins with a reason. Each
+    entry must name a file that exists. A missing list file means nothing is frozen.
+    """
+    if not path.exists():
+        return frozenset()
+    frozen: set[Path] = set()
+    reason_pending = False
+    for number, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        stripped = raw.strip()
+        if not stripped:
+            reason_pending = False
+            continue
+        if stripped.startswith("#"):
+            reason_pending = True
+            continue
+        if not reason_pending:
+            raise TimelessnessError(
+                f"{path}:{number}: {stripped!r} has no reason; start its block with a "
+                "comment line saying why it is frozen")
+        target = (repo / stripped).resolve()
+        if not target.is_file():
+            raise TimelessnessError(f"{path}:{number}: {stripped!r} names no file in the repository")
+        frozen.add(target)
+    return frozenset(frozen)
+
+
+def iter_python_files(root: Path, frozen: frozenset[Path] | None = None) -> list[Path]:
+    """Every `.py` file under `root`, excluding caches, virtual environments and the
+    files `frozen_modules.txt` lists."""
+    skip = load_frozen() if frozen is None else frozen
     if root.is_file():
-        return [root]
+        return [] if root.resolve() in skip else [root]
     out: list[Path] = []
     for path in sorted(root.rglob("*.py")):
         if any(part in SKIP_DIRS for part in path.parts):
+            continue
+        if path.resolve() in skip:
             continue
         out.append(path)
     return out

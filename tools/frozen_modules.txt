@@ -1,0 +1,16 @@
+# Files the documentation gates (check_timelessness, check_referents) do not scan.
+#
+# One repository-relative path per line, with the reason it is frozen on the comment
+# lines directly above it. An entry is a claim that its reason is true now; when the
+# reason expires, the entry goes and the file is brought in line with the rule.
+
+# The steering instrument. Every column stamp records the sha256 of these five
+# modules as the instrument's identity (vllm_lane_column.INSTRUMENT_MODULES), and the
+# first two are certified by fixed hash (CERTIFIED_MODULE_SHA256). Editing any byte,
+# docstrings included, makes a different instrument, so their documentation is
+# brought in line only together with a recertification of the instrument.
+metabasis/extraction/vllm_residual_write.py
+metabasis/extraction/vllm_entropy_probe.py
+metabasis/extraction/vllm_worker_ext.py
+metabasis/extraction/vllm_tp_proxy.py
+metabasis/scripts/vllm_lane_column.py

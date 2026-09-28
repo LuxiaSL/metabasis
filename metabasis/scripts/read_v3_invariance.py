@@ -1573,7 +1573,7 @@ def _leg_r2_values(banks: Banks, basis: Sequence[BasisSlot], ctx: Context,
 
 #: THE ARM RULE, APPLIED TO MODEL-INTRINSIC PREDICTORS (pre-registration section 3.2 + section 1's
 #: arm-consistency rule: "base models run raw ONLY — their constants live in
-#: the raw system, never native"). Both P1a and P2 are per-model constants, so
+#: the raw system, never native"). Both predictors P1a and P2 are per-model constants, so
 #: each is read in the model's OWN registered arm: native for an instruct
 #: checkpoint, raw for a base one. This is not a compromise between the arms —
 #: it is the same rule every other per-model constant in this campaign obeys,
@@ -1608,7 +1608,7 @@ def predictor_p1a(banks: Banks, basis: Sequence[BasisSlot], ctx: Context,
 def predictor_p2(banks: Banks, basis: Sequence[BasisSlot], ctx: Context,
                  hubs: dict[str, int], scores: dict[str, HubContextScore],
                  identities: dict[str, str]) -> dict[str, float]:
-    """P2: the hub's OWN pca_explained at the rank, in its registered arm.
+    """Predictor P2: the hub's OWN pca_explained at the rank, in its registered arm.
 
     Model-AND-ARM-intrinsic: the PCA is fit on the hub's own train rows IN ONE
     ARM's state bank, so it is identical across every object of that hub in
@@ -1651,12 +1651,12 @@ def predictor_p2(banks: Banks, basis: Sequence[BasisSlot], ctx: Context,
                         values.append(float(row.pca_explained_tgt))
         if not values:
             raise ReadsError(
-                f"P2 for {hub} @ {ctx.key} [{arm}]: no pca_explained filed in "
+                f"predictor P2 for {hub} @ {ctx.key} [{arm}]: no pca_explained filed in "
                 f"the hub's registered arm")
         spread = max(values) - min(values)
         if spread > 5e-4:
             raise ReadsError(
-                f"P2 for {hub} @ {ctx.key} [{arm}]: pca_explained is "
+                f"predictor P2 for {hub} @ {ctx.key} [{arm}]: pca_explained is "
                 f"model-and-arm-intrinsic but its filed values span "
                 f"{spread:.2e} WITHIN one arm across {len(values)} objects — "
                 f"those objects were not fit against one PCA bank, and "
@@ -1665,15 +1665,15 @@ def predictor_p2(banks: Banks, basis: Sequence[BasisSlot], ctx: Context,
     return out
 
 
-# ═════════════════════════════════════════ P6, from the cluster-built inputs
+# ═════════════════════════════════════════ Predictor P6, from the cluster-built inputs
 #: The artifact kind the P6-INPUTS wave emits. Anything else is refused.
 P6_ARTIFACT_KIND = "webtext-v3-p6-inputs/v1"
 
 #: The census formula, CHARACTER-FOR-CHARACTER as the census predictor script
 #: implements it (`participation_ratio`) and as the P6-INPUTS artifact quotes
 #: its own definition. The artifact's `definition` string must CONTAIN this, or
-#: the column is refused: a P6 computed under some other formula is a different
-#: slate member wearing P6's name.
+#: the column is refused: a predictor P6 computed under some other formula is a different
+#: slate member wearing predictor P6's name.
 P6_CENSUS_FORMULA = ("lambda = svd(rows - mean, compute_uv=False)**2 / (n-1); "
                      "PR = (sum lambda)^2 / sum lambda^2")
 
@@ -1684,9 +1684,9 @@ P6_RECOMPUTE_TOL = 1e-9
 
 
 class P6Inputs(BaseModel):
-    """The cluster-built P6 column, verified against its own banked eigenvalues.
+    """The cluster-built predictor P6 column, verified against its own banked eigenvalues.
 
-    P6 is BANK-ONLY (the hub's own train-row state spectrum) and needs the
+    Predictor P6 is BANK-ONLY (the hub's own train-row state spectrum) and needs the
     webtext-v3 per-text state banks, which live only on the cluster. This
     artifact is the cluster's answer to that blocker: it carries, per hub, the
     participation ratio AND the full eigenvalue spectrum it was computed from —
@@ -1729,7 +1729,7 @@ def load_p6_inputs(path: Path) -> P6Inputs:
     if kind != P6_ARTIFACT_KIND:
         raise ReadsError(
             f"{path.name}: artifact kind {kind!r} != {P6_ARTIFACT_KIND!r} — "
-            f"refusing to read a P6 column out of an artifact this reader does "
+            f"refusing to read a predictor P6 column out of an artifact this reader does "
             f"not understand")
 
     definition = str(doc.get("definition", ""))
@@ -1737,8 +1737,8 @@ def load_p6_inputs(path: Path) -> P6Inputs:
         raise ReadsError(
             f"{path.name}: `definition` does not carry the census formula "
             f"character-for-character. Expected to find:\n  {P6_CENSUS_FORMULA}"
-            f"\nGot:\n  {definition}\nA P6 computed under another formula is a "
-            f"different slate member wearing P6's name; NOT substituted")
+            f"\nGot:\n  {definition}\nA predictor P6 computed under another formula is a "
+            f"different slate member wearing predictor P6's name; NOT substituted")
 
     values: dict[str, float] = {}
     sites: dict[str, int] = {}
@@ -1818,7 +1818,7 @@ class Battery(BaseModel):
     verdict_text: str
     skipped: list[dict[str, str]]
     flags: list[str]
-    #: The cluster-built P6 column's provenance, or None when P6 stayed skipped.
+    #: The cluster-built predictor P6 column's provenance, or None when predictor P6 stayed skipped.
     p6_inputs: Optional[P6Inputs] = None
     #: Section 7's clustering rule as APPLIED, member by member.
     multiplicity_clusters: dict[str, list[str]] = Field(default_factory=dict)
@@ -1902,7 +1902,7 @@ def build_battery(banks: Banks, basis: Sequence[BasisSlot],
         circularity_guard=("BANK-ONLY: computed from the hub's own train-row "
                            "PCA and from nothing about any pair's outcome")))
 
-    # ---- P1b and P6: NAMED, DEFINED, BUT NOT COMPUTABLE LOCALLY ------------
+    # ---- predictors P1b and P6: NAMED, DEFINED, BUT NOT COMPUTABLE LOCALLY ------------
     blocker_states = (
         "the webtext-v3 per-text state banks are NOT desk-side — they exist "
         "only under the NODE-SIDE webtext-v3 arm root (checked "
@@ -1941,7 +1941,7 @@ def build_battery(banks: Banks, basis: Sequence[BasisSlot],
                 f"{missing} — a slate member scored on a SUBSET of the hub "
                 f"population would violate section 7's full-ordering rule")
         #  the artifact's own site/arm per hub must be the site/arm of record,
-        #  or the column is a different measurement wearing P6's name
+        #  or the column is a different measurement wearing predictor P6's name
         for hub in pop:
             if p6.sites[hub] != hub_sites[hub]:
                 raise ReadsError(
@@ -1951,7 +1951,7 @@ def build_battery(banks: Banks, basis: Sequence[BasisSlot],
             if p6.arms[hub] != expected_arm:
                 raise ReadsError(
                     f"P6-INPUTS reads {hub} in the {p6.arms[hub]} arm but its "
-                    f"registered arm is {expected_arm} (section 3.2) — P6 is a "
+                    f"registered arm is {expected_arm} (section 3.2) — predictor P6 is a "
                     f"per-model constant and must be read in the model's own arm")
         columns.append(PredictorColumn(
             name="P6-participation-ratio", definition=SLATE_DEFINITIONS["P6"],
@@ -1984,9 +1984,9 @@ def build_battery(banks: Banks, basis: Sequence[BasisSlot],
             "wherever P6 is quoted, and is NOT diagnosed here.")
 
     available = {c.name: c for c in columns if c.available}
-    # Section 7's clustering rule: P2 and P6 count as ONE cluster in every
+    # Section 7's clustering rule: predictors P2 and P6 count as ONE cluster in every
     # multiplicity null (their rho was -.93). The cluster is named either way;
-    # with P6 restored it finally has BOTH members and the rule binds.
+    # with predictor P6 restored it finally has BOTH members and the rule binds.
     clusters = {"P1a": ["P1a-family-excluded"],
                 "P2/P6": [n for n in ("P2-compressibility",
                                       "P6-participation-ratio")
@@ -2026,8 +2026,8 @@ def build_battery(banks: Banks, basis: Sequence[BasisSlot],
         else:
             rho_full[name] = spearman([quality[h] for h in pop],
                                       [column.values[h] for h in pop])
-            #  P2 has a per-half column (its pca_explained is read off each
-            #  half's own fit records). P6 does NOT — the P6-INPUTS artifact
+            #  predictor P2 has a per-half column (its pca_explained is read off each
+            #  half's own fit records). Predictor P6 does NOT — the P6-INPUTS artifact
             #  carries one full-split value per hub — so its per-half condition
             #  is the FULL-CORPUS column against each half's quality. The
             #  asymmetry is flagged above, never hidden by an average.

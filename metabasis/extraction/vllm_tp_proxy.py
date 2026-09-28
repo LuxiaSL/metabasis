@@ -1,13 +1,15 @@
 """Parent-side proxies for the tensor-parallel vLLM lane.
 
-Lifted BY VALUE from the standalone proxy tool the TP=2 bridge certification
-ran on (152 cells, four rungs, zero errors). UNSTAMPED: nothing here scores a
-bar. The lift makes exactly ONE non-prose edit: the two gate tolerances
-(`1e-4`, `1e-6`) are the module constants `ENTROPY_CROSS_RANK_TOL` and
-`SEC25_CROSS_RANK_TOL` rather than inline literals, of the same value, so the
-selftest pins the NUMBER the gate uses instead of a re-typed copy of it (a
-selftest that re-types a constant passes even when the constant drifts). No
-other executable line differs from the certified bytes.
+Lifted BY VALUE from the beside tool `metabasis_tp_proxy.py`
+(sha256 a14cb464d2cf1e7298ba63c9ce002b5bca5b865178de9985be10b9a0db2b805e) at
+re-freeze #4, 2026-08-20. UNSTAMPED (C§8): nothing here scores a bar. The
+objects below are the ones the TP=2 bridge certification ran on (jobs
+`70b952964a3f`, `38ae1163fd61`; 152 cells, four rungs, zero errors), lifted with
+exactly ONE non-prose edit: the two gate tolerances that were inline literals
+(`1e-4`, `1e-6`) are now the module constants `ENTROPY_CROSS_RANK_TOL` and
+`SEC25_CROSS_RANK_TOL`, of the same value, so the selftest can pin the NUMBER
+the gate uses instead of a re-typed copy of it (rake M58). No other executable
+line differs from the certified bytes.
 
 WHAT THEY ARE FOR. The certified column runner drives three in-process objects:
 the steering `wrapper` (`MetabasisSteeringLayer`), the entropy `cap`
@@ -22,10 +24,9 @@ meaning. Only the transport changes.
 
 RANK POLICY, STATED ONCE. Every rank runs the identical replicated arithmetic
 (the residual stream at a layer boundary is post-all-reduce — `o_proj`/
-`down_proj` are RowParallelLinear with reduce_results=True in
-vllm/model_executor/models/qwen2.py — and `compute_logits` all-gathers the full
-vocab, with padding stripped in vllm/model_executor/layers/logits_processor.py),
-so rank 0 is THE read. Where a
+`down_proj` are RowParallelLinear with reduce_results=True, qwen2.py:162, :94 —
+and `compute_logits` all-gathers full vocab, platforms/interface.py:563, with
+padding stripped at logits_processor.py:102), so rank 0 is THE read. Where a
 disagreement between ranks would be silent and consequential, these proxies
 REFUSE rather than pick.
 
@@ -35,8 +36,8 @@ every scoring pass of every cell of every column, and it aborts the column:
     rank 0 by more than **1e-4**, or if the ranks captured different row counts
     at all;
   * `_one()` refuses on ANY disagreement in `wrapper.stats`
-    (`tokens_seen` / `tokens_injected` / `prefill_tokens_skipped`), in the
-    per-token median residual norm that sets the dose (tolerance 1e-6, a hair of slack rather than exact float equality on
+    (`tokens_seen` / `tokens_injected` / `prefill_tokens_skipped`), in the §2.5
+    median (tolerance 1e-6, a hair of slack rather than exact float equality on
     a median), and in the shim's mask counters (`mask_true` / `mask_n`).
 A violation aborts the column; it is never silently averaged. On the four
 certification rungs the gate held across 152 cells, MoE path included
@@ -45,7 +46,7 @@ certification rungs the gate held across 152 cells, MoE path included
 THE SURFACE IS NOT A FULL IMPERSONATION, AND THE DIFFERENCES ARE NAMED.
 `PROXY_SURFACE_CONTRACT` below records, name by name, what the proxies share
 with the in-process objects and the three places they deliberately substitute
-(the shim moved into the worker; the median-norm captures reduced on the rank because
+(the shim moved into the worker; the §2.5 captures reduced on the rank because
 shipping hundreds of MB of activations for one scalar is not a transport
 detail; the wrapped layer reported by TYPE NAME because the module itself
 cannot cross an RPC). The selftest asserts that mapping against the certified
@@ -169,7 +170,7 @@ class TPWrapperProxy:
         return dict(res[0])
 
     def measure_sec25(self) -> float:
-        """Per-token median residual norm, reduced on each rank; refuses on cross-rank disagreement."""
+        """§2.5 median, reduced on each rank; refuses on cross-rank disagreement."""
         res = self._llm.collective_rpc("mb_measure_sec25")
         if any(r["n_captures"] == 0 for r in res):
             return float("nan")
@@ -245,7 +246,7 @@ class TPStateProxy(dict):
         return dict.__getitem__(self, key)
 
 
-# ── selftest (CPU, no vLLM, no torch, no weights) ────────────────────────────
+# ── selftest (desk-side, CPU, no vLLM, no torch, no weights) ─────────────────
 
 class _FakeRankFleet:
     """A CPU stand-in for `LLM` whose `collective_rpc` answers as N ranks.
@@ -272,9 +273,8 @@ class _FakeRankFleet:
 def _certified_class_surface(path: "Path", class_name: str) -> set[str]:
     """The PUBLIC surface of a certified class, read from its AST.
 
-    AST, NOT IMPORT, AND NOT A STRING NEEDLE (a substring search matches
-    comments and dead code). Both certified modules import torch at module
-    scope, so a torch-free review environment cannot import them
+    AST, NOT IMPORT, AND NOT A STRING NEEDLE (rakes M58 + M44). Both certified
+    modules import torch at module scope, so the desk .venv cannot import them
     at all — and a surface test that only runs where torch happens to exist is
     a proof that disarms itself in the configuration where the lift is reviewed.
     Parsing the source gives the same answer everywhere: public method names,
@@ -324,7 +324,7 @@ def selftest() -> int:                                            # noqa: C901
     import sys
     from pathlib import Path
 
-    # When this module is exercised from a deployment whose
+    # RAKE M59(2): when this module is exercised from a deployment whose
     # sys.path[0] is not the code root, `import metabasis…` below would skip
     # rather than run. The root is resolved off THIS file and proven to exist.
     _root = Path(__file__).resolve().parents[2]
@@ -411,7 +411,7 @@ def selftest() -> int:                                            # noqa: C901
     ok(fleet.calls == [("mb_cap_reset", ("scoring",))],
        "TPCapProxy.reset pushes the mode to EVERY rank", f"{fleet.calls}")
 
-    # -- 3. TPWrapperProxy: stats, the median norm, and the pushes -----------
+    # -- 3. TPWrapperProxy: stats, §2.5, and the pushes -----------------------
     good_stats = [{"tokens_seen": 10, "tokens_injected": 4,
                    "prefill_tokens_skipped": 6}] * 2
     wp = TPWrapperProxy(_FakeRankFleet({"mb_stats_now": good_stats}), 2048, "Qwen2DecoderLayer")
@@ -589,7 +589,7 @@ def selftest() -> int:                                            # noqa: C901
            "caught here instead of on a loaded 405B model",
            f"sent={sorted(sent_names)} stranded={sorted(sent_names - RPC_SURFACE)}")
 
-    # -- 7. the suite's own arithmetic: a check floor and a skip ceiling ------
+    # -- 7. M59: the suite's own arithmetic -----------------------------------
     SELFTEST_CHECK_FLOOR = 53
     KNOWN_SKIP_CEILING = 1
     ok(len(checks) >= SELFTEST_CHECK_FLOOR and len(skips) <= KNOWN_SKIP_CEILING,

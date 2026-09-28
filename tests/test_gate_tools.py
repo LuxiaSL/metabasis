@@ -117,3 +117,34 @@ def test_report_only_changes_the_exit_status_and_nothing_else(tmp_path: Path, ca
     assert check_timelessness.main(["--root", str(module), "--report-only"]) == 0
     assert capsys.readouterr().out == strict
     assert "dated-prose: 1" in strict
+
+
+def test_a_frozen_file_is_not_scanned(tmp_path: Path) -> None:
+    from tools.check_timelessness import iter_python_files, load_frozen
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "kept.py").write_text("x = 1\n")
+    (tmp_path / "pkg" / "frozen.py").write_text("x = 2\n")
+    listing = tmp_path / "frozen_modules.txt"
+    listing.write_text("# held at a fixed hash\npkg/frozen.py\n")
+    frozen = load_frozen(listing, repo=tmp_path)
+    names = [p.name for p in iter_python_files(tmp_path / "pkg", frozen)]
+    assert names == ["kept.py"]
+    assert iter_python_files(tmp_path / "pkg" / "frozen.py", frozen) == []
+
+
+def test_the_frozen_list_refuses_an_entry_without_a_reason_or_a_file(tmp_path: Path) -> None:
+    from tools.check_timelessness import TimelessnessError, load_frozen
+    (tmp_path / "a.py").write_text("")
+    no_reason = tmp_path / "no_reason.txt"
+    no_reason.write_text("# first\na.py\n\na.py\n")
+    with pytest.raises(TimelessnessError, match="no reason"):
+        load_frozen(no_reason, repo=tmp_path)
+    missing = tmp_path / "missing.txt"
+    missing.write_text("# gone\nb.py\n")
+    with pytest.raises(TimelessnessError, match="names no file"):
+        load_frozen(missing, repo=tmp_path)
+
+
+def test_the_shipped_frozen_list_parses() -> None:
+    from tools.check_timelessness import load_frozen
+    assert len(load_frozen()) == 5

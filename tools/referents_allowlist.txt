@@ -107,6 +107,31 @@ https?://[^\s`'"<>)\]]+
 \banamnesis\b(?![/\w.-])
 \bentropy-gradient\b(?![/\w.-])
 
+# The hub-quality predictors P1a, P1b, P2 and P6 are named by the webtext-v3
+# pre-registration (docs/planning/PREREG-webtext-v3-2026-08-03.md, which is in this
+# tree) and are keys in the slate definitions and the P6-INPUTS artifact the reader
+# writes. They are names of quantities, not citations of a plan, and are masked only
+# in forms that cannot be a bare plan code: a slash list of the slate, the artifact
+# name, or the word "predictor" in front.
+\bP(?:1a|1b|2|6)(?:/P(?:1a|1b|2|6))+\b
+\bP6-INPUTS\b
+\b[Pp]redictors?\s+P(?:1a|1b|2|6)(?:\s*(?:,|and|or)\s*P(?:1a|1b|2|6))*\b
+
+# A backticked `prereg` in a message that lists a stamp's expected JSON keys is the
+# field name the stamp carries, not a citation of a pre-registration.
+`prereg`
+
+# Made-up example filenames in generate_tree_manifest's docstrings, illustrating what
+# the sanitization patterns and GNU escaping do to a row. They point at nothing.
+store/home/notes\.txt
+bank@v1\.2\.json
+back\\\\\\\\slash\.txt
+
+# The site-guard refusal in build_behavioral_banks keeps "(§9 item 4)" because that
+# text is carried byte-identical into every banked column's refusal record, and a
+# changed string would make banked records disagree with new ones.
+\(§9 item 4\)
+
 [defer]
 
 # Meaning that lives in a conversation. Each of these leaves a reader holding
