@@ -962,8 +962,8 @@ def aggregate_site(site: int, diffs: Sequence[np.ndarray]) -> SiteVector:
 
 # ---------------------------------------------------------------- banking
 def _recipe_provenance() -> dict[str, Any]:
-    """The lift's provenance block: source path + line range, the authorizing brief,
-    and the shas of the two system prompts so the contrast is verifiable from the
+    """The lift's provenance block: source path + line range, the authorizing
+    document, and the shas of the two system prompts so the contrast is verifiable from the
     stamp alone."""
     return {"source": RECIPE_SOURCE,
             "authorized_by": RECIPE_BRIEF,

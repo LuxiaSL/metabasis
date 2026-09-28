@@ -9713,7 +9713,8 @@ def selftest() -> int:                                   # noqa: C901 — a chec
               and _cleared2["pid"] == _dead.pid and "stale_because" in _cleared2,
               _cleared2["stale_because"])
         release_attempt_lock(root, _l2)
-        # A FOREIGN host cannot be adjudicated here — /models is shared storage.
+        # A FOREIGN host cannot be adjudicated here — the attempt directory may sit
+        # on shared storage.
         _foreign_lock = _dead.model_copy(update={"hostname": "some-other-node",
                                                  "pid": os.getpid()})
         _atomic_write_text(_resume_dir(root) / ATTEMPT_LOCK_NAME,
