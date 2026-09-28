@@ -1,27 +1,28 @@
 """The prod-lane (vLLM) BRIDGE COLUMN runner — bar INGREDIENTS, never verdicts.
 
-UNSTAMPED (C§8). This fires the §3 bridge population of the stamped prod-lane
-pre-statement (2026-08-07 + its dated addendum): matched cell shapes on the vLLM
-lane against the ALREADY-BANKED byte-exact columns. It computes the raw
+UNSTAMPED: its outputs are ingredients, not stamped results. This fires the
+bridge population of the prod-lane pre-statement: matched cell shapes on the
+vLLM lane against the ALREADY-BANKED byte-exact columns. It computes the raw
 quantities the four bars consume and files them beside their banked
 counterparts. **It never scores a bar and never writes a verdict** — no PASS,
-no FAIL, no DEGENERATE appears in anything this module emits. The desk scores.
+no FAIL, no DEGENERATE appears in anything this module emits. Scoring the bars
+is a separate step that reads these files.
 
-WHAT IS MATCHED AND WHAT IS NOT (pre-statement §3 / §2, verbatim in shape):
+WHAT IS MATCHED AND WHAT IS NOT (the pre-statement's matching rule, in shape):
   * MATCHED: node · site · arm · the native/transported VECTOR (read from the
     banked bank npz, same bytes) · the frozen 6-dose signed ladder · n=80 ·
     the frozen prompt pool · max_new_tokens 512.
   * NOT MATCHED, BY DESIGN: the per-(cell,gen_id) uniform tape does not carry
     (per-request seeding), so all comparison is UNPAIRED population-level; and
     the random BANDS are drawn under the ruled recipe with LANE-TAGGED seed
-    material (§3), i.e. distinct draws in the same space under the same
+    material, i.e. distinct draws in the same space under the same
     construction. The ruled `RandomBandRecipe` is imported and used unedited —
     the tag rides `vector_key`, which is a field of the ruled seed template.
 
 THE ENTROPY INSTRUMENT IS THE CERTIFIED ONE. Both halves of the read are
 TEACHER-FORCED SCORING passes (`prompt_logprobs` set, one sequence per call),
-which is the path the 2026-08-08 adjudication certified at MEAN level (unsteered
-cell-mean agreement 0.14% relative). The generation-time path is used for ONE
+which is the path certified against the byte-exact lane at MEAN level
+(unsteered cell-mean agreement 0.14% relative). The generation-time path is used for ONE
 thing only — pinning the index convention BY VALUE, per column, against a
 reference this module produces itself — and never for a banked number.
 
@@ -38,15 +39,15 @@ THE FIVE FOOTGUNS, EACH GUARDED HERE RATHER THAN REMEMBERED:
      the wrapper skipped must equal the prompts' tokens and the tokens it wrote
      must equal the generated tokens, both counted independently.
 
-THE TENSOR-PARALLEL PATH (re-freeze #4, 2026-08-20). `--tensor-parallel-size > 1`
+THE TENSOR-PARALLEL PATH. `--tensor-parallel-size > 1`
 selects a second attachment and NOTHING ELSE. The certified TP=1 attachment
 reaches the model IN-PROCESS through `driver_worker`, which exists only on
 vLLM's `UniProcExecutor`; at TP>1 the model lives in worker PROCESSES and the
 parent holds no model object, so `MultiprocExecutor` has no `driver_worker` and
 the in-process walk refuses loudly. The TP branch installs
 `metabasis.extraction.vllm_worker_ext.MetabasisWorkerExtension` as vLLM's
-`worker_extension_cls` (mixed into the Worker class in EVERY rank,
-worker_base.py:262-287) and drives it by name through `collective_rpc`;
+`worker_extension_cls` (mixed into the Worker class in EVERY rank, by
+vllm/v1/worker/worker_base.py) and drives it by name through `collective_rpc`;
 `metabasis.extraction.vllm_tp_proxy` presents the identical attribute surface in
 the parent, so the ~700 lines of column orchestration below — the refusals, the
 span-accounting gate, the index pinning — are untouched. The TP=1 branch is the
@@ -57,12 +58,12 @@ CERTIFIED block, verbatim: its identity against the certified tool is pinned by
     asserted in the selftest and stamped on every column. Their arithmetic was
     already TP-correct: the inter-layer residual is post-all-reduce and
     replicated (`o_proj`/`down_proj` are RowParallelLinear with
-    reduce_results=True — qwen2.py:162, :94), and `compute_logits` all-gathers
-    full vocab with padding stripped (platforms/interface.py:563;
-    logits_processor.py:102), so every rank sees the identical tensor.
+    reduce_results=True in vLLM's qwen2 model), and `compute_logits` all-gathers
+    full vocab with padding stripped (vLLM's platform interface and logits
+    processor), so every rank sees the identical tensor.
   * cross-rank agreement is a STRUCTURAL GATE, enforced in-band on every cell:
-    >1e-4 entropy divergence, or any disagreement in the wrapper stats, the §2.5
-    median, or the mask counters, REFUSES the column rather than averaging it.
+    >1e-4 entropy divergence, or any disagreement in the wrapper stats, the
+    engine-side span-median norm, or the mask counters, REFUSES the column rather than averaging it.
   * `VLLM_WORKER_MULTIPROC_METHOD=spawn` is required at TP>1 and inert at TP=1.
     Fork from a parent already dirtied by an OpenMP thread pool
     (`OMP_NUM_THREADS=8` plus ~98 CPU torch selftest checks before `LLM()`) hangs
@@ -70,21 +71,18 @@ CERTIFIED block, verbatim: its identity against the certified tool is pinned by
     only when CUDA is initialised, which the CPU-only preflight never does. The
     runner exports it; this module records what it observed.
 
-THE TWO VECTOR FAMILIES (the class×TP merge, 2026-08-22). Until now the lane's
-two capabilities lived in two besides that were never merged: the repo tool did
-TP but only the ENTROPY family, and the node's `vllm_lane_column_v2.py`
-(`2c327112…`) did the CLASS family but attached in-process and so failed loudly
-at TP>1. v2's class capability is ported IN here, so the program ends with ONE
-tool that fires either family at any tensor-parallel size.
+THE TWO VECTOR FAMILIES. This one tool fires either the ENTROPY family or the
+CLASS family (contrast-built objects such as CAA axes) at any tensor-parallel
+size.
 
   * WHICH OBJECT a column rides is read from a `vllm-lane-class-spec/1` document
     (`--class-spec`). ABSENT, `LaneClassSpec()` is the entropy gradient and every
-    key, cell id and emitted field is what this tool produced before the port —
-    that backward compatibility is PROVEN in the selftest by rendering the EGV
-    plan's ids and requiring them to equal the literals the pre-port tool spelled,
-    not asserted in prose.
+    key, cell id and emitted field is the entropy-gradient spelling the banked
+    columns carry — that compatibility is PROVEN in the selftest by rendering the
+    EGV plan's ids and requiring them to equal `EGV_CELL_ID_WITNESS`, not
+    asserted in prose.
   * THE KEYS COME FROM THE OBJECT, NEVER FROM THE CAMPAIGN'S OBJECT OF RECORD
-    (HALT E, 2026-08-05): the transported key is `g` + the native object's own
+    (the refusal named HALT E): the transported key is `g` + the native object's own
     stem and the naive null is `naive_` + the same stem, so `caa_<axis>_L<site>`
     gives `gcaa_<axis>` / `naive_caa_<axis>` and four axes are four columns rather
     than four names for one. And the stem is taken from the BANK's own spelling of
@@ -94,8 +92,7 @@ tool that fires either family at any tensor-parallel size.
     basis is the corpus manifest, the VECTOR basis is the RULED contrast set a
     class object was built from, and `fd_gate_not_applicable` is admissible for a
     class object and for nothing else. The four refusals are the engine's own.
-  * THE GRAMMAR STAYS A GUARD. `CELL_ID_GRAMMAR` is no longer a hand-written
-    alternation of three entropy literals; it is GENERATED from the closed
+  * THE GRAMMAR STAYS A GUARD. `CELL_ID_GRAMMAR` is GENERATED from the closed
     `NATIVE_KEY_TEMPLATES` vocabulary with a closed axis token, so it admits the
     class family and still rejects everything else — an unknown class, an
     upper-case or underscored axis, a missing site suffix. Widening it to
@@ -103,9 +100,8 @@ tool that fires either family at any tensor-parallel size.
   * THE TP BRANCH IS UNTOUCHED BY ANY OF THIS. `worker_extension_cls` +
     `collective_rpc` + the parent proxies take a SITE and a WIDTH and know nothing
     about which object is being injected, so the class path reaches TP>1 through
-    exactly the code re-freeze #4 certified. The three TP forks' TP=1 arms and
-    every shared helper are still pinned by `ast.unparse` digest below, and those
-    pins did not move for this port.
+    exactly the certified code. The three TP forks' TP=1 arms and every shared
+    helper are pinned by `ast.unparse` digest below.
 
 DEPLOYMENT NEUTRALITY. This module names no host, no user, and no absolute path.
 The host allow-list and the required-environment list are ARGUMENTS
@@ -142,8 +138,8 @@ WORKER_EXTENSION_CLS = (
     "metabasis.extraction.vllm_worker_ext.MetabasisWorkerExtension")
 
 #: The instrument's own identity, stamped on every column. The two certified
-#: modules are byte-unchanged at re-freeze #4; the two attachment modules and
-#: this tool are new. Read from the files at run time — a hardcoded digest of
+#: modules are pinned byte-for-byte by `CERTIFIED_MODULE_SHA256`; the two
+#: attachment modules and this tool are recorded as they are. Read from the files at run time — a hardcoded digest of
 #: your own source is a digest of what you wish were there.
 INSTRUMENT_MODULES = ("metabasis/extraction/vllm_residual_write.py",
                       "metabasis/extraction/vllm_entropy_probe.py",
@@ -151,7 +147,8 @@ INSTRUMENT_MODULES = ("metabasis/extraction/vllm_residual_write.py",
                       "metabasis/extraction/vllm_tp_proxy.py",
                       "metabasis/scripts/vllm_lane_column.py")
 
-#: The two CERTIFIED modules' shas of record (re-freeze #4). These do NOT move.
+#: The two CERTIFIED modules' shas of record. These do NOT move: a changed
+#: certified module is a different instrument.
 CERTIFIED_MODULE_SHA256 = {
     "metabasis/extraction/vllm_residual_write.py":
         "fafc07d78201b5e8ca909244dff419a892daf0fd316eb3520f648887a05d514f",
@@ -163,7 +160,9 @@ CERTIFIED_MODULE_SHA256 = {
 def package_root() -> Path:
     """The directory that CONTAINS the `metabasis` package, proven by value.
 
-    RAKE M59(2): path resolution in proof code is layout-sensitive by default.
+    Path resolution in proof code is layout-sensitive by default: a proof that
+    resolves its inputs off the wrong root skips silently in one deployment
+    layout and passes in another.
     This resolves off THIS file rather than off a working directory, and the
     caller checks that the files it names exist before trusting a digest — a
     missing file is a refusal, never an absent entry that reads as clean.
@@ -186,11 +185,11 @@ def instrument_module_sha256() -> dict[str, str]:
     return out
 
 
-# ── the vector-class vocabulary (HALT D/E), ported from v2 `2c327112…` ───────
+# ── the vector-class vocabulary (the HALT D/E refusals) ──────────────────────
 #
 # WHY THESE ARE LITERALS HERE AND NOT IMPORTS. This block is read at MODULE
-# IMPORT to build the cell-id grammar, and the node runs this file directly with
-# `sys.path[0]` at the scripts directory, so `metabasis` is not importable yet
+# IMPORT to build the cell-id grammar, and a runner may execute this file
+# directly with `sys.path[0]` at the scripts directory, so `metabasis` is not importable yet
 # (the runner resolves it inside `main` via `--code-root`). The conventions are
 # therefore transcribed — and the selftest PROVES each one equal to the
 # campaign's own definition wherever the package is importable, which is the
@@ -218,8 +217,8 @@ TRANSPORTED_PREFIX = "g"
 NAIVE_PREFIX = "naive"
 SITE_SUFFIX_RE = re.compile(r"_L\d+$")
 
-#: The two band families, unchanged by the port: the native control asks whether
-#: the SITE actuates, the transported control whether the TRANSPORT carries.
+#: The two band families, shared by every vector class: the native control asks
+#: whether the SITE actuates, the transported control whether the TRANSPORT carries.
 BAND_MEMBER_INDICES: tuple[int, ...] = (1, 2, 3)
 
 #: The axis token, CLOSED. Lower-case alphanumerics with no separator, which is
@@ -250,10 +249,9 @@ def native_stem_template(vector_class: str,
 def build_cell_id_grammar(templates: Optional[dict[str, str]] = None) -> str:
     """The cell-id grammar, GENERATED from the closed class vocabulary.
 
-    THE GRAMMAR IS A GUARD AND STAYS ONE. Before the class port this was a
-    hand-written alternation of three entropy literals; widening it by hand to
-    admit the class family would have meant either retyping nine literals (which
-    drift) or relaxing it toward `.*` (which stops guarding). Generating it from
+    THE GRAMMAR IS A GUARD AND STAYS ONE. A hand-written alternation that admits
+    the class family means either retyping every literal (which drifts) or
+    relaxing it toward `.*` (which stops guarding). Generating it from
     `NATIVE_KEY_TEMPLATES` means the ids the grammar admits are exactly the ids
     the key resolver can PRODUCE — one vocabulary, two consumers — and an axis is
     a closed token rather than a wildcard.
@@ -264,9 +262,9 @@ def build_cell_id_grammar(templates: Optional[dict[str, str]] = None) -> str:
 
     `templates` is the vocabulary to generate from, defaulting to the module's.
     It is a parameter for ONE reason: the selftest generates the ENTROPY-ONLY
-    grammar from it and proves that sublanguage identical to the alternation
-    re-freeze #4 wrote by hand, so the generation is checked against the pin it
-    replaced and not only against itself.
+    grammar from it and proves that sublanguage identical to the hand-written
+    `CELL_ID_GRAMMAR_EGV_PIN`, so the generation is checked against an
+    independent pin and not only against itself.
     """
     vocabulary = NATIVE_KEY_TEMPLATES if templates is None else templates
     objects = {"baseline"}
@@ -285,19 +283,19 @@ def build_cell_id_grammar(templates: Optional[dict[str, str]] = None) -> str:
             + r")_L\d+_a[+-]\d\.\d{2}(?:@absalpha)?")
 
 
-# ── re-freeze #4 identity pins (Luxia's ruling 2026-08-20) ───────────────────
+# ── the TP=1 identity pins ───────────────────────────────────────────────────
 #
-# WHAT THESE ARE FOR. The lane column tool enters the repo as ONE tool whose
-# TP>1 path is a new branch and whose TP=1 path must be the CERTIFIED tool,
-# unchanged. "Unchanged" is not a claim to be repeated in prose; it is a
-# property to be asserted, and the assertion has to survive re-indentation
-# (the certified block now sits one level deeper inside `else:`), comment
-# rewrites, and docstring edits. So the pin is over the DOCSTRING-STRIPPED
-# `ast.unparse` of the block — code, normalised — and never over its text
-# (rake M58: a string needle cannot tell code from prose).
+# WHAT THESE ARE FOR. The lane column tool is ONE tool whose TP>1 path is a
+# separate branch and whose TP=1 path must be the CERTIFIED tool, unchanged.
+# "Unchanged" is not a claim to be repeated in prose; it is a property to be
+# asserted, and the assertion has to survive re-indentation (the certified
+# block sits one level deeper inside `else:`), comment rewrites, and docstring
+# edits. So the pin is over the DOCSTRING-STRIPPED `ast.unparse` of the block —
+# code, normalised — and never over its text, because a string needle cannot
+# tell code from prose.
 #
-# The digests below were computed at lift time against the certified node-side
-# tool `vllm_lane_column.py`, whose sha is recorded here beside them. Each TP=1
+# The digests below were computed against the certified standalone TP=1 tool,
+# whose sha is recorded here beside them. Each TP=1
 # arm was additionally proven to be a CONTIGUOUS RUN of that tool's own
 # statements, and a CPU dry-run drove both tools to the engine boundary on one
 # synthetic spec and diffed the whole cell plan, the per-cell vectors by sha,
@@ -349,27 +347,25 @@ CERTIFIED_HELPER_DIGESTS: dict[str, str] = {
         "8866de435255646a19aa67241c026872e187132ef037698e9768e23bf4b75226",
 }
 
-# ── PORTABILITY DEFECT IN THE ABOVE PINS, FOUND 2026-08-22 — NAMED, NOT SILENT ─
+# ── A PORTABILITY DEFECT IN THE ABOVE PINS — NAMED, NOT SILENT ───────────────
 #
-# WHAT WAS FOUND. Those digests are over `ast.unparse` output, and `ast.unparse`
+# THE DEFECT. Those digests are over `ast.unparse` output, and `ast.unparse`
 # IS INTERPRETER-DEPENDENT for f-strings that contain a same-quoted subscript.
 # PEP 701 (3.12) let an f-string reuse its own quote character inside the
 # replacement field, and the two interpreters render it differently:
 #
-#   CPython 3.12.3 (the LANE NODE's venv):  f'… {expect['prompt_tokens']} …'
-#   CPython 3.13.9 (the DESK):              f"… {expect['prompt_tokens']} …"
+#   CPython 3.12.3:  f'… {expect['prompt_tokens']} …'
+#   CPython 3.13.9:  f"… {expect['prompt_tokens']} …"
 #
 # Exactly ONE of the twelve helpers contains such an f-string —
 # `assert_span_accounting`, on three of its lines — so exactly one digest moves.
 # Both renderings are 2206 bytes and parse to the same tree; the difference is
 # quote style and nothing else.
 #
-# WHY IT MATTERS. The digests above were taken on the desk's 3.13. Every lane
-# runner gates on `--selftest || exit 2`. So the tool as merged at re-freeze #4
-# FAILS ITS OWN SELFTEST ON THE NODE IT RUNS ON, and did so before this port:
-# measured on `bb5f1d1` in the node venv, 126/128 with this exact failure. It is
-# a pre-existing defect of the merge, surfaced here because this certification is
-# the first thing to run the repo tool on the node.
+# WHY IT MATTERS. The digests above are the CPython 3.13 renderings. Every lane
+# runner gates on `--selftest || exit 2`, and the lane's own venv is CPython
+# 3.12, so without the alternative below the tool fails its own selftest in
+# exactly the environment that fires the columns.
 #
 # WHAT IS DONE ABOUT IT HERE, AND WHAT IS NOT. The 3.13 pin above is NOT edited —
 # it is the digest of record and it stays. The 3.12 rendering is admitted as a
@@ -380,16 +376,16 @@ CERTIFIED_HELPER_DIGESTS: dict[str, str] = {
 # parse back to the same tree as the source it came from — so an alternative
 # digest cannot silently stand for a different function.
 #
-# WHAT THE DESK SHOULD RULE ON. The durable fix is to pin over `ast.dump`, which
-# renders string VALUES rather than source quoting and is therefore immune to this
-# whole class of variance. `CERTIFIED_HELPER_AST_DUMP_DIGEST` below is that pin,
-# computed and asserted here as ONE aggregate over the same twelve helpers, so the
-# desk can promote it at the next re-freeze without a second archaeology pass.
-# Recomputing the twelve individual pins is a change to certified apparatus and is
-# NOT taken unilaterally (C§8).
+# THE DURABLE FIX, NOT YET THE PIN OF RECORD. A pin over a canonical form of the
+# tree renders string VALUES rather than source quoting and is therefore immune to
+# this whole class of variance. `CERTIFIED_HELPER_AST_DUMP_DIGEST` below is that
+# pin, computed and asserted here as ONE aggregate over the same twelve helpers,
+# so it can replace the per-helper pins without re-deriving them. Recomputing the
+# twelve individual pins is a change to certified apparatus, which this module
+# does not make on its own.
 
 #: `ast.unparse` renderings of the affected helper under PEP 701, keyed by helper.
-#: MEASURED, not guessed: the lane venv, CPython 3.12.3, 2026-08-22.
+#: MEASURED, not guessed: the lane venv, CPython 3.12.3.
 CERTIFIED_HELPER_DIGESTS_PEP701: dict[str, str] = {
     "assert_span_accounting":
         "2cbbbf72329305b49e8a5289a1694fc7e11437b464c7d1c0713a44c84c4d23e8",
@@ -402,13 +398,13 @@ CERTIFIED_HELPER_DIGESTS_PEP701: dict[str, str] = {
 #: portable either (3.13 added `show_empty` and defaults it False, so 3.12 prints
 #: `type_params=[]` where 3.13 prints nothing).
 #:
-#: MEASURED EQUAL, NOT ASSUMED: this exact number came out of both CPython 3.12.3
-#: (the lane venv) and CPython 3.13.9 (the desk) on 2026-08-22, for all twelve
-#: helpers individually as well as for the aggregate.
+#: MEASURED EQUAL, NOT ASSUMED: this exact number comes out of both CPython
+#: 3.12.3 and CPython 3.13.9, for all twelve helpers individually as well as for
+#: the aggregate.
 CERTIFIED_HELPER_AST_DUMP_DIGEST = (
     "56f59c160681fdc067724d0a6cb679106ccd1009838cf2d1a110dd0184c6053e")
-# `build_arg_parser` is deliberately ABSENT from that map: §6(b) retires
-# `--allow-any-host`, so its AST must differ. It is checked by option name
+# `build_arg_parser` is deliberately ABSENT from that map: the repo tool retires
+# `--allow-any-host` (a module names no host), so its AST must differ. It is checked by option name
 # instead (`ARGPARSE_CONTRACT`), which is the contract a runner actually
 # depends on.
 
@@ -423,9 +419,9 @@ CERTIFIED_ENGINE_KWARGS: frozenset[str] = frozenset({
 #: The tool's full option surface. 22 of the certified tool's 23 options are
 #: unchanged; `--allow-any-host` is retired and `--allowed-host`,
 #: `--require-env` and `--code-root` replace it with caller-supplied data.
-#: `--class-spec` is the class port's ONE new option (2026-08-22) and is
-#: OPTIONAL — absent, this tool is the entropy-gradient tool it was, which is
-#: what keeps every existing runner invocation meaning what it meant.
+#: `--class-spec` selects the vector class and is OPTIONAL — absent, this tool
+#: is the entropy-gradient tool, which keeps every runner invocation that omits
+#: it meaning the entropy-gradient column.
 ARGPARSE_CONTRACT: frozenset[str] = frozenset({
     "--allowed-host", "--arm", "--class-spec", "--code-root", "--corpus-sha",
     "--engine-sec25-norm", "--expect-pool-sha256", "--gpu-memory-utilization",
@@ -447,14 +443,14 @@ REQUIRED_ARGS: frozenset[str] = frozenset({
 #: key against the BANKED byte-exact columns, so a changed template produces a
 #: column that silently matches nothing.
 #:
-#: THE CLASS PORT MOVED THREE OF THESE, AND ONLY THREE. The transported and
-#: naive templates spelled `gentropy_gradient` / `naive_entropy_gradient` as
-#: LITERALS, which is HALT E's defect: a class column run through them would
-#: have stamped CAA content under an entropy-gradient name. They now interpolate
-#: the resolved key the same way the native template always interpolated
-#: `native_key`. For an EGV column the three keys resolve to those very
-#: literals, so every EGV cell id is byte-identical to the pre-port tool's — and
-#: that is PROVEN in the selftest by rendering the plan, not asserted here.
+#: THE OBJECT TEMPLATES INTERPOLATE THE RESOLVED KEY. The native, transported
+#: and naive templates take `native_key` / `transported_key` / `naive_key`
+#: rather than spelling `gentropy_gradient` / `naive_entropy_gradient` as
+#: literals, because a literal is HALT E's defect: a class column run through it
+#: would stamp CAA content under an entropy-gradient name. For an EGV column the
+#: keys resolve to exactly those literals, so every EGV cell id is the banked
+#: spelling — and that is PROVEN in the selftest by rendering the plan, not
+#: asserted here.
 CELL_ID_TEMPLATES: frozenset[str] = frozenset({
     "f'baseline_L{site}_a+0.00'",
     "f'{native_key}_L{site}_a{frac:+.2f}'",
@@ -466,7 +462,7 @@ CELL_ID_TEMPLATES: frozenset[str] = frozenset({
     "f'{native_key}_L{site}_a{frac:+.2f}@absalpha'",
 })
 
-#: The EGV cell ids the pre-port tool spelled as literals, kept as the
+#: The EGV cell ids as the banked columns spell them, kept as the
 #: BACKWARD-COMPATIBILITY WITNESS. The selftest renders the plan for a default
 #: (entropy-gradient) spec and requires these exact strings out of it, so
 #: "the EGV path is unchanged" is a property that fails loudly rather than a
@@ -489,13 +485,12 @@ EGV_CELL_ID_WITNESS: tuple[str, ...] = (
 #: and not only the templates themselves. GENERATED from the closed class
 #: vocabulary (see `build_cell_id_grammar`) rather than hand-written, so the two
 #: families cannot drift apart; the EGV alternation it produces is character-for-
-#: character the one re-freeze #4 pinned, which the selftest asserts by value.
+#: character `CELL_ID_GRAMMAR_EGV_PIN`, which the selftest asserts by value.
 CELL_ID_GRAMMAR = build_cell_id_grammar()
 
-#: The EGV half of that grammar, as re-freeze #4 wrote it by hand. Kept so the
-#: generation is checked against the pin it replaced instead of only against
-#: itself (rake M40's family: a generated pin that vouches for itself is not a
-#: pin).
+#: The EGV half of that grammar, written by hand. Kept so the generation is
+#: checked against an independent pin instead of only against itself: a
+#: generated pin that vouches for itself is not a pin.
 CELL_ID_GRAMMAR_EGV_PIN = (
     r"(?:baseline|entropy_gradient_L\d+|Rband[123]|gentropy_gradient"
     r"|gRband[123]|naive_entropy_gradient)_L\d+_a[+-]\d\.\d{2}(?:@absalpha)?")
@@ -565,10 +560,10 @@ class VectorKeyUnresolvable(LaneColumnRefused):
 class DeploymentGuard(BaseModel):
     """WHICH guard actually ran, recorded on the column rather than assumed.
 
-    The certified tool hardcoded one hostname and one environment variable. In
-    the repo both are arguments, and both default to EMPTY — the lane's runner
-    scripts already enforce the same two constraints one layer up, and a repo
-    module that names a node is a sanitization problem, not a safety feature.
+    Both the host allow-list and the required environment are arguments, and
+    both default to EMPTY — the lane's runner scripts enforce the same two
+    constraints one layer up, and a repo module that names a host is a
+    sanitization problem, not a safety feature.
     An empty guard is therefore legitimate AND is stamped as empty, so a reader
     of a column never has to guess whether a guard was applied or merely
     assumed.
@@ -607,8 +602,8 @@ class LaneClassSpec(BaseModel):
     """The document that says WHAT OBJECT this column rides (HALT D + HALT E).
 
     ABSENT, the runner is an entropy-gradient runner and every key, cell id and
-    emitted field is what it produced before the class port — that default is
-    the whole of the backward-compatibility story. PRESENT, it names the class,
+    emitted field is the entropy-gradient spelling the banked columns carry —
+    that default is the whole of the compatibility story. PRESENT, it names the class,
     the axis and both bases, and the refusals below are the ENGINE's own, applied
     here so a lane column cannot bank a class object under a contract the
     byte-exact lane would have refused.
@@ -657,14 +652,14 @@ class LaneClassSpec(BaseModel):
         if self.fd_gate_not_applicable and not self.is_class_vector:
             raise VectorClassRefused(
                 "an entropy-gradient object claims fd_gate_not_applicable. The FD "
-                "gate is the EGV's OWN acceptance test (§9 item 3) and waiving it "
+                "gate is the EGV's OWN acceptance test and waiving it "
                 "would run this lane on an UNGATED lever.")
         if self.is_class_vector and self.vector_basis is None:
             raise VectorClassRefused(
                 f"vector_class={self.vector_class!r} names no `vector_basis`. A "
                 "class object's VECTOR basis is the RULED contrast set it was "
                 "built from; writing the corpus sha instead would be false "
-                "provenance and writing nothing would be a hole (§9 item 2).")
+                "provenance and writing nothing would be a hole in the record.")
         if self.is_class_vector and self.vector_basis.kind != "contrast-set":
             raise VectorClassRefused(
                 f"vector_basis.kind={self.vector_basis.kind!r} on a class object. "
@@ -689,9 +684,8 @@ class LaneVectorKeys(BaseModel):
     """The four npz keys a lane column reads, resolved ONCE and used everywhere.
 
     A typed object rather than four locals so the plan block and the ingredients
-    block cannot drift apart: the pre-port tool spelled `gentropy_gradient` in
-    both, which is exactly how a class column would have kept an entropy-gradient
-    name in half its output.
+    block cannot drift apart: a key spelled as a literal in both is exactly how a
+    class column would keep an entropy-gradient name in half its output.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -737,12 +731,12 @@ class RankAttachReport(BaseModel):
 
 
 class ColumnIdentityPins(BaseModel):
-    """The §1 identity additions re-freeze #4 puts on EVERY column stamp.
+    """The identity pins stamped on EVERY column, whatever its TP size.
 
     Two lanes that differ only in `tensor_parallel_size` are the same experiment
     only if the pins say so by value. `VLLM_ENABLE_V1_MULTIPROCESSING` is pinned
     at its recorded value rather than dropped: the four certification columns ran
-    with it at 0 (the investigator's own correction), and a clean V1MP=1 column
+    with it at 0, and a clean V1MP=1 column
     has never been produced, so 0 is the environment of record and not an
     inference.
     """
@@ -796,7 +790,7 @@ def apply_deployment_guard(allowed_hosts: Sequence[str],
                            blocked_reason=reason)
 
 
-# ── key resolution (HALT E), ported from v2 `2c327112…` ──────────────────────
+# ── key resolution (HALT E) ──────────────────────────────────────────────────
 
 def resolve_vector_keys(*, site: int, vector_class: str = EGV_VECTOR_CLASS,
                         axis: Optional[str] = None) -> LaneVectorKeys:
@@ -804,8 +798,8 @@ def resolve_vector_keys(*, site: int, vector_class: str = EGV_VECTOR_CLASS,
 
     HALT E's rule: the transported and naive keys come from the OBJECT, never
     from the campaign's object of record. For an EGV column the stem is
-    `entropy_gradient` and the three keys are byte-identical to the literals the
-    pre-port tool spelled; for a CAA column the stem carries the axis, so
+    `entropy_gradient` and the three keys are byte-identical to the banked
+    entropy-gradient keys; for a CAA column the stem carries the axis, so
     `gcaa_<axis>` and `naive_caa_<axis>` are per-axis and four axes are four
     columns.
 
@@ -1205,13 +1199,12 @@ def pin_indexing(inference: dict[str, Any], *, margin: float = 3.0,
 def _average_ranks(values: Sequence[float]) -> "list[float]":
     """Ranks with TIES AVERAGED — scipy's `rankdata` default, transcribed.
 
-    The isolated lane venv has no scipy (verified by value on the lane node,
-    2026-08-08),
-    and `actuation_calibration.dose_ordering` — the frozen §4.2(a) reader — uses
-    `scipy.stats.spearmanr`. Rather than let the two lanes compute a slightly
-    different ρ, the arithmetic is written out here and CROSS-CHECKED against
-    scipy wherever scipy exists (the desk), so the number the lane files is the
-    number the desk's frozen reader would produce.
+    The isolated lane venv has no scipy, and
+    `actuation_calibration.dose_ordering` — the frozen dose-ordering reader —
+    uses `scipy.stats.spearmanr`. Rather than let the two lanes compute a
+    slightly different ρ, the arithmetic is written out here and CROSS-CHECKED
+    against scipy wherever scipy is installed, so the number the lane files is
+    the number the frozen reader would produce.
     """
     order = sorted(range(len(values)), key=lambda i: values[i])
     ranks = [0.0] * len(values)
@@ -1263,7 +1256,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     ap.add_argument("--site", type=int, required=True)
     ap.add_argument("--arm", required=True, choices=("native", "raw"),
                     help="EXPLICIT. Hardcoded native rendering is a refusal case "
-                         "(the base rung renders raw); the addendum names this.")
+                         "(the base rung renders raw).")
     ap.add_argument("--corpus-sha", required=True,
                     help="the basis the banked band was anchored to")
     ap.add_argument("--vectors-npz", type=Path, required=True,
@@ -1281,17 +1274,19 @@ def build_arg_parser() -> argparse.ArgumentParser:
     ap.add_argument("--prompt-pool", type=Path, required=True)
     ap.add_argument("--expect-pool-sha256", default=None)
     ap.add_argument("--lane-tag", default="@vllm-lane",
-                    help="pre-statement §3's lane-tagged seed material; rides "
+                    help="the lane tag in the band seed material, so lane bands "
+                         "are distinct draws from the banked ones; rides "
                          "vector_key, which is a field of the RULED template")
     ap.add_argument("--n-per-cell", type=int, default=80)
     ap.add_argument("--max-new-tokens", type=int, default=512)
     ap.add_argument("--include", default="calibration",
                     help="comma list of blocks: calibration,transported,absbeside")
     ap.add_argument("--matched-absolute-alpha", type=float, default=None,
-                    help="the labeled BESIDE (ruling ②): the native ladder re-run "
-                         "at the ENGINE's absolute alpha at +0.3. Never gates.")
+                    help="the labeled BESIDE: the native ladder re-run at the "
+                         "ENGINE's absolute alpha at +0.3. Never gates.")
     ap.add_argument("--engine-sec25-norm", type=float, default=None,
-                    help="the banked column's own §2.5 norm, for the delta beside")
+                    help="the banked column's own per-token median residual norm "
+                         "at the site, for the delta beside")
     ap.add_argument("--out-dir", type=Path, required=True)
     ap.add_argument("--gpu-memory-utilization", type=float, default=0.85)
     ap.add_argument("--max-model-len", type=int, default=2048)
@@ -1300,13 +1295,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
                     help="SMOKE ONLY: run the first N planned cells")
     ap.add_argument("--resume", action="store_true",
                     help="skip cells already banked under --out-dir")
-    # REPO-NEUTRAL GUARD (re-freeze #4, Luxia's ruling 2026-08-20 §6(b)). The
-    # certified tool carried `--allow-any-host`, whose whole meaning was "skip
-    # the one hostname compiled into me" — and a repo module cannot carry the
-    # hostname that flag existed to escape. Both halves of that guard are now
-    # caller-supplied lists that default to empty, and the lane's runner
-    # scripts — which already enforce the same two constraints one layer up —
-    # pass them.
+    # REPO-NEUTRAL GUARD. A repo module carries no hostname, so there is no
+    # `--allow-any-host` escape from one: both halves of the deployment guard
+    # are caller-supplied lists that default to empty, and the lane's runner
+    # scripts — which enforce the same two constraints one layer up — pass
+    # them.
     ap.add_argument("--allowed-host", action="append", default=[],
                     metavar="HOST", dest="allowed_host",
                     help="repeatable host allow-list; EMPTY (the default) means "
@@ -1317,18 +1310,17 @@ def build_arg_parser() -> argparse.ArgumentParser:
                     metavar="VAR", dest="require_env",
                     help="repeatable list of environment variables that must be "
                          "set and non-empty; EMPTY (the default) imposes none. "
-                         "The node runners pass their scheduler's job-id "
-                         "variable here.")
-    # THE CLASS PORT'S ONE NEW OPTION (2026-08-22). Optional by construction:
-    # absent, `load_class_spec(None)` is the entropy gradient and every key, cell
-    # id and emitted field is what this tool produced before the port, so no
-    # existing runner invocation changes meaning.
+                         "A runner that must execute inside a batch job passes "
+                         "its job-id variable here.")
+    # THE VECTOR-CLASS OPTION. Optional by construction: absent,
+    # `load_class_spec(None)` is the entropy gradient and every key, cell id and
+    # emitted field is the entropy-gradient spelling, so a runner invocation
+    # without it means the entropy-gradient column.
     ap.add_argument("--class-spec", type=Path, default=None,
                     help="a `vllm-lane-class-spec/1` document (JSON: "
                          "vector_class, axis, fd_gate_not_applicable, "
                          "vector_basis, generation_basis). ABSENT = the "
-                         "entropy-gradient family, which is what every flag here "
-                         "meant before the class column existed. With "
+                         "entropy-gradient family. With "
                          "vector_class=caa the keys become caa_<axis>_L<site> / "
                          "gcaa_<axis> / naive_caa_<axis>, and HALT D's two-bases "
                          "contract rides into the column artifact.")
@@ -1440,7 +1432,7 @@ def main(argv: Optional[list[str]] = None) -> int:                # noqa: C901
               file=sys.stderr)
         return 2
 
-    # ---- the class spec, and the keys it resolves (the class port) -----------
+    # ---- the class spec, and the keys it resolves ----------------------------
     # Loaded BEFORE the bank so a malformed contract costs no I/O, and resolved
     # AGAINST the bank below so the stem of record is the bank's own spelling.
     try:
@@ -1500,8 +1492,8 @@ def main(argv: Optional[list[str]] = None) -> int:                # noqa: C901
             tvecs = {k: np.asarray(z[k]).reshape(-1).astype(np.float32)
                      for k in z.files}
         # The two keys asked for are DERIVED from the native object's own stem,
-        # never retyped: for an EGV column they are `gentropy_gradient` and
-        # `naive_entropy_gradient`, the very literals this block used to spell.
+        # never retyped: for an EGV column they resolve to `gentropy_gradient`
+        # and `naive_entropy_gradient`, the banked spellings.
         try:
             for need in (transported_key, naive_key):
                 assert_key_present(list(tvecs), need, site=site,
@@ -1540,15 +1532,15 @@ def main(argv: Optional[list[str]] = None) -> int:                # noqa: C901
     if "transported" in blocks:
         # THE TRANSPORTED BAND IS NOT RE-DRAWN, AND THAT IS THE RULED RECIPE
         # SPEAKING, NOT A SHORTCUT. `RandomBandRecipe` draws a gRband in the
-        # SOURCE's space and §5.1 then carries it through the SAME fitted map as
-        # the signal — "the control travels the same road as the signal or it is
+        # SOURCE's space and the transport step carries it through the SAME
+        # fitted map as the signal — "the control travels the same road as the signal or it is
         # not a control for transport". The fit is not on this lane's path, so a
         # lane-tagged re-draw could only produce an isotropic in the TARGET's
         # space, which is precisely the object the recipe's own validator refuses
         # by name ("a native band wearing a transported name"). The banked
         # gRband1..3 — already carried through the map — are therefore used as
-        # the matched objects they are, and this deviation from §3's
-        # "lane-tagged seed material" is named here rather than quietly taken.
+        # the matched objects they are, and this deviation from the
+        # pre-statement's "lane-tagged seed material" is named here rather than quietly taken.
         for i in (1, 2, 3):
             if f"gRband{i}" not in tvecs:
                 print(f"BLOCKED: transported bank has no gRband{i}", file=sys.stderr)
@@ -1631,7 +1623,7 @@ def main(argv: Optional[list[str]] = None) -> int:                # noqa: C901
     from vllm import LLM, SamplingParams
     doc["vllm"] = vllm.__version__
 
-    # ---- the §1 identity pins re-freeze #4 adds (on EVERY column) ------------
+    # ---- the identity pins (on EVERY column) ---------------------------------
     doc["identity_pins"] = ColumnIdentityPins(
         tensor_parallel_size=int(args.tensor_parallel_size),
         attachment=("worker_extension_cls (per-rank), driven by collective_rpc"
@@ -1654,12 +1646,12 @@ def main(argv: Optional[list[str]] = None) -> int:                # noqa: C901
               gpu_memory_utilization=float(args.gpu_memory_utilization),
               max_model_len=int(args.max_model_len), disable_log_stats=True,
               enable_chunked_prefill=False, enable_prefix_caching=False,
-              # TP-ONLY BESIDE TOOL (desk, 2026-08-20). At TP>1 the model lives in
+              # TP>1 ONLY. At TP>1 the model lives in
               # worker PROCESSES, so the certified in-process attachment cannot
               # reach it (`_find_model` refuses: MultiprocExecutor has no
               # driver_worker). `worker_extension_cls` mixes the metabasis
               # instrument into the Worker class INSIDE every rank
-              # (vllm/v1/worker/worker_base.py:262-287) and the parent drives it
+              # (vllm/v1/worker/worker_base.py) and the parent drives it
               # by name through collective_rpc. Inert at TP=1.
               **({"worker_extension_cls": WORKER_EXTENSION_CLS}
                  if int(args.tensor_parallel_size) > 1 else {}))
@@ -1687,7 +1679,7 @@ def main(argv: Optional[list[str]] = None) -> int:                # noqa: C901
                 f"{vllm.__version__}); observed={observed}")
         if bool(observed[flag]):
             raise EngineConfigRefused(
-                f"{flag} is ON. Pre-statement §1: prefix caching and chunked "
+                f"{flag} is ON. Prefix caching and chunked "
                 "prefill are OFF as a CORRECTNESS requirement of the span rule — "
                 "a cache hit means the prompt's leading tokens are not recomputed "
                 "and the span detector would inject into the PROMPT.")
@@ -1797,7 +1789,7 @@ def main(argv: Optional[list[str]] = None) -> int:                # noqa: C901
     cells_out: list[dict[str, Any]] = []
     errors: list[str] = []
     try:
-        # ---- §2.5 on the LANE'S OWN measurement (the dose invariant) ---------
+        # ---- the site norm, the LANE'S OWN measurement (the dose invariant) --
         prompts = list(pool.prompts)[:n]
         tok = llm.get_tokenizer()
         rendered = [list(render_prompt(p, tok, arm)) for p in prompts]
@@ -1904,7 +1896,8 @@ def main(argv: Optional[list[str]] = None) -> int:                # noqa: C901
             else:
                 alpha = resolve_alpha(frac, med)
             # the absolute-alpha beside is NOT alpha_frac x lane norm, so the
-            # spec's own §2.5 consistency check must not be handed a frac.
+            # spec's own norm-relative consistency check must not be handed a
+            # frac.
             spec = spec_for(cell["vector"], alpha,
                             None if cell["alpha_mode"] == "absolute" else frac,
                             med)
@@ -2215,17 +2208,15 @@ def main(argv: Optional[list[str]] = None) -> int:                # noqa: C901
     return 0 if not errors else 2
 
 
-# ── selftest (desk-side, CPU, no vLLM, no weights) ───────────────────────────
+# ── selftest (CPU, no vLLM, no weights) ──────────────────────────────────────
 
 def selftest() -> int:                                            # noqa: C901
     checks = 0
     fails: list[str] = []
-    # HOISTED to the top of the suite, 2026-08-22. `skip` was defined halfway
-    # down, so the ONE optional block above it — the scipy cross-check — degraded
-    # to a bare `print` and six checks simply VANISHED from the count. That is
-    # the shape rake M44 is named for: an unqualified count that silently vouches
-    # for less than it says, and it is why the recorded floor could not be met in
-    # the lane venv (which has no scipy) even before this port.
+    # `skip` is defined at the TOP of the suite so every optional block — the
+    # scipy cross-check first among them — can NAME its skip. A block that
+    # degrades to a bare `print` makes its checks vanish from the count, and an
+    # unqualified count silently vouches for less than it says.
     skips: list[str] = []
 
     def ok(cond: bool, name: str, detail: str = "") -> None:
@@ -2371,8 +2362,8 @@ def selftest() -> int:                                            # noqa: C901
     ok(spearman_rho([1, 2, 3], [5, 5, 5]) is None,
        "a constant ladder gives None, never a spurious 0")
     # CROSS-CHECK against the frozen reader's own implementation where it exists.
-    # The lane venv has no scipy; the desk does, and this is where the two are
-    # proven to agree rather than assumed to.
+    # The lane venv has no scipy; a development environment usually does, and
+    # this is where the two are proven to agree rather than assumed to.
     try:
         from scipy.stats import spearmanr                      # type: ignore
     except ImportError:
@@ -2410,26 +2401,25 @@ def selftest() -> int:                                            # noqa: C901
     ok(C8.startswith("UNSTAMPED (C§8)"),
        "every artifact this runner writes carries the C§8 grade")
 
-    # ══ re-freeze #4: the TP attachment + the repo-neutral column tool ═══════
+    # ══ the TP attachment + the repo-neutral column tool ══════════════════════
     #
-    # Everything below is new at re-freeze #4 (Luxia's ruling 2026-08-20 §6).
-    # It is CPU-only, data-independent, and torch-free; the two blocks that
-    # cannot run without an importable sibling degrade to NAMED SKIPS that say
-    # what evidence is missing (rakes M44 + M59(3)).
+    # Everything below is CPU-only, data-independent, and torch-free; the two
+    # blocks that cannot run without an importable sibling degrade to NAMED
+    # SKIPS that say what evidence is missing, because a skip that names
+    # nothing reads as a pass.
     import ast
     import inspect
     import re as _re
 
-    # (`skip` and `skips` are hoisted to the top of the suite — see the note
-    # there; they used to be declared at this point, which is what left the
-    # scipy block above unable to name its own skip.)
+    # (`skip` and `skips` are defined at the top of the suite — see the note
+    # there — so the scipy block above can name its own skip.)
 
-    # RAKE M59(2): the node runs this file as `python <code-root>/metabasis/
+    # A runner may execute this file as `python <code-root>/metabasis/
     # scripts/vllm_lane_column.py --selftest`, so `sys.path[0]` is the SCRIPTS
     # directory and `import metabasis` fails — four of the checks below would
-    # degrade to named skips exactly where the columns actually fire, which is
-    # the deployment-disarms-the-proof failure M59 is named for. The package
-    # root is resolved off THIS file and PROVEN to exist before it is trusted.
+    # degrade to named skips exactly where the columns actually fire, a
+    # deployment layout silently disarming the proof. The package root is
+    # resolved off THIS file and PROVEN to exist before it is trusted.
     _root = package_root()
     if (_root / "metabasis" / "__init__.py").exists():
         if str(_root) not in sys.path:
@@ -2476,7 +2466,7 @@ def selftest() -> int:                                            # noqa: C901
                 and isinstance(node.test.comparators[0], ast.Constant)
                 and node.test.comparators[0].value == 1)
 
-    # ── 1. THE TP=1 IDENTITY, PINNED BY AST (M58: AST, never strings) ────────
+    # ── 1. THE TP=1 IDENTITY, PINNED BY AST (never by strings) ──────────────
     _branches = sorted((n for n in ast.walk(_main) if _is_tp_gt_1(n)),
                        key=lambda n: n.lineno)
     ok(len(_branches) == 3,
@@ -2561,10 +2551,10 @@ def selftest() -> int:                                            # noqa: C901
            "the RENDERING may vary by interpreter, the CODE may not, and that is "
            "what makes the named PEP-701 alternative safe to accept")
 
-    # THE PORTABLE PIN the desk may promote: one aggregate over those canonical
-    # forms. VERIFIED equal on CPython 3.12.3 (the lane node) and 3.13.9 (the
-    # desk) on 2026-08-22 — that equality is the whole claim, and it is a
-    # measurement, not a property of `ast`.
+    # THE PORTABLE PIN, ready to replace the per-helper pins: one aggregate over
+    # those canonical forms. VERIFIED equal on CPython 3.12.3 and 3.13.9 — that
+    # equality is the whole claim, and it is a measurement, not a property of
+    # `ast`.
     _dump_digest = hashlib.sha256(
         "\n".join(_dumps[h] for h in sorted(_dumps)).encode()).hexdigest()
     ok(_dump_digest == CERTIFIED_HELPER_AST_DUMP_DIGEST,
@@ -2629,8 +2619,8 @@ def selftest() -> int:                                            # noqa: C901
            f"`{dest}` is typed as a Path rather than a bare string")
 
     # ── 3. the host guard is repo-neutral, and PROVEN so ─────────────────────
-    # PROPERTY, NOT A NEEDLE (M58/M51(b)): rather than grepping this file for a
-    # node name — which would put the node name IN this file — assert that the
+    # PROPERTY, NOT A NEEDLE: rather than grepping this file for a host name —
+    # which would put the host name IN this file — assert that the
     # module never compares `socket.gethostname()` against a string constant.
     _hostname_calls = 0
     _hostname_compared = 0
@@ -2922,11 +2912,11 @@ def selftest() -> int:                                            # noqa: C901
            "…whose every public attribute is `mb_`-prefixed (vLLM aborts engine "
            "construction on a Worker attribute collision, worker_base.py:269-275)")
 
-    # ══ the class port (2026-08-22): BOTH vector families, at any TP ════════
+    # ══ the vector classes: BOTH vector families, at any TP ═════════════════
     #
-    # Everything below is new at the class×TP merge. It is CPU-only and
-    # data-independent; the one block that needs the campaign package degrades
-    # to a NAMED SKIP that says what evidence is missing (rakes M44 + M59(3)).
+    # Everything below is CPU-only and data-independent; the one block that
+    # needs the campaign package degrades to a NAMED SKIP that says what
+    # evidence is missing, because a skip that names nothing reads as a pass.
 
     # ── 12. the closed vocabulary and HALT E's key derivation ────────────────
     _egv = resolve_vector_keys(site=26)
@@ -3165,7 +3155,7 @@ def selftest() -> int:                                            # noqa: C901
         ok(not _cg.fullmatch(bad),
            f"the grammar REJECTS {bad!r} — {why}; widening it to anything-goes "
            "would retire the join key against the banked columns")
-    # …and the EGV SUBLANGUAGE is exactly what re-freeze #4 pinned by hand. Not
+    # …and the EGV SUBLANGUAGE is exactly the hand-written pin. Not
     # string equality (the generator sorts and spells `Rband1|Rband2|Rband3`
     # where the pin spells `Rband[123]`) — LANGUAGE equality, decided over a
     # corpus the two must agree on id by id.
@@ -3195,10 +3185,11 @@ def selftest() -> int:                                            # noqa: C901
        "is not two regexes agreeing that everything is rejected",
        f"{sum(1 for c in _corpus if _pin.fullmatch(c))} accepted")
 
-    # ── 17. the EGV plan is BYTE-IDENTICAL to the pre-port tool's ────────────
+    # ── 17. the EGV plan is BYTE-IDENTICAL to the banked ids ─────────────────
     # The witness is rendered THROUGH the same templates `main` uses, from the
-    # keys the default spec resolves — so if the port had changed any of the
-    # three moved templates, or the default, this fails with the id it produced.
+    # keys the default spec resolves — so a change to any of the three
+    # key-interpolating templates, or to the default, fails with the id it
+    # produced.
     def _render_plan_ids(keys: LaneVectorKeys, site: int) -> list[str]:
         native_key, transported_key, naive_key = (keys.native, keys.transported,
                                                   keys.naive)
@@ -3269,9 +3260,9 @@ def selftest() -> int:                                            # noqa: C901
            "…and the EGV class name IS the campaign's object key, so the default "
            "spec names the object of record and not a lookalike")
 
-    # ── 19. the TP path is untouched by the class port ───────────────────────
+    # ── 19. the TP path knows nothing of the vector class ────────────────────
     # PROPERTY, NOT PROSE. The three TP forks and every shared helper are pinned
-    # by AST digest in blocks 1 above and did not move; what remains to show is
+    # by AST digest in block 1 above; what remains to show is
     # that the TP>1 arm never reads a class name — it takes a SITE and a WIDTH,
     # which is why the class path reaches TP>1 through certified code.
     _class_names = {"class_spec", "keys", "native_key", "transported_key",
@@ -3289,21 +3280,20 @@ def selftest() -> int:                                            # noqa: C901
        "the class path reaches TP>1 through exactly the code re-freeze #4 "
        "certified", f"overlap: {sorted(_tp_arm_names & _class_names)}")
 
-    # ── 20. M59: the suite's own arithmetic ──────────────────────────────────
-    # RAKE M44: the count is QUALIFIED, not a bare number, and it is qualified BY
+    # ── 20. the suite's own arithmetic ───────────────────────────────────────
+    # The count is QUALIFIED, not a bare number, and it is qualified BY
     # ENVIRONMENT because this suite legitimately runs a different number of
     # checks in the two places it runs.
     #
-    #   desk  — CPython 3.13.9, scipy present : 211 checks, 0 named skips
+    #   dev   — CPython 3.13.9, scipy present : 211 checks, 0 named skips
     #   lane  — CPython 3.12.3, no scipy      : 206 checks, 1 named skip
     #           (the scipy cross-check; the lane venv has no scipy by design)
     #
-    # THE FLOOR IS THE NODE'S, because the node is where columns are actually
-    # fired and a floor the node cannot meet is a gate that blocks the science —
-    # which is exactly what the previous floor of 133 did: `bb5f1d1` scored
-    # 126/128 in the lane venv and every runner gates on `--selftest || exit 2`.
-    # It sits one below the node's count because this check has not been counted
-    # yet when it reads `checks`.
+    # THE FLOOR IS THE LANE'S, because the lane venv is where columns are
+    # actually fired, every runner gates on `--selftest || exit 2`, and a floor
+    # the lane cannot meet is a gate that blocks every column. It sits one below
+    # the lane's count because this check has not been counted yet when it
+    # reads `checks`.
     SELFTEST_CHECK_FLOOR = 205
     KNOWN_SKIP_CEILING = 6
     ok(checks >= SELFTEST_CHECK_FLOOR and len(skips) <= KNOWN_SKIP_CEILING,
