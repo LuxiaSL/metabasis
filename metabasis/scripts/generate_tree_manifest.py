@@ -1,61 +1,60 @@
 """ONE canonical sha256 manifest generator — the code the per-store shell
-incantations retire into (optimization-pass item 8).
+incantations retire into.
 
-Every manifest in this campaign has been produced by a hand-typed pipeline of the
-shape `find <tree> -type f -print0 | sort -z | xargs -0 sha256sum > <manifest>`,
-re-typed per store, per session, per node. Four rakes were filed against that
-habit inside three days — M38, M42, M43 and M46's filename rider — and every one
-of them is a property of the GENERATOR, not of the data. A rake that can only be
-paid by remembering to type a flag gets paid until the session someone forgets.
-This module is where those flags stop being remembered and start being enforced.
+A hand-typed pipeline of the shape `find <tree> -type f -print0 | sort -z |
+xargs -0 sha256sum > <manifest>`, re-typed per store and per machine, fails in
+four known ways, and every one of them is a property of the GENERATOR, not of
+the data. A rule that can only be kept by remembering to type a flag is broken
+the first time someone forgets. This module is where those flags stop being
+remembered and start being enforced.
 
 THE FOUR RULES, AS CODE
 -----------------------
-  * **M38 — symlink blindness.** `find <tree> -type f` never descends a symlinked
-    directory and never lists a symlinked file, so under the /models placement
-    rule (where every relocated tree is reached through a symlink) a naive
-    regeneration silently DROPS the relocated store and the diff reads as
-    deletion. The walk here is `os.walk(followlinks=True)` — `find -L` semantics —
-    with a (st_dev, st_ino) visit guard so a link cycle terminates instead of
-    spinning (M38(a)). `compare_to_previous` implements M38(b): a manifest that
-    SHRANK after a relocation is reported as this rake first and a deletion
+  * **The symlink rule — symlink blindness.** `find <tree> -type f` never
+    descends a symlinked directory and never lists a symlinked file, so where a
+    relocated tree is reached through a symlink (large data lives on a separate
+    volume) a naive regeneration silently DROPS the relocated store and the diff
+    reads as deletion. The walk here is `os.walk(followlinks=True)` — `find -L`
+    semantics — with a (st_dev, st_ino) visit guard so a link cycle terminates
+    instead of spinning. `compare_to_previous` reports a manifest that SHRANK
+    after a relocation as a symlink-blindness suspect first and a deletion
     second.
-  * **M42 — self-listing.** A file cannot contain its own hash, so a manifest
+  * **The self-listing rule.** A file cannot contain its own hash, so a manifest
     that lists itself can never verify clean and every future checker must
     adjudicate a guaranteed false alarm. The output path is excluded from its own
     enumeration unconditionally (not by a glob that a renamed output could slip
     past — by identity, `os.path.samefile`-grade comparison of resolved paths),
     the written artifact is re-parsed after the write and a self-row there is a
     HALT, and `verify_manifest` classifies a self-row as a GENERATOR defect with
-    its own exit code rather than as a digest failure (M42(c): the artifacts are
+    its own exit code rather than as a digest failure (the artifacts are
     innocent).
-  * **M43 — scratch inside the tree.** A `MANIFEST-….sha256.tmp` staged INSIDE the
-    tree being hashed self-includes as an empty-file row, and the M42 exclusion
-    misses it because the suffix differs. Two defences: nothing at all is written
-    during the walk (hashing completes in memory first, so there is no scratch
-    file to find), and the atomic-rename scratch is placed in a directory proven
-    to be OUTSIDE the hashed tree. A tree that ALREADY contains scratch files is
-    a refusal (`ScratchInTreeError`) until they are named in `exclude_globs` —
-    "explicitly excluded", never silently swept. `expect_rows` implements
-    M43(b), the row-count-versus-derivation check that caught the original;
-    `EMPTY_FILE_SHA256` rows are flagged on sight per M43(c).
-  * **M46 — sanitization, filenames included.** `grep -c` exits 0 when it FINDS
-    matches, so a sweep riding inside a `&&` chain publishes exactly when it
-    fails; the rider that got filed sent a manifest row whose FILENAME carried an
-    infrastructure alias to a remote. `scan_paths` is a zero-assert
+  * **The scratch rule — scratch inside the tree.** A `MANIFEST-….sha256.tmp`
+    staged INSIDE the tree being hashed self-includes as an empty-file row, and
+    the self-listing exclusion misses it because the suffix differs. Two
+    defences: nothing at all is written during the walk (hashing completes in
+    memory first, so there is no scratch file to find), and the atomic-rename
+    scratch is placed in a directory proven to be OUTSIDE the hashed tree. A tree
+    that ALREADY contains scratch files is a refusal (`ScratchInTreeError`) until
+    they are named in `exclude_globs` — "explicitly excluded", never silently
+    swept. `expect_rows` is the row-count-versus-derivation check that catches
+    a self-included scratch row; `EMPTY_FILE_SHA256` rows are flagged on sight.
+  * **The sanitization rule — filenames included.** `grep -c` exits 0 when it
+    FINDS matches, so a sweep riding inside a `&&` chain publishes exactly when
+    it fails, and a manifest row whose FILENAME carries an infrastructure alias
+    leaks it as surely as file content does. `scan_paths` is a zero-assert
     (`! grep -qE …`): any hit is a nonzero exit and the manifest is NOT WRITTEN.
     Filenames are content, so PATHS are scanned as well as bytes. `SANITIZE_MODE
-    = "exclude"` (the desk's redaction lane) REFUSES to run without an
-    `unsanitized_copy` destination, because M46(c) requires the full copy to stay
-    desk-side for coverage to remain honest.
+    = "exclude"` (the redaction lane) REFUSES to run without an
+    `unsanitized_copy` destination, because the full copy must stay on the
+    private side for coverage to remain honest.
 
 NO PROJECT-SPECIFIC PATTERNS LIVE IN THIS FILE, deliberately. A regex that
 matches an infrastructure alias contains that alias, and this file is committed
 to a public remote — shipping the sweep's pattern list would leak precisely the
 strings the sweep exists to keep off the remote. `GENERIC_PATH_PATTERNS` holds
 only patterns that are generic by construction (home-directory paths, e-mail
-addresses, well-known credential prefixes); the campaign's own patterns are
-loaded at run time from a gitignored desk-side file via `--patterns-file`.
+addresses, well-known credential prefixes); project-specific patterns are
+loaded at run time from a gitignored, private file via `--patterns-file`.
 
 BYTE COMPATIBILITY is the compatibility contract: output is exactly what GNU
 `sha256sum` writes — `<64 hex><two spaces><path>\\n`, with GNU's leading-backslash
@@ -65,49 +64,50 @@ header lines are supported because `manifests/collection.sha256` carries three o
 them and GNU `sha256sum --check` (coreutils 9.5, measured) silently ignores them.
 
 ORDERING is byte-wise (`LC_ALL=C sort`) by default, because that is the only
-ordering that reproduces on another machine. NOTE FOR THE DESK, flagged not
+ordering that reproduces on another machine. A KNOWN DIVERGENCE, flagged not
 fixed: `manifests/outputs.sha256` is NOT byte-sorted — it was produced by a
 `sort -z` under a UTF-8 locale, whose collation ignores punctuation (the first
 divergence is `…/a5_vectors_3b_14k/…` sorting before `…/a5_vectors_3b/…`). A
 regeneration with the default ordering therefore reorders rows without changing
 one digest, which is a large but content-free diff at the next freeze point.
-`sort="locale"` reproduces the historical order for a minimal-diff regeneration;
+`sort="locale"` reproduces that locale order for a minimal-diff regeneration;
 it is offered, labelled non-portable, and is nobody's default.
 
 CPU self-test (no weights, no GPU, no data tree, no torch):
 
     python -m metabasis.scripts.generate_tree_manifest --selftest
 
-RAKE M44 — THE CONFIGURATION MATRIX IS THE MERGE BAR. Every reported count names
-the configuration it was measured in. This selftest is data-tree-independent by
-construction (every fixture is built in a `TemporaryDirectory`, nothing resolves
-a banked artifact relative to cwd — the dcbe7d7 pattern), so the {data tree, no
-data tree} axis is vacuous here and is asserted vacuous rather than assumed. The
-axes that are NOT vacuous are {`sha256sum` on PATH, absent} — the byte-
-compatibility blocks cross-check against the real binary — and {`read_composed_
-predictions` importable, not} for the parser-agreement block. Each degrades to a
-NAMED skip carrying its triggering condition, counted in the tail. Per M45 this
-module's `selftest()` never calls `sys.exit`: it RETURNS a code and raises
-`ManifestGeneratorError` on internal HALTs, so an all-module sweep survives it.
+NAMED CONFIGURATIONS — THE CONFIGURATION MATRIX IS THE MERGE BAR. Every reported
+count names the configuration it was measured in. This selftest is
+data-tree-independent by construction (every fixture is built in a
+`TemporaryDirectory`, nothing resolves a banked artifact relative to cwd), so the
+{data tree, no data tree} axis is vacuous here and is asserted vacuous rather
+than assumed. The axes that are NOT vacuous are {`sha256sum` on PATH, absent} —
+the byte-compatibility blocks cross-check against the real binary — and
+{`read_composed_predictions` importable, not} for the parser-agreement block.
+Each degrades to a NAMED skip carrying its triggering condition, counted in the
+tail. This module's `selftest()` never calls `sys.exit`: it RETURNS a code and
+raises `ManifestGeneratorError` on internal HALTs, so an all-module sweep
+survives it.
 
 Usage:
 
     # generate (the shared lane; `--dry-run` prints the plan and writes nothing)
     python -m metabasis.scripts.generate_tree_manifest \\
         --tree outputs --output manifests/outputs.sha256 \\
-        --patterns-file /desk/side/sanitization-patterns.txt \\
+        --patterns-file <private>/sanitization-patterns.txt \\
         --compare-previous manifests/outputs.sha256 --expect-rows 16008
 
-    # verify (in-process `sha256sum --check` semantics, with M42 diagnosis)
+    # verify (in-process `sha256sum --check` semantics, with self-listing diagnosis)
     python -m metabasis.scripts.generate_tree_manifest \\
         --verify manifests/outputs.sha256 --anchor .
 
-    # sanitization sweep alone, as its own BLOCKING command (M46(a))
+    # sanitization sweep alone, as its own BLOCKING command (the zero-assert)
     python -m metabasis.scripts.generate_tree_manifest \\
         --scan-only manifests/outputs.sha256 --patterns-file …
 
 Exit codes: 0 clean · 1 a HALT or a digest failure · 2 usage (argparse) ·
-3 the DATA verified clean but the MANIFEST is defective (a self-row: M42) ·
+3 the DATA verified clean but the MANIFEST is defective (a self-row) ·
 4 a sanitization hit (the zero-assert fired).
 """
 from __future__ import annotations
@@ -138,13 +138,13 @@ logger = logging.getLogger("generate_tree_manifest")
 #: is the byte-compatibility contract; a single space is a different format and
 #: `sha256sum --check` reads the second space as part of the filename.
 ROW_SEPARATOR = "  "
-#: sha256 of the empty string. Rake M43(c): its appearance in any manifest is a
+#: sha256 of the empty string. Its appearance in any manifest is a
 #: red flag worth a scan on sight — it is what a scratch file staged inside the
 #: hashed tree hashes to when `find` creates-then-hashes it.
 EMPTY_FILE_SHA256 = ("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b"
                      "7852b855")
 #: The name prefix a manifest generator must exclude from its own enumeration
-#: (rake M42(a)). Mirrors `read_composed_predictions.MANIFEST_NAME_PREFIX`; the
+#: (the self-listing rule, by name). Mirrors `read_composed_predictions.MANIFEST_NAME_PREFIX`; the
 #: selftest asserts the two agree whenever that module is importable, so the
 #: convention cannot drift into two values.
 MANIFEST_NAME_PREFIX = "MANIFEST-"
@@ -152,7 +152,7 @@ MANIFEST_NAME_PREFIX = "MANIFEST-"
 #: contains ZERO rows matching either glob (measured, 16008 rows), so these
 #: defaults reproduce the existing manifests rather than changing them.
 DEFAULT_EXCLUDE_GLOBS: tuple[str, ...] = (f"{MANIFEST_NAME_PREFIX}*", "*.sha256")
-#: A tree containing any of these is REFUSED (rake M43) until they are named in
+#: A tree containing any of these is REFUSED (the scratch rule) until they are named in
 #: `exclude_globs`. Scratch is a fact about the tree, not about the generator:
 #: hashing a half-written file produces a digest of record for a file that never
 #: existed in that state.
@@ -210,28 +210,28 @@ GENERIC_PATTERN_NAMES: tuple[str, ...] = (
 
 # -------------------------------------------------------------------- errors
 class ManifestGeneratorError(Exception):
-    """Base HALT. Raised, never `sys.exit`-ed (rake M45): a module selftest that
+    """Base HALT. Raised, never `sys.exit`-ed: a module selftest that
     exits kills an all-module sweep silently, because SystemExit is not
     Exception and every later module never runs."""
 
 
 class ScratchInTreeError(ManifestGeneratorError):
-    """Rake M43: the tree to be hashed contains scratch/temporary files."""
+    """The scratch rule: the tree to be hashed contains scratch/temporary files."""
 
 
 class SanitizationLeakError(ManifestGeneratorError):
-    """Rake M46: a sanitization pattern matched a path or the bytes of a covered
+    """The sanitization rule: a sanitization pattern matched a path or the bytes of a covered
     artifact. The zero-assert fired; nothing is written."""
 
 
 class RowCountMismatchError(ManifestGeneratorError):
-    """Rake M43(b): the row count disagrees with the caller's derivation. This is
+    """The row-count check: the row count disagrees with the caller's derivation. This is
     the check that caught the 2919-vs-2918 scratch row before it was promoted."""
 
 
 class UnreadableArtifactError(ManifestGeneratorError):
     """A covered file could not be read. A manifest that silently omits it is the
-    entire M38 failure mode wearing a different hat, so this HALTs by default."""
+    entire symlink-blindness failure mode wearing a different hat, so this HALTs by default."""
 
 
 class ManifestFormatError(ManifestGeneratorError):
@@ -240,14 +240,14 @@ class ManifestFormatError(ManifestGeneratorError):
 
 # -------------------------------------------------------------------- models
 class SanitizationPattern(BaseModel):
-    """One named regex for the M46 sweep. Named so a finding can be reported
+    """One named regex for the sanitization sweep. Named so a finding can be reported
     WITHOUT quoting the matched text — the string is exactly what must not
     propagate, and a refusal message is a place strings propagate to."""
     model_config = ConfigDict(frozen=True)
 
     name: str
     pattern: str
-    #: scan row PATHS with this (M46(b): filenames are content)
+    #: scan row PATHS with this (filenames are content)
     paths: bool = True
     #: scan covered artifacts' BYTES with this (costlier; opt-in per pattern)
     contents: bool = False
@@ -267,7 +267,7 @@ class SanitizationPattern(BaseModel):
 
 class SanitizationHit(BaseModel):
     """A match. `redacted` is what a log may carry; `matched` is populated only
-    when the caller explicitly asked to see it (`--show-matches`, desk-side)."""
+    when the caller explicitly asked to see it (`--show-matches`, private side only)."""
     pattern_name: str
     where: Literal["path", "bytes"]
     row_name: str
@@ -293,7 +293,7 @@ class HashedFile(BaseModel):
     #: quote it, and it is NOT what goes in the manifest
     walked_path: str
     #: True when the file or one of its parent directories was reached through a
-    #: symlink: the rows `find -type f` would have silently dropped (rake M38)
+    #: symlink: the rows `find -type f` would have silently dropped (symlink blindness)
     via_symlink: bool = False
 
 
@@ -324,7 +324,7 @@ class ManifestSpec(BaseModel):
     tree: Path
     #: where the manifest is written. May sit inside `tree` (the per-staging
     #: `MANIFEST-*.sha256` case) — it is excluded from its own enumeration by
-    #: identity either way (rake M42).
+    #: identity either way (the self-listing rule).
     output: Path
     #: the directory row names are relative to. Must be an ancestor of `tree`, so
     #: no row can carry a `../` escape. Defaults to the current directory, which
@@ -340,19 +340,19 @@ class ManifestSpec(BaseModel):
     scratch_globs: list[str] = list(SCRATCH_GLOBS)
     sanitization_patterns: list[SanitizationPattern] = []
     #: "refuse" = the zero-assert HALTs and nothing is written (the default, and
-    #: what M46(a) asks for). "exclude" = matching rows are dropped from the
+    #: what the zero-assert asks for). "exclude" = matching rows are dropped from the
     #: published manifest and the FULL manifest is written to `unsanitized_copy`,
-    #: which is therefore mandatory in that mode (M46(c)).
+    #: which is therefore mandatory in that mode (the full copy stays private).
     sanitize_mode: Literal["refuse", "exclude"] = "refuse"
     unsanitized_copy: Optional[Path] = None
     #: bytes-scanning is opt-in and capped; see `DEFAULT_BYTES_SCAN_MAX`
     scan_bytes: bool = False
     bytes_scan_max: int = DEFAULT_BYTES_SCAN_MAX
     sort: Literal["byte", "locale"] = "byte"
-    #: rake M43(b): the caller's independent derivation of the row count. A
+    #: the row-count check: the caller's independent derivation of the row count. A
     #: mismatch is a HALT before anything is promoted to head.
     expect_rows: Optional[int] = None
-    #: rake M38(b): the previous manifest, for the row-count-and-rows comparison
+    #: the symlink rule's shrink check: the previous manifest, for the row-count-and-rows comparison
     compare_previous: Optional[Path] = None
     #: broken symlinks are what `find -L -type f` also omits; strict makes them a
     #: HALT instead of a reported finding
@@ -375,8 +375,8 @@ class ManifestSpec(BaseModel):
     def _coherent(self) -> "ManifestSpec":
         if self.sanitize_mode == "exclude" and self.unsanitized_copy is None:
             raise ValueError(
-                "sanitize_mode='exclude' requires unsanitized_copy: rake M46(c) — "
-                "a full unsanitized copy of any redacted artifact stays desk-side "
+                "sanitize_mode='exclude' requires unsanitized_copy: "
+                "a full unsanitized copy of any redacted artifact stays on the private side "
                 "(gitignored) so coverage remains honest. Excluding rows with no "
                 "complete copy anywhere turns a redaction into data loss")
         if self.bytes_scan_max <= 0:
@@ -392,7 +392,7 @@ class ManifestBuildResult(BaseModel):
     tree: str
     anchor: str
     rows: list[HashedFile] = []
-    #: names excluded by glob or by the M42 self-identity rule, with the reason
+    #: names excluded by glob or by the self-listing identity rule, with the reason
     excluded: dict[str, str] = {}
     scratch_found: list[str] = []
     broken_symlinks: list[str] = []
@@ -415,7 +415,7 @@ class ManifestBuildResult(BaseModel):
 
     @property
     def clean(self) -> bool:
-        """No finding that a desk must adjudicate before promoting this to head."""
+        """No finding that must be adjudicated before promoting this to head."""
         return not (self.findings or self.sanitization_hits or self.unreadable
                     or self.changed_during_walk)
 
@@ -437,7 +437,7 @@ class ParsedRow(BaseModel):
 
 
 class ParsedManifest(BaseModel):
-    """A parsed manifest with every M42 hazard surfaced as data rather than as a
+    """A parsed manifest with every self-listing hazard surfaced as data rather than as a
     surprise inside a checker."""
     path: str
     dialect: Literal["bare", "dot-prefixed", "mixed", "empty"]
@@ -464,7 +464,7 @@ class VerifyRow(BaseModel):
 
 
 class VerifyResult(BaseModel):
-    """`sha256sum --check` semantics in-process, plus the M42 diagnosis it lacks."""
+    """`sha256sum --check` semantics in-process, plus the self-listing diagnosis it lacks."""
     manifest_path: str
     anchor: str
     rows: list[VerifyRow] = []
@@ -487,7 +487,7 @@ class VerifyResult(BaseModel):
     @property
     def data_clean(self) -> bool:
         """The ARTIFACTS verify. Deliberately independent of `manifest_clean`:
-        rake M42(c) — a self-row is a generator defect and the data is innocent."""
+        a self-row is a generator defect and the data is innocent."""
         return not (self.failed or self.missing)
 
     @property
@@ -511,7 +511,7 @@ def _visit_key(path: Path) -> Optional[tuple[int, int]]:
 
 def walk_tree_following_symlinks(
         root: Path) -> Iterator[tuple[Path, bool, Optional[str]]]:
-    """`find -L <root> -type f` at Python grain (rake M38).
+    """`find -L <root> -type f` at Python grain (the symlink rule).
 
     Yields `(path, via_symlink, broken_reason)` for every regular file reachable
     from `root` WITH symlinks followed — both symlinked files and files inside
@@ -519,7 +519,7 @@ def walk_tree_following_symlinks(
     `Path.rglob` silently drop. Under the /models placement rule the relocated
     tree is the normal case, so the naive walk's omission reads as a deletion.
 
-    LINK CYCLES terminate (M38(a)): each directory's (st_dev, st_ino) is recorded
+    LINK CYCLES terminate: each directory's (st_dev, st_ino) is recorded
     and a second visit prunes that branch rather than raising. A cycle is a fact
     about someone else's tree, not a reason for a manifest run to die.
 
@@ -628,7 +628,7 @@ def format_manifest_row(digest: str, name: str,
     """
     if not _SHA256_HEX_RE.match(digest):
         raise ManifestFormatError(
-            f"not a lowercase 64-hex sha256: {digest!r} — rake M40: a digest is "
+            f"not a lowercase 64-hex sha256: {digest!r} — a digest is "
             f"either a complete verified value or an explicitly-labelled prefix, "
             f"and nothing in between goes in a manifest")
     if _CONTROL_NAME_RE.search(name):
@@ -675,9 +675,9 @@ def _sort_key(sort: Literal["byte", "locale"]) -> Callable[[str], Any]:
     return locale.strxfrm
 
 
-# ----------------------------------------------------------- the M46 sweep
+# ------------------------------------------------- the sanitization sweep
 def load_patterns_file(path: Path) -> list[SanitizationPattern]:
-    """Read a desk-side sanitization pattern file. One pattern per line:
+    """Read a private sanitization pattern file. One pattern per line:
 
         # comment
         name = regex          # named
@@ -730,7 +730,7 @@ def load_patterns_file(path: Path) -> list[SanitizationPattern]:
 
 def generic_patterns(contents: bool = False) -> list[SanitizationPattern]:
     """The generic-by-construction set. Never sufficient on its own: the
-    campaign's own aliases live in a desk-side `--patterns-file`."""
+    project's own aliases live in a private `--patterns-file`."""
     return [SanitizationPattern(name=name, pattern=pattern, paths=True,
                                 contents=contents)
             for name, pattern in GENERIC_PATH_PATTERNS.items()]
@@ -742,7 +742,7 @@ def _redact(text: str, match: re.Match[str]) -> str:
 
 def scan_paths(names: Sequence[str], patterns: Sequence[SanitizationPattern],
                show_matches: bool = False) -> list[SanitizationHit]:
-    """Rake M46(b): FILENAMES ARE CONTENT. Zero-assert — the caller treats a
+    """FILENAMES ARE CONTENT. Zero-assert — the caller treats a
     non-empty return as `! grep -qE` firing, i.e. a refusal, never a count to
     print inside a `&&` chain."""
     hits: list[SanitizationHit] = []
@@ -767,7 +767,7 @@ def scan_bytes(rows: Sequence[HashedFile],
     or undecodable file is REPORTED as not scanned, never counted as clean.
 
     Reads through `HashedFile.walked_path`, the path the walk actually reached
-    (symlinks followed, rake M38), so a relocated tree is scanned rather than
+    (symlinks followed, the symlink rule), so a relocated tree is scanned rather than
     reported as unreadable.
     """
     hits: list[SanitizationHit] = []
@@ -797,12 +797,12 @@ def scan_bytes(rows: Sequence[HashedFile],
 
 
 def assert_no_sanitization_hits(hits: Sequence[SanitizationHit]) -> None:
-    """The blocking zero-assert (M46(a)). This is a COMMAND of its own, not a
+    """The blocking zero-assert of the sanitization rule. This is a COMMAND of its own, not a
     rider: `grep -c` exits 0 when it finds matches, so the counting form publishes
     exactly when the sweep fails."""
     if hits:
         raise SanitizationLeakError(
-            f"sanitization sweep found {len(hits)} hit(s) — rake M46, blocking. "
+            f"sanitization sweep found {len(hits)} hit(s) — the sanitization rule, blocking. "
             + "; ".join(hit.describe() for hit in hits[:8])
             + ("" if len(hits) <= 8 else f" … (+{len(hits) - 8} more)"))
 
@@ -810,8 +810,8 @@ def assert_no_sanitization_hits(hits: Sequence[SanitizationHit]) -> None:
 # ------------------------------------------------------------- the generator
 def _is_within(path: Path, tree: Path) -> bool:
     """True when `path` is `tree` or lives beneath it, symlinks resolved on both
-    sides. Used for the M43 scratch-placement proof, where a false negative is
-    the entire rake."""
+    sides. Used for the scratch-placement proof, where a false negative is
+    the entire failure the scratch rule exists to prevent."""
     try:
         resolved, tree_resolved = path.resolve(), tree.resolve()
     except OSError:                          # pragma: no cover — defensive
@@ -820,7 +820,7 @@ def _is_within(path: Path, tree: Path) -> bool:
 
 
 def scratch_staging_dir(tree: Path, output: Path) -> Path:
-    """A directory PROVEN to be outside `tree` (rake M43(a)).
+    """A directory PROVEN to be outside `tree` (the scratch rule's placement proof).
 
     Preference order: the output's own parent (same filesystem as the final
     path, so the rename is atomic) · the tree's parent · the system temp dir.
@@ -834,7 +834,7 @@ def scratch_staging_dir(tree: Path, output: Path) -> Path:
         except OSError:                      # pragma: no cover — defensive
             continue
     raise ManifestGeneratorError(          # pragma: no cover — needs / as tree
-        f"no staging directory outside {tree} could be found; rake M43 forbids "
+        f"no staging directory outside {tree} could be found; the scratch rule forbids "
         f"staging the scratch file inside the tree being hashed")
 
 
@@ -842,7 +842,7 @@ def _atomic_write(text: str, destination: Path, tree: Path) -> int:
     """Write via a scratch file staged OUTSIDE `tree`, then rename into place.
 
     Nothing at all is written during the walk — the whole manifest is built in
-    memory first — so the M43 failure mode (a scratch file inside the tree being
+    memory first — so the scratch-rule failure mode (a scratch file inside the tree being
     created-then-hashed as an empty row) cannot occur even if this staging
     directory choice were wrong.
     """
@@ -864,7 +864,7 @@ def _atomic_write(text: str, destination: Path, tree: Path) -> int:
                 raise
             logger.warning(
                 "staging dir %s is on another filesystem than %s: the rename "
-                "degrades to a copy (not atomic). The M43 rule — scratch OUTSIDE "
+                "degrades to a copy (not atomic). The scratch rule — scratch OUTSIDE "
                 "the hashed tree — is still honoured", staging, destination)
             shutil.copyfile(temp_path, destination)
             temp_path.unlink(missing_ok=True)
@@ -883,10 +883,10 @@ def _atomic_write(text: str, destination: Path, tree: Path) -> int:
 def parse_manifest(path: Path) -> ParsedManifest:
     """Parse a sha256 manifest, accepting BOTH banked dialects explicitly.
 
-    Rake M42(d): bare (`<digest>  name`) and `./`-prefixed with `#` headers are
-    both of record in this tree. A `#` line is a COMMENT, counted and never
-    parsed as a row — a two-word comment becoming a phantom artifact is the exact
-    failure that rule was filed for. Duplicate names HALT (rake M18): which
+    Bare (`<digest>  name`) and `./`-prefixed with `#` headers are both of
+    record in this tree. A `#` line is a COMMENT, counted and never parsed as a
+    row — a two-word comment must never become a phantom artifact. Duplicate
+    names HALT: which
     digest is of record cannot be guessed, and a dict that collapses two rows
     reports a false pass at n−1.
     """
@@ -925,11 +925,11 @@ def parse_manifest(path: Path) -> ParsedManifest:
         if name in seen:
             raise ManifestFormatError(
                 f"{path}: duplicate row for {name!r} (lines {seen[name]} and "
-                f"{number}) — rake M18: which digest is of record cannot be "
+                f"{number}) — which digest is of record cannot be "
                 f"guessed")
         seen[name] = number
         #  A SELF-ROW is judged by BASENAME first, resolution second: a
-        #  manifest's anchor is not always its parent (rake M15), so a
+        #  manifest's anchor is not always its parent, so a
         #  resolution-only test misses the self-row in every manifest anchored
         #  elsewhere — and missing one is the whole point of the check.
         is_self = Path(name).name == path.name
@@ -954,7 +954,7 @@ def parse_manifest(path: Path) -> ParsedManifest:
 
 def compare_to_previous(previous: Path,
                         rows: Sequence[HashedFile]) -> ManifestDiff:
-    """Row-level diff against the previous manifest of record (rake M38(b))."""
+    """Row-level diff against the previous manifest of record (the symlink rule's shrink check)."""
     parsed = parse_manifest(previous)
     old = parsed.by_name
     new = {row.name: row.digest for row in rows}
@@ -970,16 +970,16 @@ def generate_tree_manifest(spec: ManifestSpec) -> ManifestBuildResult:
     """THE shared generator. One function, every rule, no flags to remember.
 
     Order of operations is itself load-bearing:
-      1. walk with `find -L` semantics (M38) and classify what is found;
-      2. REFUSE on scratch in the tree (M43) before hashing a byte;
+      1. walk with `find -L` semantics (the symlink rule) and classify what is found;
+      2. REFUSE on scratch in the tree (the scratch rule) before hashing a byte;
       3. hash everything IN MEMORY — nothing is written during the walk, so no
-         scratch file can self-include (M43 again, structurally);
+         scratch file can self-include (the scratch rule again, structurally);
       4. re-stat and HALT on anything that changed under us;
       5. run the sanitization zero-assert over PATHS (and bytes on request) —
-         M46, blocking, before any write;
-      6. check the row count against the caller's derivation (M43(b));
+         the sanitization rule, blocking, before any write;
+      6. check the row count against the caller's derivation (the row-count check);
       7. write LAST, atomically, from a staging dir proven outside the tree;
-      8. re-parse the written artifact and HALT on a self-row (M42).
+      8. re-parse the written artifact and HALT on a self-row (the self-listing rule).
     """
     tree, anchor, output = spec.tree, spec.anchor, spec.output
     if not _is_within(tree, anchor) and tree.resolve() != anchor.resolve():
@@ -997,7 +997,7 @@ def generate_tree_manifest(spec: ManifestSpec) -> ManifestBuildResult:
     except OSError:                          # pragma: no cover — defensive
         output_resolved = None
 
-    #  "Explicitly excluded" (rake M43) means a glob THIS CALLER supplied — a
+    #  "Explicitly excluded" (the scratch rule) means a glob THIS CALLER supplied — a
     #  shipped default is not an acknowledgement of anything.
     explicit_exclusions = [g for g in spec.exclude_globs
                            if g not in DEFAULT_EXCLUDE_GLOBS]
@@ -1013,7 +1013,7 @@ def generate_tree_manifest(spec: ManifestSpec) -> ManifestBuildResult:
             else:
                 result.excluded[name] = broken
             continue
-        #  M42 BY IDENTITY, not by glob: the output is excluded because it IS the
+        #  SELF-LISTING BY IDENTITY, not by glob: the output is excluded because it IS the
         #  output, so a manifest named anything at all still cannot list itself.
         if output_resolved is not None:
             try:
@@ -1030,10 +1030,10 @@ def generate_tree_manifest(spec: ManifestSpec) -> ManifestBuildResult:
                          or fnmatch.fnmatch(name, g)), None)
         if scratch is not None and explicit is None:
             #  SCRATCH IS CHECKED BEFORE THE EXCLUSION GLOBS, and this ordering
-            #  is the rake itself. `MANIFEST-….sha256.tmp` matches the DEFAULT
+            #  is the scratch rule itself. `MANIFEST-….sha256.tmp` matches the DEFAULT
             #  `MANIFEST-*` exclusion, so an exclusion-first generator drops it
             #  quietly and reports a clean run over a tree that is mid-write —
-            #  M43's failure with the sign flipped, found by this module's own
+            #  The scratch rule's failure with the sign flipped, found by this module's own
             #  selftest. A default can therefore never swallow scratch; only a
             #  glob the CALLER added can, which is what "explicitly excluded"
             #  has to mean.
@@ -1073,9 +1073,9 @@ def generate_tree_manifest(spec: ManifestSpec) -> ManifestBuildResult:
     if result.scratch_found and not spec.dry_run:
         raise ScratchInTreeError(
             f"{len(result.scratch_found)} scratch/temporary file(s) inside "
-            f"{tree} — rake M43. A manifest generated over a tree that contains "
+            f"{tree} — the scratch rule. A manifest generated over a tree that contains "
             f"scratch hashes a half-written state as a digest of record, and the "
-            f"M42 exclusion misses it whenever the suffix differs. Remove them, "
+            f"self-listing exclusion misses it whenever the suffix differs. Remove them, "
             f"or name them in exclude_globs EXPLICITLY: "
             + "; ".join(result.scratch_found[:8])
             + ("" if len(result.scratch_found) <= 8
@@ -1085,7 +1085,7 @@ def generate_tree_manifest(spec: ManifestSpec) -> ManifestBuildResult:
         raise UnreadableArtifactError(
             f"{len(result.unreadable)} covered file(s) could not be read: "
             + "; ".join(result.unreadable[:8])
-            + ". A manifest that silently omits them is the M38 failure mode "
+            + ". A manifest that silently omits them is the symlink-blindness failure mode "
               "wearing a different hat; pass skip_unreadable=True to proceed "
               "with the omission REPORTED in the result")
 
@@ -1099,8 +1099,8 @@ def generate_tree_manifest(spec: ManifestSpec) -> ManifestBuildResult:
             raise ManifestGeneratorError(message)
         result.findings.append(message)
 
-    #  Rake M42(b) at generation grain: an artifact rewritten while we hashed it
-    #  carries a digest of a state that no longer exists, and the manifest reads
+    #  Mid-walk rewrites, at generation grain: an artifact rewritten while we hashed
+    #  it carries a digest of a state that is already gone, and the manifest reads
     #  as tampered forever after.
     for row in candidates:
         try:
@@ -1116,13 +1116,13 @@ def generate_tree_manifest(spec: ManifestSpec) -> ManifestBuildResult:
             f"{len(result.changed_during_walk)} covered artifact(s) changed "
             f"DURING the walk — their digests are of states already gone, and a "
             f"manifest carrying them makes an honest artifact read as tampered "
-            f"(rake M42(b)). Re-run when the producers are quiet: "
+            f". Re-run when the producers are quiet: "
             + "; ".join(result.changed_during_walk[:8]))
 
     candidates.sort(key=lambda row: _sort_key(spec.sort)(row.name))
     result.rows = candidates
 
-    #  ---- the M46 zero-assert, BEFORE any write ---------------------------
+    #  ---- the sanitization zero-assert, BEFORE any write ---------------------------
     patterns = spec.sanitization_patterns
     hits = scan_paths([row.name for row in result.rows], patterns)
     if spec.scan_bytes:
@@ -1154,7 +1154,7 @@ def generate_tree_manifest(spec: ManifestSpec) -> ManifestBuildResult:
     if spec.expect_rows is not None and len(result.rows) != spec.expect_rows:
         raise RowCountMismatchError(
             f"row count {len(result.rows)} != expected {spec.expect_rows} — rake "
-            f"M43(b): the row-count-versus-derivation check is mandatory before "
+            f"the row-count-versus-derivation check is mandatory before "
             f"any regenerated manifest is promoted to head, and it is exactly "
             f"what caught the scratch row (2919 != 2918). Nothing was written")
 
@@ -1195,12 +1195,12 @@ def generate_tree_manifest(spec: ManifestSpec) -> ManifestBuildResult:
     result.n_bytes_written = _atomic_write(text, output, tree)
     result.written = True
 
-    #  ---- M42, on the artifact rather than on the intent ------------------
+    #  ---- self-listing, on the artifact rather than on the intent --------
     written = parse_manifest(output)
     if written.lists_itself:                 # pragma: no cover — unreachable
         raise ManifestGeneratorError(
             f"{output} lists itself after generation ({written.self_rows}) — "
-            f"rake M42. The identity-based exclusion failed; this manifest can "
+            f"the self-listing rule. The identity-based exclusion failed; this manifest can "
             f"never verify clean and must not be promoted")
     if len(written.rows) != len(result.rows):    # pragma: no cover — torn write
         raise ManifestGeneratorError(
@@ -1212,9 +1212,9 @@ def generate_tree_manifest(spec: ManifestSpec) -> ManifestBuildResult:
 # ---------------------------------------------------------------- verify mode
 def verify_manifest(manifest: Path, anchor: Optional[Path] = None,
                     quiet: bool = False) -> VerifyResult:
-    """`sha256sum --check` semantics in-process, plus the M42 diagnosis it lacks.
+    """`sha256sum --check` semantics in-process, plus the self-listing diagnosis it lacks.
 
-    The exit-code split is the point (rake M42(c)): a digest mismatch is a DATA
+    The exit-code split is the point: a digest mismatch is a DATA
     question and a self-row is a GENERATOR defect, so `data_clean` and
     `manifest_clean` are separate verdicts and a self-listing manifest over
     intact artifacts exits 3, not 1. A checker that conflates them blames
@@ -1263,7 +1263,7 @@ def verify_manifest(manifest: Path, anchor: Optional[Path] = None,
                                      expected=row.digest, computed=computed))
         if not quiet or status != "OK":
             print(f"{row.name}: {status}")
-    #  Rake M15: a mass non-OK result means CHECK THE DIRECTORY FIRST. A verify
+    #  A mass non-OK result means CHECK THE DIRECTORY FIRST. A verify
     #  where almost nothing resolves is an anchor question, not a data loss.
     covered = [r for r in result.rows if r.status != "SELF-ROW"]
     if covered and len(result.missing) > 0.5 * len(covered):
@@ -1309,7 +1309,7 @@ def _spec(tree: Path, output: Path, **kwargs: Any) -> ManifestSpec:
 def selftest() -> int:                       # noqa: C901 — a checklist
     """CPU-only, data-independent verification of every rule this module encodes.
 
-    Rake M44: every fixture is built inside a `TemporaryDirectory`, so nothing
+    Named configurations: every fixture is built inside a `TemporaryDirectory`, so nothing
     here resolves a banked artifact relative to cwd and the {data tree, no data
     tree} axis is VACUOUS — asserted below rather than assumed. The two live axes
     ({`sha256sum` present, absent} and {`read_composed_predictions` importable,
@@ -1325,7 +1325,7 @@ def selftest() -> int:                       # noqa: C901 — a checklist
         logger.info("%s %s %s", "PASS" if ok else "MISS", name, detail)
 
     def skip(name: str, why: str) -> None:
-        """A NAMED skip (rake M44): a block that cannot run in THIS
+        """A NAMED skip: a block that cannot run in THIS
         configuration. Recorded as run-and-absent, counted in the tail, and
         NEVER a non-zero exit — nothing was asserted and found wanting."""
         skips.append(name)
@@ -1402,7 +1402,7 @@ def selftest() -> int:                       # noqa: C901 — a checklist
               _unescape_name("back\\\\slash") == "back\\slash"
               and _unescape_name("two\\nlines") == "two\nlines")
 
-    # ---- 2. RAKE M38: symlinks, symlinked dirs, and cycles ------------------
+    # ---- 2. THE SYMLINK RULE: symlinks, symlinked dirs, and cycles ------------------
     print("== selftest 2: RAKE M38 — `find -L`, symlinked trees, link cycles ==")
     with _tempfile.TemporaryDirectory(prefix="mgen_m38_") as td:
         base = Path(td)
@@ -1434,7 +1434,7 @@ def selftest() -> int:                       # noqa: C901 — a checklist
                                                "store/relocated/banked.npz",
                                                "store/relocated/nested/deep.json"],
               str(sorted(built.symlinked_rows)))
-        #  M38(a): a cycle must terminate.
+        #  A cycle must terminate.
         (tree / "relocated" / "loop").symlink_to(tree, target_is_directory=True)
         looped = generate_tree_manifest(_spec(tree, base / "MANIFEST-loop.sha256"))
         check("a symlink CYCLE back to the root terminates and does not "
@@ -1455,7 +1455,7 @@ def selftest() -> int:                       # noqa: C901 — a checklist
                   _spec(tree, base / "MANIFEST-strict.sha256",
                         strict_broken_symlinks=True)), ManifestGeneratorError))
         (tree / "dangling.bin").unlink()
-        #  M38(b): a shrunk manifest after a relocation is the rake, not deletion.
+        #  A shrunk manifest after a relocation is symlink blindness, not deletion.
         previous = base / "PREV.sha256"
         previous.write_text(out.read_text() + f"{'0' * 64}  store/vanished.bin\n")
         shrunk = generate_tree_manifest(
@@ -1472,7 +1472,7 @@ def selftest() -> int:                       # noqa: C901 — a checklist
               and shrunk.diff.removed == ["store/vanished.bin"]
               and not shrunk.diff.added)
 
-    # ---- 3. RAKE M42: a manifest can never list itself ----------------------
+    # ---- 3. THE SELF-LISTING RULE: a manifest can never list itself ----------------------
     print("== selftest 3: RAKE M42 — self-listing, by identity not by glob ==")
     with _tempfile.TemporaryDirectory(prefix="mgen_m42_") as td:
         base = Path(td)
@@ -1499,7 +1499,7 @@ def selftest() -> int:                       # noqa: C901 — a checklist
               verified.data_clean and verified.manifest_clean
               and verified.exit_code() == 0, f"{verified.n_ok}/2 OK")
         #  BY IDENTITY: an output whose name matches no exclusion glob at all.
-        #  A glob-only exclusion (`-not -name "MANIFEST-*"`, the convention M42
+        #  A glob-only exclusion (`-not -name "MANIFEST-*"`, the convention the self-listing rule
         #  names) would list THIS one, which is the whole reason the check here
         #  is on resolved paths.
         odd = tree / "coverage-index.txt"
@@ -1531,7 +1531,7 @@ def selftest() -> int:                       # noqa: C901 — a checklist
               and result.exit_code() == 3
               and any("SELF-LISTING (rake M42)" in f for f in result.findings),
               f"exit code {result.exit_code()} (3 = manifest defect, data clean)")
-        #  M42(d): both banked dialects, and a two-word comment is not a row.
+        #  Both banked dialects, and a two-word comment is not a row.
         dotted = base / "MANIFEST-dotted.sha256"
         dotted.write_text(
             "# a node-side manifest\n# phantom\n"
@@ -1548,7 +1548,7 @@ def selftest() -> int:                       # noqa: C901 — a checklist
                   base / "dupe.sha256", rows + rows.splitlines()[0] + "\n")),
                   ManifestFormatError))
 
-    # ---- 4. RAKE M43: scratch never inside the hashed tree ------------------
+    # ---- 4. THE SCRATCH RULE: scratch never inside the hashed tree ------------------
     print("== selftest 4: RAKE M43 — scratch outside the tree, row counts ==")
     with _tempfile.TemporaryDirectory(prefix="mgen_m43_") as td:
         base = Path(td)
@@ -1606,14 +1606,14 @@ def selftest() -> int:                       # noqa: C901 — a checklist
               not _is_within(staging, tree), str(staging))
         check("…even when the output itself lives inside the tree",
               not _is_within(scratch_staging_dir(tree, tree / "x.sha256"), tree))
-        #  M43(b): the row-count-versus-derivation check that caught the original.
+        #  The row-count-versus-derivation check that catches a self-included scratch row.
         check("a row count that disagrees with the caller's derivation HALTs "
               "before anything is promoted (rake M43(b))",
               _raises(lambda: generate_tree_manifest(
                   _spec(tree, out, expect_rows=99)), RowCountMismatchError))
         check("…and the matching count proceeds",
               generate_tree_manifest(_spec(tree, out, expect_rows=2)).written)
-        #  M43(c): the empty-file sha is a red flag worth a scan on sight.
+        #  The empty-file sha is a red flag worth a scan on sight.
         _write(tree / "empty.bin", "")
         with_empty = generate_tree_manifest(_spec(tree, out))
         check("a row carrying the sha256 of the EMPTY string is flagged (M43(c))",
@@ -1623,7 +1623,7 @@ def selftest() -> int:                       # noqa: C901 — a checklist
         check("the empty-string sha constant is the real one",
               hashlib.sha256(b"").hexdigest() == EMPTY_FILE_SHA256)
 
-    # ---- 5. RAKE M46: sanitization, filenames included ----------------------
+    # ---- 5. THE SANITIZATION RULE: sanitization, filenames included ----------------------
     print("== selftest 5: RAKE M46 — the blocking zero-assert over PATHS ==")
     with _tempfile.TemporaryDirectory(prefix="mgen_m46_") as td:
         base = Path(td)
@@ -1653,7 +1653,7 @@ def selftest() -> int:                       # noqa: C901 — a checklist
         check("…and the raw match is available only when explicitly asked for",
               scan_paths(["a/secretalias/b"], patterns,
                          show_matches=True)[0].matched == "secretalias")
-        #  M46(c): the exclude lane REQUIRES a desk-side full copy.
+        #  The exclude lane REQUIRES a private full copy.
         check("sanitize_mode='exclude' without an unsanitized copy is refused "
               "at construction (rake M46(c))",
               _raises(lambda: ManifestSpec(tree=tree, output=out,
@@ -1865,7 +1865,7 @@ def selftest() -> int:                       # noqa: C901 — a checklist
               parsed_weird.unparsed_lines and len(parsed_weird.rows) == 1,
               str(parsed_weird.unparsed_lines))
 
-    # ---- 8. the M44 configuration statement, asserted -----------------------
+    # ---- 8. the named-configuration statement, asserted -----------------------
     print("== selftest 8: rake M44 — the configuration this run measured ==")
     check("every fixture is tmpdir-based, so the {data tree, no data tree} axis "
           "is VACUOUS here (asserted, not assumed): no default resolves a "
@@ -1924,7 +1924,7 @@ def selftest() -> int:                       # noqa: C901 — a checklist
     print(f"\nselftest: {len(failures)} failure(s)")
     for name, _, detail in failures:
         print(f"  MISS {name} {detail}")
-    # RAKE M44: coverage is part of the verdict, per configuration.
+    # Named configurations: coverage is part of the verdict, per configuration.
     print(f"selftest checks run: {len(checks)} ({len(skips)} named skip(s))")
     for name in skips:
         print(f"  SKIPPED {name}")
@@ -1977,7 +1977,8 @@ def _print_build_report(result: ManifestBuildResult) -> None:
 def main(argv: Optional[list[str]] = None) -> int:
     ap = argparse.ArgumentParser(
         description="The canonical sha256 manifest generator/verifier: one "
-                    "shared lane with rakes M38/M42/M43/M46 enforced in code.")
+                    "shared lane with the symlink, self-listing, scratch and "
+                    "sanitization rules enforced in code.")
     mode = ap.add_mutually_exclusive_group(required=True)
     mode.add_argument("--selftest", action="store_true",
                       help="CPU-only, data-independent verification")
@@ -1986,9 +1987,9 @@ def main(argv: Optional[list[str]] = None) -> int:
                            "--anchor)")
     mode.add_argument("--verify", type=Path, metavar="MANIFEST",
                       help="verify a manifest in process (`sha256sum --check` "
-                           "semantics + the M42 diagnosis)")
+                           "semantics + the self-listing diagnosis)")
     mode.add_argument("--scan-only", type=Path, metavar="MANIFEST",
-                      help="run the M46 sanitization zero-assert over an "
+                      help="run the sanitization zero-assert over an "
                            "existing manifest's PATHS, as its own blocking "
                            "command")
     ap.add_argument("--output", type=Path, help="manifest path (with --tree)")
@@ -2002,26 +2003,26 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--exclude-path", action="append", default=[],
                     metavar="GLOB", help="row-name glob to exclude; repeatable")
     ap.add_argument("--patterns-file", type=Path,
-                    help="desk-side sanitization patterns (never in this repo)")
+                    help="private sanitization patterns (never in this repo)")
     ap.add_argument("--generic-patterns", action="store_true",
                     help="also apply the generic-by-construction pattern set")
     ap.add_argument("--sanitize-mode", choices=("refuse", "exclude"),
                     default="refuse",
-                    help="refuse (default, M46(a)) or exclude matching rows "
-                         "(requires --unsanitized-copy, M46(c))")
+                    help="refuse (default, the zero-assert) or exclude matching rows "
+                         "(requires --unsanitized-copy, which keeps the full copy private)")
     ap.add_argument("--unsanitized-copy", type=Path,
                     help="where the COMPLETE manifest goes in exclude mode")
     ap.add_argument("--scan-bytes", action="store_true",
                     help="also scan covered artifacts' bytes (capped)")
     ap.add_argument("--show-matches", action="store_true",
-                    help="print matched text in findings (desk-side only)")
+                    help="print matched text in findings (private side only)")
     ap.add_argument("--sort", choices=("byte", "locale"), default="byte",
                     help="byte (default, portable) or locale (reproduces the "
-                         "historical `sort -z` order; NOT portable)")
+                         "UTF-8-locale `sort -z` order; NOT portable)")
     ap.add_argument("--expect-rows", type=int,
-                    help="the caller's independent row-count derivation (M43(b))")
+                    help="the caller's independent row-count derivation")
     ap.add_argument("--compare-previous", type=Path, metavar="MANIFEST",
-                    help="diff against the previous manifest of record (M38(b))")
+                    help="diff against the previous manifest of record (reports a shrink as symlink blindness first)")
     ap.add_argument("--strict-broken-symlinks", action="store_true")
     ap.add_argument("--skip-unreadable", action="store_true")
     ap.add_argument("--allow-concurrent-writes", action="store_true")
@@ -2076,7 +2077,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             print(hit.describe())
         print(f"sanitization sweep over {len(parsed.rows)} row PATHS: "
               f"{len(hits)} hit(s)")
-        #  The zero-assert IS the exit code (rake M46(a)).
+        #  The zero-assert IS the exit code.
         return 4 if hits else 0
 
     if args.output is None:
