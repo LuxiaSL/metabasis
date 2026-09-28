@@ -1,8 +1,10 @@
-"""A8 — dsv2 difficulty-curve rows + the Δ-watch third instance (CPU, banked inputs).
+"""dsv2 difficulty-curve rows + the third instance of the Δ-sharpening watch (CPU, banked inputs).
 
-Fills the 8B↔DSV2 row of DIFFICULTY-CURVE-provisional (rake-14 discipline: fields and
-needle series stay separate; needle never divided by â) and measures the third
-instance of the Δ≈.24 sharpening watch-constant (Add-1.2 standing instrument):
+Fills the 8B↔DSV2 row of the difficulty curve. The fields series and the needle
+series stay separate, and the needle is never divided by â: the needle is a
+different kind of object from the fields, and a ratio between them has no meaning.
+It also measures the third instance of the Δ≈.24 sharpening watch-constant, a
+standing instrument read on every new pair:
 
   fields row  — â(g) = cos(g·V7_8B, V7_dsv2@L22) via the anchor fit (primary);
                 Vtemp beside via the L18 fit (Vtemp_L18 is the banked dsv2 analog;
@@ -11,13 +13,14 @@ instance of the Δ≈.24 sharpening watch-constant (Add-1.2 standing instrument)
                 vs the MODE-FREE g (S1+S2 only), same site pair, native proc_k512.
                 Δ = primary − mode-free.
 
-Output: leg3/readouts_cpu/dsv2_curverows_allfam.json — one block per fit family
-(proc_k32/proc_k128/proc_k512/ridge). The proc_k512 block reproduces the banked
-single-family dsv2_curverows.json bit-for-bit; the other blocks bank the same rows
-under the alternate fit families (e.g. proc_k128 for the P8-STAR rider). Rows are
-appended to the curve doc at close-out by hand, with this file as the raw artifact.
+Output: outputs/battery/arms/A8_conjugation/leg3/readouts_cpu/dsv2_curverows_allfam.json
+— one block per fit family (proc_k32/proc_k128/proc_k512/ridge). The proc_k512 block
+reproduces the single-family curve-rows artifact bit-for-bit; the other blocks give
+the same rows under the alternate fit families (e.g. proc_k128 for the star-law
+rider). Rows are copied into the curve table by hand, with this file as the raw
+artifact.
 
-Run (repo root): PYTHONPATH=pipeline python -m metabasis.scripts.difficulty_curve_rows_dsv2
+Run (repo root): python -m metabasis.scripts.difficulty_curve_rows_dsv2
                  [--families proc_k32,proc_k128,proc_k512,ridge]
 """
 from __future__ import annotations
@@ -54,7 +57,7 @@ def fit_name(tlevel: int, family: str) -> str:
 
 
 def anchor_r2(family: str) -> float | None:
-    """Native L22 anchor-fit R2 for `family`, from the leg-2 grid summary (or None)."""
+    """Native L22 anchor-fit R2 for `family`, from the fit-grid summary beside the fits (or None)."""
     summ = FITS / "cp2_summary.json"
     if not summ.exists():
         return None

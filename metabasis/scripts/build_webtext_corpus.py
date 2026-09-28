@@ -16,8 +16,9 @@ crawl content, so the fitting basis is structurally empty of model-authored text
   pg19           deepmind/pg19 validation books — long-form public-domain prose
                  (everything published before 1919).
   stackexchange  flax-sentence-embeddings/stackexchange_title_body_jsonl — the
-                 dialogic/technical register, from the 2021-06-07 Stack Exchange
-                 dump (see COMPOSITION-CENSUS.md for the survey that chose it).
+                 dialogic/technical register, from the June 2021 Stack Exchange
+                 dump (the composition census this script writes carries the
+                 survey that chose it).
 
 Chunking is the FROZEN v2.1 S2 chunker, imported verbatim from
 `build_paired_corpus` and applied identically to all four strata: greedy
@@ -26,13 +27,15 @@ dropped, paragraphs rejoined with a blank line. Nothing is re-implemented here �
 strata 2-4 stage each source document as the one-column table that chunker reads,
 so "same chunking parameters" is true BY CONSTRUCTION rather than by discipline.
 
-Outputs (into --out-dir, desk-side staging until the prereg freezes the sha):
-  corpus_manifest.json        full manifest WITH bodies — desk-side only, never git
-  corpus_manifest.meta.json   public metadata shape: bodies dropped, text_sha256 added
-  corpus_stamp.json           every pin, every source sha256, counts, build env
-  COMPOSITION-CENSUS.md       rake M47: counts by source/stratum, revisions,
-                              licenses, vintage, and the stratum-4 survey
-  RECONSTRUCT.md              the exact pinned command -> byte-identical rebuild
+Outputs (into <out-dir>, a staging directory; the corpus sha is frozen by the
+webtext-v3 pre-registration under docs/planning/):
+  <out-dir>/corpus_manifest.json        full manifest WITH bodies — local only, never git
+  <out-dir>/corpus_manifest.meta.json   public metadata shape: bodies dropped, text_sha256 added
+  <out-dir>/corpus_stamp.json           every pin, every source sha256, counts, build env
+  <out-dir>/COMPOSITION-CENSUS.md       counts by source/stratum, revisions, licenses,
+                                        vintage, and the stratum-4 survey — a corpus
+                                        is published with its composition, not without
+  <out-dir>/RECONSTRUCT.md              the exact pinned command -> byte-identical rebuild
 
 Run (repo root, a venv with pyarrow + transformers + huggingface_hub):
   python -m metabasis.scripts.build_webtext_corpus --out-dir staging/webtext-v3-draft \\
@@ -76,7 +79,7 @@ logger = logging.getLogger("build_webtext_corpus")
 
 #: The tokenizer is pinned by repository AND revision. At this revision the
 #: tokenizer's files digest to TOKENIZER_FILES_SHA256 — the digests recorded by
-#: the build that produced the published `corpus_manifest.json` sha — so this
+#: the build that produced the published corpus manifest's sha — so this
 #: revision reproduces that corpus. A build of TOKENIZER_REF at this revision
 #: refuses to run if any of the three files digests differently.
 TOKENIZER_REVISION = "0e9e39f249a16976918f6564b8830bc894c89659"
@@ -104,8 +107,8 @@ StratumKey = Literal["wikitext", "c4", "pg19", "stackexchange"]
 
 
 class WebtextBuildError(RuntimeError):
-    """A HALT: something the build refuses to guess about (rake M45 rule c —
-    an exception, never sys.exit, so a selftest sweep survives it)."""
+    """A HALT: something the build refuses to guess about (an exception, never
+    sys.exit, so a selftest sweep survives it)."""
 
 
 # ---------------------------------------------------------------- typed pins
@@ -239,7 +242,7 @@ PIN_PG19 = SourcePin(
     homepage="https://huggingface.co/datasets/deepmind/pg19",
     asset_root=PG19_ASSET_ROOT,
 )
-# Stratum 4: the survey and the reasons live in COMPOSITION-CENSUS.md (STRATUM4_SURVEY).
+# Stratum 4: the survey and the reasons live in STRATUM4_SURVEY, which the census reproduces.
 PIN_STACKEXCHANGE = SourcePin(
     key="stackexchange",
     repo_id="flax-sentence-embeddings/stackexchange_title_body_jsonl",
@@ -569,7 +572,7 @@ def verify_license(pin: SourcePin, cache_dir: Optional[Path]) -> dict[str, Any]:
     missing = [s for s in pin.readme_must_contain if s not in body]
     if missing:
         raise WebtextBuildError(
-            f"{pin.ref}: README at the pinned revision no longer states {missing}")
+            f"{pin.ref}: README at the pinned revision does not state {missing}")
     return {"declared_license": list(got), "readme_sha256": _sha_file(readme),
             "verified_claims": list(pin.readme_must_contain)}
 
@@ -1275,7 +1278,7 @@ def _raises(fn: Callable[[], Any], exc: type[BaseException]) -> bool:
 
 
 def selftest() -> int:  # noqa: C901 — a checklist
-    """Named-configuration selftest (rake M44): no network, no torch, no data tree.
+    """Named-configuration selftest: no network, no torch, no data tree.
 
     Blocks that genuinely need pyarrow (the imported chunker reads a parquet) are
     NAMED SKIPS rather than silent passes, and the tail states the configuration
@@ -1605,7 +1608,8 @@ def selftest() -> int:  # noqa: C901 — a checklist
     print(f"\nselftest: {len(failures)} failure(s)")
     for name, _, detail in failures:
         print(f"  MISS {name} {detail}")
-    # RAKE M44: the count names the configuration it was measured in.
+    # The count names the configuration it was measured in: coverage differs per
+    # environment, so a bare count would overstate it.
     print(f"selftest checks run: {len(checks)} ({len(skips)} named skip(s)) "
           f"in configuration [{config}]")
     for name in skips:

@@ -16,19 +16,15 @@ is the residual stream ENTERING decoder layer `site`, meaned over the GENERATED
 positions only.
 
 PROVENANCE — this is a LIFT, not a new recipe. The construction is taken verbatim
-in behavior from the anamnesis pipeline:
-
-    anamnesis: pipeline/anamnesis/scripts/vmb_a5_build_vectors.py
+in behavior from the anamnesis pipeline.
+Ported from pipeline/anamnesis/scripts/vmb_a5_build_vectors.py in that repository:
         build_v1               L90-128   (the recipe)
         _chat_ids              L56-62    (the chat-template call)
         _mean_resid_at_sites   L65-75    (the extraction)
         DATE_STRING / FORMAL_SYS / INFORMAL_SYS   L46-52  (the constants)
 
-authorized by `docs/desk/briefs/BRIEF-class-probe-v1-2026-07-29.md` section 1,
-sha256 568dcb610cc6c9df38fafca597ab3af16fb5609eda6f00b0a2010778b72d19c7. The
-anamnesis builder was NEVER lifted before (the 2026-07-29 census corrected the
-canon's premise); metabasis carried only banked *vectors* of this class, topping
-out at 27B.
+Apart from this builder, metabasis holds only banked *vectors* of this class,
+topping out at 27B; building one for a larger model needs the recipe itself.
 
 WHAT IS THE SAME, AND IS LOAD-BEARING (a fresh build must be comparable with the
 banked ones, so none of this is a preference):
@@ -61,11 +57,12 @@ WHAT IS DELIBERATELY DIFFERENT, AND WHY (each one census-justified):
     than forked, so the sharding layout is the same object the >=70B rungs collected
     under and lands in the trunk stamp the same way. Inputs go on the loader's
     reported input-embedding device, never `.to(device)` on a dispatched model.
-  * **No `--stage0-run` / `--a2-root`.** Those were anamnesis-banked corpora feeding
-    the sibling V3/norms stages, which are NOT lifted (no V3, no norms builder).
+  * **No `--stage0-run` / `--a2-root`.** Those are anamnesis-banked corpora feeding
+    the sibling mode-contrast/norms stages, which are NOT lifted (no mode-contrast
+    vector, no norms builder).
     Site norms for a metabasis model live in its banked collection stamp
     (`median_token_resid_norms`), which is a read, not a build.
-  * **HALT, not warn, on a short pair.** The recipe skipped and carried on with
+  * **HALT, not warn, on a short pair.** The original recipe skips and carries on with
     fewer pairs; a vector built from 39 pairs is a different object from one built
     from 40 and is not comparable with the banked builds. `n_pairs_effective == 40`
     is asserted at the end and raises `PairCountError`. `n_topics == 20` is asserted
@@ -89,8 +86,9 @@ BITWISE equal at every site. (`hidden_states` has `n_layers + 1` entries; only
 check exists.)
 
 KNOWN CAVEAT, CARRIED IN THE STAMP: **sharded-generation reproducibility is NOT
-certified.** The prereg §4 sharding gate (PASSED 2026-07-27) compared FORWARD passes
-and found them byte-identical to single-device. This builder GENERATES, and a
+certified.** The sharding certification in the frozen transport-campaign
+pre-registration (docs/planning/) compared FORWARD passes and found them
+byte-identical to single-device. This builder GENERATES, and a
 sampled decode reads the RNG once per step through kernels whose selection can
 depend on placement. The seeding is deterministic and recorded; bitwise equality of
 a sharded generation against a single-device one is not claimed anywhere. Every
@@ -106,7 +104,7 @@ hidden-state-convention proof, the end-to-end 40-pair build, the assertion-fires
 controls) are SKIPPED with a named line when torch/transformers are absent, so a
 CPU-spine sweep gets a clean partial count instead of a traceback.
 
-Node-side runs (one card for the controls; sharded for the 405B):
+GPU runs (one card for the controls; sharded for the 405B):
 
     CUDA_VISIBLE_DEVICES=3 OMP_NUM_THREADS=1 \\
     python -m metabasis.scripts.build_formality_contrast \\
@@ -168,8 +166,7 @@ INFORMAL_SYS = ("You are a super casual assistant. Keep it loose and chatty — 
                 "contractions, and casual asides, like you're texting a friend.")
 
 #: sha256 of each system prompt as it stands in the anamnesis source (verified by
-#: exec-ing that file's constants block, 2026-07-29, rather than by eyeballing the
-#: copy). Pinned so "verbatim" is a CHECK a selftest can fail on — a re-wrapped line
+#: exec-ing that file's constants block rather than by eyeballing the copy). Pinned so "verbatim" is a CHECK a selftest can fail on — a re-wrapped line
 #: or a smart-quote substitution would build a silently different contrast — and
 #: banked in every stamp so a reader can verify the prompts without this file.
 FORMAL_SYS_SHA256 = "988cd7cf46c3b76b1f4ad87ff627775bc018f94b39eb47bca1005538bfed0a40"
@@ -319,9 +316,9 @@ class TopicManifest(BaseModel):
     @field_validator("topics")
     @classmethod
     def _exactly_twenty_distinct(cls, v: tuple[str, ...]) -> tuple[str, ...]:
-        # THE 8-PAIRS-INSTEAD-OF-40 RAKE, as a type constraint. The anamnesis prompt
-        # file's top-level `topics` is a DICT of set names; iterating it yielded 4
-        # keys and built the vector from 8 pairs instead of 40 (caught 2026-07-13).
+        # THE 8-PAIRS-INSTEAD-OF-40 FAILURE, as a type constraint. The anamnesis prompt
+        # file's top-level `topics` is a DICT of set names; iterating it yields 4
+        # keys and builds the vector from 8 pairs instead of 40.
         if len(v) != N_TOPICS_REQUIRED:
             raise ValueError(
                 f"the formality contrast needs exactly {N_TOPICS_REQUIRED} topics, "
@@ -345,11 +342,12 @@ def topic_manifest_candidates(explicit: Optional[Path] = None) -> list[Path]:
     """Where the tracked topic manifest is looked for, in order.
 
     The package-relative probe comes before the cwd one so a run from any directory
-    finds the manifest that ships with the code it is running (the cwd-dependence
-    lesson of selftest 22, commit dcbe7d7). `--topics` always wins.
+    finds the manifest that ships with the code it is running, never one that
+    happens to sit in the working directory (selftest 22 pins this). `--topics`
+    always wins.
     """
     here = Path(__file__).resolve()
-    repo_root = here.parents[2]                    # metabasis/scripts/x.py -> repo root
+    repo_root = here.parents[2]                    # this file -> scripts -> package -> repo root
     out: list[Path] = []
     if explicit is not None:
         out.append(Path(explicit))
@@ -413,7 +411,7 @@ class SamplingResolution(BaseModel):
 
     `metabasis.config.MODEL_PRESETS` carries an explicit warning that some of its
     temperatures are transformers' 1.0 default rather than a checkpoint's native
-    value, and that the desk should pin real temperatures before a GENERATION probe
+    value, and that real temperatures must be pinned before a GENERATION probe
     uses them. This builder IS a generation probe, so the source of the number is
     part of the record, and a key with no preset at all (the 405B) is a refusal
     rather than a guess.
@@ -506,10 +504,10 @@ def resolve_sampling(model_key: str, temperature: Optional[float] = None,
             f"no temperature for {model_key!r}: it has no row in "
             f"metabasis.config.MODEL_PRESETS ({list(preset_keys)}), and this builder "
             "will not guess a sampling temperature — the vector is built FROM the "
-            "samples. Pass --temperature explicitly with a desk-ruled value (the "
+            "samples. Pass --temperature explicitly with a reviewed value (the "
             "roster row's notes record the checkpoint's own generation_config "
-            "temperature; the ruling that promotes prose to a build parameter is "
-            "Luxia's, not this module's).")
+            "temperature; promoting that note to a build parameter is a human "
+            "decision, not this module's).")
 
     if eos_token_ids is not None:
         eos, eos_src = tuple(int(e) for e in eos_token_ids), "explicit --eos-token-ids"
@@ -534,7 +532,7 @@ def resolve_sampling(model_key: str, temperature: Optional[float] = None,
             f"{model_key}: MODEL_PRESETS says torch_dtype={dtype!r}, but "
             "collect_mean_states' loaders (single-card and sharded alike) pin "
             "bfloat16. Building through them would put this vector in a different "
-            "dtype regime than the preset names. Needs a desk ruling, not a cast.")
+            "dtype regime than the preset names. Needs a human decision, not a cast.")
 
     return SamplingResolution(
         model_key=model_key, registries=registries,
@@ -732,7 +730,7 @@ def chat_ids(tok: Any, user: str, system: Optional[str], date_string: str) -> An
             f"this tokenizer's chat template rejected date_string={date_string!r} "
             f"({exc}). The recipe passes it unconditionally; dropping it would change "
             "the token ids and make this vector incomparable with the banked builds "
-            "of its class. HALT — needs a desk ruling, not a fall-back.") from exc
+            "of its class. HALT — needs a human decision, not a fall-back.") from exc
     ids = res if isinstance(res, torch.Tensor) else res["input_ids"]
     if ids.ndim != 2 or ids.shape[0] != 1:
         raise ChatTemplateError(
@@ -964,8 +962,8 @@ def aggregate_site(site: int, diffs: Sequence[np.ndarray]) -> SiteVector:
 
 # ---------------------------------------------------------------- banking
 def _recipe_provenance() -> dict[str, Any]:
-    """The lift's provenance block: source path + line range, the authorizing brief,
-    and the shas of the two system prompts so the contrast is verifiable from the
+    """The lift's provenance block: source path + line range, the authorizing
+    document, and the shas of the two system prompts so the contrast is verifiable from the
     stamp alone."""
     return {"source": RECIPE_SOURCE,
             "authorized_by": RECIPE_BRIEF,
@@ -1127,8 +1125,8 @@ def bank(result: BuildResult, trunk: dict,
             stamp_tmp = stamp_path.with_name(stamp_path.name + tmp_suffix)
             try:
                 # np.savez APPENDS `.npz` to a filename that does not already end in
-                # it — `foo.npz.tmp-123` would become `foo.npz.tmp-123.npz` and the
-                # os.replace below would then fail on a missing file. Handing it an
+                # it — a temp name ending in `.tmp-<pid>` would gain a second suffix
+                # and the os.replace below would then fail on a missing file. Handing it an
                 # open FILE OBJECT writes exactly where we said.
                 with open(vec_tmp, "wb") as fh:
                     np.savez(fh, **{CANONICAL_VECTOR_KEY.format(site=sv.site):
@@ -1844,7 +1842,8 @@ def _selftest_with_model() -> list[tuple[str, bool, str]]:
               "date_string" in str(exc))
 
     # ---- the loaders this builder reuses are the collector's, not forks --------
-    # The certified sharded path (prereg §4, gate PASSED 2026-07-27) certifies the
+    # The certified sharded path (the frozen transport-campaign pre-registration's
+    # sharding certification) certifies the
     # COLLECTOR's loader; a fork of it would certify nothing. `main` reaches these by
     # `from ... import`, so the check that matters is that the names it imports are the
     # collector's objects and that this module defines no same-named shadow.

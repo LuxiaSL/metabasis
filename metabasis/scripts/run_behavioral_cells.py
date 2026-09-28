@@ -1,39 +1,38 @@
-"""The node-side behavioral engine — one load, all cells, batched (BRIEF §2).
+"""The behavioral engine — one model load, all cells, batched.
 
-The generation/injection harness of the behavioral phase. `BRIEF-behavioral-phase-
-2026-07-29.md` (sha `475bc2a8…`) §2 is this module's specification verbatim and §13
-holds the ten rulings that freeze its design choices; §9 is its HALT list, encoded
-here as the named exceptions of `BehavioralHarnessError` rather than as warnings,
-because an enactor never adjudicates a live HALT.
+The generation/injection harness of the behavioral phase. Its design choices are
+frozen, and each one is stated where the code enforces it. Every condition that must
+stop a run is a named subclass of `BehavioralHarnessError` rather than a warning,
+because a live HALT is not something the running code is allowed to adjudicate.
 
-WHAT THIS MODULE IS. §2.1's one-load-per-node job: preflight → norm calibration →
+WHAT THIS MODULE IS. The one-load-per-node column job: preflight → norm calibration →
 canonical-layout determination → all calibration cells → all transported cells →
 battery → entropy probe → in-job replay gate → stamps → manifest, with the model
 loaded exactly once. This file owns the generation/injection/probe/replay mechanics
-and the stamp. The §4 verdict logic lives in `actuation_calibration.py`; the §6
-battery and coherence panel live in `capability_battery.py`; §2's CPU staging is
-`build_behavioral_banks.py` (whose `CellsDocument` is this module's `--run` input) and
-scoring is `score_behavioral_column.py`, which is NOT in this batch — the desk scores
-and this module never self-scores (C§8).
+and the stamp. The actuation-calibration verdict logic lives in
+`actuation_calibration.py`; the capability battery and coherence panel live in
+`capability_battery.py`; CPU staging is `build_behavioral_banks.py` (whose
+`CellsDocument` is this module's `--run` input). Scoring happens outside this module,
+which never scores its own output: every stamp it writes is UNSTAMPED.
 
 THE JOB IS WIRED, AND ITS ORCHESTRATION IS PROVED WITHOUT A GPU. `run_column` is the
-§2.1 job; it is written against the narrow `NodeRuntime` surface so the SAME
-orchestration runs under `HFNodeRuntime` on a node and under a numpy-only stub in
+column job; it is written against the narrow `NodeRuntime` surface so the SAME
+orchestration runs under `HFNodeRuntime` on a GPU and under a numpy-only stub in
 `--selftest`. That is what keeps the fire ORDER (calibration before transported,
-because §4 is a gate), the per-cell §2.8 stamps, the completeness guard and the replay
-gate proven in a configuration with no deep-learning stack — while the torch block
-additionally drives the REAL runtime end to end on a tiny CPU Llama, so the hook, the
-two-forward probe, the in-job norm measurement and the battery-under-injection are
-exercised against a genuine forward rather than described.
+because the actuation verdict is a gate), the per-cell stamps, the completeness guard
+and the replay gate proven in a configuration with no deep-learning stack — while the
+torch block additionally drives the REAL runtime end to end on a tiny CPU Llama, so
+the hook, the two-forward probe, the in-job norm measurement and the
+battery-under-injection are exercised against a genuine forward rather than described.
 
 BASIS-AGNOSTIC AT RUN TIME. `CORPUS_SHA_V21` is this module's DEFAULT expectation and
 nothing more: `run_column` takes `corpus_sha_of_record` as a parameter and the CLI
 defaults it to the cells document's own basis, so re-pointing the harness at another
-corpus/basis is a staging act, never an edit here.
+corpus or basis is a staging act, never an edit here.
 
 THE FOUR PROPERTIES THAT MAKE THE FAST PATH LEGITIMATE, and where each is proved:
 
-  1. **Layout invariance** (§2.2). A cell is 80 generations sharing ONE injection
+  1. **Layout invariance.** A cell is 80 generations sharing ONE injection
      spec, so batching is legitimate — but only if a generation's token sequence is
      a function of the generation, never of the batch it rode in. Both halves of
      that are constructive here: the randomness is per-(cell, gen_id) pre-drawn
@@ -43,32 +42,31 @@ THE FOUR PROPERTIES THAT MAKE THE FAST PATH LEGITIMATE, and where each is proved
      B ∈ {80, 40, 20, 10, 1} on a deterministic stub stepper; CHARACTERIZED (never
      asserted) on a real tiny Llama, because GPU — and, as the selftest measures,
      sometimes CPU — reductions are not batch-size invariant, which is exactly why
-     §2.7 defines replay IN THE CANONICAL LAYOUT.
+     the replay gate compares IN THE CANONICAL LAYOUT.
 
-     TWO KERNELS, ONE STEP (2026-08-01). The per-generation python step is also the
-     harness's hot path, so a VECTORIZED kernel computes the same step for a whole
-     sub-batch at once (`sample_tokens`). `sample_token` remains in the module as the
-     path of reference and the definition of the step; the vectorized kernel may not
-     draw a token at a (batch, vocab) shape until it has been certified BYTE-identical
-     to the reference at that shape, on that machine, in that process
-     (`assert_batched_sampler_identity`). Every subcase whose batched spelling would
-     be a different computation rather than a faster one — greedy, top-k, top-p, any
-     degenerate row — is REFUSED back to the reference rather than approximated.
+     TWO KERNELS, ONE STEP. The per-generation python step is also the harness's hot
+     path, so a VECTORIZED kernel computes the same step for a whole sub-batch at once
+     (`sample_tokens`). `sample_token` is the path of reference and the definition of
+     the step; the vectorized kernel may not draw a token at a (batch, vocab) shape
+     until it has been certified BYTE-identical to the reference at that shape, on
+     that machine, in that process (`assert_batched_sampler_identity`). Every subcase
+     whose batched spelling would be a different computation rather than a faster one
+     — greedy, top-k, top-p, any degenerate row — is REFUSED back to the reference
+     rather than approximated.
 
-  2. **M5-safety by construction** (§2.3, ruling 8). Every generation's uniforms
+  2. **Safe under partial re-runs, by construction.** Every generation's uniforms
      derive from its OWN sha256 digest over
      `{corpus_sha}|{node_key}|{arm}|L{site}|{cell_id}|{gen_id:03d}`, so a partial
-     re-run of any subset of cells keeps every other cell in phase. M5's rake is a
-     single stream that shifted phase when records were filtered (up to .0459 drift
-     on q95s); this column WILL be re-run in parts. `hash()` appears nowhere (M25:
-     PYTHONHASHSEED salts it, and the archived preview's nulls are irreproducible
-     for exactly that reason).
+     re-run of any subset of cells keeps every other cell in phase. A single RNG
+     stream shifts phase when records are filtered (drift up to .0459 on q95s), and
+     a column is routinely re-run in parts. `hash()` appears nowhere: PYTHONHASHSEED
+     salts it, so anything seeded from it is irreproducible across processes.
 
-  3. **α = 0 is bitwise no-hook** (§2.4). The hook short-circuits on `alpha == 0.0`
+  3. **α = 0 is bitwise no-hook.** The hook short-circuits on `alpha == 0.0`
      and returns its args untouched, so the baseline cell with the hook attached is
      the unperturbed forward. Asserted once per node, cheaply, rather than trusted.
 
-  4. **The in-job replay gate** (§2.7). After all cells complete, in the SAME
+  4. **The in-job replay gate.** After all cells complete, in the SAME
      process and the SAME canonical layout, K = 3 cells re-generate — selection
      deterministic from `sha256(node_key|corpus_sha)`, constrained to one signal
      cell at |0.3|, one random-band cell and one calibration cell — and both the
@@ -77,102 +75,97 @@ THE FOUR PROPERTIES THAT MAKE THE FAST PATH LEGITIMATE, and where each is proved
 
 TWO SPEC AMBIGUITIES, RESOLVED EXPLICITLY AND REPORTED (never improvised silently):
 
-  * **§2.6's probe batching.** The probe is specified right-padded with "per-row
-    spans sliced by that row's own `prompt_length`", but the injection hook gates on
-    ABSOLUTE positions with one `[seq_len]` mask per forward (`hooks.py` L181), so a
-    right-padded batch of rows with DIFFERENT prompt lengths has no single valid
-    mask — the steered probe would inject over prompt positions of the shorter rows.
-    Resolution of necessity: probe batches group rows of EQUAL `prompt_length`
-    (deterministic — ascending length, gen_id order within a length), which
-    satisfies every literal §2.6 requirement and adds only the grouping. The
-    realized grouping is recorded in the cell record and the stamp
-    (`probe_grouping`), and `PROBE_GROUPING_READING` names it as a desk-owed
-    reading rather than a frozen one. The named alternative — extending `hooks.py`
-    to accept a per-row `[batch, seq]` mask — is a change to a frozen surface and
-    is deliberately NOT taken here.
-  * **§2.6's batch-1-vs-batch-32 sentence** both "asserts ... bit-exactness" and
-    says the delta is "instrumentation and cannot fail the gate" (M19). M19 wins:
-    `characterize_probe_batch_invariance` is descriptive-only and returns a record,
-    and only the §2.7 replay gate — same layout, same process — can HALT.
+  * **The probe's batching.** The probe is specified right-padded with "per-row
+    spans sliced by that row's own `prompt_length`", but the residual-write hook in
+    `metabasis.extraction.hooks` gates on ABSOLUTE positions with one `[seq_len]`
+    mask per forward, so a right-padded batch of rows with DIFFERENT prompt lengths
+    has no single valid mask — the steered probe would inject over prompt positions
+    of the shorter rows. Resolution of necessity: probe batches group rows of EQUAL
+    `prompt_length` (deterministic — ascending length, gen_id order within a length),
+    which satisfies every literal requirement of the probe spec and adds only the
+    grouping. The realized grouping is recorded in the cell record and the stamp
+    (`probe_grouping`), and `PROBE_GROUPING_READING` names it as a reading made here,
+    open to review, rather than a frozen one. The named alternative — extending the
+    hook to accept a per-row `[batch, seq]` mask — is a change to a frozen surface
+    and is deliberately NOT taken here.
+  * **The batch-1-vs-batch-32 sentence** of the probe spec both "asserts ...
+    bit-exactness" and says the delta is "instrumentation and cannot fail the gate".
+    Instrumentation wins: `characterize_probe_batch_invariance` is descriptive-only
+    and returns a record, and only the replay gate — same layout, same process — can
+    HALT.
 
 CPU self-test (no weights, no GPU, no data tree):
 
     python -m metabasis.scripts.run_behavioral_cells --selftest
 
-RAKE M44 — THE CONFIGURATION MATRIX IS THE MERGE BAR. This selftest is verified in
-all four cells of {torch, no torch} x {data tree, no data tree} and every cell
-must exit 0 with either real passes or NAMED skips. Two environments differ in ways
-a single run cannot see: the repo `.venv` has NO torch (numpy/pydantic/scipy only)
-while `/usr/bin/python` has torch + transformers, and the data tree is gitignored so
-a fresh worktree has none. A bare `import torch` at a point of use passes in one
-environment and CRASHES in another, and a crash is indistinguishable from a failure
-while saying less. Every torch-dependent BLOCK here therefore branches on one
-availability probe and degrades to a named skip, counted in the tail so coverage is
-reported per configuration rather than inferred.
+THE CONFIGURATION MATRIX IS THE MERGE BAR. This selftest is verified in all four cells
+of {torch, no torch} x {data tree, no data tree} and every cell must exit 0 with either
+real passes or NAMED skips. Two environments differ in ways a single run cannot see: the
+repo `.venv` has NO torch (numpy/pydantic/scipy only) while a GPU environment has torch
++ transformers, and the data tree is gitignored so a fresh worktree has none. A bare
+`import torch` at a point of use passes in one environment and CRASHES in another, and
+a crash is indistinguishable from a failure while saying less. Every torch-dependent
+BLOCK here therefore branches on one availability probe and degrades to a named skip,
+counted in the tail so coverage is reported per configuration rather than inferred.
 
-Node-side run (§2.1; Heimdall CLI only, the HTTP API is read-only verification):
+GPU run (one card, one model load):
 
     OMP_NUM_THREADS=1 CUDA_VISIBLE_DEVICES=3 \
     python -m metabasis.scripts.run_behavioral_cells --run \
         --node-key qwen2.5-3b-instruct --model-path <LOCAL_WEIGHTS_DIR> \
-        --arm-root <ARM_ROOT> --work-root <NODE_DATA_ROOT>/metabasis-behavioral/<node> \
+        --arm-root <ARM_ROOT> --work-root <DATA_ROOT>/metabasis-behavioral/<node> \
         --cells-json <STAGED_CELLS>.json --prompt-pool <POOL>.json --arm native \
-        --actuation-calibration <VERDICT>.json    # §4.2, see below
+        --actuation-calibration <VERDICT>.json    # see below
 
-§4.2'S VERDICT ON THE STAMP (2026-08-05, Luxia's ruling ①). §4.2 closes by requiring
-every §5 cell to NAME its site's actuation calibration by job id + verdict + the three
-criterion values. `run_column` has always accepted that block as the
-`actuation_calibration_stamp` kwarg, but nothing on the CLI could fill it, so a
-CLI-fired column stamped OWED — TRUE while no verdict existed (batch A/B), a FALSE
-provenance statement the moment the desk filed one. `--actuation-calibration` takes
-the desk's typed verdict document, refuses it if it names another (node, site, arm)
-or is not a §4.2 document at all, and transcribes it. WITHOUT the flag nothing about
-this module changes: the OWED default and its honest note stand, byte for byte. The
-verdict is never derived here — the desk scores, this module transcribes (C§8).
+THE ACTUATION VERDICT ON THE STAMP. Every transported cell must NAME its site's
+actuation calibration by job id + verdict + the three criterion values.
+`run_column` accepts that block as the `actuation_calibration_stamp` kwarg, and
+`--actuation-calibration` fills it from the CLI: it takes the typed verdict document,
+refuses it if it names another (node, site, arm) or is not an actuation-verdict
+document at all, and transcribes it. WITHOUT the flag the stamp says the verdict is
+OWED, with a note saying so — true while no verdict exists, and never a false
+provenance statement. The verdict is never derived here: it is scored elsewhere and
+this module transcribes it.
 
-THE MAPPING MODE (2026-08-08, Luxia's ratification of the desk's proposal on
-`PRESTATEMENT-moe-dose-window-mixtral-2026-08-08.md`). A dose-WINDOW mapping is not a
-science read: it asks where a model's response window ends, at doses the frozen ladder
-does not carry. `DOSE_LADDER` is untouched — every science cell validates against it
-exactly as before — and the mapping doses arrive instead on a SPEC DOCUMENT, admitted
-only when BOTH an explicit spec file AND the explicit `--mapping-mode` flag are given.
-Absent either, this module's behavior is unchanged in every byte.
+THE MAPPING MODE. A dose-WINDOW mapping is not a science read: it asks where a model's
+response window ends, at doses the frozen ladder does not carry. `DOSE_LADDER` is
+untouched — every science cell validates against it — and the mapping doses arrive
+instead on a SPEC DOCUMENT, admitted only when BOTH an explicit spec file AND the
+explicit `--mapping-mode` flag are given. Absent either, the mapping machinery is inert.
 
   * Mapping cells wear `kind="mapping"` and carry the spec's `MappingAuthorization`
     (its id, its sha256, its dose tuple). A science cell carrying one is refused; a
     mapping cell without one is refused; a mapping cell whose dose is ON the frozen
     ladder is refused. That last refusal is the load-bearing one: mapping doses are
     provably DISJOINT from `DOSE_LADDER`, so a mapping cell's rise cannot occupy a
-    dose any §4.2 arithmetic reads, and `actuation_calibration` refuses an off-ladder
-    dose key besides.
+    dose any actuation-verdict arithmetic reads, and `actuation_calibration` refuses
+    an off-ladder dose key besides.
   * A mapping column is PURE (`assert_mapping_column`): mapping cells never share a
-    column with science cells, so a §4.2-scorable column holds zero mapping cells by
-    construction rather than by care. §2.7's gate still fires, under a third role
-    mapping (`MAPPING_ONLY_ROLE_READING`) built exactly as B-1 built the second.
+    column with science cells, so a scorable column holds zero mapping cells by
+    construction rather than by care. The replay gate still fires, under a third role
+    mapping (`MAPPING_ONLY_ROLE_READING`) built on the same principle as the
+    calibration-only mapping (`CALIBRATION_ONLY_ROLE_READING`).
   * A mapping cell LICENSES NOTHING and says so on its own stamp
     (`mapping_mode.licenses_nothing`), and its `actuation_calibration` block is
     replaced by a NON-VERDICT — any verdict handed to the run rides beside, quoted,
     where nothing can read it as this cell's license.
 
-THE AMENDED LADDER (2026-08-09, re-freeze #2 — Luxia's close-out ruling "Push for
-re-cal this program", on the ratified `LADDER-SPEC-*.json`). Where the mapping mode
-measures a window BESIDE the science, this mechanism RE-CALIBRATES the science itself:
-once a node's window has been mapped and a ladder ratified for it, that node's science
-column runs the ratified ladder instead of the frozen one. The encumbrance ruling is
-what shapes it — POLICY LIVES IN DOCUMENTS, NOT IN ENGINE CONSTANTS — so this module
+THE AMENDED LADDER. Where the mapping mode measures a window BESIDE the science, this
+mechanism RE-CALIBRATES the science itself: once a node's window has been mapped and a
+ladder approved for it in a ladder spec, that node's science column runs that ladder
+instead of the frozen one. POLICY LIVES IN DOCUMENTS, NOT IN ENGINE CONSTANTS — so this module
 carries no per-node ladder, only the machinery to validate a document and record it.
 
-  * The two keys again, by the mapping mode's pattern: `--ladder-spec PATH` (the
-    CONTENT — schema `behavioral-ladder-spec/1`, naming this run's node and site) and
+  * Two keys, by the mapping mode's pattern: `--ladder-spec PATH` (the CONTENT —
+    schema `behavioral-ladder-spec/1`, naming this run's node and site) and
     `--amended-ladder` (the AUTHORIZATION — this operator, this invocation, meant it).
-    Either alone is refused by name. ABSENT BOTH, this module is byte-for-byte what it
-    was: `DOSE_LADDER` is untouched and remains every node's default.
+    Either alone is refused by name. ABSENT BOTH, `DOSE_LADDER` is every node's ladder.
   * WHOLE-COLUMN REPLACEMENT. An amended ladder replaces the ladder for the entire
     science column at that (node, site) — every arm, every lever, every band; the α=0
     baseline is unchanged because α=0 is α=0 under any ladder. Science cells carry the
     spec's `LadderAuthorization` and are validated against THE LADDER IN FORCE; a
     column mixing spec-ladder and frozen-ladder science cells is REFUSED, because a
-    half-amended column is a column whose §4.2 arithmetic has two denominators.
+    half-amended column is a column whose verdict arithmetic has two denominators.
   * UNLIKE the mapping mode, amended doses MAY coincide with frozen ones. Replacement
     is the contract, not disjointness: a re-calibrated ladder that keeps ±0.03 and
     ±0.10 and moves only its extremes is the ordinary case, and a disjointness law here
@@ -181,37 +174,33 @@ carries no per-node ladder, only the machinery to validate a document and record
     it (`amended_ladder`), and `dose_ladder` states the ladder actually run — so an
     amended-ladder column can never present as a frozen-ladder one, and the
     comparability rider (never pooled without the ladder quoted) has something to read.
-  * §4.2 STAYS DESK-SIDE. This module runs and records; it never scores. The amendment
-    reaches engine machinery in exactly TWO places, and nowhere else: §2.7's signal
-    role, which reads "the extreme dose" — of the ladder in force,
-    `AMENDED_LADDER_SIGNAL_ROLE_READING` — and the verdict document's ladder pair
-    below (re-freeze #3).
+  * THE VERDICT IS SCORED ELSEWHERE. This module runs and records; it never scores.
+    The amendment reaches engine machinery in exactly TWO places, and nowhere else: the
+    replay gate's signal role, which reads "the extreme dose" — of the ladder in force,
+    `AMENDED_LADDER_SIGNAL_ROLE_READING` — and the verdict document's ladder pair below.
 
-THE LADDER IN FORCE REACHES THE §4.2 VERDICT DOCUMENT (re-freeze #3, 2026-08-13; Luxia's
-ruling "we need more flexibility here and to rely on documentation around it to proof and
-replicate"). `ActuationCalibrationVerdict` gained an optional `dose_ladder` /
-`scoring_doses` pair, and `stamp_block` emits the document's values when it states them.
+THE LADDER IN FORCE REACHES THE ACTUATION VERDICT DOCUMENT. `ActuationCalibrationVerdict`
+carries an optional `dose_ladder` / `scoring_doses` pair, and `stamp_block` emits the
+document's values when it states them.
 
-  * WHY IT HAD TO MOVE. Those two stamp keys were module constants, so every §5 cell
-    naming an amended column's calibration would have stamped `±0.3` for a column that
-    ran `±0.15` — the false-provenance failure the `--actuation-calibration` flag was
-    ruled into existence to prevent. The desk could not fix it from its side: the
-    document model is `extra="forbid"`, so the desk could not add the fields, and the
-    scorer cannot reach a module constant. It was the last place the amendment did not
-    propagate.
-  * POLICY STILL LIVES IN DOCUMENTS. This module still carries no per-node ladder. It
-    validates a pair and records it; which ladder is right for a node is the ladder
-    spec's ruling and Luxia's, never this file's.
+  * WHY THE DOCUMENT CARRIES IT. If those two stamp keys were module constants, every
+    transported cell naming an amended column's calibration would stamp `±0.3` for a
+    column that ran `±0.15` — the false-provenance failure the `--actuation-calibration`
+    flag exists to prevent. The document model is `extra="forbid"`, and a scorer cannot
+    reach a module constant, so the document is the only place the pair can live.
+  * POLICY STILL LIVES IN DOCUMENTS. This module carries no per-node ladder. It
+    validates a pair and records it; which ladder is right for a node is decided in
+    the ladder spec, never in this file.
   * ABSENT THE PAIR, BYTE-IDENTICAL. The fallback is the frozen constants, and no key
     marks which branch produced them — a frozen ladder stated and a frozen ladder
-    defaulted are the same claim. Every document filed before this field existed stamps
-    exactly as it did.
+    defaulted are the same claim. A document that omits the pair stamps exactly as the
+    frozen constants dictate.
   * BOTH OR NEITHER, AND THE PAIR IS `(min, max)`. Not ±magnitude: an asymmetric
-    ratified ladder must read correctly, and every symmetric one is unchanged by the
-    choice. The same reading the ladder spec's `gate_reading_rule` ratifies.
+    ladder spec must read correctly, and every symmetric one is unchanged by the
+    choice. The same reading the ladder spec's `gate_reading_rule` states.
 
-    python -m metabasis.scripts.run_behavioral_cells --preflight ...   # M10: a
-        first-class exit-early mode, never output truncation.
+    python -m metabasis.scripts.run_behavioral_cells --preflight ...   # a first-class
+        exit-early mode, never output truncation.
 """
 from __future__ import annotations
 
@@ -242,32 +231,30 @@ BRIEF_OF_RECORD = "BRIEF-behavioral-phase-2026-07-29.md"
 BRIEF_SHA256 = "475bc2a8ce767f70890837129644917f17094734b70bb510524be4aa0ecdcea4"
 
 # ---------------------------------------------------------------- frozen constants
-#: §2.5 / §11: the signed dose ladder is FROZEN. No extension, no interpolation, no
-#: per-node tuning. The α=0 baseline is a separate cell and is deliberately NOT a
-#: member of the ladder, so `len(DOSE_LADDER) == 6` is the ladder's own arity
-#: everywhere (the §4.2 "4/6 doses" criterion counts against exactly this tuple).
+#: The signed dose ladder is FROZEN. No extension, no interpolation, no per-node
+#: tuning. The α=0 baseline is a separate cell and is deliberately NOT a member of
+#: the ladder, so `len(DOSE_LADDER) == 6` is the ladder's own arity everywhere (the
+#: actuation verdict's "4/6 doses" criterion counts against exactly this tuple).
 #:
-#: DATED AMENDMENT (2026-08-09, re-freeze #2 — Luxia's close-out ruling, on the
-#: ratified `LADDER-SPEC-*.json`). The rule above is now stated at the layer it was
-#: always about: NO LADDER WITHOUT A RATIFIED DOCUMENT. "No per-node tuning" never
-#: meant that a model whose response window was measured to end at |0.15| must be
-#: dosed at |0.3| forever; it meant that no ladder may be chosen at the console, in a
+#: The rule is NO LADDER WITHOUT AN APPROVED DOCUMENT. "No per-node tuning" does not
+#: mean that a model whose response window was measured to end at |0.15| must be
+#: dosed at |0.3| forever; it means that no ladder may be chosen at the console, in a
 #: staging script, or by an engine constant edited between runs. A per-node ladder is
-#: admissible ONLY as `LadderSpec` — a desk document that names the node and site it
-#: amends, carries its ratification lineage, and becomes an authorization through its
-#: own sha256. This tuple is the DEFAULT and the fallback: it is untouched, it remains
-#: the ladder for every node with no ratified amendment, and a run given no document
-#: validates against it exactly as before. See `AMENDED_LADDER_NOTE`.
+#: admissible ONLY as `LadderSpec` — a document that names the node and site it
+#: amends, carries its approval lineage, and becomes an authorization through its
+#: own sha256. This tuple is the DEFAULT and the fallback: it remains the ladder for
+#: every node with no approved amendment, and a run given no document validates
+#: against it. See `AMENDED_LADDER_NOTE`.
 DOSE_LADDER: tuple[float, ...] = (-0.3, -0.1, -0.03, 0.03, 0.1, 0.3)
 BASELINE_DOSE = 0.0
-#: THE MAPPING MODE (Luxia's ratification, 2026-08-08). The one kind of cell whose dose
+#: THE MAPPING MODE. The one kind of cell whose dose
 #: does NOT come from `DOSE_LADDER`, admitted only through a spec document plus an
 #: explicit flag, and never able to license anything. See the module docstring.
 MAPPING_CELL_KIND = "mapping"
-#: Both are required. The spec is the CONTENT (which doses, whose ratification); the
+#: Both are required. The spec is the CONTENT (which doses, who approved them); the
 #: flag is the AUTHORIZATION (this operator, this invocation, meant it). Either alone
-#: leaves the engine byte-for-byte what it was — which is the property the re-freeze
-#: was ratified on, so the two are named as constants and quoted in every refusal.
+#: leaves the mapping machinery inert — the property the mode depends on, so the two
+#: are named as constants and quoted in every refusal.
 MAPPING_SPEC_FLAG = "--mapping-spec"
 MAPPING_MODE_FLAG = "--mapping-mode"
 MAPPING_SPEC_SCHEMA_VERSION = "behavioral-mapping-spec/1"
@@ -283,20 +270,22 @@ MAPPING_LICENSES_NOTHING = (
     "key. Ratified by Luxia 2026-08-08 as a dated, spec-scoped engine deviation "
     "(PRESTATEMENT-moe-dose-window-mixtral-2026-08-08.md, dated addendum); never a "
     "silent replacement for the ladder and never retroactive.")
-#: The mapping mode's own §2.7 role mapping is an ENACTOR READING, recorded here the
-#: way B-1's was so the desk can rule differently without hunting for the assumption.
+#: The mapping mode's own replay-gate role mapping is a reading made here, not a
+#: frozen rule, recorded the way `CALIBRATION_ONLY_ROLE_READING` is so a reviewer can
+#: overrule it without hunting for the assumption.
 #: A pure mapping column has no cell at |0.3| and no `calibration`-kind cell, so the
 #: two existing mappings cannot constitute the blocking gate and the column would HALT
 #: on `ExpectedNShortfall` after burning its whole budget. The roles map to the
-#: mapping column's OWN work-types on the same principle B-1 used: signal role = the
+#: mapping column's OWN work-types on the same principle as the calibration-only
+#: mapping: signal role = the
 #: mapping lever at the LARGEST mapped magnitude (the analogue of |0.3| — the edge the
 #: run exists to find) · band role = the column's own Rband · calibration role = the
 #: mapping lever at a SMALLER non-zero magnitude. Deterministic selection, bitwise
 #: replay and the blocking HALT are unchanged; K == 3 and `REPLAY_GATE_STRATA` are
 #: untouched; a science column can never reach this mapping (it has no mapping cell).
 #: The named alternative — leave the gate unfillable, so a mapping column cannot run
-#: at all — was NOT taken, because the ratified contract requires the mapping run to
-#: fire and an unrunnable mode is not a mode. DESK-OWED READING.
+#: at all — was NOT taken, because the mapping mode's contract requires the mapping
+#: run to fire and an unrunnable mode is not a mode. OPEN TO REVIEW.
 MAPPING_ONLY_ROLE_READING = (
     "enactor reading (delegated re-freeze, 2026-08-08), DESK-OWED: on a pure MAPPING "
     "column the three frozen §2.7 roles map to the column's own work-types — signal "
@@ -305,17 +294,17 @@ MAPPING_ONLY_ROLE_READING = (
     "Deterministic selection, bitwise replay and the blocking HALT are unchanged, and "
     "a column that cannot fill a mapped role still raises ExpectedNShortfall — "
     "incomplete, not exempt. A science column never reaches this mapping.")
-#: THE AMENDED LADDER (re-freeze #2, 2026-08-09). The same two-key shape as the
-#: mapping mode, and named as constants for the same reason: either flag alone leaves
-#: the engine byte-for-byte what it was, and both are quoted in every refusal.
+#: THE AMENDED LADDER. The same two-key shape as the mapping mode, and named as
+#: constants for the same reason: either flag alone leaves the amendment machinery
+#: inert, and both are quoted in every refusal.
 LADDER_SPEC_FLAG = "--ladder-spec"
 AMENDED_LADDER_FLAG = "--amended-ladder"
 LADDER_SPEC_SCHEMA_VERSION = "behavioral-ladder-spec/1"
 #: What an amended ladder IS, written onto every amended cell's stamp so a reader
 #: holding one cell's stamp and nothing else knows which ladder produced the number in
 #: front of them. Deliberately free of any node, any dose and any window: the doses are
-#: the DOCUMENT's, and an engine constant that named them would be the encumbrance the
-#: re-freeze was commissioned to remove.
+#: the DOCUMENT's, and an engine constant that named them would put ladder policy
+#: back into the engine.
 AMENDED_LADDER_NOTE = (
     "AMENDED LADDER — this cell ran a RE-CALIBRATED dose ladder, not the frozen one. "
     "The ladder in force is named beside the frozen ladder on this stamp, and the "
@@ -326,20 +315,22 @@ AMENDED_LADDER_NOTE = (
     "from an amended-ladder column never pool with frozen-ladder rows in a cross-node "
     "table without this ladder quoted beside them. Ratified per document (re-freeze "
     "#2, Luxia 2026-08-09); never a silent re-calibration and never retroactive.")
-#: §2.7's signal role under an amended ladder — an ENACTOR READING, recorded the way
-#: B-1's and the mapping mode's were so the desk can rule differently without hunting
-#: for the assumption. The frozen role mapping reads the signal role at |0.3| because
+#: The replay gate's signal role under an amended ladder — a reading made here, not a
+#: frozen rule, recorded the way the calibration-only and mapping-only readings are so
+#: a reviewer can overrule it without hunting for the assumption. The frozen role
+#: mapping reads the signal role at |0.3| because
 #: |0.3| is the frozen ladder's EXTREME, and a column re-calibrated to a narrower
 #: window has no cell there at all: read literally, an amended column would burn its
 #: whole budget and then HALT on `ExpectedNShortfall`, which is not a re-calibration
 #: mechanism. So "the extreme dose" is read on THE LADDER IN FORCE — which is the same
-#: generalization the ratified spec makes for §4.2(b) in its own `gate_reading_rule`,
+#: generalization the ladder spec makes for the actuation verdict's |0.3|-dose
+#: criterion in its own `gate_reading_rule`,
 #: applied at the one place it touches engine machinery. `REPLAY_GATE_STRATA`, K == 3,
 #: the deterministic selection, the bitwise comparison and the blocking HALT are all
 #: untouched; a frozen-ladder column's extreme IS |0.3|, so its selection, strata and
 #: digest are byte-identical. The named alternative — leave the signal role pinned to
 #: the literal 0.3, so an amended column cannot run — was NOT taken, because a ladder
-#: the engine refuses to run is not a ratified ladder. DESK-OWED READING.
+#: the engine refuses to run is not an approved ladder. OPEN TO REVIEW.
 AMENDED_LADDER_SIGNAL_ROLE_READING = (
     "enactor reading (re-freeze #2, 2026-08-09), DESK-OWED: on a column running a "
     "ratified AMENDED ladder, §2.7's signal role reads 'the extreme dose' on THE "
@@ -349,46 +340,48 @@ AMENDED_LADDER_SIGNAL_ROLE_READING = (
     "unchanged, and a column that cannot fill the role still raises ExpectedNShortfall "
     "— incomplete, not exempt. A frozen-ladder column's extreme is |0.3|, so nothing "
     "about its gate moves.")
-#: §4.2(a)/§5.5 read the ordering across the full SIGNED ladder, sign flipping
-#: through zero; §4.2(b)'s "both |0.3| doses" are these two.
+#: The actuation verdict's ordering criterion and the transported-cell readout read
+#: the ordering across the full SIGNED ladder, sign flipping through zero; the verdict's
+#: "both |0.3| doses" criterion reads these two.
 SCORING_DOSES: tuple[float, ...] = (-0.3, 0.3)
-#: §2.2: the fixed batch-size ladder. Preflight takes the LARGEST that fits with
+#: The fixed batch-size ladder. Preflight takes the LARGEST that fits with
 #: ≥15% VRAM headroom; B is then frozen in the node's stamp before any cell fires.
 BATCH_LADDER: tuple[int, ...] = (80, 40, 20, 10)
 VRAM_HEADROOM_FRACTION = 0.15
-#: §5.1: n stays 80/cell and max_new_tokens stays 512 (§11: no deviation).
+#: n stays 80/cell and max_new_tokens stays 512, with no deviation, so every cell's
+#: rise is measured over the same sample size and the same generation length.
 N_PER_CELL = 80
 MAX_NEW_TOKENS = 512
-#: §2.6's measured probe anchor (43.0 → 290.9 seq/s at len 273). The probe's realized
+#: The probe's measured throughput anchor (43.0 → 290.9 seq/s at len 273). The probe's realized
 #: batch size is min(this, the size of the equal-prompt-length group) — see
 #: `PROBE_GROUPING_READING`.
 PROBE_BATCH_SIZE = 32
-#: §2.3: the banked cell-id formatting, verbatim (precedent
+#: The banked cell-id formatting, verbatim (precedent
 #: `build_injection_banks.py`, parsed by `score_entropy_writes.parse_cell`).
 CELL_ID_TEMPLATE = "{vector_key}_L{site}_a{frac:+.2f}"
-#: §2.3: the seed-material template. Its own digest rides every stamp, so a stamp
+#: The seed-material template. Its own digest rides every stamp, so a stamp
 #: names the recipe it was produced under and a changed recipe cannot pass silently.
 SEED_MATERIAL_TEMPLATE = "{corpus_sha}|{node_key}|{arm}|L{site}|{cell_id}|{gen_id:03d}"
 SEED_MATERIAL_TEMPLATE_DIGEST = hashlib.sha256(
     SEED_MATERIAL_TEMPLATE.encode()).hexdigest()
-#: §2.7: K cells re-generate under the in-job gate, one from each required stratum.
+#: K cells re-generate under the in-job replay gate, one from each required stratum.
 REPLAY_GATE_K = 3
-#: §2.5 / §9 item 8: measured vs banked per-token median residual norm.
+#: HALT threshold (`ResidualNormDeltaError`): measured vs banked per-token median residual norm.
 NORM_DELTA_HALT_FRACTION = 0.10
-#: §2.5: the fixed sample the in-job norm measurement runs over.
+#: The fixed sample the in-job norm measurement runs over.
 NORM_SAMPLE_SIZE = 64
-#: §9 item 12 / Addendum B: GPT-2's learned absolute positions are a hard ceiling.
+#: GPT-2's learned absolute positions are a hard ceiling (`PositionCeilingExceeded`).
 GPT2_POSITION_CEILING = 1024
-#: ruling 10: the banked stage-0 pool, 20 topics × 4 strata × 1 seed.
+#: The banked stage-0 prompt pool is the pool of record: 20 topics × 4 strata × 1 seed.
 PROMPT_POOL_TOPICS = 20
 PROMPT_POOL_STRATA = 4
 PROMPT_POOL_SIZE = PROMPT_POOL_TOPICS * PROMPT_POOL_STRATA
-#: corpus of record (Addendum G1). Resolved from `read_composed_predictions` so the
-#: campaign holds ONE literal; the brief records only the `5ae355bc…` prefix.
+#: Corpus of record. The full digest is written here once and resolved from
+#: `read_composed_predictions`, so the campaign holds ONE literal.
 CORPUS_SHA_V21 = (
     "5ae355bc5d130f8e9c3ae426f5e71bf2b6e99c74b95369a874bec2abcd59b5d9")
-#: ruling 3, verbatim — written into every stamp so no behavioral row carries an
-#: unadjudicated §7 clause obligation.
+#: The envelope reading of record, verbatim — written into every stamp so no
+#: behavioral row carries an unresolved envelope obligation.
 ENVELOPE_RULING_OF_RECORD = (
     "envelope hygiene at behavioral grain (ruling 3, Luxia 2026-07-29): the §7 "
     "≥100-fresh-randoms envelope is satisfied at the COSINE/alignment read that "
@@ -397,8 +390,8 @@ ENVELOPE_RULING_OF_RECORD = (
     "BEHAVIORAL band is 3 transported members per the banked precedent. Ruled "
     "explicitly and recorded: this is the clause's reading of record, NOT a weakened "
     "clause.")
-#: §2.6's resolution of necessity — see the module docstring. Named so the desk can
-#: rule differently without hunting for the assumption.
+#: The probe-batching resolution of necessity — see the module docstring. Named so a
+#: reviewer can overrule it without hunting for the assumption.
 PROBE_GROUPING_READING = (
     "probe batches group rows of EQUAL prompt_length (ascending length, gen_id order "
     "within a length), because the injection hook gates on ABSOLUTE positions with "
@@ -408,27 +401,27 @@ PROBE_GROUPING_READING = (
     "prompt_length, padding never in a mean) and adds only the grouping. DESK-OWED "
     "READING, recorded in every stamp; the named alternative (a per-row [batch, seq] "
     "mask in hooks.py) is a change to a frozen surface and was not taken.")
-#: §11 / C§8: nothing behavioral is stamped.
+#: Nothing behavioral is stamped by this module: it never scores its own output.
 GRADE_LINE = "UNSTAMPED (C§8)"
-#: M10: a scheduler job carries a card index; a rogue carries the sentinel. The
-#: field that caught the rogue run, so it is never allowed to be absent (§9 item 9).
+#: A scheduled job carries a card index; a job launched outside the scheduler carries
+#: the sentinel. That field is how such a run is caught, so it is never allowed to be
+#: absent (`StampIncompleteError`).
 CVD_UNSET_SENTINEL = "(unset)"
 
 CellKind = Literal["baseline", "calibration", "calibration_band", "transported",
                    "transported_band", "naive", "bridge", "judged", "mapping"]
-#: The kinds that are SCIENCE — everything a §4.2 verdict, a §5 row or a stamp that
+#: The kinds that are SCIENCE — everything an actuation verdict, a transported row or a stamp that
 #: licenses anything may be built from. `mapping` is the complement, and the two are
 #: written as one partition so a kind added later must choose a side explicitly.
 SCIENCE_CELL_KINDS: tuple[str, ...] = ("baseline", "calibration", "calibration_band",
                                        "transported", "transported_band", "naive",
                                        "bridge", "judged")
 
-#: The band families that ARE the null of record — the two §4.1 keeps distinct, and the
+#: The band families that ARE the null of record — the two the actuation calibration keeps distinct, and the
 #: only two any gate population may contain.
 GATE_BAND_FAMILIES: tuple[str, ...] = ("Rband", "gRband")
-#: The BESIDE families (Luxia's B4 ruling, 2026-08-04, on the staging wave's blocker B4):
-#: a Σ-shaped band is a STRICTER null quoted BESIDE the null of record, on the two
-#: DESIGNATED cell tuples only (pre-statement §2 / open word O-2). Widening
+#: The BESIDE families: a Σ-shaped band is a STRICTER null quoted BESIDE the null of
+#: record, on the two DESIGNATED cell tuples only. Widening
 #: `CellSpec.band_family` to admit it is the whole of that authorization — it does NOT
 #: make a Σ cell a gate input. Every gate population in this file filters on
 #: `GATE_BAND_FAMILIES` rather than on `is_null`, precisely so "never the null of
@@ -437,33 +430,31 @@ GATE_BAND_FAMILIES: tuple[str, ...] = ("Rband", "gRband")
 BESIDE_BAND_FAMILIES: tuple[str, ...] = ("SigmaBand",)
 BAND_FAMILIES: tuple[str, ...] = GATE_BAND_FAMILIES + BESIDE_BAND_FAMILIES
 
-#: The strata the §2.7 gate must cover, in order. Each contributes exactly one cell,
+#: The strata the replay gate must cover, in order. Each contributes exactly one cell,
 #: so K == 3 is not a tunable but the arity of this tuple.
 REPLAY_GATE_STRATA: tuple[str, ...] = ("signal_at_0.3", "random_band", "calibration")
 
-#: B-1, RULED (Luxia, 2026-08-05 ~03:00, session 12), quoted verbatim from the ledger
-#: row: "**B-1 = the DESK READING RULED**: for a column with no transported cells the
-#: §2.7 replay strata map to the column's own work-types — signal role = native EGV at
-#: |0.3| · band role = the node's own Rband · calibration role = a small-dose cell;
-#: dated interpretation, quoted in the gate code + a pre-statement addendum; the gate's
-#: intent (one of each work-type, deterministic selection, bitwise replay) is
-#: preserved."
+#: The calibration-only role mapping: for a column with no transported cells the
+#: replay strata map to the column's own work-types — signal role = native EGV at
+#: |0.3| · band role = the node's own Rband · calibration role = a small-dose cell.
+#: The gate's intent (one of each work-type, deterministic selection, bitwise replay)
+#: is preserved.
 #:
-#: What the ruling is NOT: a second gate, a second stratum set, or a weaker gate.
+#: What the mapping is NOT: a second gate, a second stratum set, or a weaker gate.
 #: `REPLAY_GATE_STRATA` and K == 3 are untouched, so a calibration-only column's gate
 #: record has exactly the same shape and the same blocking force as a transported
 #: column's; only WHICH cells fill the three roles changes, and only on a column that
 #: has no transported cells at all. A column that cannot fill a mapped role still
-#: raises `ExpectedNShortfall` — "incomplete, not exempt" is unchanged.
+#: raises `ExpectedNShortfall` — incomplete, not exempt.
 REPLAY_ROLE_MAPPING_OF_RECORD = "of_record"
 REPLAY_ROLE_MAPPING_CALIBRATION_ONLY = "calibration_only"
-#: The mapping mode's third mapping (2026-08-08). See `MAPPING_ONLY_ROLE_READING` for
-#: what it maps and why it is an enactor reading rather than a ruling.
+#: The mapping mode's third mapping. See `MAPPING_ONLY_ROLE_READING` for what it maps
+#: and why it is a reading made here rather than a frozen rule.
 REPLAY_ROLE_MAPPING_MAPPING_ONLY = "mapping_only"
 #: The dose magnitude the |0.3| signal role reads at (`SCORING_DOSES` as a magnitude).
 SCORING_DOSE_MAGNITUDE = 0.3
-#: The enactor's reading of "a small-dose cell", recorded so the desk can rule
-#: differently without hunting for the assumption: the calibration ROLE is filled by a
+#: The reading of "a small-dose cell" made here, recorded so a reviewer can overrule
+#: it without hunting for the assumption: the calibration ROLE is filled by a
 #: native-lever cell at a NON-SCORING, non-zero dose — |0.03| or |0.10| on the frozen
 #: ladder. The named alternative (the ladder's SMALLEST magnitude, |0.03|, only) is
 #: narrower and was NOT taken, because the role's job is "the lever below the scoring
@@ -476,42 +467,38 @@ CALIBRATION_ONLY_ROLE_READING = (
     "role = a small-dose native-lever cell (non-scoring, non-zero: |0.03| or |0.10| "
     "on the frozen ladder). Deterministic selection, bitwise replay and the blocking "
     "HALT are unchanged; a transported column never reaches this mapping.")
-#: The kinds whose presence makes a column "transported" for B-1's trigger. `naive`
-#: is in the set BY CONSTRUCTION: a naive cell carries a SOURCE object into a target
-#: (ruling 5), so a column holding one is not a calibration-only column. `judged` is
+#: The kinds whose presence makes a column "transported" for the calibration-only
+#: mapping's trigger. `naive` is in the set BY CONSTRUCTION: a naive cell carries a
+#: SOURCE object into a target, so a column holding one is not a calibration-only
+#: column. `judged` is
 #: in the set conservatively — a judged cell's provenance is not decidable from its
-#: kind, and the conservative outcome is the of-record mapping's HALT (a report to the
-#: desk), never a silently substituted role.
+#: kind, and the conservative outcome is the of-record mapping's HALT (a report for a
+#: human to resolve), never a silently substituted role.
 TRANSPORTED_CELL_KINDS: tuple[str, ...] = ("transported", "transported_band", "bridge",
                                            "naive", "judged")
 
-#: §4.2's closing line — "Every behavioral cell in §5 NAMES its site's actuation
-#: calibration in its stamp, by job id + verdict + the three criterion values" — is a
-#: STATEMENT OF PROVENANCE the engine transcribes, never one it derives. C§8 and the
-#: overnight go both say the same thing from the other side: "the desk is the scorer
-#: (module never self-scores)". So the verdict arrives as a document the desk wrote,
-#: this module validates its SHAPE and its IDENTITY (does it name THIS column?), and
-#: it copies the numbers through verbatim. Nothing here re-applies a §4.2 threshold.
+#: Every transported cell NAMES its site's actuation calibration in its stamp, by job
+#: id + verdict + the three criterion values. That is a STATEMENT OF PROVENANCE the
+#: engine transcribes, never one it derives: the verdict is scored outside this module,
+#: which never scores its own output. So the verdict arrives as a document, this module
+#: validates its SHAPE and its IDENTITY (does it name THIS column?), and it copies the
+#: numbers through verbatim. Nothing here re-applies an actuation-verdict threshold.
 ACTUATION_CALIBRATION_SCORER_OF_RECORD = (
     "DESK-SCORED (C§8 unstamped arithmetic). The §4.2 verdict is the desk's act on "
     "the column's own ingredients; this engine transcribes it into the stamp and "
     "NEVER re-derives, re-scores or adjudicates it — including §4.2's consequence "
     "(only a PASS licenses transported-write cells at a site), which is asserted by "
     "actuation_calibration.gate_transported_cells at the desk, not here.")
-#: The kwarg has existed since the harness was frozen; before 2026-08-05 nothing on
-#: the CLI could fill it, so every CLI-fired column stamped OWED. That was TRUE for
-#: batch A/B (no verdict existed yet) and became a FALSE provenance statement the
-#: moment the desk filed verdicts — which is the gap `--actuation-calibration` closes
-#: (Luxia's ruling ① of the 2026-08-05 morning round). Absent the flag this module's
-#: behavior is unchanged in every byte: the OWED default below still applies.
+#: The CLI flag that fills the `actuation_calibration_stamp` kwarg. Without it a
+#: column stamps OWED, which is true only while no verdict exists; once one does,
+#: OWED would be a FALSE provenance statement, so a column with a verdict passes it
+#: here. Absent the flag, the OWED default below applies.
 ACTUATION_CALIBRATION_FLAG = "--actuation-calibration"
 #: sha256 over the canonical JSON of the OWED block `run_column` writes when no
-#: calibration stamp is handed in, taken from the FROZEN engine
-#: (`run_behavioral_cells.py` `85500d36196cbf15…`) BEFORE the flag existed. The
-#: selftest asserts a flag-absent column still stamps exactly this — a frozen
-#: pre-change digest, in the shape of B-1's `4115092e…` triple digest, so a future
-#: edit to the OWED text is a FAILING check rather than a quiet re-wording of a
-#: provenance statement that 100+ banked cells already carry.
+#: calibration stamp is handed in. The selftest asserts a flag-absent column stamps
+#: exactly this frozen digest, so an edit to the OWED text is a FAILING check rather
+#: than a quiet re-wording of a provenance statement that 100+ banked cells already
+#: carry.
 OWED_ACTUATION_BLOCK_DIGEST = (
     "117c51bbecf8e0d4024ce4d7c5d35229aadb0a4eb3e8fc08e6a97e80ab514b06")
 
@@ -520,9 +507,9 @@ OWED_ACTUATION_BLOCK_DIGEST = (
 class BesideCellInGatePopulation(RuntimeError):
     """A BESIDE cell (Σ-shaped band) reached a population a gate reads.
 
-    Not a §9 HALT of the brief's numbering — it is the mechanical expression of the
-    B4 ruling's own condition ("the engine's gates must never read them as gate
-    inputs"). It is an exception rather than a filter-and-continue because silently
+    Not one of the `BehavioralHarnessError` HALTs — it is the mechanical expression
+    of the BESIDE families' own condition: the engine's gates must never read them as
+    gate inputs. It is an exception rather than a filter-and-continue because silently
     dropping a cell from a gate population is how a gate quietly changes arity.
     """
 
@@ -530,26 +517,26 @@ class BesideCellInGatePopulation(RuntimeError):
 class BehavioralHarnessError(RuntimeError):
     """Base class for every failure specific to the behavioral harness.
 
-    Every subclass is one of the brief's §9 HALT conditions. They are exceptions
-    rather than warnings on purpose: §3 and §9 both say an enactor never adjudicates
-    a live HALT, and a warning is an invitation to adjudicate.
+    Every subclass is one of the harness's HALT conditions. They are exceptions
+    rather than warnings on purpose: a live HALT is resolved by a human, never by the
+    running code, and a warning is an invitation to adjudicate.
     """
 
 
 class ArtifactShaMismatch(BehavioralHarnessError):
-    """§9 item 1 (M4): a number-bearing artifact's sha is not the expected one."""
+    """A number-bearing artifact's sha is not the expected one: it is not the artifact of record."""
 
 
 class CorpusVintageError(BehavioralHarnessError):
-    """§9 item 2: the corpus is not v2.1, or the resolution chain is MIXED."""
+    """The corpus is not v2.1, or the resolution chain is MIXED."""
 
 
 class NativeVectorUnavailable(BehavioralHarnessError):
-    """§9 item 3: the node's native entropy-gradient vector is absent/not FD-gated/FD-FAIL."""
+    """The node's native entropy-gradient vector is absent/not FD-gated/FD-FAIL."""
 
 
 class SiteNotOfRecord(BehavioralHarnessError):
-    """§9 item 4: the injection site is not the registered site of record.
+    """The injection site is not the registered site of record.
 
     A RETIRED site (gemma L36, 70B L17) must never resolve by default, so this is
     raised on a site that a bank happens to hold but the registries do not carry.
@@ -557,38 +544,37 @@ class SiteNotOfRecord(BehavioralHarnessError):
 
 
 class ReplayGateNotBitwise(BehavioralHarnessError):
-    """§9 item 6 / §2.7: the in-job replay is not bitwise in the canonical layout."""
+    """The in-job replay gate: a replay is not bitwise in the canonical layout."""
 
 
 class NaiveTransplantRowMissing(BehavioralHarnessError):
-    """§9 item 7 / §5.3: no banked naive row for a pair whose cell is being built."""
+    """No banked naive-transplant row for a pair whose cell is being built."""
 
 
 class ResidualNormDeltaError(BehavioralHarnessError):
-    """§9 item 8 / §2.5: measured per-token median residual norm deviates >10%."""
+    """The in-job measured per-token median residual norm deviates >10% from the banked one."""
 
 
 class StampIncompleteError(BehavioralHarnessError):
-    """§9 item 9 / §2.8: a stamp is missing a required field, or CVD is unset.
+    """A stamp is missing a required field, or CVD is unset.
 
-    Absence is a FIRST-CLASS reportable state (OWED, §10) — never silently "absent".
+    Absence is a FIRST-CLASS reportable state (OWED) — never silently "absent".
     """
 
 
 class VectorClassContractError(BehavioralHarnessError):
-    """HALT D (Luxia's ruling 2, 2026-08-05): the vector-class declaration is unsound.
+    """The vector-class declaration is unsound.
 
-    The class-pilot HALT's root cause in one sentence: a CLASS column has TWO BASES —
-    the GENERATION basis (the corpus manifest the prompts and generations are of) and
-    the VECTOR basis (the RULED contrast set the class object was built from) — and
-    the harness was written when every object was an entropy-gradient vector, i.e.
-    when the two coincided. The engine now stamps both, each under its own key, and
+    A CLASS column has TWO BASES — the GENERATION basis (the corpus manifest the
+    prompts and generations are of) and the VECTOR basis (the frozen contrast set the
+    class object was built from). For an entropy-gradient vector the two coincide; for
+    a class object they do not. The engine stamps both, each under its own key, and
     refuses every way of blurring them.
     """
 
 
 class VectorBasisMissing(VectorClassContractError):
-    """A class cell reached the stamp without naming its RULED contrast-set basis."""
+    """A class cell reached the stamp without naming its frozen contrast-set basis."""
 
 
 class VectorClassMisdeclared(VectorClassContractError):
@@ -601,12 +587,11 @@ class VectorClassMisdeclared(VectorClassContractError):
 
 
 class MappingModeError(BehavioralHarnessError):
-    """The mapping mode's refusal family (2026-08-08, Luxia's ratified deviation).
+    """The mapping mode's refusal family.
 
     Every member is a REFUSAL, never a warning: the mode's whole authorization rests
     on mapping cells being unable to reach anything that licenses, and a mode that
-    warned and continued would be exactly the silent ladder replacement the
-    pre-statement forbids.
+    warned and continued would be exactly a silent ladder replacement.
     """
 
 
@@ -621,11 +606,11 @@ class MappingAuthorizationOnScienceCell(MappingModeError):
 class MappingDoseImpersonatesScience(MappingModeError):
     """A mapping dose sits ON the frozen ladder (or is the baseline).
 
-    Refused because DISJOINTNESS is what makes mapping cells invisible to §4.2: a
-    mapping rise at a ladder dose could be read into `rises_by_dose` and satisfy a
-    criterion. A mapping run that genuinely needs a ladder dose already has one — the
-    banked science column measured it — and reusing that measurement is the
-    shared-baseline design the pre-statement already uses for α=0.
+    Refused because DISJOINTNESS is what makes mapping cells invisible to the
+    actuation verdict: a mapping rise at a ladder dose could be read into
+    `rises_by_dose` and satisfy a criterion. A mapping run that genuinely needs a
+    ladder dose already has one — the banked science column measured it — and reusing
+    that measurement is the same shared-baseline design used for α=0.
     """
 
 
@@ -654,12 +639,12 @@ class MappingSpecError(MappingModeError):
 
 
 class AmendedLadderError(BehavioralHarnessError):
-    """The amended ladder's refusal family (re-freeze #2, 2026-08-09).
+    """The amended ladder's refusal family.
 
     Every member is a REFUSAL. The mechanism's whole authorization is that a ladder can
-    only be changed by a ratified document naming the column it changes; a member that
-    warned and continued would be the console-side per-node tuning §2.5 forbids,
-    wearing a document as cover.
+    only be changed by an approved document naming the column it changes; a member that
+    warned and continued would be the console-side per-node tuning the frozen ladder
+    forbids, wearing a document as cover.
     """
 
 
@@ -676,7 +661,7 @@ class LadderAuthorizationOnBaseline(AmendedLadderError):
     """The α=0 baseline carried a ladder authorization.
 
     Refused because the baseline is genuinely UNCHANGED by an amendment — α=0 is α=0
-    under any ladder, and §5.1's shared-baseline design has one baseline serve the
+    under any ladder, and the shared-baseline design has one baseline serve the
     column either way. A baseline that declared a ladder would invite the reading that
     there are two different α=0 cells, which there are not.
     """
@@ -707,30 +692,30 @@ class LadderSpecError(AmendedLadderError):
 
 
 class ExpectedNShortfall(BehavioralHarnessError):
-    """§9 item 10 / §7: a cell or column is short of its expected N.
+    """A cell or column is short of its expected N.
 
-    M23 discipline: a count one short is a rake, not a rounding.
+    A count one short is a defect to explain, not a rounding to ignore.
     """
 
 
 class HookAdmissibilityError(BehavioralHarnessError):
-    """§9 item 11 / §4.4: the SSM hook-admissibility preflight failed.
+    """The SSM hook-admissibility preflight failed.
 
     The remedy — a positional-gating shim for that architecture — is a code change
-    with its own gate, never something an enactor improvises mid-column.
+    with its own gate, never something improvised mid-column.
     """
 
 
 class PositionCeilingExceeded(BehavioralHarnessError):
-    """§9 item 12: max(prompt_tokens) + max_new_tokens > the node's position ceiling.
+    """max(prompt_tokens) + max_new_tokens > the node's position ceiling.
 
-    Addendum B's `truncation: first-1024` covers CORPUS texts, not behavioral
-    prompts; the extension is a desk ruling, not an enactor call.
+    The corpus's `truncation: first-1024` covers CORPUS texts, not behavioral
+    prompts; extending it to prompts is a design decision, never a run-time call.
     """
 
 
 class CanonicalLayoutInvalidated(BehavioralHarnessError):
-    """§9 item 13: an OOM/VRAM event mid-column, or B changed after freeze.
+    """An OOM/VRAM event mid-column, or B changed after freeze.
 
     A mid-column B change would silently split the layout of record, so the node
     restarts from preflight instead.
@@ -738,7 +723,7 @@ class CanonicalLayoutInvalidated(BehavioralHarnessError):
 
 
 class LesionRecipeViolation(BehavioralHarnessError):
-    """§5.4's lesion-recipe law, asserted in code.
+    """The lesion-recipe law, asserted in code.
 
     No object in this column is ever built by projecting out the direction known to
     produce the behavior. Re-asserted engine-side on every cell's vector provenance
@@ -748,24 +733,24 @@ class LesionRecipeViolation(BehavioralHarnessError):
 
 
 class PromptPoolError(BehavioralHarnessError):
-    """The behavioral prompt pool is not the banked stage-0 pool of record (ruling 10)."""
+    """The behavioral prompt pool is not the banked stage-0 pool of record."""
 
 
 class SamplingConfigError(BehavioralHarnessError):
-    """The sampling configuration is not resolvable to the config of record (ruling 4)."""
+    """The sampling configuration is not resolvable to the config of record (pure ancestral)."""
 
 
 class BatchLayoutError(BehavioralHarnessError):
-    """A batch layout was requested that is not on the frozen ladder (§2.2)."""
+    """A batch layout was requested that is not on the frozen batch-size ladder."""
 
 
 class VectorizedSamplerNotIdentical(BehavioralHarnessError):
-    """The batched sampling kernel is not byte-identical to ruling 8's reference step.
+    """The batched sampling kernel is not byte-identical to the reference step (`sample_token`).
 
     Not a tolerance and not a warning. The vectorized kernel exists ONLY as a faster
     spelling of `sample_token`; a platform on which it spells something else must not
     produce one token of record, so this fires BEFORE the first token of a sub-batch
-    shape is drawn (`assert_batched_sampler_identity`) and stops the run for the desk.
+    shape is drawn (`assert_batched_sampler_identity`) and stops the run for a human.
     """
 
 
@@ -773,8 +758,8 @@ class ActuationCalibrationNotFound(BehavioralHarnessError):
     """`--actuation-calibration` named a path that is not a readable file.
 
     Its own exception, deliberately not folded into the schema refusal, because the
-    two have different remedies: an absent document means the desk has not filed the
-    verdict (or the job script points at the wrong path), while a malformed one means
+    two have different remedies: an absent document means the verdict has not been
+    filed (or the job script points at the wrong path), while a malformed one means
     the document exists and is wrong. Never a fall-back to OWED — silently stamping
     OWED because the named verdict could not be read is exactly the false provenance
     statement the flag exists to end.
@@ -782,7 +767,7 @@ class ActuationCalibrationNotFound(BehavioralHarnessError):
 
 
 class ActuationCalibrationSchemaError(BehavioralHarnessError):
-    """The verdict document is not a valid §4.2 verdict document.
+    """The verdict document is not a valid actuation-calibration verdict document.
 
     Unreadable JSON, a non-object body, a missing field, an UNKNOWN field
     (`extra="forbid"`: a typo'd key is a refusal, never a silently dropped value) or
@@ -795,7 +780,7 @@ class ActuationCalibrationSchemaError(BehavioralHarnessError):
 class ActuationCalibrationMismatch(BehavioralHarnessError):
     """The verdict document names a different (node, site, arm) than this column.
 
-    §4 gates a SITE, so a verdict is a statement about exactly one (node, site, arm)
+    The actuation calibration gates a SITE, so a verdict is a statement about exactly one (node, site, arm)
     and about no other. Stamping this column with another column's verdict is the
     same class of error as running one column under another column's stamp — which
     the CLI's `--node-key/--arm/--site` cross-check already refuses. Every disagreeing
@@ -803,8 +788,8 @@ class ActuationCalibrationMismatch(BehavioralHarnessError):
     """
 
 
-# -------------------------------------------- resumption / residency (2026-08-05)
-# The COLUMN-RESUMABILITY + MODEL-RESIDENCY amendment's HALT list. Two families,
+# ---------------------------------------------------------- resumption / residency
+# The HALT list for column resumption and model residency. Two families,
 # kept apart because they demand different responses and a single `ResumeRefused`
 # would let the wrong one be swallowed:
 #
@@ -813,7 +798,7 @@ class ActuationCalibrationMismatch(BehavioralHarnessError):
 #     the name of the condition that differed. Never caught inside this module.
 #   * `ResumeCellUnusable` — one banked cell cannot be trusted as banked (no
 #     receipt, missing/short bytes, a stamp that fails the engine's own checker, a
-#     digest that no longer reproduces from its raw). That is a LOST CELL, not a
+#     digest that does not reproduce from its raw). That is a LOST CELL, not a
 #     different experiment: the cell is QUARANTINED under `resume/quarantine/` with
 #     its reason and re-run from scratch. Caught by `resume_preflight` and by
 #     nothing else.
@@ -834,15 +819,15 @@ class ResumeCellsDocumentMismatch(ResumeIdentityRefused):
 
 
 class ResumeCorpusVintageMismatch(ResumeIdentityRefused):
-    """The banked cells stand on a different corpus manifest (§9 item 2)."""
+    """The banked cells stand on a different corpus manifest."""
 
 
 class ResumePromptPoolMismatch(ResumeIdentityRefused):
-    """The banked cells were generated against a different prompt pool (ruling 10)."""
+    """The banked cells were generated against a different prompt pool."""
 
 
 class ResumeVerdictMismatch(ResumeIdentityRefused):
-    """The banked cells transcribe a different §4.2 actuation-calibration document."""
+    """The banked cells transcribe a different actuation-calibration document."""
 
 
 class ResumeEngineModuleMismatch(ResumeIdentityRefused):
@@ -854,18 +839,18 @@ class ResumeEngineModuleUnknown(ResumeIdentityRefused):
 
 
 class ResumeLayoutMismatch(ResumeIdentityRefused):
-    """The canonical layout differs (§2.2 / §9 item 13: a silent split)."""
+    """The canonical layout differs — resuming would silently split the layout of record."""
 
 
 class ResumeModelConfigMismatch(ResumeIdentityRefused):
-    """The M9 drift anchor moved: a different model config is loaded."""
+    """The model-config drift anchor moved: a different checkpoint is loaded."""
 
 
 class ResumeNormDrift(ResumeIdentityRefused):
     """The in-job measured per-token median residual norm is not the banked one.
 
     The one identity condition that is not a sha of an input: α is
-    `alpha_frac × measured_per_token_median` (§2.5), so a norm that moved by one
+    `alpha_frac × measured_per_token_median`, so a norm that moved by one
     ulp across the process seam would give every re-run cell a DIFFERENT dose from
     its banked siblings — an inhomogeneous column that every downstream read would
     treat as one. Refused rather than tolerated, and never rounded.
@@ -901,11 +886,11 @@ class BankedCellArtifactShaMismatch(ResumeCellUnusable):
 
 
 class BankedCellStampIncomplete(ResumeCellUnusable):
-    """The banked stamp fails the engine's own §2.8 checker on re-read."""
+    """The banked stamp fails the engine's own stamp checker on re-read."""
 
 
 class BankedCellDigestMismatch(ResumeCellUnusable):
-    """The banked raw no longer reproduces the digests its own stamp names."""
+    """The banked raw does not reproduce the digests its own stamp names."""
 
 
 class BankedCellReceiptUnreadable(ResumeCellUnusable):
@@ -913,7 +898,7 @@ class BankedCellReceiptUnreadable(ResumeCellUnusable):
 
 
 class AttemptLockError(BehavioralHarnessError):
-    """M55's handshake: an attempt directory has at most one live writer."""
+    """The attempt-lock handshake: an attempt directory has at most one live writer."""
 
 
 class AttemptLockHeld(AttemptLockError):
@@ -923,10 +908,11 @@ class AttemptLockHeld(AttemptLockError):
 class AttemptLockForeignHost(AttemptLockError):
     """The lock was taken on another host and cannot be adjudicated here.
 
-    `/models` is shared storage. A pid on THIS host says nothing about a pid on
-    another, so a foreign lock is refused rather than guessed at — the M55 incident
-    was untracked processes holding a shared resource, and a cross-host stale-lock
-    heuristic is exactly how that gets re-created quietly.
+    An attempt directory can live on storage shared between machines. A pid on THIS
+    host says nothing about a pid on another, so a foreign lock is refused rather than
+    guessed at — untracked processes holding a shared resource is the failure the lock
+    exists to prevent, and a cross-host stale-lock heuristic is exactly how that gets
+    re-created quietly.
     """
 
 
@@ -935,7 +921,7 @@ class AttemptLockUnreadable(AttemptLockError):
 
 
 class ResidencyRefused(BehavioralHarnessError):
-    """The model-residency driver's HALT family (Luxia's ruling, 2026-08-05)."""
+    """The model-residency driver's HALT family."""
 
 
 class ResidencyModelMismatch(ResidencyRefused):
@@ -972,9 +958,9 @@ class ResidencyPlanInvalid(ResidencyRefused):
 
 # ---------------------------------------------------------------- typed records
 class SamplingConfig(BaseModel):
-    """A generation sampling configuration, frozen (§2.2 / ruling 4).
+    """A generation sampling configuration, frozen.
 
-    Ruling 4: **pure ancestral is the config of record**, identical across all 23
+    **Pure ancestral is the config of record**, identical across all 23
     nodes — the only cross-model-comparable choice, and the only one under which the
     entropy read stays interpretable. Exactly one exception exists: the bridge cell
     on the re-anchor pair, which runs under the NODE'S OWN `generation_config` so the
@@ -997,7 +983,7 @@ class SamplingConfig(BaseModel):
         if not self.do_sample and self.name != "greedy":
             raise ValueError(
                 "do_sample=False is not the config of record and is only named "
-                "'greedy'; ruling 4 froze pure ancestral sampling")
+                "'greedy'; the config of record is pure ancestral sampling")
         return self
 
 
@@ -1010,7 +996,7 @@ SAMPLING_OF_RECORD = SamplingConfig(
 
 
 class BridgeCellDecision(BaseModel):
-    """Ruling 4's bridge cell: run it, or DROP it and NAME the discontinuity."""
+    """The re-anchor bridge cell: run it, or DROP it and NAME the discontinuity."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -1018,15 +1004,15 @@ class BridgeCellDecision(BaseModel):
     banked_config_recoverable: bool
     dropped: bool
     sampling: Optional[SamplingConfig] = None
-    #: Present exactly when `dropped`. Ruling 4: "the discontinuity is NAMED, not
-    #: papered over" — so this is a sentence a reader can quote, not a flag.
+    #: Present exactly when `dropped`. The discontinuity is NAMED, not papered
+    #: over — so this is a sentence a reader can quote, not a flag.
     discontinuity_named: Optional[str] = None
 
     @model_validator(mode="after")
     def _drop_is_named(self) -> "BridgeCellDecision":
         if self.dropped and not self.discontinuity_named:
             raise ValueError(
-                "ruling 4: a dropped bridge cell must NAME the discontinuity with "
+                "a dropped bridge cell must NAME the discontinuity with "
                 "the banked leg; an unnamed drop papers it over")
         if not self.dropped and self.sampling is None:
             raise ValueError("a bridge cell that runs needs its sampling config")
@@ -1034,11 +1020,12 @@ class BridgeCellDecision(BaseModel):
 
 
 class CanonicalLayout(BaseModel):
-    """§2.2's canonical batch layout — frozen in the node's stamp before any cell fires.
+    """The canonical batch layout — frozen in the node's stamp before any cell fires.
 
     A read produced at one layout is NEVER compared bitwise against another; the
-    §2.7 replay gate is defined against this object, and §9 item 13 makes a
-    mid-column change a restart-from-preflight rather than a silent split.
+    in-job replay gate is defined against this object, and a mid-column change
+    raises `CanonicalLayoutInvalidated` — a restart-from-preflight rather than a
+    silent split.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -1057,17 +1044,17 @@ class CanonicalLayout(BaseModel):
                        "length-sorted reordering (§2.2)")
     probe_grouping_reading: str = PROBE_GROUPING_READING
     #: True once the layout is written to the node stamp. A cell that fires against
-    #: an unfrozen layout is a §2.2 violation.
+    #: an unfrozen layout breaks layout invariance.
     frozen: bool = False
-    #: M19: how B was chosen. `measured=False` means the VRAM probe was degraded and
+    #: How B was chosen, recorded rather than implied. `measured=False` means the VRAM probe was degraded and
     #: the CONSERVATIVE bound was taken (the smallest rung), never a gamble.
     measured: bool = True
     headroom_note: str = ""
-    #: §2.7's batch-invariance characterization asks for a cell re-run "at B=8 and
-    #: B=1" — NEITHER of which is on §2.2's frozen ladder {80, 40, 20, 10}. The two
-    #: clauses are both in the brief and both meant: the ladder governs the LAYOUT OF
-    #: RECORD, the characterization deliberately steps OFF it to measure what stepping
-    #: off costs. This flag is the named resolution: an off-ladder size is admissible
+    #: The batch-invariance characterization re-runs a cell "at B=8 and B=1" —
+    #: NEITHER of which is on the frozen batch-size ladder {80, 40, 20, 10}. Both
+    #: requirements hold: the ladder governs the LAYOUT OF RECORD, the
+    #: characterization deliberately steps OFF it to measure what stepping off
+    #: costs. This flag is the named resolution: an off-ladder size is admissible
     #: ONLY on a characterization layout, and a characterization layout can never be
     #: FROZEN — so no cell of record can ever be produced at one.
     characterization_only: bool = False
@@ -1077,28 +1064,28 @@ class CanonicalLayout(BaseModel):
         if self.characterization_only:
             if self.frozen:
                 raise ValueError(
-                    "a characterization layout is never FROZEN: §2.7 defines replay IN "
-                    "the canonical layout, and a frozen off-ladder layout would be a "
-                    "second layout of record (§9 item 13's silent split)")
+                    "a characterization layout is never FROZEN: the replay gate is defined "
+                    "IN the canonical layout, and a frozen off-ladder layout would be a "
+                    "second layout of record (a silent split)")
             if self.batch_size <= 0:
                 raise ValueError("batch size must be positive")
             return self
         if self.batch_size not in BATCH_LADDER:
             raise ValueError(
                 f"batch size {self.batch_size} is not on the frozen ladder "
-                f"{BATCH_LADDER} (§2.2). §2.7's B=8/B=1 characterization is the one "
+                f"{BATCH_LADDER}. The B=8/B=1 batch-invariance characterization is the one "
                 "exception and must set `characterization_only=True`.")
         return self
 
     def sub_batch_of(self, gen_id: int) -> tuple[int, int]:
-        """§2.2's deterministic, total sub-batch map: (sub_batch, row)."""
+        """The deterministic, total sub-batch map: (sub_batch, row)."""
         if gen_id < 0:
             raise BatchLayoutError(f"gen_id must be non-negative, got {gen_id}")
         return divmod(gen_id, self.batch_size)
 
 
 class BehavioralPrompt(BaseModel):
-    """One prompt of the banked stage-0 pool (ruling 10)."""
+    """One prompt of the banked stage-0 pool."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -1112,9 +1099,9 @@ class BehavioralPrompt(BaseModel):
 
 
 class PromptPool(BaseModel):
-    """The behavioral prompt pool of record — 80 prompts, sha-frozen (ruling 10).
+    """The behavioral prompt pool of record — 80 prompts, sha-frozen.
 
-    Ruling 10: carry the banked stage-0 pool (20 topics × 4 strata × 1 seed = 80),
+    The pool is the banked stage-0 pool (20 topics × 4 strata × 1 seed = 80),
     rendered per-arm, sha-frozen AT HARNESS-FREEZE TIME, sha on every stamp. The
     re-anchor bridge row is only interpretable on the same pool and every prior
     behavioral leg used it, so building a fresh pool was refused.
@@ -1132,7 +1119,7 @@ class PromptPool(BaseModel):
             raise ValueError(
                 f"prompt pool has {len(self.prompts)} prompts, expected "
                 f"{PROMPT_POOL_SIZE} ({PROMPT_POOL_TOPICS} topics × "
-                f"{PROMPT_POOL_STRATA} strata × 1 seed, ruling 10)")
+                f"{PROMPT_POOL_STRATA} strata × 1 seed, the banked stage-0 pool)")
         ids = [p.prompt_id for p in self.prompts]
         if len(set(ids)) != len(ids):
             raise ValueError("prompt pool has duplicate prompt_ids")
@@ -1146,23 +1133,24 @@ class PromptPool(BaseModel):
         return self
 
     def for_gen(self, gen_id: int) -> BehavioralPrompt:
-        """§2.2: the map from gen_id to prompt is total and deterministic.
+        """The map from gen_id to prompt is total and deterministic.
 
         n=80/cell over an 80-prompt pool, so at n=80 every cell covers the pool
         exactly once; the modulo keeps the map total for the reduced-n shape
-        rehearsal (§3 step 2 runs n=8/cell) without changing which prompt any
+        rehearsal (which runs n=8/cell) without changing which prompt any
         gen_id gets.
         """
         return self.prompts[gen_id % len(self.prompts)]
 
 
 class NormConventions(BaseModel):
-    """§2.5's TWO norm conventions, with provenance — only one of them sets α.
+    """The TWO norm conventions, with provenance — only one of them sets α.
 
     The convention that sets α is the PER-TOKEN median residual norm at the target
     site, measured in-job. The banked mean-state median is a DIFFERENT number (3B
-    L14: 12.2391 vs 12.1125) and rides beside, never used. Rake M21b's silent-
-    fallback finding is why this resolution is explicit and never inherited.
+    L14: 12.2391 vs 12.1125) and rides beside, never used. A code path that falls
+    back silently from one convention to the other goes unnoticed, which is why
+    this resolution is explicit and never inherited.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -1171,13 +1159,13 @@ class NormConventions(BaseModel):
     used_for_alpha: str = "PER-TOKEN median residual norm, MEASURED in-job (§2.5)"
     measured_per_token_median: float = Field(gt=0.0)
     measured_provenance: str
-    #: None on a node with no banked `a5_vectors_stamps.json` (every NEW node).
+    #: None on a node with no banked a5 vector stamps (every NEW node).
     banked_per_token_median: Optional[float] = None
     banked_provenance: Optional[str] = None
     #: The mean-STATE median convention, recorded beside and never used for α.
     banked_mean_state_median: Optional[float] = None
     banked_mean_state_provenance: Optional[str] = None
-    #: Recorded, not absorbed (§2.5). >10% is a HALT, raised by `resolve_norms`.
+    #: Recorded, not absorbed. >10% is a HALT, raised by `resolve_norms`.
     delta_fraction_vs_banked: Optional[float] = None
 
 
@@ -1217,15 +1205,15 @@ class MappingAuthorization(BaseModel):
                 f"mapping spec {self.experiment_id!r} authorizes dose(s) {clash}, "
                 f"which are on the FROZEN ladder {DOSE_LADDER} (or the α=0 baseline). "
                 "Mapping doses are DISJOINT from the ladder by construction — that "
-                "disjointness is what makes a mapping cell invisible to every §4.2 "
-                "path, and a mapping cell at a science dose would be a science cell "
+                "disjointness is what makes a mapping cell invisible to every "
+                "actuation-verdict path, and a mapping cell at a science dose would be a science cell "
                 "wearing another name. The ladder's own doses are already measured by "
                 "the banked column; reuse that measurement.")
         if any(not np.isfinite(d) or d == 0.0 for d in self.doses):
             raise MappingDoseNotAuthorized(
                 f"mapping spec {self.experiment_id!r}: every authorized dose must be "
                 f"finite and non-zero, got {list(self.doses)}. The α=0 read is the "
-                "BASELINE cell and is shared with the banked column (§5.1), never "
+                "BASELINE cell and is shared with the banked column, never "
                 "re-spelled as a mapping dose.")
         if len(set(self.doses)) != len(self.doses):
             raise MappingDoseNotAuthorized(
@@ -1238,10 +1226,11 @@ class MappingAuthorization(BaseModel):
 class MappingSpec(BaseModel):
     """The mapping mode's SPEC DOCUMENT — the other half of the two-key admission.
 
-    Written by the desk, named on the CLI beside `--mapping-mode`, and validated to
-    name THIS column (node, arm, site) before a single mapping cell is admitted. It
-    carries its own ratification provenance because a dated engine deviation whose
-    document does not say who dated it is not a dated deviation.
+    Written outside the engine, named on the CLI beside `--mapping-mode`, and
+    validated to name THIS column (node, arm, site) before a single mapping cell is
+    admitted. It carries its own approval provenance because an engine deviation
+    whose document does not say who approved it, and when, is not an accountable
+    deviation.
 
     The doses are the spec's, not this module's: the mixtral set is ±0.15/±0.20/±0.25
     but the MECHANISM is spec-driven, so a second model's window is measured by
@@ -1257,7 +1246,7 @@ class MappingSpec(BaseModel):
     arm: Literal["native", "raw"]
     site: int = Field(ge=0)
     doses: tuple[float, ...] = Field(min_length=1)
-    #: the pre-statement this mapping is pinned by, and the ratification that dated it.
+    #: the pre-statement this mapping is pinned by, and the approval that dated it.
     prestatement_of_record: str = Field(min_length=1)
     ratified_by: str = Field(min_length=1)
     ledger_date: date
@@ -1271,7 +1260,7 @@ class MappingSpec(BaseModel):
                                     spec_sha256=spec_sha256, doses=self.doses)
 
     def assert_names_column(self, *, node_key: str, arm: str, site: int) -> None:
-        """Refuse a spec that authorizes a DIFFERENT column (§4.2's identity habit).
+        """Refuse a spec that authorizes a DIFFERENT column (the verdict loader's identity check).
 
         Modelled on `load_actuation_calibration`: a document that names another
         (node, arm, site) is not a document about this run, and transcribing it would
@@ -1283,8 +1272,7 @@ class MappingSpec(BaseModel):
                 f"{self.node_key} L{self.site} ({self.arm} arm); this column is "
                 f"{node_key} L{site} ({arm} arm). A spec for another column cannot "
                 "authorize this one — the doses are a property of THIS model's "
-                "response window (Luxia's ruling of record: 'every model has their "
-                "own specific sensitivity range').")
+                "response window: every model has its own sensitivity range.")
 
 
 class LadderAuthorization(BaseModel):
@@ -1300,7 +1288,7 @@ class LadderAuthorization(BaseModel):
     THE INVERTED LAW. `MappingAuthorization` refuses doses that touch `DOSE_LADDER`;
     this one does NOT, and the omission is the contract rather than an oversight. An
     amended ladder REPLACES the frozen ladder for its column, so overlap is the
-    ordinary case (the ratified mixtral ladder keeps ±0.03 and ±0.10 and moves only its
+    ordinary case (the approved mixtral ladder keeps ±0.03 and ±0.10 and moves only its
     extremes). What makes an amended cell distinguishable is not a disjoint dose — it
     is this authorization, carried on the cell and stamped on its record.
     """
@@ -1314,14 +1302,14 @@ class LadderAuthorization(BaseModel):
 
     @model_validator(mode="after")
     def _is_a_ladder(self) -> "LadderAuthorization":
-        """The STRUCTURAL properties §4.2's arithmetic reads off any ladder.
+        """The STRUCTURAL properties the actuation-verdict arithmetic reads off any ladder.
 
         Not policy — policy is which doses, and that is the document's. These are the
         shape the frozen ladder has and that every criterion assumes it has, asserted
         so an amended ladder cannot silently break a reading rule the spec claims to
-        preserve. Each refusal names the criterion that needs it. ENACTOR READING, on
-        the record for the desk: the alternative (accept any tuple and let §4.2 fail
-        at scoring time) was not taken, because a column costs a budget to run and a
+        preserve. Each refusal names the criterion that needs it. This is a reading
+        made here, named so a reviewer can overrule it: the alternative (accept any
+        tuple and let the verdict fail at scoring time) was not taken, because a column costs a budget to run and a
         ladder that cannot be scored should be refused before it fires.
         """
         if any(not np.isfinite(d) for d in self.ladder):
@@ -1331,13 +1319,13 @@ class LadderAuthorization(BaseModel):
         if any(d == 0.0 for d in self.ladder):
             raise LadderDoseNotOnLadderInForce(
                 f"ladder spec {self.experiment_id!r}: the α=0 read is the BASELINE "
-                f"cell (§5.1) and is never a rung — got {list(self.ladder)}. The "
+                f"cell and is never a rung — got {list(self.ladder)}. The "
                 "baseline is unchanged by an amendment and is staged as it always was.")
         if list(self.ladder) != sorted(set(self.ladder)):
             raise LadderDoseNotOnLadderInForce(
                 f"ladder spec {self.experiment_id!r}: the ladder must be strictly "
-                f"ASCENDING and free of duplicates, got {list(self.ladder)}. §4.2(a) "
-                "reads the ordering across the full SIGNED ladder, sign flipping "
+                f"ASCENDING and free of duplicates, got {list(self.ladder)}. The dose-order "
+                "criterion reads the ordering across the full SIGNED ladder, sign flipping "
                 "through zero; a ladder whose order is not its own order makes that "
                 "reading depend on how the document happened to list it.")
         if len(self.ladder) != len(DOSE_LADDER):
@@ -1345,31 +1333,31 @@ class LadderAuthorization(BaseModel):
                 f"ladder spec {self.experiment_id!r}: an amended ladder has "
                 f"{len(DOSE_LADDER)} rungs like the frozen one, got "
                 f"{len(self.ladder)} ({list(self.ladder)}). The arity is not "
-                "decoration: §4.2(b) counts '4 of 6 doses outside the band' against "
+                "decoration: the band criterion counts '4 of 6 doses outside the band' against "
                 "the ladder's own arity, and a ladder of another length would change "
                 "a frozen criterion's denominator while claiming to preserve it.")
         if not (any(d < 0 for d in self.ladder) and any(d > 0 for d in self.ladder)):
             raise LadderDoseNotOnLadderInForce(
                 f"ladder spec {self.experiment_id!r}: a ladder carries doses of BOTH "
-                f"signs, got {list(self.ladder)}. §4.2(a)/§5.5 read the ordering "
-                "'sign flipping through zero' and §4.2(b) reads BOTH extremes; a "
+                f"signs, got {list(self.ladder)}. The dose-order criterion reads the ordering "
+                "'sign flipping through zero' and the band criterion reads BOTH extremes; a "
                 "one-sided ladder has no such pair to read.")
         return self
 
     @property
     def extreme_magnitude(self) -> float:
-        """|the ladder's edge| — what §2.7's signal role reads instead of |0.3|."""
+        """|the ladder's edge| — what the replay gate's signal role reads instead of |0.3|."""
         return max(abs(d) for d in self.ladder)
 
 
 class LadderSpec(BaseModel):
-    """The amended ladder's SPEC DOCUMENT — the desk's ratified re-calibration.
+    """The amended ladder's SPEC DOCUMENT — an approved re-calibration.
 
-    Written by the desk, named on the CLI beside `--amended-ladder`, and validated to
-    name THIS column's node and site before a single science cell is admitted at a dose
-    the frozen ladder does not carry. It carries its ratification lineage because a
-    dated re-calibration whose document does not say who dated it is not a dated
-    re-calibration.
+    Written outside the engine, named on the CLI beside `--amended-ladder`, and
+    validated to name THIS column's node and site before a single science cell is
+    admitted at a dose the frozen ladder does not carry. It carries its approval
+    lineage because a re-calibration whose document does not say who approved it,
+    and when, is not an accountable re-calibration.
 
     NO `arm` FIELD, and the absence is deliberate — the one shape difference from
     `MappingSpec`. A response window is a property of the MODEL, not of an arm: the
@@ -1389,18 +1377,18 @@ class LadderSpec(BaseModel):
     experiment_id: str = Field(min_length=1)
     node_key: str = Field(min_length=1)
     site: int = Field(ge=0)
-    #: the amendment's own statement of its scope, in the desk's words.
+    #: the amendment's own statement of its scope, in its author's words.
     applies_to: str = Field(min_length=1)
     ladder: tuple[float, ...] = Field(min_length=1)
-    #: what this ladder replaces, and under which ratified window.
+    #: what this ladder replaces, and under which approved window.
     replaces: str = Field(min_length=1)
-    #: the chain of rulings that got here — the analogue of `MappingSpec.ratified_by`,
-    #: a list because a re-calibration is reached by more than one ruling and the desk
-    #: files each with its date.
+    #: the chain of decisions that got here — the analogue of `MappingSpec.ratified_by`,
+    #: a list because a re-calibration is reached by more than one decision, each
+    #: filed with its date.
     ratification_lineage: tuple[str, ...] = Field(min_length=1)
-    #: DESK POLICY, carried for the record and never executed here: how §4.2 reads its
-    #: extreme-dose references on this ladder. The engine does not score (§4.2 is
-    #: desk-side), so this field is validated as present and prose and nothing more.
+    #: SCORING POLICY, carried for the record and never executed here: how the actuation
+    #: verdict reads its extreme-dose references on this ladder. The engine does not
+    #: score, so this field is validated as present and prose and nothing more.
     gate_reading_rule: str = Field(min_length=1)
     #: the pooling rule an amended-ladder row travels under.
     comparability_rider: str = Field(min_length=1)
@@ -1414,7 +1402,7 @@ class LadderSpec(BaseModel):
                                    spec_sha256=spec_sha256, ladder=self.ladder)
 
     def assert_names_column(self, *, node_key: str, site: int) -> None:
-        """Refuse a spec that amends a DIFFERENT column (§4.2's identity habit).
+        """Refuse a spec that amends a DIFFERENT column (the verdict loader's identity check).
 
         Node and site only — see the class docstring on why there is no arm to check.
         """
@@ -1423,12 +1411,12 @@ class LadderSpec(BaseModel):
                 f"ladder spec {self.experiment_id!r} amends "
                 f"{self.node_key} L{self.site}; this column is {node_key} L{site}. A "
                 "spec for another column cannot amend this one — the ladder is a "
-                "property of THIS model's response window (Luxia's ruling of record: "
-                "'every model has their own specific sensitivity range').")
+                "property of THIS model's response window: every model has its own "
+                "sensitivity range.")
 
 
 class CellSpec(BaseModel):
-    """One behavioral cell: 80 generations sharing ONE injection spec (§2.2)."""
+    """One behavioral cell: 80 generations sharing ONE injection spec."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -1439,28 +1427,27 @@ class CellSpec(BaseModel):
     site: int = Field(ge=0)
     alpha_frac: float
     n: int = Field(gt=0, default=N_PER_CELL)
-    #: `Rband*` = the node's OWN native random band (§4's control: does the SITE
-    #: actuate). `gRband*` = the SOURCE's randoms through the SAME map (§5's
-    #: control: does the TRANSPORT carry). §4.1 keeps them distinct in name and in
-    #: stamp because conflating them is the fastest way to make a null
+    #: `Rband*` = the node's OWN native random band (the actuation calibration's
+    #: control: does the SITE actuate). `gRband*` = the SOURCE's randoms through the
+    #: SAME map (the transported cells' control: does the TRANSPORT carry). They stay
+    #: distinct in name and in stamp because conflating them is the fastest way to make a null
     #: uninterpretable.
-    #: `SigmaBand` is admitted as a BESIDE family ONLY (B4, Luxia 2026-08-04): it
+    #: `SigmaBand` is admitted as a BESIDE family ONLY: it
     #: schedules and generates like any other band cell and it is never a gate input.
     #: See `is_beside` / `is_null_of_record` and `BESIDE_BAND_FAMILIES`.
     band_family: Optional[Literal["Rband", "gRband", "SigmaBand"]] = None
     vector_npz: Optional[str] = None
     vector_provenance: str = ""
     sampling: SamplingConfig = SAMPLING_OF_RECORD
-    #: THE MAPPING MODE's cell-carried key (2026-08-08). Present on a `mapping` cell
-    #: and refused on every other kind, so the two populations cannot be confused by
-    #: anything holding a spec. `None` — the default — is the science cell, whose
-    #: validation below is byte-for-byte what it was before this field existed.
+    #: THE MAPPING MODE's cell-carried key. Present on a `mapping` cell and refused
+    #: on every other kind, so the two populations cannot be confused by anything
+    #: holding a spec. `None` — the default — is the science cell, whose validation
+    #: below is the frozen-ladder validation, unaffected by this field.
     mapping_authorization: Optional[MappingAuthorization] = None
-    #: THE AMENDED LADDER's cell-carried key (re-freeze #2, 2026-08-09). Present on a
-    #: SCIENCE cell whose column runs a ratified amended ladder, and refused on the
-    #: baseline and on every mapping cell. `None` — the default — is the frozen-ladder
-    #: science cell, whose validation below is byte-for-byte what it was before this
-    #: field existed.
+    #: THE AMENDED LADDER's cell-carried key. Present on a SCIENCE cell whose column
+    #: runs an approved amended ladder, and refused on the baseline and on every
+    #: mapping cell. `None` — the default — is the frozen-ladder science cell, whose
+    #: validation below is unaffected by this field.
     ladder_authorization: Optional[LadderAuthorization] = None
 
     @property
@@ -1476,7 +1463,7 @@ class CellSpec(BaseModel):
 
     @property
     def is_amended_ladder(self) -> bool:
-        """True iff this cell runs a ratified AMENDED ladder rather than the frozen one."""
+        """True iff this cell runs an approved AMENDED ladder rather than the frozen one."""
         return self.ladder_authorization is not None
 
     @property
@@ -1522,7 +1509,7 @@ class CellSpec(BaseModel):
                 "('calibration_band' beside an Rband, 'transported_band' beside a "
                 f"gRband), not as {self.kind!r} — a beside that wore a signal kind "
                 "would be pooled as signal by every consumer that splits on kind")
-        # THE AMENDED LADDER (2026-08-09): the two cells that may never carry one, both
+        # THE AMENDED LADDER: the two cells that may never carry one, both
         # refused before any dose is looked at. A mapping cell is the other mechanism
         # and stays untouched by this one; the baseline is unchanged by an amendment.
         if self.ladder_authorization is not None:
@@ -1538,7 +1525,7 @@ class CellSpec(BaseModel):
                     f"{self.cell_id}: the α=0 baseline carries a "
                     "`ladder_authorization`. α=0 is α=0 under any ladder: the baseline "
                     "is UNCHANGED by an amendment and is shared by the column exactly "
-                    "as §5.1 shares it. A baseline that declared a ladder would imply "
+                    "as the shared-baseline design shares it. A baseline that declared a ladder would imply "
                     "two different α=0 cells, and there is only ever one.")
         if self.is_baseline:
             if self.alpha_frac != BASELINE_DOSE or self.vector_key is not None:
@@ -1548,7 +1535,7 @@ class CellSpec(BaseModel):
         if self.vector_key is None:
             raise ValueError(f"{self.cell_id}: a non-baseline cell needs a vector_key")
         if self.is_mapping:
-            # THE MAPPING BRANCH (2026-08-08). It replaces the ladder test for this
+            # THE MAPPING BRANCH. It replaces the ladder test for this
             # kind and NOTHING else: the science branch below is the frozen one, and a
             # cell that is not `kind="mapping"` never reaches this code.
             if self.mapping_authorization is None:
@@ -1556,7 +1543,7 @@ class CellSpec(BaseModel):
                     f"{self.cell_id}: kind={MAPPING_CELL_KIND!r} with no "
                     "`mapping_authorization`. A mapping cell's dose is admissible "
                     "ONLY as an authorization the spec document granted; a mapping "
-                    f"cell without one would be an off-ladder dose with no ratified "
+                    f"cell without one would be an off-ladder dose with no approved "
                     f"provenance ({MAPPING_SPEC_FLAG} + {MAPPING_MODE_FLAG}).")
             if self.alpha_frac not in self.mapping_authorization.doses:
                 raise MappingDoseNotAuthorized(
@@ -1573,31 +1560,29 @@ class CellSpec(BaseModel):
                     "science cell wearing a mapping key is the laundering direction "
                     "this contract exists to close, and it is refused at "
                     "construction rather than at a gate.")
-            # §2.5's membership test, now read against THE LADDER IN FORCE (re-freeze
-            # #2). With no authorization — every cell that ever ran — the ladder in
-            # force IS `DOSE_LADDER` and this raise is byte-for-byte the frozen one,
-            # message included. With one, the ratified document is the ladder and the
+            # The ladder membership test, read against THE LADDER IN FORCE. With no
+            # authorization the ladder in force IS `DOSE_LADDER` and the refusal names
+            # the frozen ladder. With one, the approved document is the ladder and the
             # refusal names the document rather than the constant.
             if self.alpha_frac not in self.ladder_in_force:
                 if self.ladder_authorization is None:
                     raise ValueError(
                         f"{self.cell_id}: dose {self.alpha_frac} is not on the FROZEN "
-                        f"ladder {DOSE_LADDER} (§2.5/§11: no extension, no interpolation, "
-                        "no per-node tuning)")
+                        f"ladder {DOSE_LADDER} (no extension, no interpolation, "
+                        "no per-node tuning without an approved ladder spec)")
                 raise LadderDoseNotOnLadderInForce(
                     f"{self.cell_id}: dose {self.alpha_frac} is not on the AMENDED "
-                    f"ladder {list(self.ladder_in_force)} ratified by ladder spec "
+                    f"ladder {list(self.ladder_in_force)} approved by ladder spec "
                     f"{self.ladder_authorization.experiment_id!r} (which replaces the "
                     f"frozen {list(DOSE_LADDER)} for this column). The document is the "
                     "only source of an amended dose — the engine hardcodes none and "
-                    "interpolates none (§2.5 as amended 2026-08-09: no ladder without "
-                    "a ratified document).")
+                    "interpolates none (no ladder without an approved document).")
         expected = CELL_ID_TEMPLATE.format(
             vector_key=self.vector_key, site=self.site, frac=self.alpha_frac)
         if self.cell_id != expected:
             raise ValueError(
                 f"cell_id {self.cell_id!r} does not match the banked formatting "
-                f"{expected!r} (§2.3; parsed by score_entropy_writes.parse_cell)")
+                f"{expected!r} (parsed by score_entropy_writes.parse_cell)")
         return self
 
 
@@ -1629,7 +1614,7 @@ class GenerationRecord(BaseModel):
 
 
 class ProbeRow(BaseModel):
-    """One generation's entropy probe result (§2.6)."""
+    """One generation's entropy probe result."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -1644,7 +1629,7 @@ class ProbeRow(BaseModel):
 
 
 class BatchInvarianceCharacterization(BaseModel):
-    """§2.7's descriptive batch-invariance record — M19: it CANNOT fail a gate.
+    """The descriptive batch-invariance record — instrumentation, so it CANNOT fail a gate.
 
     GPU reductions are not batch-size-invariant; this is expected and is documented
     ONCE PER NODE so nobody later reads it as a defect. It is precisely why replay
@@ -1663,16 +1648,16 @@ class BatchInvarianceCharacterization(BaseModel):
 
 
 class ReplayGateResult(BaseModel):
-    """§2.7's blocking in-job gate: bitwise ids AND bitwise float32 entropy arrays."""
+    """The blocking in-job replay gate: bitwise ids AND bitwise float32 entropy arrays."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     k: int
     selection_digest: str
     selection_rule: str
-    #: B-1 (ruled 2026-08-05): which role mapping filled the three frozen strata —
-    #: `of_record` (the transported column's) or `calibration_only`. Defaulted so a
-    #: record written before the ruling reads back as what it was.
+    #: Which role mapping filled the three frozen strata — `of_record` (the
+    #: transported column's) or `calibration_only`. Defaulted so a record written
+    #: without the field reads back as `of_record`, which is what it was.
     role_mapping: str = REPLAY_ROLE_MAPPING_OF_RECORD
     cells: list[str]
     strata: dict[str, str]
@@ -1685,12 +1670,13 @@ class ReplayGateResult(BaseModel):
 
 
 class HookAdmissibility(BaseModel):
-    """§4.4's named technical preflight — HALT-gated, architecture-independent.
+    """The hook-admissibility preflight — HALT-gated, architecture-independent.
 
     The residual-write hook reads absolute positions from the `cache_position`
     kwarg. If a block does not receive it AS A KWARG the hook falls back to local-
     index slicing and RAISES BY DESIGN on incremental seq_len=1 steps rather than
-    mis-injecting silently (`hooks.py` L193-199). This preflight is what turns that
+    mis-injecting silently (the residual-write hook in `metabasis.extraction.hooks`).
+    This preflight is what turns that
     design into a budget decision instead of a mid-column surprise.
     """
 
@@ -1708,10 +1694,10 @@ class HookAdmissibility(BaseModel):
     detail: str
 
 
-# ---------------------------------------------------------------- seeding (§2.3)
+# ---------------------------------------------------------------- seeding
 def seed_material(*, corpus_sha: str, node_key: str, arm: str, site: int,
                   cell_id: str, gen_id: int) -> str:
-    """§2.3's seed material, formatted from the frozen template.
+    """The per-generation seed material, formatted from the frozen template.
 
     Built through `SEED_MATERIAL_TEMPLATE` rather than an f-string so the template
     whose digest rides every stamp is the SAME object the seeds are derived from —
@@ -1723,20 +1709,21 @@ def seed_material(*, corpus_sha: str, node_key: str, arm: str, site: int,
 
 
 def seed_int(material: str) -> int:
-    """§2.3: sha256 → the first 8 bytes, big-endian. NEVER `hash()` (M25)."""
+    """sha256 → the first 8 bytes, big-endian. NEVER `hash()`: PYTHONHASHSEED salts it."""
     return int.from_bytes(hashlib.sha256(material.encode()).digest()[:8], "big")
 
 
 def draw_uniforms(seed: int, n: int) -> np.ndarray:
-    """Ruling 8's PRE-DRAWN uniforms for one generation: float64 in [0, 1).
+    """The PRE-DRAWN uniforms for one generation: float64 in [0, 1).
 
     Pre-drawing is the whole mechanism. Because the uniforms for (cell, gen_id) are
     materialized from that pair's own digest BEFORE any forward runs, the sampling
     step consumes a fixed tape: a partial re-run of any subset of cells keeps every
-    other cell in phase (M5-safe by construction, not by discipline), and the tape
-    is independent of the batch the generation rides in (the §2.2 layout-invariance
-    property). Ruling 8 refused the one-stream-per-cell alternative for exactly the
-    re-run case: a re-run that changes cell membership desyncs a stream.
+    other cell in phase (safe against the phase shift a single filtered stream
+    suffers, by construction rather than by discipline), and the tape is independent
+    of the batch the generation rides in (the layout-invariance property). The
+    one-stream-per-cell alternative is refused for exactly the re-run case: a re-run
+    that changes cell membership desyncs a stream.
 
     `n` is `max_new_tokens`: the tape is drawn to the full budget so an early EOS
     cannot shorten it and thereby couple one generation's length to another's tape.
@@ -1758,7 +1745,7 @@ def uniform_tape(*, corpus_sha: str, node_key: str, arm: str, site: int,
 
 def cell_seed_root(*, corpus_sha: str, node_key: str, arm: str, site: int,
                    cell_id: str) -> str:
-    """The per-cell seed ROOT that §2.8 requires in the stamp.
+    """The per-cell seed ROOT that every cell stamp carries.
 
     A digest over the cell's material prefix (gen_id excluded): it identifies the
     cell's tape family without listing 80 seeds, and it changes if any coordinate of
@@ -1773,21 +1760,22 @@ def cell_seed_root(*, corpus_sha: str, node_key: str, arm: str, site: int,
 # ------------------------------------------------------- the fixed sampling step
 def sample_token(logits_row: Any, u: float, sampling: SamplingConfig = SAMPLING_OF_RECORD
                  ) -> int:
-    """Ruling 8's FIXED sampling step: one row's logits + one pre-drawn uniform → a token.
+    """The FIXED sampling step: one row's logits + one pre-drawn uniform → a token.
 
     LAYOUT INVARIANCE LIVES HERE. The row's logits are cast to float64 numpy first,
     so every arithmetic operation of the sampling step — the temperature divide, the
     softmax, the cumulative sum, the search — runs on exactly one row's numbers in a
     fixed dtype and a fixed order. No reduction crosses rows, so identical logits
     yield a bitwise identical token at B=80 and at B=1. What is NOT invariant is the
-    FORWARD that produced the logits (§2.7's characterization), which is why replay
+    FORWARD that produced the logits (the batch-invariance characterization), which is why replay
     is defined in the canonical layout rather than across layouts.
 
     Inverse-CDF rather than `torch.multinomial`: multinomial consumes a global
-    generator, which is the single-stream design ruling 8 refused (M5).
+    generator, which is the single-stream design refused above: filtering records
+    shifts its phase.
 
     THE PATH OF REFERENCE. This function is the DEFINITION of the sampling step and is
-    deliberately unchanged by the 2026-08-01 vectorization: `sample_tokens` computes
+    deliberately independent of the vectorized kernel: `sample_tokens` computes
     the same step for a whole sub-batch and is certified byte-identical against THIS
     code before it may draw a token, and every subcase the batched kernel does not own
     lands back here. Change this body and the batched kernel becomes wrong by
@@ -1803,7 +1791,7 @@ def sample_token(logits_row: Any, u: float, sampling: SamplingConfig = SAMPLING_
     x = logits / sampling.temperature
     # top-k / top-p are 0 / 1.0 in the config of record (pure ancestral), so both
     # filters are exact no-ops there; they exist for the bridge cell, whose node
-    # generation_config may carry them (ruling 4).
+    # generation_config may carry them.
     if sampling.top_k:
         k = min(int(sampling.top_k), x.size)
         cut = np.partition(x, x.size - k)[x.size - k]
@@ -1827,9 +1815,9 @@ def sample_token(logits_row: Any, u: float, sampling: SamplingConfig = SAMPLING_
     return int(np.searchsorted(cdf, float(u), side="right"))
 
 
-# ------------------------------------------------- the batched sampling step (2026-08-01)
+# ------------------------------------------------------------ the batched sampling step
 class SamplerKernel(BaseModel):
-    """WHICH spelling of ruling 8's fixed sampling step draws the tokens.
+    """WHICH spelling of the fixed sampling step draws the tokens.
 
     Two kernels, ONE step. `sample_token` above is the reference and stays in the
     module unchanged; `vectorized` computes the SAME step for a whole sub-batch in one
@@ -1864,7 +1852,7 @@ SAMPLER_KERNEL_OF_RECORD = SAMPLER_KERNEL_VECTORIZED
 
 #: The working set one tile of the batched kernel aims at, in bytes: a core's private
 #: L2, which is where the reference's one-row-at-a-time chain already lived. MEASURED
-#: on the desk CPU (8-core Zen3 class, 512 KiB L2 per core) across vocab 1000 / 50257
+#: on an 8-core Zen3-class CPU (512 KiB L2 per core) across vocab 1000 / 50257
 #: / 128256 — 512 KiB was at or within noise of the best tile at every one, while the
 #: unbounded spelling (one [80, V] array per intermediate) came in at 0.75× at vocab
 #: 128256, i.e. SLOWER than the reference. At vocab 128256 this is one row; at vocab
@@ -1896,7 +1884,7 @@ _SAMPLER_CERTIFICATES: dict[tuple, str] = {}
 def vectorized_sampling_refusal(sampling: SamplingConfig) -> str:
     """"" if the batched kernel handles this config; else the NAMED reason it will not.
 
-    REFUSAL, never approximation. The kernel implements exactly ruling 4's config of
+    REFUSAL, never approximation. The kernel implements exactly the sampling config of
     record (pure ancestral: sample, T free, no top-k, no top-p). Greedy and the
     top-k/top-p filters are `sample_token`'s branches — the battery's and the bridge
     cell's, both off the 80×512 hot path — and each one contains an operation whose
@@ -1930,7 +1918,7 @@ def sampler_tile_rows(vocab: int) -> int:
     and the working set of a per-row chain is kept with it.
 
     A tile is rows, never columns: a row's table must remain a function of that row
-    alone (§2.2), so a tile boundary can only ever fall between generations.
+    alone (layout invariance), so a tile boundary can only ever fall between generations.
     """
     return max(1, int(SAMPLER_TILE_BYTES // max(1, int(vocab) * 8)))
 
@@ -1978,7 +1966,8 @@ def _tile_cdf(tile: np.ndarray, temperature: float
         `cdf[-1] = 1.0` can (legally, rarely) break that.
 
     No reduction crosses a row, so a row's table is a function of that row alone — the
-    §2.2 layout-invariance property ruling 8 bought is preserved, not traded away.
+    layout-invariance property the fixed sampling step exists for is preserved, not
+    traded away.
     """
     src = tile if temperature == 1.0 else np.asarray(
         tile, dtype=np.float64) / temperature
@@ -2072,7 +2061,7 @@ def sample_tokens(logits_block: Any, *, us: Sequence[float],
 
     `rows` are indices into the block (the rows not yet frozen by EOS) and `us` are
     their tape values, in the same order; the returned tokens are in that order too.
-    A frozen row keeps its SLOT in the batch (§2.2) — the tiling is a function of the
+    A frozen row keeps its SLOT in the batch (layout invariance) — the tiling is a function of the
     vocab alone and never of who has finished — but a tile holding no active row is
     not computed, so freezing costs its neighbours nothing.
 
@@ -2263,7 +2252,7 @@ def assert_batched_sampler_identity(
                 f"GATE 1 at shape ({batch}, {vocab}), family {family!r}, row {r}: "
                 f"{moved} is NOT byte-identical between the row-wise and tiled "
                 "spellings on this numpy build. The batched kernel is refused here — "
-                "ruling 8's step is defined by `sample_token`, and a faster spelling "
+                "the sampling step is defined by `sample_token`, and a faster spelling "
                 "that rounds differently is a different experiment. Run with "
                 "SAMPLER_KERNEL_REFERENCE and file the platform.")
         # ---- GATE 2: the kernel's token == `sample_token`'s token ----------------
@@ -2303,11 +2292,12 @@ class Stepper(Protocol):
     """The minimum surface the generation loop needs from a model.
 
     Deliberately narrow: the loop below is the load-bearing layout/sampling logic
-    and it is the SAME code on the node and in the selftest. `HFStepper` implements
+    and it is the SAME code on a GPU run and in the selftest. `HFStepper` implements
     this against a real HF model with a KV cache; the selftest's stub implements it
     with per-row-independent arithmetic, which is what makes bitwise layout
     invariance provable at all (a real forward's reductions are not batch-invariant,
-    §2.7). One loop, two steppers — never two loops.
+    which is why replay is defined in the canonical layout). One loop, two steppers —
+    never two loops.
     """
 
     def prefill(self, ids: Any, attention_mask: Any) -> Any:
@@ -2322,7 +2312,7 @@ class Stepper(Protocol):
 
 def left_pad(sequences: Sequence[Sequence[int]], pad_id: int
              ) -> tuple[np.ndarray, np.ndarray, int]:
-    """§2.2's left padding: (ids [b, L], attention_mask [b, L], L).
+    """Left padding for generation: (ids [b, L], attention_mask [b, L], L).
 
     Left padding is not a convenience — it is what makes ONE `start_pos` valid for a
     whole batch: the generated span starts at absolute position L for every row, and
@@ -2343,7 +2333,7 @@ def left_pad(sequences: Sequence[Sequence[int]], pad_id: int
 
 def right_pad(sequences: Sequence[Sequence[int]], pad_id: int
               ) -> tuple[np.ndarray, np.ndarray]:
-    """§2.6's right padding for the probe: (ids [b, T], attention_mask [b, T])."""
+    """Right padding for the entropy probe: (ids [b, T], attention_mask [b, T])."""
     if not sequences:
         raise ValueError("right_pad: no sequences")
     T = max(len(s) for s in sequences)
@@ -2382,10 +2372,10 @@ def generate_sub_batch(
     A row that emits EOS is FROZEN: it stops appending and stops consuming its tape,
     but it stays in the batch (fed the pad token) so no other row's slot moves. That
     is what keeps `sub_batch = gen_id // B; row = gen_id % B` total and deterministic
-    (§2.2) — a compacting batch would make a generation's result depend on when its
+    (layout invariance) — a compacting batch would make a generation's result depend on when its
     neighbours finished.
 
-    `sampler_kernel` chooses which spelling of ruling 8's step draws the tokens. The
+    `sampler_kernel` chooses which spelling of the sampling step draws the tokens. The
     two are certified byte-identical at the sub-batch's own (batch, vocab) shape
     before the first token is drawn, so this is a COST switch and never a semantic
     one — which is exactly why the certification is a gate and not a test: the switch
@@ -2462,7 +2452,7 @@ def generate_cell(
     n: Optional[int] = None,
     sampler_kernel: SamplerKernel = SAMPLER_KERNEL_OF_RECORD,
 ) -> list[GenerationRecord]:
-    """A whole cell, sub-batched by §2.2's deterministic total map.
+    """A whole cell, sub-batched by the deterministic total sub-batch map.
 
     `stepper_factory` is called once per sub-batch (a KV cache belongs to one batch
     shape). The returned records are in gen_id order regardless of sub-batching, so
@@ -2494,25 +2484,25 @@ def generate_cell(
     if len(records) != total:
         raise ExpectedNShortfall(
             f"{cell.cell_id}: produced {len(records)} generations, expected {total} "
-            "(§9 item 10 / M23: a count one short is a rake, not a rounding)")
+            "(a count one short is a defect, not a rounding)")
     return records
 
 
 # ---------------------------------------------------------------- dose application
 def resolve_alpha(alpha_frac: float, per_token_median_resid_norm: float, *,
                   cell: Optional["CellSpec"] = None) -> float:
-    """§2.5: α = frac × (PER-TOKEN median residual norm at the target site).
+    """α = frac × (PER-TOKEN median residual norm at the target site).
 
     NOT the median-of-mean-state norm the collection stamps carry — the two differ
-    (banked example, 3B L14: 12.2391 vs 12.1125) and rake M21b's silent-fallback
-    finding says the resolution must be explicit, never inherited.
+    (banked example, 3B L14: 12.2391 vs 12.1125), and a silent fallback from one to
+    the other goes unnoticed, so the resolution is explicit, never inherited.
 
-    THE MAPPING MODE (2026-08-08). `cell` is the only way an off-ladder dose can be
+    THE MAPPING MODE. `cell` is the only way an off-ladder dose can be
     resolved here, and it is honoured for a MAPPING cell and nothing else: the frozen
     ladder check below is what every science cell still meets, including a science
-    cell passed through `cell`. Omitting the argument — which is what every existing
-    caller does — leaves this function's behavior byte-for-byte what it was, so the
-    α-provenance of §1 is unchanged for every banked cell.
+    cell passed through `cell`. Omitting the argument leaves only the frozen-ladder
+    path, so the α-provenance of every banked cell is unaffected by the mapping and
+    amended-ladder branches.
     """
     if not np.isfinite(per_token_median_resid_norm) or per_token_median_resid_norm <= 0:
         raise ResidualNormDeltaError(
@@ -2531,8 +2521,8 @@ def resolve_alpha(alpha_frac: float, per_token_median_resid_norm: float, *,
                 f"not this cell's authorized dose {cell.alpha_frac} "
                 f"(spec {auth.experiment_id!r} authorizes {list(auth.doses)}).")
         return float(alpha_frac) * float(per_token_median_resid_norm)
-    # THE AMENDED LADDER (2026-08-09). The second and last way a dose off the frozen
-    # ladder resolves here, and honoured only for a cell that CARRIES the ratified
+    # THE AMENDED LADDER. The second and last way a dose off the frozen
+    # ladder resolves here, and honoured only for a cell that CARRIES the approved
     # authorization. Same shape as the mapping branch above and same guarantee below
     # it: a caller that passes no cell, or a cell with no authorization, meets the
     # frozen check unchanged.
@@ -2546,7 +2536,7 @@ def resolve_alpha(alpha_frac: float, per_token_median_resid_norm: float, *,
         return float(alpha_frac) * float(per_token_median_resid_norm)
     if alpha_frac != BASELINE_DOSE and alpha_frac not in DOSE_LADDER:
         raise ValueError(
-            f"dose {alpha_frac} is not on the FROZEN ladder {DOSE_LADDER} (§2.5)")
+            f"dose {alpha_frac} is not on the FROZEN ladder {DOSE_LADDER}")
     return float(alpha_frac) * float(per_token_median_resid_norm)
 
 
@@ -2558,10 +2548,11 @@ def apply_dose_ladder(vector_key: str, site: int, *,
                       vector_provenance: str = "",
                       sampling: SamplingConfig = SAMPLING_OF_RECORD,
                       n: int = N_PER_CELL) -> list[tuple[CellSpec, float]]:
-    """The frozen ladder applied to one vector: 6 cells, exact α per cell (§2.5).
+    """The frozen ladder applied to one vector: 6 cells, exact α per cell.
 
     Exactly `len(DOSE_LADDER)` cells, in ladder order, no baseline (the α=0 cell is
-    SHARED between §4's calibration block and §5's column and so is built once, by
+    SHARED between the actuation-calibration block and the transported column and so
+    is built once, by
     `baseline_cell`, never per vector).
     """
     assert_no_lesion_recipe(vector_provenance, vector_key)
@@ -2620,7 +2611,7 @@ def apply_amended_ladder(vector_key: str, site: int, *,
                          vector_provenance: str = "",
                          sampling: SamplingConfig = SAMPLING_OF_RECORD,
                          n: int = N_PER_CELL) -> list[tuple[CellSpec, float]]:
-    """The RATIFIED ladder applied to one vector: one science cell per amended rung.
+    """The APPROVED amended ladder applied to one vector: one science cell per amended rung.
 
     `apply_dose_ladder`'s amended twin, and a separate function for the same reason
     `apply_mapping_ladder` is: the frozen ladder's applier must keep having exactly ONE
@@ -2651,8 +2642,8 @@ def ladder_in_force(cells: Sequence[CellSpec]) -> tuple[float, ...]:
 
     Reads the first authorization it finds rather than reconciling them, because
     `assert_amended_ladder_column` has already refused a column whose cells disagree —
-    and this function is called from places (the stamp, the preflight, §2.7's
-    magnitude) that must give an answer for a set that has passed that gate.
+    and this function is called from places (the stamp, the preflight, the replay
+    gate's signal magnitude) that must give an answer for a set that has passed that gate.
     """
     for c in cells:
         if c.ladder_authorization is not None:
@@ -2663,7 +2654,7 @@ def ladder_in_force(cells: Sequence[CellSpec]) -> tuple[float, ...]:
 def scoring_dose_magnitude(cells: Sequence[CellSpec]) -> float:
     """|the extreme dose| of the ladder this cell set runs (`SCORING_DOSE_MAGNITUDE`).
 
-    The §2.7 signal role's threshold, computed from the cell SET rather than read from
+    The replay gate's signal-role threshold, computed from the cell SET rather than read from
     a constant — exactly as `mapping_signal_magnitude` is. For every frozen-ladder
     column this returns 0.3, which is `SCORING_DOSE_MAGNITUDE` itself, so no existing
     column's gate moves. See `AMENDED_LADDER_SIGNAL_ROLE_READING`.
@@ -2696,11 +2687,12 @@ def assert_amended_ladder_column(cells: Sequence[CellSpec], *,
       3. a cell whose carried authorization is not this run's — the two keys must be
          the SAME key, which is what makes a swapped spec file unusable;
       4. a column holding both amended and frozen science cells — refused because a
-         half-amended column is a column whose §4.2 arithmetic has two denominators,
+         half-amended column is a column whose actuation-verdict arithmetic has two
+         denominators,
          and "the ladder in force" would name two ladders at once.
 
     A column with neither amended cells nor an authorization returns False having
-    asserted nothing, which is every column that ran before this ruling.
+    asserted nothing — the ordinary frozen-ladder column.
     """
     science = [c for c in cells if not c.is_mapping and not c.is_baseline]
     amended = [c for c in science if c.ladder_authorization is not None]
@@ -2712,7 +2704,7 @@ def assert_amended_ladder_column(cells: Sequence[CellSpec], *,
             f"{amended[0].cell_id}) but this run carries no ladder authorization. An "
             f"amended ladder is admitted ONLY with BOTH {LADDER_SPEC_FLAG} and "
             f"{AMENDED_LADDER_FLAG}; a cells document alone cannot re-calibrate a "
-            "node (§2.5 as amended: no ladder without a ratified document).")
+            "node (no ladder without an approved document).")
     if authorization is not None and not amended:
         raise AmendedLadderNotEngaged(
             f"{who}: an amended ladder is authorized (spec "
@@ -2723,12 +2715,12 @@ def assert_amended_ladder_column(cells: Sequence[CellSpec], *,
             "here, before the budget.")
     if not amended:
         return False
-    # COMPARED BY VALUE, never by object identity — the dual-import-path rake. The
+    # COMPARED BY VALUE, never by object identity — the dual-import-path hazard. The
     # engine runs as `__main__` while every importer sees
     # `metabasis.scripts.run_behavioral_cells`, so a cell that travelled through the
     # staging module carries an authorization compiled from the OTHER copy of this
-    # source, and pydantic's `==` compares classes first. The same rake
-    # `StagedCell._accept_a_cellspec_from_either_import_path` was written for.
+    # source, and pydantic's `==` compares classes first. The same hazard
+    # `StagedCell._accept_a_cellspec_from_either_import_path` guards against.
     want = authorization.model_dump()                    # type: ignore[union-attr]
     wrong = sorted(c.cell_id for c in amended
                    if c.ladder_authorization is None
@@ -2746,7 +2738,7 @@ def assert_amended_ladder_column(cells: Sequence[CellSpec], *,
             f"{sorted(c.cell_id for c in frozen)[0]}). An amendment is WHOLE-COLUMN: "
             "it replaces the ladder for every arm, every lever and every band at this "
             "node and site. A mixed column would have two ladders in force at once, so "
-            "'the ladder in force' would name neither and §4.2 would count against two "
+            "'the ladder in force' would name neither and the actuation verdict would count against two "
             "denominators. Re-stage the column under one ladder.")
     logger.info("AMENDED LADDER engaged: %d science cell(s) on ladder %s under spec %s "
                 "(frozen ladder %s is REPLACED for this column). %s",
@@ -2830,10 +2822,10 @@ def assert_mapping_column(cells: Sequence[CellSpec], *,
       3. a cell whose carried authorization is not this run's — the two keys must be
          the SAME key, which is what makes a swapped spec file unusable;
       4. a column holding both mapping and science cells — refused so that "a
-         §4.2-scorable column contains zero mapping cells" is true by construction.
+         scorable column contains zero mapping cells" is true by construction.
 
     A column with neither mapping cells nor an authorization returns False having
-    asserted nothing, which is every column that ran before this ruling.
+    asserted nothing — the ordinary science column.
     """
     mapping = [c for c in cells if c.is_mapping]
     science = [c for c in cells if not c.is_mapping]
@@ -2858,8 +2850,8 @@ def assert_mapping_column(cells: Sequence[CellSpec], *,
     # while every importer sees `metabasis.scripts.run_behavioral_cells`, so a cell
     # that travelled through the staging module carries an authorization compiled from
     # the OTHER copy of this source — and pydantic's `==` compares classes first. The
-    # same rake `StagedCell._accept_a_cellspec_from_either_import_path` was written
-    # for; a dump comparison is the shape-level test the contract actually means.
+    # same hazard `StagedCell._accept_a_cellspec_from_either_import_path` guards
+    # against; a dump comparison is the shape-level test the contract actually means.
     want = authorization.model_dump()                    # type: ignore[union-attr]
     wrong = sorted(c.cell_id for c in mapping
                    if c.mapping_authorization is None
@@ -2874,10 +2866,10 @@ def assert_mapping_column(cells: Sequence[CellSpec], *,
         raise MappingColumnNotPure(
             f"{who}: {len(mapping)} mapping cell(s) and {len(science)} science "
             f"cell(s) in one column (e.g. {sorted(c.cell_id for c in science)[0]}). "
-            "A mapping column is PURE — that is what makes 'a §4.2-scorable column "
+            "A mapping column is PURE — that is what makes 'a scorable column "
             "holds zero mapping cells' true by construction instead of by care. "
             "Stage the mapping run as its own column; its α=0 baseline is the banked "
-            "column's, by the shared-baseline design (§5.1).")
+            "column's, by the shared-baseline design.")
     logger.info("MAPPING MODE engaged: %d cell(s) at doses %s under spec %s (%s)",
                 len(mapping), list(authorization.doses),  # type: ignore[union-attr]
                 authorization.experiment_id,  # type: ignore[union-attr]
@@ -2921,14 +2913,14 @@ def load_mapping_spec(path: Path, *, node_key: str, arm: str, site: int
 
 
 def baseline_cell(site: int, n: int = N_PER_CELL) -> CellSpec:
-    """The α=0 baseline, SHARED by §4's calibration block and §5's column (§5.1)."""
+    """The α=0 baseline, SHARED by the actuation-calibration block and the transported column."""
     return CellSpec(cell_id=f"baseline_L{site}_a+0.00", kind="baseline",
                     vector_key=None, site=site, alpha_frac=BASELINE_DOSE, n=n)
 
 
 #: Substrings whose presence in a vector's construction provenance means the object
 #: was built by projecting out the direction known to produce the behavior — the
-#: lesion-recipe law's forbidden construction (§5.4). Matched case-insensitively on
+#: lesion-recipe law's forbidden construction. Matched case-insensitively on
 #: the provenance string the staging module writes.
 LESION_RECIPE_MARKERS: tuple[str, ...] = (
     "minus entropy_gradient", "- entropy_gradient", "orthogonalized against "
@@ -2938,7 +2930,7 @@ LESION_RECIPE_MARKERS: tuple[str, ...] = (
 
 
 def assert_no_lesion_recipe(provenance: str, vector_key: str = "") -> None:
-    """§5.4's lesion-recipe law, asserted in code rather than trusted.
+    """The lesion-recipe law, asserted in code rather than trusted.
 
     No object in this column is ever built by projecting out the direction known to
     produce the behavior. The staging module asserts this at construction; this is
@@ -2951,7 +2943,7 @@ def assert_no_lesion_recipe(provenance: str, vector_key: str = "") -> None:
         if marker in low:
             raise LesionRecipeViolation(
                 f"{vector_key or '(vector)'}: provenance names a lesion recipe "
-                f"({marker!r}) — §5.4's lesion-recipe law forbids an object built by "
+                f"({marker!r}) — the lesion-recipe law forbids an object built by "
                 f"projecting out the direction known to produce the behavior. "
                 f"Provenance: {provenance!r}")
 
@@ -2962,12 +2954,12 @@ def resolve_norms(*, site: int, measured: float, measured_provenance: str,
                   banked_mean_state: Optional[float] = None,
                   banked_mean_state_provenance: Optional[str] = None
                   ) -> NormConventions:
-    """§2.5's both-conventions record, with the >10% HALT (§9 item 8).
+    """The both-conventions norm record, with the >10% HALT (`ResidualNormDeltaError`).
 
     For the six carried nodes with banked a5 stamps the measured value is asserted
     against the banked one and the delta is RECORDED RATHER THAN ABSORBED; >10%
     would mean the site or the pool is not what the stamp says, which is a HALT and
-    not a correction an enactor applies.
+    not a correction the run applies.
     """
     delta = None
     if banked_per_token is not None:
@@ -2981,9 +2973,9 @@ def resolve_norms(*, site: int, measured: float, measured_provenance: str,
             raise ResidualNormDeltaError(
                 f"L{site}: measured per-token median residual norm {measured:.4f} "
                 f"deviates {delta * 100:.1f}% from the banked a5 value "
-                f"{banked_per_token:.4f} (>{NORM_DELTA_HALT_FRACTION * 100:.0f}%, §9 "
-                f"item 8). That means the site or the prompt pool is not what the "
-                f"stamp says — HALT to the desk; an enactor does not absorb this.")
+                f"{banked_per_token:.4f} (>{NORM_DELTA_HALT_FRACTION * 100:.0f}%). "
+                f"That means the site or the prompt pool is not what the stamp says — "
+                f"HALT for a human to resolve; the run does not absorb this.")
         logger.info("L%d norm conventions: measured %.4f vs banked %.4f (Δ %.2f%%) — "
                     "recorded, not absorbed", site, measured, banked_per_token,
                     delta * 100)
@@ -2997,10 +2989,10 @@ def resolve_norms(*, site: int, measured: float, measured_provenance: str,
         delta_fraction_vs_banked=delta)
 
 
-# ---------------------------------------------------------------- entropy probe (§2.6)
+# ---------------------------------------------------------------- entropy probe
 def probe_groups(records: Sequence[GenerationRecord],
                  max_group: int = PROBE_BATCH_SIZE) -> list[list[int]]:
-    """§2.6's probe batching under `PROBE_GROUPING_READING`.
+    """The entropy probe's batching under `PROBE_GROUPING_READING`.
 
     Rows of EQUAL `prompt_length` group together (ascending length; gen_id order
     within a length), chunked to `max_group`. Equal prompt length is what makes ONE
@@ -3025,7 +3017,7 @@ def probe_groups(records: Sequence[GenerationRecord],
 
 def per_position_entropy_and_nll(logits: Any, ids: Any, prompt_length: int,
                                  n_generated: int) -> tuple[np.ndarray, np.ndarray]:
-    """§2.6's per-position next-token entropy + NLL over ONE row's generated span.
+    """The probe's per-position next-token entropy + NLL over ONE row's generated span.
 
     The same algebra as `entropy_write_probe._ent_nll_over_gen` (one source of
     truth for the convention): entropy = state of the distribution; NLL =
@@ -3034,7 +3026,7 @@ def per_position_entropy_and_nll(logits: Any, ids: Any, prompt_length: int,
     `logits` is that row's [T, vocab] float32; the slice is
     `[P-1, P+n_generated-1)` — the distributions that PRODUCED the generated
     tokens. Padding cannot enter, because the slice is bounded by this row's own
-    `prompt_length` and its own generated count (§2.6: padding must never enter a
+    `prompt_length` and its own generated count (padding must never enter a
     mean).
     """
     import torch
@@ -3054,7 +3046,7 @@ def per_position_entropy_and_nll(logits: Any, ids: Any, prompt_length: int,
 
 
 def entropy_rise_from_rows(rows: Sequence[ProbeRow]) -> dict[str, float]:
-    """§2.6's cell-level read: mean over generations, 4-dp filing convention.
+    """The probe's cell-level read: mean over generations, 4-dp filing convention.
 
     Aggregation order matches `entropy_write_probe` exactly (per-generation mean,
     then mean over generations), so a cross-harness comparison is a comparison of
@@ -3073,7 +3065,7 @@ def entropy_rise_from_rows(rows: Sequence[ProbeRow]) -> dict[str, float]:
 
 
 def entropy_array_digest(arrays: Sequence[np.ndarray]) -> str:
-    """§2.7: sha256 over the probe's per-position float32 arrays, `.tobytes()`.
+    """Replay-gate digest: sha256 over the probe's per-position float32 arrays, `.tobytes()`.
 
     float32 is asserted rather than cast: a silent float64 promotion would change
     the digest for a reason that has nothing to do with the model, and the gate must
@@ -3084,7 +3076,7 @@ def entropy_array_digest(arrays: Sequence[np.ndarray]) -> str:
         arr = np.asarray(a)
         if arr.dtype != np.float32:
             raise ReplayGateNotBitwise(
-                f"entropy array has dtype {arr.dtype}, expected float32 — the §2.7 "
+                f"entropy array has dtype {arr.dtype}, expected float32 — the replay-gate "
                 "digest is defined over float32 .tobytes() and a promoted array "
                 "would digest differently for a non-model reason")
         h.update(np.ascontiguousarray(arr).tobytes())
@@ -3092,7 +3084,7 @@ def entropy_array_digest(arrays: Sequence[np.ndarray]) -> str:
 
 
 def token_id_digest(records: Sequence[GenerationRecord]) -> str:
-    """§2.7: sha256 over the generated token-id arrays, in gen_id order."""
+    """Replay-gate digest: sha256 over the generated token-id arrays, in gen_id order."""
     h = hashlib.sha256()
     for r in sorted(records, key=lambda x: x.generation_id):
         h.update(np.asarray(r.generated_ids, dtype=np.int64).tobytes())
@@ -3105,12 +3097,13 @@ def characterize_probe_batch_invariance(
     reference_batch_size: int,
     measured: bool = True,
 ) -> BatchInvarianceCharacterization:
-    """§2.7's DESCRIPTIVE batch-invariance record. M19: it cannot fail a gate.
+    """The DESCRIPTIVE batch-invariance record. Instrumentation: it cannot fail a gate.
 
-    §2.6 says the job "asserts" bit-exactness of a single-row probe against the
-    batched row AND that the delta is instrumentation that "cannot fail the gate".
-    Those cannot both hold, and M19 decides it: this function returns a record.
-    Only §2.7's replay gate — same process, same canonical layout — can HALT.
+    The probe specification both "asserts" bit-exactness of a single-row probe
+    against the batched row AND calls the delta instrumentation that "cannot fail
+    the gate". Those cannot both hold, and instrumentation never failing a gate
+    decides it: this function returns a record. Only the in-job replay gate — same
+    process, same canonical layout — can HALT.
     """
     bitwise: dict[str, bool] = {}
     first_div: dict[str, Optional[int]] = {}
@@ -3143,17 +3136,17 @@ def characterize_probe_batch_invariance(
              "layout. M19: descriptive only — this record cannot fail a gate.")
 
 
-# ---------------------------------------------------------------- replay gate (§2.7)
+# ---------------------------------------------------------------- in-job replay gate
 def _stratum_of(cell: CellSpec, *, calibration_only: bool = False,
                 mapping_only: bool = False,
                 mapping_signal_magnitude: Optional[float] = None,
                 scoring_magnitude: float = SCORING_DOSE_MAGNITUDE) -> Optional[str]:
-    # B4: a BESIDE cell holds NO stratum. Written as the first test rather than left
+    # A BESIDE cell holds NO stratum. Written as the first test rather than left
     # to fall through the family comparisons below, so that adding a stratum later
     # cannot accidentally admit one. It is the first test under ALL role mappings.
     if cell.is_beside:
         return None
-    # THE MAPPING MODE (2026-08-08), written as the SECOND test for the same reason.
+    # THE MAPPING MODE, written as the SECOND test for the same reason.
     # A mapping cell holds a stratum under the mapping-only mapping and under NO other
     # — without this line a mapping Rband would fall through to the calibration-only
     # band role below and enter a science column's gate population.
@@ -3169,9 +3162,9 @@ def _stratum_of(cell: CellSpec, *, calibration_only: bool = False,
         return "calibration" if cell.kind == "calibration" else None
     if cell.band_family == "gRband":
         return "random_band"
-    # THE AMENDED LADDER (2026-08-09): "the extreme dose", read on the ladder in force.
+    # THE AMENDED LADDER: "the extreme dose", read on the ladder in force.
     # `scoring_magnitude` defaults to `SCORING_DOSE_MAGNITUDE` and IS 0.3 for every
-    # frozen-ladder column, so this line is the line it was. See
+    # frozen-ladder column, so a frozen-ladder column selects at |0.3|. See
     # `AMENDED_LADDER_SIGNAL_ROLE_READING`.
     if (cell.kind in ("transported", "bridge")
             and abs(cell.alpha_frac) == scoring_magnitude):
@@ -3182,19 +3175,19 @@ def _stratum_of(cell: CellSpec, *, calibration_only: bool = False,
 def _stratum_of_calibration_only(cell: CellSpec, *,
                                  scoring_magnitude: float = SCORING_DOSE_MAGNITUDE
                                  ) -> Optional[str]:
-    """B-1's RULED role mapping (`CALIBRATION_ONLY_ROLE_READING`), for one cell.
+    """The calibration-only role mapping (`CALIBRATION_ONLY_ROLE_READING`), for one cell.
 
     Reached ONLY through `_stratum_of(..., calibration_only=True)`, which
     `select_replay_cells` engages only for a column that has no transported cells AND
     cannot constitute the gate under the mapping of record — so a transported column's
-    selection is byte-identical to its selection before this ruling was implemented.
+    selection never passes through this function.
     """
     if cell.band_family == "Rband":              # band role: the node's OWN band
         return "random_band"
     if cell.kind == "calibration":               # the native lever, split by dose
-        # `scoring_magnitude` is the ladder in force's EXTREME (2026-08-09) and is
-        # `SCORING_DOSE_MAGNITUDE` for every frozen-ladder column, so B-1's mapping is
-        # unmoved for every column it was ruled over.
+        # `scoring_magnitude` is the ladder in force's EXTREME and is
+        # `SCORING_DOSE_MAGNITUDE` for every frozen-ladder column, so on the frozen
+        # ladder the signal role sits at |0.3|.
         if abs(cell.alpha_frac) == scoring_magnitude:
             return "signal_at_0.3"               # signal role: native EGV at |0.3|
         if 0.0 < abs(cell.alpha_frac) < scoring_magnitude:
@@ -3230,7 +3223,7 @@ def _stratum_of_mapping_only(cell: CellSpec, *, signal_magnitude: float
 def mapping_signal_magnitude(cells: Sequence[CellSpec]) -> Optional[float]:
     """The largest mapped |dose| among a column's non-band mapping levers, or None.
 
-    A function of the cell SET alone (like the §2.7 selection digest itself), so the
+    A function of the cell SET alone (like the replay-gate selection digest itself), so the
     signal role is presence-independent of the order a cells-json listed them in.
     """
     magnitudes = [abs(c.alpha_frac) for c in cells
@@ -3242,8 +3235,8 @@ def _bucket_by_stratum(cells: Sequence[CellSpec], *, calibration_only: bool,
                        mapping_only: bool = False) -> dict[str, list[str]]:
     """The per-stratum cell_id buckets under one role mapping (never sorted here)."""
     signal = mapping_signal_magnitude(cells) if mapping_only else None
-    # The extreme of THE LADDER IN FORCE — 0.3 for every frozen-ladder column, so every
-    # bucket a science column ever produced is the bucket it produced (2026-08-09).
+    # The extreme of THE LADDER IN FORCE — 0.3 for every frozen-ladder column, so a
+    # frozen-ladder science column buckets its signal cells at |0.3|.
     extreme = scoring_dose_magnitude(cells)
     buckets: dict[str, list[str]] = {s: [] for s in REPLAY_GATE_STRATA}
     for c in cells:
@@ -3256,21 +3249,21 @@ def _bucket_by_stratum(cells: Sequence[CellSpec], *, calibration_only: bool,
 
 
 def column_has_transported_cells(cells: Sequence[CellSpec]) -> bool:
-    """True iff ANY cell in the set is transported-family (B-1's trigger, negated)."""
+    """True iff ANY cell in the set is transported-family (the calibration-only trigger, negated)."""
     return any(c.kind in TRANSPORTED_CELL_KINDS or c.band_family == "gRband"
                for c in cells)
 
 
 def replay_gate_role_mapping(cells: Sequence[CellSpec]) -> str:
-    """Which §2.7 role mapping this cell SET falls under (B-1, ruled 2026-08-05).
+    """Which replay-gate role mapping this cell SET falls under.
 
     The mapping of record wins whenever it CAN constitute the gate, so every column
-    that worked before this ruling selects exactly what it selected before — the
-    calibration-only mapping is unreachable for them by construction, not by care.
+    the mapping of record can serve is selected under it — the calibration-only
+    mapping is unreachable for such columns by construction, not by care.
     A column that is short a stratum AND holds transported cells also keeps the
     mapping of record, so its shortfall still HALTs instead of being re-roled.
 
-    THE MAPPING MODE (2026-08-08) is tested FIRST and on presence alone. A mapping
+    THE MAPPING MODE is tested FIRST and on presence alone. A mapping
     column cannot constitute the gate under either science mapping (it has no cell at
     |0.3| and no `calibration`-kind cell), so "prefer the mapping of record whenever
     it can constitute the gate" would silently hand it a shortfall; and a science
@@ -3289,7 +3282,7 @@ def replay_gate_role_mapping(cells: Sequence[CellSpec]) -> str:
 
 def select_replay_cells(cells: Sequence[CellSpec], node_key: str, corpus_sha: str
                         ) -> tuple[list[str], dict[str, str], str]:
-    """§2.7's deterministic gate-cell selection.
+    """The in-job replay gate's deterministic gate-cell selection.
 
     "selection deterministic from `sha256(node_key|corpus_sha)`, constrained to
     include one signal cell at |0.3|, one random-band cell, and one calibration
@@ -3298,7 +3291,7 @@ def select_replay_cells(cells: Sequence[CellSpec], node_key: str, corpus_sha: st
     Cells are sorted by cell_id first, so the choice depends on the cell SET and the
     digest, never on the order a cells-json happened to list them in.
 
-    B-1 (ruled 2026-08-05): a column with NO transported cells fills the same three
+    A column with NO transported cells fills the same three
     frozen roles from its own work-types (`CALIBRATION_ONLY_ROLE_READING`). The
     mapping is chosen by `replay_gate_role_mapping`, which prefers the mapping of
     record whenever it can constitute the gate — so nothing about a transported
@@ -3312,7 +3305,7 @@ def select_replay_cells(cells: Sequence[CellSpec], node_key: str, corpus_sha: st
         # science mapping this population must be mapping-free, and the assertion is
         # here rather than implied so a future caller that assembles a population by
         # hand cannot slip one in.
-        assert_no_mapping_cells(cells, where="the §2.7 replay-gate population")
+        assert_no_mapping_cells(cells, where="the in-job replay-gate population")
     buckets = _bucket_by_stratum(
         cells, calibration_only=(mapping == REPLAY_ROLE_MAPPING_CALIBRATION_ONLY),
         mapping_only=(mapping == REPLAY_ROLE_MAPPING_MAPPING_ONLY))
@@ -3321,8 +3314,8 @@ def select_replay_cells(cells: Sequence[CellSpec], node_key: str, corpus_sha: st
         cid for ids in buckets.values() for cid in ids))
     if leaked:                                                    # pragma: no cover
         raise BesideCellInGatePopulation(
-            f"{node_key}: BESIDE cell(s) {leaked} entered a §2.7 replay-gate stratum. "
-            "B4 admits Σ-shaped bands as besides ONLY; a beside inside the blocking "
+            f"{node_key}: BESIDE cell(s) {leaked} entered an in-job replay-gate stratum. "
+            "Σ-shaped bands are admitted as besides ONLY; a beside inside the blocking "
             "gate would make the gate's population depend on a designation.")
     chosen: dict[str, str] = {}
     missing = []
@@ -3338,7 +3331,7 @@ def select_replay_cells(cells: Sequence[CellSpec], node_key: str, corpus_sha: st
         chosen[stratum] = options[(seed ^ window) % len(options)]
     if missing:
         raise ExpectedNShortfall(
-            f"§2.7 replay gate cannot be constituted on {node_key}: no cell for "
+            f"in-job replay gate cannot be constituted on {node_key}: no cell for "
             f"stratum(a) {missing}. The gate is BLOCKING and its composition is "
             f"frozen ({list(REPLAY_GATE_STRATA)}), so a column that cannot supply "
             f"one of each is incomplete, not exempt. "
@@ -3357,7 +3350,7 @@ def evaluate_replay_gate(*, selection: list[str], strata: dict[str, str],
                          entropy_replay: dict[str, str],
                          role_mapping: str = REPLAY_ROLE_MAPPING_OF_RECORD
                          ) -> ReplayGateResult:
-    """§2.7's blocking comparison. Any mismatch → HALT; no cell is quotable."""
+    """The in-job replay gate's blocking comparison. Any mismatch → HALT; no cell is quotable."""
     mismatches = []
     for cell in selection:
         for label, a, b in (("token_ids", token_first, token_replay),
@@ -3385,8 +3378,8 @@ def evaluate_replay_gate(*, selection: list[str], strata: dict[str, str],
         passed=not mismatches, mismatches=mismatches)
     if mismatches:
         raise ReplayGateNotBitwise(
-            "§2.7 in-job replay gate FAILED in the canonical layout — no cell from "
-            f"this node is quotable (§9 item 6). Mismatches: {mismatches}")
+            "in-job replay gate FAILED in the canonical layout — no cell from "
+            f"this node is quotable (ReplayGateNotBitwise). Mismatches: {mismatches}")
     return result
 
 
@@ -3395,10 +3388,10 @@ def choose_batch_size(vram_probe: Optional[Callable[[int], float]] = None,
                       ladder: Sequence[int] = BATCH_LADDER,
                       headroom: float = VRAM_HEADROOM_FRACTION
                       ) -> tuple[int, bool, str]:
-    """§2.2's preflight: the largest ladder rung that fits with ≥15% headroom.
+    """The batch-size preflight: the largest ladder rung that fits with ≥15% headroom.
 
     `vram_probe(B)` returns the FRACTION of device memory a measured probe at max
-    sequence length uses at batch size B. M19: every instrumentation call is
+    sequence length uses at batch size B. Every instrumentation call is
     wrapped, and a degraded probe does not gamble — it takes the CONSERVATIVE
     bound (the smallest rung) and says `measured=False`, so the consumer blocks on
     the bound rather than on a hope.
@@ -3410,8 +3403,8 @@ def choose_batch_size(vram_probe: Optional[Callable[[int], float]] = None,
     for B in sorted(ladder, reverse=True):
         try:
             used = float(vram_probe(int(B)))
-        except Exception as exc:                       # noqa: BLE001 — M19(a)
-            logger.warning("VRAM probe at B=%d failed (%s: %s) — M19: taking the "
+        except Exception as exc:                       # noqa: BLE001 — instrumentation; named below
+            logger.warning("VRAM probe at B=%d failed (%s: %s) — a failed probe takes the "
                            "conservative bound", B, type(exc).__name__, exc)
             return (min(ladder), False,
                     f"probe raised {type(exc).__name__} at B={B}; conservative "
@@ -3432,7 +3425,7 @@ def choose_batch_size(vram_probe: Optional[Callable[[int], float]] = None,
 def freeze_layout(batch_size: int, *, dtype: str, measured: bool = True,
                   headroom_note: str = "",
                   max_new_tokens: int = MAX_NEW_TOKENS) -> CanonicalLayout:
-    """§2.2: B is FROZEN in the node's stamp before any cell fires."""
+    """B is FROZEN in the node's stamp before any cell fires (the canonical layout)."""
     return CanonicalLayout(batch_size=batch_size, dtype=dtype,
                            max_new_tokens=max_new_tokens, frozen=True,
                            measured=measured, headroom_note=headroom_note)
@@ -3440,11 +3433,11 @@ def freeze_layout(batch_size: int, *, dtype: str, measured: bool = True,
 
 def assert_position_budget(max_prompt_tokens: int, max_new_tokens: int,
                            ceiling: Optional[int], node_key: str = "") -> None:
-    """§9 item 12: a node with a learned-position ceiling must fit prompt + span.
+    """A node with a learned-position ceiling must fit prompt + span, or HALT.
 
-    Addendum B's `truncation: first-1024` covers CORPUS texts, not behavioral
-    prompts, so an over-budget behavioral pool is a DESK RULING, not an enactor's
-    truncation.
+    The corpus pipeline's `truncation: first-1024` covers CORPUS texts, not
+    behavioral prompts, so an over-budget behavioral pool needs a deliberate
+    decision about the pool, never a truncation made here.
     """
     if ceiling is None:
         return
@@ -3453,40 +3446,41 @@ def assert_position_budget(max_prompt_tokens: int, max_new_tokens: int,
         raise PositionCeilingExceeded(
             f"{node_key or 'node'}: max(prompt_tokens)={max_prompt_tokens} + "
             f"max_new_tokens={max_new_tokens} = {need} > position ceiling "
-            f"{ceiling} (§9 item 12). Addendum B's first-{ceiling} truncation "
-            f"covers corpus texts, NOT behavioral prompts — the extension is a "
-            f"desk ruling, not an enactor call.")
+            f"{ceiling} (PositionCeilingExceeded). The corpus first-{ceiling} truncation "
+            f"covers corpus texts, NOT behavioral prompts — extending it to prompts is "
+            f"a decision about the pool, never a truncation made at run time.")
 
 
 def assert_alpha_zero_is_no_hook(logits_hooked_alpha0: Any,
                                  logits_unhooked: Any) -> None:
-    """§2.4's cheap once-per-node correctness check.
+    """The α=0-is-bitwise-no-hook check: cheap, once per node.
 
     The hook short-circuits on `alpha == 0.0` and returns its args untouched, so the
     α=0 baseline WITH the hook attached must be bitwise identical to no hook. If it
     is not, the injection machinery is not what the stamp says it is, and every cell
-    on the node is suspect.
+    this model produced is suspect.
     """
     a = np.asarray(logits_hooked_alpha0)
     b = np.asarray(logits_unhooked)
     if a.shape != b.shape or not np.array_equal(a, b):
         raise ReplayGateNotBitwise(
-            "§2.4: α=0 WITH the hook attached is not bitwise identical to the "
+            "α=0 WITH the hook attached is not bitwise identical to the "
             "unhooked forward. The hook's alpha==0.0 short-circuit is the whole "
-            "reason the baseline cell is shared between §4 and §5 — HALT.")
+            "reason the baseline cell is shared between the actuation calibration "
+            "and the transported cells — HALT.")
 
 
 def ssm_hook_admissibility_preflight(model: Any, *, node_key: str, site: int,
                                      vector: Any, n_tokens: int = 8,
                                      prompt_ids: Optional[Sequence[int]] = None
                                      ) -> HookAdmissibility:
-    """§4.4's named technical preflight — HALT-gated, run BEFORE any SSM cell is budgeted.
+    """The SSM hook-admissibility preflight — HALT-gated, run BEFORE any SSM cell is budgeted.
 
     Resolve `decoder_layers` on the LOADED model, attach a spec, generate `n_tokens`
     tokens, and assert `stats["saw_cache_position"] is True` and that
-    `stats["positions"]` equals expectation. On failure the SSM tier HALTs to the
-    desk: the remedy (a positional-gating shim for that architecture) is a code
-    change with its own gate, never something an enactor improvises mid-column.
+    `stats["positions"]` equals expectation. On failure the SSM tier HALTs: the
+    remedy (a positional-gating shim for that architecture) is a code change with
+    its own gate, never something improvised mid-column.
 
     Not SSM-specific in the code — it is a fact about an ARCHITECTURE's kwarg
     plumbing, so it is safe (and cheap) to run on any node whose blocks are not
@@ -3503,7 +3497,7 @@ def ssm_hook_admissibility_preflight(model: Any, *, node_key: str, site: int,
         raise HookAdmissibilityError(
             f"{node_key}: decoder_layers() cannot resolve the decoder stack on "
             f"{type(model).__name__} ({exc}) — the site cannot be hooked at all. "
-            "HALT to the desk (§4.4): extending decoder_layers for an architecture "
+            "HALT: extending decoder_layers for an architecture "
             "is a code change with its own gate.") from exc
     n_layers = len(layers)
     if not 0 <= site < n_layers:
@@ -3526,13 +3520,14 @@ def ssm_hook_admissibility_preflight(model: Any, *, node_key: str, site: int,
         stats = dict(handle.stats)
         n_new = int(out.shape[1] - ids.shape[1])
     except RuntimeError as exc:
-        # hooks.py L193-199 raises BY DESIGN on an ambiguous incremental step; that
-        # is the admissibility failure this preflight exists to surface early.
+        # The residual-write hook in `metabasis.extraction.hooks` raises BY DESIGN on
+        # an ambiguous incremental step; that is the admissibility failure this
+        # preflight exists to surface early.
         raise HookAdmissibilityError(
             f"{node_key}: the residual-write hook refused an incremental step at "
-            f"L{site} ({exc}). hooks.py raises rather than mis-injecting when a "
-            "block does not receive `cache_position` as a kwarg. HALT to the desk "
-            "(§4.4) — the remedy is a positional-gating shim with its own gate.") from exc
+            f"L{site} ({exc}). The hook raises rather than mis-injecting when a "
+            "block does not receive `cache_position` as a kwarg. HALT "
+            "— the remedy is a positional-gating shim with its own gate.") from exc
     finally:
         handle.remove()
     saw = bool(stats.get("saw_cache_position", False))
@@ -3556,9 +3551,9 @@ def ssm_hook_admissibility_preflight(model: Any, *, node_key: str, site: int,
     if not admissible:
         raise HookAdmissibilityError(
             f"{node_key}: SSM hook-admissibility preflight FAILED at L{site} — "
-            f"{detail}. §4.4/§9 item 11: the tier HALTs to the desk; a positional-"
+            f"{detail}. The tier HALTs (HookAdmissibilityError); a positional-"
             "gating shim for this architecture is a code change with its own gate, "
-            "not an enactor improvisation mid-column.")
+            "not an improvisation mid-column.")
     logger.info("hook-admissibility preflight PASSED on %s L%d: %s",
                 node_key, site, detail)
     return record
@@ -3567,7 +3562,7 @@ def ssm_hook_admissibility_preflight(model: Any, *, node_key: str, site: int,
 # ---------------------------------------------------------------- corpus / pool
 def assert_corpus_vintage(*shas: Optional[str],
                           expected: str = CORPUS_SHA_V21) -> str:
-    """§9 item 2: v2.1 everywhere in a cell's resolution chain, and never MIXED.
+    """Corpus v2.1 everywhere in a cell's resolution chain, and never MIXED.
 
     Every argument is one link of the chain (corpus manifest, vector build stamp,
     state bank, map fit). A None is a HOLE, and a hole is reported as a hole — it is
@@ -3577,26 +3572,26 @@ def assert_corpus_vintage(*shas: Optional[str],
     if not present:
         raise CorpusVintageError(
             "no corpus sha resolved anywhere in the chain — a cell cannot fire "
-            "against an unknown corpus vintage (§9 item 2)")
+            "against an unknown corpus vintage (CorpusVintageError)")
     if len(shas) != len(present):
         raise CorpusVintageError(
             f"corpus vintage chain has {len(shas) - len(present)} UNRESOLVED "
             f"link(s) of {len(shas)}; an absent link is a hole, not an agreement "
-            "(§9 item 2)")
+            "(CorpusVintageError)")
     distinct = sorted(set(present))
     if len(distinct) > 1:
         raise CorpusVintageError(
             f"MIXED corpus vintage across the resolution chain: {distinct} "
-            "(§9 item 2)")
+            "(CorpusVintageError)")
     if distinct[0] != expected:
         raise CorpusVintageError(
             f"corpus vintage {distinct[0][:12]}… is not v2.1 ({expected[:12]}…) "
-            "(§9 item 2)")
+            "(CorpusVintageError)")
     return distinct[0]
 
 
 def load_prompt_pool(path: Path) -> PromptPool:
-    """Ruling 10's banked stage-0 pool, sha-frozen, from disk.
+    """The banked stage-0 prompt pool of record, sha-frozen, from disk.
 
     Tolerant on KEY NAMES (banked pools predate this module and carry the corpus
     builder's own field names) and INTOLERANT on SHAPE: an unrecognized record
@@ -3605,7 +3600,7 @@ def load_prompt_pool(path: Path) -> PromptPool:
     """
     if not path.exists():
         raise PromptPoolError(
-            f"behavioral prompt pool not found: {path} (ruling 10: the banked "
+            f"behavioral prompt pool not found: {path} (the banked "
             "stage-0 pool is the pool of record and its sha rides every stamp)")
     raw = path.read_bytes()
     sha = hashlib.sha256(raw).hexdigest()
@@ -3646,27 +3641,25 @@ def load_prompt_pool(path: Path) -> PromptPool:
 
 def render_prompt(prompt: BehavioralPrompt, tok: Any, arm: str,
                   date_string: str = "12 Jul 2026") -> list[int]:
-    """Ruling 10's "rendered per-arm": native = chat template, raw = plain.
+    """The prompt "rendered per-arm": native = chat template, raw = plain.
 
     Mirrors `collect_mean_states.build_ids`'s arm semantics (the same
     `date_string` pin, the same TypeError fall-back for templates that take no
     `date_string`, and the same MAPPING unwrap) so a behavioral prompt and a
-    collected text are tokenized under the same arm rules. §5.1's frame is the
-    BARE SYSTEM PROMPT — the standard entropy frame, frozen — so nothing is added
+    collected text are tokenized under the same arm rules. The transported cells'
+    frame is the BARE SYSTEM PROMPT — the standard entropy frame, frozen — so nothing is added
     here that the pool does not carry.
 
     ⚠ THE MAPPING UNWRAP IS NOT COSMETIC. `apply_chat_template` returns a bare id
     list for some tokenizers and a `BatchEncoding` for others — on transformers
     5.3.0 the Llama-3.2-3B tokenizer returns the mapping and the Qwen2.5-3B one
     returns the list, so the two shapes appear on ONE roster at ONE version.
-    Iterating the mapping yields its KEYS, and `int("input_ids")` is where that
-    surfaced (3B certification, 2026-08-05). `build_ids` — the collection lane of
-    record — has always carried
+    Iterating the mapping yields its KEYS, which fails as `int("input_ids")`.
+    `build_ids` — the collection lane of record — carries
         `list(res["input_ids"] if hasattr(res, "keys") else res)`
-    and this function's own docstring claimed to mirror it while omitting exactly
-    that line. The unwrap is restored here in the ancestor's form, so a behavioral
-    prompt and a collected text tokenize identically on every tokenizer in the
-    roster rather than on the subset that happens to return a list.
+    and this function carries the same unwrap, so a behavioral prompt and a
+    collected text tokenize identically on every tokenizer in the roster rather
+    than on the subset that happens to return a list.
     """
     if arm not in ("native", "raw"):
         raise ValueError(f"unknown arm {arm!r} (valid: native, raw)")
@@ -3692,9 +3685,9 @@ def render_prompt(prompt: BehavioralPrompt, tok: Any, arm: str,
     return [int(i) for i in ids]
 
 
-# ---------------------------------------------------------------- stamps (§2.8)
-#: §2.8's checklist, as data. Every field is non-negotiable per node, per cell; the
-#: checker asserts presence AND non-nullness, because §10 makes absence a
+# ---------------------------------------------------------------- per-cell stamps
+#: The per-cell stamp checklist, as data. Every field is non-negotiable per node, per
+#: cell; the checker asserts presence AND non-nullness, because absence is a
 #: first-class reportable state (OWED) rather than a silent "absent".
 STAMP_REQUIRED_FIELDS: tuple[str, ...] = (
     "corpus_manifest_sha256",
@@ -3732,7 +3725,7 @@ STAMP_REQUIRED_FIELDS: tuple[str, ...] = (
 
 #: Fields that are legitimately null on a CALIBRATION cell — a native lever at the
 #: node's own site rides no transport map and has no naive-transplant row, because
-#: there is no (source, target) pair. Named explicitly so "null" is a RULED state
+#: there is no (source, target) pair. Named explicitly so "null" is a DECLARED state
 #: for these and only these, and the checker still refuses every other null.
 CALIBRATION_NULLABLE_FIELDS: frozenset[str] = frozenset({
     "transport_map_fit_sha256", "transport_map_family", "transport_map_arm",
@@ -3740,22 +3733,21 @@ CALIBRATION_NULLABLE_FIELDS: frozenset[str] = frozenset({
     "naive_transplant_verdict",
 })
 
-#: B-2, RULED (Luxia, 2026-08-05 ~03:00, session 12), quoted verbatim from the ledger
-#: row: "**B-2 = ADOPTED**: `naive` joins the nullable-kind set for EXACTLY the four
-#: transport_map_* stamp fields; the naive gate row/verdict fields stay required; a
-#: selftest must prove a naive cell missing its gate row still HALTs."
+#: `naive` is nullable for EXACTLY the four transport_map_* stamp fields; the naive
+#: gate row/verdict fields stay required, and the selftest proves a naive cell missing
+#: its gate row still HALTs.
 #:
-#: WHY the four and only the four: a naive cell is the ruling-5 null — the SOURCE's
-#: object dropped into the target's site with NO map applied — so there is no fit sha,
-#: no family, no arm and no map vintage to name, by construction. The naive-transplant
-#: gate row and its verdict are the opposite case: a naive cell is exactly the cell
-#: that gate was written for (§5.3 item 1 / §9 item 7), so they stay REQUIRED and a
-#: naive cell that lost them still HALTs.
+#: WHY the four and only the four: a naive cell is the naive-transplant null — the
+#: SOURCE's object dropped into the target's site with NO map applied — so there is no
+#: fit sha, no family, no arm and no map vintage to name, by construction. The
+#: naive-transplant gate row and its verdict are the opposite case: a naive cell is
+#: exactly the cell that gate was written for (`NaiveTransplantRowMissing`), so they
+#: stay REQUIRED and a naive cell that lost them still HALTs.
 NAIVE_NULLABLE_FIELDS: frozenset[str] = frozenset({
     "transport_map_fit_sha256", "transport_map_family", "transport_map_arm",
     "transport_map_corpus_vintage",
 })
-#: THE MAPPING MODE (2026-08-08). A mapping cell is a NATIVE-lever cell at an
+#: THE MAPPING MODE. A mapping cell is a NATIVE-lever cell at an
 #: off-ladder dose: it rides the node's own object at the node's own site, so it has
 #: no (source, target) pair and therefore no map and no naive-transplant row — the
 #: calibration case exactly. The widening is the calibration six and NOT one field
@@ -3764,7 +3756,7 @@ NAIVE_NULLABLE_FIELDS: frozenset[str] = frozenset({
 #: measurement of a window is worth no more than an unauditable science read.
 MAPPING_NULLABLE_FIELDS: frozenset[str] = CALIBRATION_NULLABLE_FIELDS
 #: The nullable-kind table, read by `assert_stamp_complete`. Every other kind gets the
-#: empty set — "null" stays a RULED state for named (kind, field) pairs and nothing
+#: empty set — "null" stays a DECLARED state for named (kind, field) pairs and nothing
 #: else, which is the property the whole checklist rests on.
 NULLABLE_FIELDS_BY_KIND: dict[str, frozenset[str]] = {
     "calibration": CALIBRATION_NULLABLE_FIELDS,
@@ -3774,21 +3766,21 @@ NULLABLE_FIELDS_BY_KIND: dict[str, frozenset[str]] = {
     MAPPING_CELL_KIND: MAPPING_NULLABLE_FIELDS,
 }
 
-#: HALT D, RULED (Luxia, 2026-08-05 morning, session 12) — option A, bundled:
-#: "`vector_class` declaration: fd_gate_not_applicable honoured by census AND stamp
-#: nullable table (EGV objects still REQUIRE their gate, selftest-proven);
-#: class-vintage = the ruled contrast-set sha, each stamp naming its basis."
+#: The vector-class contract: a declared `vector_class` other than the entropy
+#: gradient makes `fd_gate_not_applicable` honoured by the census AND by the stamp
+#: nullable table (EGV objects still REQUIRE their gate, selftest-proven); a class
+#: object's vintage is its contrast-set sha, and each stamp names its basis.
 #:
 #: WHY exactly one field: a CAA/PCA class object has no finite-difference gate
 #: analogue — `build_contrast_vectors`'s own stamp says so ("no FD-gate analogue
 #: exists for a CAA object — build acceptance is stamp completeness + the pair-count
-#: assertion + the anchor cosines"). Every OTHER §2.8 field means the same thing for
+#: assertion + the anchor cosines"). Every OTHER stamp field means the same thing for
 #: a class cell as for an EGV cell and stays required. The widening is keyed on the
 #: VECTOR CLASS, not on the cell kind, because the two are orthogonal: a class column
 #: has calibration, band and transported cells like any other.
 CLASS_VECTOR_NULLABLE_FIELDS: frozenset[str] = frozenset({"vector_fd_gate"})
 #: The vector class of record — the campaign's entropy-gradient object. A stamp that
-#: does not say otherwise IS this, which is why every column banked before the ruling
+#: does not say otherwise IS this, which is why a stamp with no `vector_class` key
 #: keeps its exact meaning (and its exact bytes).
 EGV_VECTOR_CLASS = "entropy_gradient"
 #: The closed vocabulary. `build_behavioral_banks.VectorClass` is the typed twin; the
@@ -3802,19 +3794,18 @@ VECTOR_BASIS_KINDS: tuple[str, ...] = ("corpus-manifest", "contrast-set")
 
 def assert_stamp_complete(stamp: dict, *, cell_kind: Optional[CellKind] = None,
                           vector_class: Optional[str] = None) -> None:
-    """§2.8 as a checklist assertion; §9 item 9 as its HALT.
+    """The per-cell stamp checklist as an assertion; `StampIncompleteError` as its HALT.
 
     Two ways to fail, kept apart in the message because they demand different
-    responses: a MISSING/NULL field is an OWED artifact (§10), and an unset CVD is
-    the M10 rogue-run tell (a scheduler job carries a card index; a rogue carries
-    the sentinel).
+    responses: a MISSING/NULL field is an OWED artifact, and an unset CVD is the
+    rogue-run tell (a scheduler job carries a card index; a process started outside
+    the scheduler carries the sentinel).
 
     A null is legitimate only for a (kind, field) pair named in
     `NULLABLE_FIELDS_BY_KIND` — the calibration half's six (no pair, so no map and no
-    naive row) and, since B-2 was ruled 2026-08-05, a `naive` cell's four
-    `transport_map_*` fields and NOTHING else — or for a (class, field) pair named in
-    `CLASS_VECTOR_NULLABLE_FIELDS`, which since HALT D was ruled the same day is
-    `vector_fd_gate` on a CLASS cell and nothing else. A MISSING field is refused for
+    naive row) and a `naive` cell's four `transport_map_*` fields and NOTHING
+    else — or for a (class, field) pair named in `CLASS_VECTOR_NULLABLE_FIELDS`,
+    which is `vector_fd_gate` on a CLASS cell and nothing else. A MISSING field is refused for
     every kind and every class: `nullable` widens what may be null, never what may be
     absent.
 
@@ -3828,7 +3819,7 @@ def assert_stamp_complete(stamp: dict, *, cell_kind: Optional[CellKind] = None,
     if declared not in VECTOR_CLASSES:
         raise VectorClassMisdeclared(
             f"vector_class={declared!r} is not one of {list(VECTOR_CLASSES)}. The "
-            "class vocabulary is closed (HALT D); an unrecognized class is refused "
+            "class vocabulary is closed; an unrecognized class is refused "
             "rather than defaulted to the object of record.")
     nullable = NULLABLE_FIELDS_BY_KIND.get(cell_kind or "", frozenset())
     if declared != EGV_VECTOR_CLASS:
@@ -3839,15 +3830,15 @@ def assert_stamp_complete(stamp: dict, *, cell_kind: Optional[CellKind] = None,
             and f not in nullable]
     if missing or null:
         raise StampIncompleteError(
-            f"§2.8 stamp incomplete (§9 item 9): missing={missing} null={null}. "
-            "Absence is a first-class reportable state (OWED, §10), never a silent "
-            "'absent' — the desk's stamp-completeness checker reads exactly this.")
+            f"per-cell stamp incomplete: missing={missing} null={null}. "
+            "Absence is a first-class reportable state (OWED), never a silent "
+            "'absent' — a stamp-completeness checker reads exactly this.")
     cvd = stamp.get("cuda_visible_devices")
     if cvd == CVD_UNSET_SENTINEL or not cvd:
         raise StampIncompleteError(
-            f"§9 item 9: cuda_visible_devices is {cvd!r}. M10: a SCHEDULER job "
+            f"stamp field cuda_visible_devices is {cvd!r}. A SCHEDULER job "
             "carries a card index and a ROGUE carries the sentinel — this is the "
-            "field that caught the rogue run, so it can never be absent.")
+            "field that tells a scheduled run from a rogue one, so it can never be absent.")
     assert_mapping_stamp_contract(stamp, cell_kind=cell_kind)
     assert_amended_ladder_stamp_contract(stamp, cell_kind=cell_kind)
     assert_vector_class_contract(stamp, vector_class=declared)
@@ -3855,7 +3846,7 @@ def assert_stamp_complete(stamp: dict, *, cell_kind: Optional[CellKind] = None,
 
 def assert_mapping_stamp_contract(stamp: dict, *, cell_kind: Optional[CellKind]
                                   ) -> None:
-    """The mapping mode's stamp contract, in both directions (2026-08-08).
+    """The mapping mode's stamp contract, in both directions.
 
     A MAPPING cell's stamp must carry `mapping_mode.licenses_nothing is True` — the
     completeness checker is the one place every stamp passes, at build time and again
@@ -3865,7 +3856,7 @@ def assert_mapping_stamp_contract(stamp: dict, *, cell_kind: Optional[CellKind]
     And the mirror: a stamp of any OTHER kind carrying a `mapping_mode` block is
     refused, because a science cell that could wear the mapping badge could also be
     quietly excused from a gate by a consumer that filters on it. `cell_kind=None` —
-    the desk's checker reading a stamp with no kind in hand — falls back to the
+    an external checker reading a stamp with no kind in hand — falls back to the
     stamp's own `cell_kind`, so a stamp is checked as the thing it says it is.
     """
     kind = cell_kind or stamp.get("cell_kind")
@@ -3887,7 +3878,7 @@ def assert_mapping_stamp_contract(stamp: dict, *, cell_kind: Optional[CellKind]
 
 def assert_amended_ladder_stamp_contract(stamp: dict, *, cell_kind: Optional[CellKind]
                                          ) -> None:
-    """The amended ladder's stamp contract (2026-08-09), in both directions.
+    """The amended ladder's stamp contract, in both directions.
 
     A stamp carrying an `amended_ladder` block must carry a WELL-FORMED one — amended
     is True, the spec sha is a sha, the ladder in force is a non-empty list, and
@@ -3895,14 +3886,13 @@ def assert_amended_ladder_stamp_contract(stamp: dict, *, cell_kind: Optional[Cel
     That last equality is the load-bearing one: a stamp whose badge says ±0.15 while
     its `dose_ladder` says the frozen six would be a stamp that presents as
     frozen-ladder to every consumer that does not know the badge exists, which is the
-    exact failure the block was added to prevent.
+    exact failure the block exists to prevent.
 
     And the mirror: a MAPPING cell's stamp may never carry the block. The two
     mechanisms are separate, and a mapping cell wearing a science re-calibration's
     badge would be a window measurement claiming a ladder.
 
-    A stamp with no block is a frozen-ladder cell and is checked as it always was —
-    nothing is asserted, which is every stamp banked before this ruling.
+    A stamp with no block is a frozen-ladder cell and nothing here is asserted of it.
     """
     block = stamp.get("amended_ladder")
     kind = cell_kind or stamp.get("cell_kind")
@@ -3933,11 +3923,11 @@ def assert_amended_ladder_stamp_contract(stamp: dict, *, cell_kind: Optional[Cel
 
 
 def assert_vector_class_contract(stamp: dict, *, vector_class: str) -> None:
-    """HALT D's stamp contract: BOTH bases named, and neither readable as the other.
+    """The vector-class stamp contract: BOTH bases named, and neither readable as the other.
 
     Four refusals, in the order a mistake is most likely to be made:
 
-      1. a CLASS cell with no `vector_basis` — the hole the pilot HALTed on;
+      1. a CLASS cell with no `vector_basis` — an object with no auditable vintage;
       2. a CLASS cell whose vector basis is not a `contrast-set` — the conflation
          itself (writing the corpus sha as the class object's vintage);
       3. a CLASS cell that does not also name its GENERATION basis — the mirror
@@ -3945,10 +3935,10 @@ def assert_vector_class_contract(stamp: dict, *, vector_class: str) -> None:
          its generations came from;
       4. an ENTROPY-GRADIENT cell carrying either key — an EGV's basis is the corpus
          manifest, already stamped under `corpus_manifest_sha256`, and a second name
-         for it is exactly how the two bases blurred in the first place.
+         for it is exactly how the two bases blur into one.
 
     Called from `assert_stamp_complete`, so it holds wherever a stamp is checked —
-    at build time, on a stamp read back from disk, and in the desk's own checker.
+    at build time, on a stamp read back from disk, and in any external checker.
     """
     basis = stamp.get("vector_basis")
     generation = stamp.get("generation_basis")
@@ -3959,28 +3949,28 @@ def assert_vector_class_contract(stamp: dict, *, vector_class: str) -> None:
                 f"an entropy-gradient cell's stamp carries {offending}. The EGV's "
                 "basis IS the corpus manifest and is stamped once, under "
                 "`corpus_manifest_sha256`; a second name for the same basis is the "
-                "two-bases defect (HALT D). Declare `vector_class` if this is a "
+                "two-bases defect. Declare `vector_class` if this is a "
                 "class object.")
         if stamp.get("fd_gate_not_applicable"):
             classes = ", ".join(c for c in VECTOR_CLASSES if c != EGV_VECTOR_CLASS)
             raise VectorClassMisdeclared(
                 "an entropy-gradient cell's stamp claims fd_gate_not_applicable. "
-                "The FD gate is the EGV's OWN acceptance test (§9 item 3) and only "
+                "The FD gate is the EGV's OWN acceptance test and only "
                 f"a class object ({classes}) may say it has no analogue.")
         return
     if not isinstance(basis, dict) or not basis.get("sha256"):
         raise VectorBasisMissing(
             f"vector_class={vector_class!r} but the stamp names no `vector_basis` "
-            "with a sha256. A class object's VECTOR basis is the RULED CONTRAST SET "
+            "with a sha256. A class object's VECTOR basis is the CONTRAST SET "
             "it was built from — the sha `build_contrast_vectors` refuses to build "
             "without — and a stamp that omits it makes the object unauditable "
-            "(§9 item 2: a hole is a hole, not an agreement).")
+            "(a hole is a hole, not an agreement).")
     if basis.get("kind") != "contrast-set":
         raise VectorClassMisdeclared(
             f"vector_class={vector_class!r} with vector_basis.kind="
             f"{basis.get('kind')!r}. A class object's vector basis is the "
             "contrast set; `corpus-manifest` is the GENERATION basis and rides "
-            "`generation_basis`. The two are never the same field (HALT D).")
+            "`generation_basis`. The two are never the same field.")
     if not isinstance(generation, dict) or not generation.get("sha256"):
         raise VectorBasisMissing(
             f"vector_class={vector_class!r} names its contrast set but no "
@@ -4007,23 +3997,23 @@ def build_stamp(*, cell: CellSpec, alpha: float, layout: CanonicalLayout,
                 vector_basis: Optional[dict] = None,
                 site_role: Optional[str] = None,
                 extra: Optional[dict] = None) -> dict:
-    """§2.8's per-cell custody stamp, built so the checklist cannot be half-met.
+    """The per-cell custody stamp, built so the checklist cannot be half-met.
 
-    Every §2.8 field is written here explicitly — nothing is `.get`-defaulted into
-    existence — and `assert_stamp_complete` runs before the stamp is returned, so a
-    caller can never receive a stamp that would fail the desk's own checker.
+    Every required stamp field is written here explicitly — nothing is `.get`-defaulted
+    into existence — and `assert_stamp_complete` runs before the stamp is returned, so
+    a caller can never receive a stamp that would fail an external completeness checker.
 
-    HALT C and HALT D add three keys, and all three are written ONLY when the caller
-    declares them. `site_role` appears when the column was staged in a declared role
-    (§4.2's remedy (i)); `vector_class`/`vector_basis`/`generation_basis` appear when
-    the cell rides a CLASS object. An entropy-gradient cell staged at its site of
-    record therefore produces the byte-identical stamp it produced before both
-    rulings — the flag-absent condition, in the one function that writes stamps.
+    Three optional keys are written ONLY when the caller declares them. `site_role`
+    appears when the column was staged in a declared role (the actuation-calibration
+    remedy of calibrating at a robustness site); `vector_class`/`vector_basis`/
+    `generation_basis` appear when the cell rides a CLASS object. An entropy-gradient
+    cell staged at its site of record therefore carries none of the three — the
+    flag-absent condition, in the one function that writes stamps.
     """
     tmap = transport_map or {}
-    # THE MAPPING MODE (2026-08-08): a mapping cell's §4.2 slot is a NON-VERDICT.
-    # §4.2's closing line binds every §5 cell to name its site's calibration; a mapping
-    # cell is not a §5 cell, and a PASS transcribed onto it would be a licence sitting
+    # THE MAPPING MODE: a mapping cell's actuation-calibration slot is a NON-VERDICT.
+    # Every transported cell must name its site's calibration; a mapping cell is not a
+    # transported cell, and a PASS transcribed onto it would be a licence sitting
     # on a cell that licenses nothing. Whatever verdict the RUN carries is preserved —
     # under `site_calibration_beside`, where it reads as a fact about the site rather
     # than about this cell. Every other kind takes the caller's block unchanged, so no
@@ -4044,7 +4034,7 @@ def build_stamp(*, cell: CellSpec, alpha: float, layout: CanonicalLayout,
         "vector_key": cell.vector_key,
         "band_family": cell.band_family,
         "is_null": cell.is_null,
-        # B4, written into every stamp so a beside can never be read back as the null
+        # Written into every stamp so a beside can never be read back as the null
         # of record by anything downstream that only has the stamp.
         "is_null_of_record": cell.is_null_of_record,
         "is_beside_only": cell.is_beside,
@@ -4063,10 +4053,9 @@ def build_stamp(*, cell: CellSpec, alpha: float, layout: CanonicalLayout,
         "site_cross_check": site_cross_check,
         "arm": arm,
         "node_key": node_key,
-        # THE LADDER THIS CELL RAN (2026-08-09). `cell.ladder_in_force` is `DOSE_LADDER`
-        # for every cell with no ratified amendment — which is every cell banked before
-        # re-freeze #2 — so this field is byte-for-byte what it was. For an amended cell
-        # it states the ladder actually run, and the `amended_ladder` block below names
+        # THE LADDER THIS CELL RAN. `cell.ladder_in_force` is `DOSE_LADDER` for every
+        # cell with no authorized amendment, so on a frozen-ladder cell this field is
+        # the frozen ladder. For an amended cell it states the ladder actually run, and the `amended_ladder` block below names
         # the frozen one beside it: a stamp never says "frozen" about an amended column.
         "dose_ladder": list(cell.ladder_in_force),
         "alpha_frac": cell.alpha_frac,
@@ -4110,14 +4099,14 @@ def build_stamp(*, cell: CellSpec, alpha: float, layout: CanonicalLayout,
             "direction known to produce the behavior; asserted on the vector's "
             "construction provenance at cell build time"),
     }
-    # E4.1's pre-written clause, attached at the cell's stamp for a FLAGGED pair
-    # (§5.3 item 2). A flagged pair still runs and still scores.
+    # The pre-written artifact-exposure clause, attached at the cell's stamp for a
+    # FLAGGED pair. A flagged pair still runs and still scores.
     if naive_row and naive_row.get("verdict") == "ARTIFACT-EXPOSED":
         stamp["naive_transplant_clause"] = (
             "shared residual coordinate frame; a hit on this pair is not evidence "
             "of transport beyond frame-sharing; excluded from mechanism aggregates, "
             "retained in scored aggregates.")
-    # HALT C: the DECLARED site role, on the cell stamp as well as inside the
+    # The DECLARED site role, on the cell stamp as well as inside the
     # cross-check block, so a reader with one cell's stamp can tell a robustness-site
     # column from a site-of-record one without re-deriving anything.
     if site_role is not None:
@@ -4139,7 +4128,7 @@ def build_stamp(*, cell: CellSpec, alpha: float, layout: CanonicalLayout,
             "note": MAPPING_LICENSES_NOTHING,
         }
     # THE AMENDED LADDER: the cell says which ladder produced it, with the document
-    # that ratified the replacement named by id and by sha, and the FROZEN ladder
+    # that authorized the replacement named by id and by sha, and the FROZEN ladder
     # quoted beside so the substitution is legible from this stamp alone. This is the
     # block that makes the comparability rider enforceable downstream — a reader
     # pooling rows can tell, per row, which ladder it is holding.
@@ -4153,15 +4142,16 @@ def build_stamp(*, cell: CellSpec, alpha: float, layout: CanonicalLayout,
             "replaces_frozen_ladder": True,
             "extreme_magnitude": cell.ladder_authorization.extreme_magnitude,
             "signal_role_reading": AMENDED_LADDER_SIGNAL_ROLE_READING,
-            # §4.2 is DESK-SIDE: the reading rule lives in the document named above and
-            # is not executed, paraphrased or scored here. The sha is the pointer to it.
+            # Scoring happens outside this module: the reading rule lives in the
+            # document named above and is not executed, paraphrased or scored here.
+            # The sha is the pointer to it.
             "gate_reading_rule": (
                 "read §4.2's extreme-dose references on the ladder in force; the "
                 "ratified wording is in the ladder spec named by the sha above "
                 "(desk policy — the engine runs and records, it does not score)"),
             "note": AMENDED_LADDER_NOTE,
         }
-    # HALT D: the two bases, both named, only on a class cell.
+    # The vector-class contract: the two bases, both named, only on a class cell.
     if vector_class != EGV_VECTOR_CLASS:
         stamp["vector_class"] = vector_class
         stamp["vector_basis"] = vector_basis
@@ -4184,10 +4174,10 @@ def build_stamp(*, cell: CellSpec, alpha: float, layout: CanonicalLayout,
 
 
 def assert_naive_row_banked(pair: str, gate: Optional[dict]) -> dict:
-    """§5.3 item 1 / §9 item 7: no cell fires for a pair whose naive row is unbanked.
+    """No cell fires for a pair whose naive-transplant row is unbanked.
 
-    A pair absent from the banked 66 + 36 rows HALTs to the desk for a gate
-    extension BEFORE the cell is built — the gate is not something a cell can
+    A pair absent from the banked 66 + 36 rows HALTs (`NaiveTransplantRowMissing`)
+    until the gate is extended, BEFORE the cell is built — the gate is not something a cell can
     proceed without and then have added afterwards.
     """
     rows = (gate or {}).get("rows") or (gate or {}).get("pairs") or {}
@@ -4196,20 +4186,19 @@ def assert_naive_row_banked(pair: str, gate: Optional[dict]) -> dict:
     row = rows.get(pair)
     if not row:
         raise NaiveTransplantRowMissing(
-            f"no banked naive-transplant row for pair {pair!r} (§5.3 item 1 / §9 "
-            "item 7). The banked gate is 66 candidate pairs + 36 gpt2-xl supplement "
-            "rows; a new pair HALTs to the desk for a gate extension BEFORE its cell "
-            "is built.")
+            f"no banked naive-transplant row for pair {pair!r}. The banked gate is "
+            "66 candidate pairs + 36 gpt2-xl supplement rows; a new pair HALTs until "
+            "the gate is extended, BEFORE its cell is built.")
     return row
 
 
-# ------------------------------------------------- §4.2's verdict, as a document
+# ------------------------------------ the actuation-calibration verdict, as a document
 class ActuationCalibrationVerdict(BaseModel):
-    """§4.2's closing requirement as a typed document the desk files and the CLI reads.
+    """The actuation-calibration verdict as a typed document the scorer files and the CLI reads.
 
-    "Every behavioral cell in §5 NAMES its site's actuation calibration in its stamp,
-    by job id + verdict + the three criterion values." The three values are §4.2's
-    own: (a) Spearman ρ(dose, entropy_rise) over the full signed ladder, (b) how many
+    Every transported behavioral cell NAMES its site's actuation calibration in its
+    stamp, by job id + verdict + the three criterion values. The three values are the
+    calibration criteria: (a) Spearman ρ(dose, entropy_rise) over the full signed ladder, (b) how many
     of the ladder's doses sit outside the node's OWN native random band — and whether
     BOTH |0.3| doses do, because (b) is one criterion with two parts and a stamp that
     dropped the second could not re-apply the threshold — and (c) the mean
@@ -4217,18 +4206,19 @@ class ActuationCalibrationVerdict(BaseModel):
 
     THE ROLE BOUNDARY, IN THE TYPE. `verdict` is a field, not a computation. No
     validator here re-derives PASS/FAIL/DEGENERATE from the criterion values, and a
-    document whose verdict disagrees with its own numbers still loads verbatim: the
-    desk is the scorer (C§8), this module transcribes. The engine's job is to refuse a
-    document that is not a §4.2 document at all, and to refuse one that is about some
-    OTHER column.
+    document whose verdict disagrees with its own numbers still loads verbatim:
+    scoring happens elsewhere and this module never self-scores, it transcribes. The
+    engine's job is to refuse a document that is not an actuation-calibration verdict
+    at all, and to refuse one that is about some OTHER column.
 
     `extra="forbid"`: an unrecognized key is a refusal, because a mistyped criterion
     name that silently defaulted would put a number in a stamp that no one filed.
 
     Field names deliberately echo `actuation_calibration.stamp_fragment`'s keys
     (`job_id`, `verdict`, `spearman_rho`, `outside_band_doses`,
-    `coherence_at_scoring_dose`) so a reader of a §5 stamp meets ONE vocabulary
-    whether the block came from a desk-scored document or from that module's own
+    `coherence_at_scoring_dose`) so a reader of a transported cell's stamp meets ONE
+    vocabulary whether the block came from an externally scored document or from that
+    module's own
     evaluation. The two modules are NOT wired together — `actuation_calibration`
     imports this one, so importing it back would be a cycle — and the alignment is by
     name, on purpose, with this sentence as the record of it.
@@ -4241,48 +4231,48 @@ class ActuationCalibrationVerdict(BaseModel):
     node_key: str = Field(min_length=1)
     site: int = Field(ge=0)
     arm: Literal["native", "raw"]
-    #: the scheduler job that produced the calibration cells (§4.2's "job id").
+    #: the scheduler job that produced the calibration cells (the verdict's "job id").
     job_id: str = Field(min_length=1)
-    #: the desk's verdict string, VERBATIM. DEGENERATE is its own state and is never
-    #: folded into PASS (§4.2), so it is a member of the literal rather than a note.
+    #: the scorer's verdict string, VERBATIM. DEGENERATE is its own state and is never
+    #: folded into PASS, so it is a member of the literal rather than a note.
     verdict: Literal["PASS", "FAIL", "DEGENERATE"]
     #: (a) dose-ordering across the full signed 6-dose ladder.
     spearman_rho_dose_vs_rise: float = Field(ge=-1.0, le=1.0)
     #: (b) band separation vs the node's OWN native Rband, as VALUES: the count, its
     #: denominator (the ladder's arity, so the fraction is self-describing) and
-    #: §4.2(b)'s second half.
+    #: criterion (b)'s second half (both extremes outside).
     outside_band_doses: int = Field(ge=0, le=len(DOSE_LADDER))
     outside_band_of: int = Field(default=len(DOSE_LADDER), ge=1, le=len(DOSE_LADDER))
     outside_band_at_both_extremes: bool
     #: (c) the coherence floor's measurement at the scoring dose — the POSITIVE extreme
-    #: of the ladder in force (+0.3 frozen; +0.15 on the ratified mixtral amendment).
+    #: of the ladder in force (+0.3 frozen; +0.15 on the authorized mixtral amendment).
     coherence_at_scoring_dose: float = Field(ge=0.0, le=1.0)
-    #: where the desk's scoring arithmetic is on the record, and the ledger day it
-    #: was ruled — the two pointers that make the verdict auditable from the stamp.
+    #: where the scorer's arithmetic is on the record, and the day the verdict was
+    #: filed — the two pointers that make the verdict auditable from the stamp.
     scoring_log_path: str = Field(min_length=1)
     ledger_date: date
-    #: the site's role, for the §4.2 remedy ladder (a robustness-site calibration is
+    #: the site's role, for the calibration remedy ladder (a robustness-site calibration is
     #: a different statement from a site-of-record one). Defaulted, never inferred.
     site_role: Literal["site_of_record", "robustness_site"] = "site_of_record"
-    #: THE LADDER IN FORCE (re-freeze #3, 2026-08-13). §4.2 is scored on the ladder the
-    #: column ACTUALLY RAN, and on an amended-ladder column that is not the frozen one.
-    #: The desk states it HERE, in the document, because policy lives in documents —
-    #: this module still carries no per-node ladder, only the machinery to record one.
+    #: THE LADDER IN FORCE. The calibration is scored on the ladder the column
+    #: ACTUALLY RAN, and on an amended-ladder column that is not the frozen one. The
+    #: scorer states it HERE, in the document, because policy lives in documents —
+    #: this module carries no per-node ladder, only the machinery to record one.
     #:
-    #: ABSENT BOTH, `stamp_block` emits the frozen constants exactly as it always has,
-    #: so every document filed before this field existed stamps BYTE-IDENTICALLY. There
+    #: ABSENT BOTH, `stamp_block` emits the frozen constants, so a document without
+    #: the pair stamps BYTE-IDENTICALLY to one that states the frozen ladder. There
     #: is deliberately no "which branch produced this" marker in the block: a frozen
     #: ladder stated explicitly and a frozen ladder taken by default are the same claim.
     #:
     #: BOTH OR NEITHER. A scoring pair without its ladder cannot be checked against it,
-    #: and a ladder without its scoring pair leaves §4.2(b)'s extremes to be inferred by
+    #: and a ladder without its scoring pair leaves criterion (b)'s extremes to be inferred by
     #: a reader — the inference this whole mechanism exists to stop.
     dose_ladder: Optional[list[float]] = None
     scoring_doses: Optional[list[float]] = None
 
     @model_validator(mode="after")
     def _counts_are_consistent(self) -> "ActuationCalibrationVerdict":
-        """Arithmetic self-consistency ONLY — never a re-reading of §4.2.
+        """Arithmetic self-consistency ONLY — never a re-reading of the calibration criteria.
 
         A count cannot exceed its own denominator, and "outside at both extreme doses"
         cannot be true when fewer than two doses are outside at all. Both are
@@ -4292,16 +4282,16 @@ class ActuationCalibrationVerdict(BaseModel):
         The ladder-in-force pair is checked the same way and no further: present
         together, distinct and non-empty, arity agreeing with the band denominator, and
         a scoring pair that IS the ladder's two extremes — `(min, max)`, not
-        ±magnitude, so an asymmetric ratified ladder reads correctly and every
-        symmetric one is unchanged. Whether ±0.15 was the RIGHT window is Luxia's
-        ruling in the ladder spec, never this validator's.
+        ±magnitude, so an asymmetric authorized ladder reads correctly and every
+        symmetric one is unchanged. Whether ±0.15 was the RIGHT window is decided in
+        the ladder spec, never by this validator.
         """
         if (self.dose_ladder is None) != (self.scoring_doses is None):
             raise ValueError(
                 "dose_ladder and scoring_doses are BOTH-OR-NEITHER: this document "
                 f"states {'dose_ladder' if self.dose_ladder is not None else 'scoring_doses'} "
                 "alone. A scoring pair without its ladder cannot be checked against it, "
-                "and a ladder without its pair leaves §4.2(b)'s extremes to inference.")
+                "and a ladder without its pair leaves criterion (b)'s extremes to inference.")
         if self.dose_ladder is not None:
             if not self.dose_ladder:
                 raise ValueError("dose_ladder is present but empty — a column runs a "
@@ -4309,17 +4299,17 @@ class ActuationCalibrationVerdict(BaseModel):
             if len(set(self.dose_ladder)) != len(self.dose_ladder):
                 raise ValueError(
                     f"dose_ladder {self.dose_ladder} repeats a dose — a ladder's rungs "
-                    "are distinct, and §4.2(a)'s Spearman is over the signed ladder")
+                    "are distinct, and criterion (a)'s Spearman is over the signed ladder")
             if len(self.dose_ladder) != self.outside_band_of:
                 raise ValueError(
                     f"dose_ladder has {len(self.dose_ladder)} rungs but "
-                    f"outside_band_of is {self.outside_band_of} — §4.2(b)'s denominator "
+                    f"outside_band_of is {self.outside_band_of} — criterion (b)'s denominator "
                     "IS the ladder's arity, so these two cannot disagree")
             want = [min(self.dose_ladder), max(self.dose_ladder)]
             if list(self.scoring_doses) != want:
                 raise ValueError(
                     f"scoring_doses {list(self.scoring_doses)} are not the ladder's two "
-                    f"extremes {want}. The ratified reading is (min, max) of THE LADDER "
+                    f"extremes {want}. The reading of record is (min, max) of THE LADDER "
                     "IN FORCE — not ±magnitude, so an asymmetric ladder reads correctly.")
         if self.outside_band_doses > self.outside_band_of:
             raise ValueError(
@@ -4329,16 +4319,16 @@ class ActuationCalibrationVerdict(BaseModel):
         if self.outside_band_at_both_extremes and self.outside_band_doses < 2:
             raise ValueError(
                 f"outside_band_at_both_extremes is true but only "
-                f"{self.outside_band_doses} dose(s) are outside the band — §4.2(b)'s "
+                f"{self.outside_band_doses} dose(s) are outside the band — criterion (b)'s "
                 "two halves contradict each other in this document")
         return self
 
     def stamp_block(self, *, document_path: str, document_sha256: str) -> dict:
-        """The object a §5 stamp embeds, under `actuation_calibration`.
+        """The object a transported cell's stamp embeds, under `actuation_calibration`.
 
-        Values, not booleans, so a downstream reader re-applies §4.2's thresholds by
-        hand without re-running anything — and the document's own sha, so the stamp
-        is M4-checkable against the file the desk filed.
+        Values, not booleans, so a downstream reader re-applies the calibration
+        thresholds by hand without re-running anything — and the document's own sha,
+        so the stamp can be checked byte-for-byte against the file the scorer filed.
         """
         return {
             "verdict": self.verdict,
@@ -4353,9 +4343,9 @@ class ActuationCalibrationVerdict(BaseModel):
                 f"{self.outside_band_doses}/{self.outside_band_of}",
             "outside_band_at_both_extremes": self.outside_band_at_both_extremes,
             "coherence_at_scoring_dose": self.coherence_at_scoring_dose,
-            # THE LADDER IN FORCE (re-freeze #3): the document's own pair when it
-            # states one, the frozen constants otherwise. The fallback is what makes
-            # every pre-existing verdict document stamp byte-identically.
+            # THE LADDER IN FORCE: the document's own pair when it states one, the
+            # frozen constants otherwise. The fallback is what makes a verdict
+            # document without the pair stamp byte-identically.
             "dose_ladder": (list(self.dose_ladder) if self.dose_ladder is not None
                             else list(DOSE_LADDER)),
             "scoring_doses": (list(self.scoring_doses) if self.scoring_doses is not None
@@ -4376,20 +4366,20 @@ def load_actuation_calibration(path: Path, *, node_key: str, arm: str, site: int
 
     Three refusals, each its own exception because each has its own remedy:
     `ActuationCalibrationNotFound` (no readable file at that path),
-    `ActuationCalibrationSchemaError` (not a §4.2 verdict document) and
+    `ActuationCalibrationSchemaError` (not an actuation-calibration verdict document) and
     `ActuationCalibrationMismatch` (a verdict about some other column). All three are
     `BehavioralHarnessError`, so the CLI's existing HALT path reports them and exits
-    2 — an enactor never adjudicates a live HALT.
+    2 — a live HALT is never adjudicated by the process that hit it.
 
     There is no fourth outcome. In particular there is no degrade-to-OWED: a named
     verdict that cannot be read stops the job, because OWED means "no verdict has
     been filed" and stamping it while one exists is the false provenance statement
-    this whole flag was ruled to fix.
+    this whole flag exists to prevent.
     """
     if not path.is_file():
         raise ActuationCalibrationNotFound(
             f"no actuation-calibration verdict document at {path} "
-            f"({ACTUATION_CALIBRATION_FLAG}). §4.2 requires every §5 cell to NAME its "
+            f"({ACTUATION_CALIBRATION_FLAG}). Every transported cell must NAME its "
             "site's calibration by job id + verdict + the three criterion values; "
             "this job named a document that is not a readable file. It does NOT fall "
             "back to OWED — OWED means no verdict exists, and that would be a false "
@@ -4405,17 +4395,17 @@ def load_actuation_calibration(path: Path, *, node_key: str, arm: str, site: int
         body = json.loads(raw)
     except json.JSONDecodeError as exc:
         raise ActuationCalibrationSchemaError(
-            f"{path}: not JSON ({exc}) — a §4.2 verdict document is a JSON "
+            f"{path}: not JSON ({exc}) — an actuation-calibration verdict document is a JSON "
             "object") from exc
     if not isinstance(body, dict):
         raise ActuationCalibrationSchemaError(
-            f"{path}: a §4.2 verdict document is a JSON object, got "
+            f"{path}: an actuation-calibration verdict document is a JSON object, got "
             f"{type(body).__name__}")
     try:
         verdict = ActuationCalibrationVerdict(**body)
     except ValidationError as exc:
         raise ActuationCalibrationSchemaError(
-            f"{path}: not a §4.2 verdict document ({exc}). Required: node_key, site, "
+            f"{path}: not an actuation-calibration verdict document ({exc}). Required: node_key, site, "
             "arm, job_id, verdict, spearman_rho_dose_vs_rise, outside_band_doses, "
             "outside_band_at_both_extremes, coherence_at_scoring_dose, "
             "scoring_log_path, ledger_date. Unknown keys are REFUSED, never "
@@ -4432,7 +4422,7 @@ def load_actuation_calibration(path: Path, *, node_key: str, arm: str, site: int
         raise ActuationCalibrationMismatch(
             f"{path}: this verdict is about another column — " +
             "; ".join(disagreements) +
-            ". §4 gates a SITE, so a verdict is a statement about exactly one "
+            ". The actuation calibration gates a SITE, so a verdict is a statement about exactly one "
             "(node, site, arm); stamping this column with it would name a "
             "calibration that never ran here.")
     return verdict.stamp_block(document_path=str(path),
@@ -4441,9 +4431,9 @@ def load_actuation_calibration(path: Path, *, node_key: str, arm: str, site: int
 
 # ---------------------------------------------------------------- HF stepper
 class HFStepper:
-    """`Stepper` over a real HF causal LM with a KV cache (§2.2's generation path).
+    """`Stepper` over a real HF causal LM with a KV cache (the generation path).
 
-    `use_cache=True` for generation (§2.2). Logits are returned as the LAST
+    `use_cache=True` for generation. Logits are returned as the LAST
     position's row block, float32 on CPU, because the sampling step does its
     arithmetic in float64 numpy on one row — which is what makes it layout-invariant
     (see `sample_token`).
@@ -4503,9 +4493,9 @@ class HFStepper:
         self._past = None
 
 
-# ---------------------------------------------------------------- the column job (§2.1)
-#: §2.1's fire order, as data. Calibration runs BEFORE anything transported because §4
-#: is a GATE and not a warm-up: a node whose site fails it gets no transported-write
+# ---------------------------------------------------------------- the column job
+#: The column job's fire order, as data. Calibration runs BEFORE anything transported
+#: because the actuation calibration is a GATE and not a warm-up: a node whose site fails it gets no transported-write
 #: cell there, and a column that fired the transported half first would have spent the
 #: budget before the gate could refuse it.
 #: `mapping` is last and alone, which costs nothing (a mapping column is pure, so it
@@ -4515,12 +4505,12 @@ CELL_KIND_ORDER: tuple[CellKind, ...] = (
     "baseline", "calibration", "calibration_band", "transported", "transported_band",
     "naive", "bridge", "judged", "mapping")
 
-#: §2.7's descriptive batch-invariance sizes. Both are OFF the frozen ladder, on
+#: The descriptive batch-invariance sizes. Both are OFF the frozen batch ladder, on
 #: purpose — see `CanonicalLayout.characterization_only`.
 CHARACTERIZATION_BATCH_SIZES: tuple[int, ...] = (8, 1)
 
-#: How a cell's entropy digest is composed (§2.7 says "the probe's per-position
-#: float32 entropy arrays" without fixing an order; an unnamed order would make the
+#: How a cell's entropy digest is composed (the replay gate is specified over "the
+#: probe's per-position float32 entropy arrays" without a fixed order; an unnamed order would make the
 #: digest unreproducible by anyone but this file).
 ENTROPY_DIGEST_ORDER = (
     "sha256 over float32 .tobytes() of: every generation's STEERED per-position entropy "
@@ -4528,8 +4518,8 @@ ENTROPY_DIGEST_ORDER = (
     "order. Both halves are in the digest because the rise is their difference and a "
     "gate on only one half could pass while the read moved.")
 
-#: §6(1)/§6(2): the battery's own injection span. The brief fixes the hook, the α and
-#: the site but not the SPAN, and the span is what makes the read a capability-under-
+#: The capability battery's own injection span (likelihood and format halves). The
+#: specification fixes the hook, the α and the site but not the SPAN, and the span is what makes the read a capability-under-
 #: dose rather than a model fact — so it is named here rather than assumed.
 BATTERY_INJECTION_SPAN = (
     "the battery injects over the SCORED span only — the continuation positions of a "
@@ -4538,7 +4528,7 @@ BATTERY_INJECTION_SPAN = (
     "the item's prompt would measure a different intervention from the one the cell's "
     "entropy read measures.")
 
-#: The battery's format probe is GREEDY. §6 wants the battery deterministic ("no
+#: The battery's format probe is GREEDY. The battery is specified deterministic ("no
 #: sampling noise on top of the effect being measured") and only the likelihood half is
 #: deterministic by construction, so the generated half is pinned rather than sampled.
 BATTERY_SAMPLING = SamplingConfig(
@@ -4555,15 +4545,15 @@ class NodeRuntime(Protocol):
     The orchestration (`run_column`) is the part that has to be right and the part no
     GPU can be spared to test, so it is written against this narrow surface: the SAME
     orchestration runs under `HFNodeRuntime` on a node and under a numpy-only stub in
-    `--selftest`, which is how the §2.1 order, the stamps, the completeness guard and
+    `--selftest`, which is how the fire order, the stamps, the completeness guard and
     the replay gate stay proven in a configuration with no deep-learning stack at all.
     """
 
     def trunk(self) -> dict:
-        """§2.8's trunk facts: transformers/torch versions, node, GPU model, driver."""
+        """The stamp's trunk facts: transformers/torch versions, node, GPU model, driver."""
 
     def model_config_sha256(self) -> Optional[str]:
-        """§2.8's M9 drift anchor."""
+        """The stamp's drift anchor: a changed model config shows up as a changed sha."""
 
     def tokenize(self, prompt: BehavioralPrompt) -> list[int]:
         ...
@@ -4582,7 +4572,7 @@ class NodeRuntime(Protocol):
 
     def measure_per_token_median_resid_norm(
             self, *, site: int, prompt_ids: Sequence[Sequence[int]]) -> float:
-        """§2.5's in-job measurement — the convention that sets α."""
+        """The in-job norm measurement — the convention that sets α."""
 
     def begin_cell(self, *, cell: CellSpec, alpha: float) -> None:
         """Attach/point the injection for one cell (one hook, mutated per cell)."""
@@ -4595,22 +4585,22 @@ class NodeRuntime(Protocol):
 
     def probe(self, records: Sequence[GenerationRecord], *, steered: bool
               ) -> list[tuple[np.ndarray, np.ndarray]]:
-        """(entropy, nll) float32 arrays per record, right-padded and masked (§2.6)."""
+        """(entropy, nll) float32 arrays per record, right-padded and masked (the entropy probe)."""
 
     def decode(self, ids: Sequence[int]) -> str:
         ...
 
     def likelihood_nll(self) -> Callable[[str, str], float]:
-        """NLL(prompt, continuation) UNDER the current cell's injection (§6(1))."""
+        """NLL(prompt, continuation) UNDER the current cell's injection (battery likelihood half)."""
 
     def format_probe_texts(self) -> dict[str, str]:
-        """item_id → generated text under the current cell's injection (§6(2))."""
+        """item_id → generated text under the current cell's injection (battery format half)."""
 
     def alpha_zero_equivalence(self) -> Optional[tuple[Any, Any]]:
         """(hooked-at-α0 logits, unhooked logits), or None if not measurable."""
 
     def hook_admissibility(self, site: int) -> Optional[HookAdmissibility]:
-        """§4.4's preflight, or None on an architecture already known to pass."""
+        """The SSM hook-admissibility preflight, or None on an architecture already known to pass."""
 
     def end_cell(self) -> None:
         ...
@@ -4642,7 +4632,7 @@ class CellOutcome(BaseModel):
 
 
 class ColumnResult(BaseModel):
-    """The whole node job: layout, norms, cells, gate, table, custody (§2.1)."""
+    """The whole node job: layout, norms, cells, gate, table, custody."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -4670,10 +4660,10 @@ class ColumnResult(BaseModel):
 
 
 def trunk_stamp(runtime: NodeRuntime) -> dict:
-    """§2.8's trunk facts with M19 framing: a degraded read is described, not dropped."""
+    """The stamp's trunk facts, as instrumentation: a degraded read is described, not dropped."""
     try:
         trunk = dict(runtime.trunk())
-    except Exception as exc:                             # noqa: BLE001 — M19(a)
+    except Exception as exc:                             # noqa: BLE001 — named and recorded below
         logger.warning("trunk facts unavailable (%s: %s) — recorded as degraded",
                        type(exc).__name__, exc)
         return {"measured": False,
@@ -4685,15 +4675,15 @@ def trunk_stamp(runtime: NodeRuntime) -> dict:
 
 def site_cross_check(node_key: str, site: int, *,
                      site_role: Optional[str] = None) -> dict:
-    """§2.8's `SITES` ∧ `SITE_OF_RECORD` cross-check, re-derived at run time.
+    """The stamp's `SITES` ∧ `SITE_OF_RECORD` cross-check, re-derived at run time.
 
     Delegates to the staging module so the two halves of the campaign cannot disagree
     about what "the site of record" means. Imported inside the function because the
     staging module imports THIS one (the engine owns the primitives, the staging module
-    owns the composition), and because §4.3 forbids trusting a module-level snapshot of
-    registries that change nightly.
+    owns the composition), and because a module-level snapshot of registries that
+    change between runs cannot be trusted.
 
-    HALT C: `site_role` is the DECLARATION the staged document carries, passed through
+    `site_role` is the DECLARATION the staged document carries, passed through
     unchanged. The engine re-derives the ANSWER from the live registries — it does not
     trust the staging module's answer — but the QUESTION ("in what role is this site
     being used?") is the spec's to ask, and a job that dropped it would re-HALT on
@@ -4704,7 +4694,7 @@ def site_cross_check(node_key: str, site: int, *,
 
 
 def order_cells(cells: Sequence[CellSpec]) -> list[CellSpec]:
-    """§2.1's fire order: calibration first, then transported, naive last of the reads."""
+    """The fire order: calibration first, then transported, naive last of the reads."""
     rank = {k: i for i, k in enumerate(CELL_KIND_ORDER)}
     return sorted(cells, key=lambda c: (rank.get(c.kind, len(rank)),
                                         c.alpha_frac, c.cell_id))
@@ -4713,9 +4703,9 @@ def order_cells(cells: Sequence[CellSpec]) -> list[CellSpec]:
 def assert_column_complete(outcomes: Sequence[CellOutcome], expected_cells: int,
                            *, n_per_cell: int, node_key: str = "",
                            beside_cell_ids: Collection[str] = ()) -> None:
-    """§7's completeness guard / §9 item 10 — a count one short is a rake (M23).
+    """The expected-N completeness guard — a count one short is a defect, not a rounding.
 
-    `beside_cell_ids` names the BESIDE cells (Σ-shaped bands, B4) among the planned
+    `beside_cell_ids` names the BESIDE cells (Σ-shaped bands) among the planned
     set. Expected-N is then asserted TWICE — on the whole column and on the column
     MINUS its besides — so a Σ cell can never stand in for a missing cell of record.
     Without the second assertion a designated row could lose a gRband dose and still
@@ -4724,7 +4714,7 @@ def assert_column_complete(outcomes: Sequence[CellOutcome], expected_cells: int,
     if len(outcomes) != expected_cells:
         raise ExpectedNShortfall(
             f"{node_key or 'column'}: {len(outcomes)} cells completed, {expected_cells} "
-            "planned (§9 item 10 / M23: a count one short is a rake, not a rounding)")
+            "planned (ExpectedNShortfall: a count one short is a defect, not a rounding)")
     beside = set(beside_cell_ids)
     completed = {o.cell_id for o in outcomes}
     missing_beside = sorted(beside - completed)
@@ -4732,7 +4722,7 @@ def assert_column_complete(outcomes: Sequence[CellOutcome], expected_cells: int,
         raise ExpectedNShortfall(
             f"{node_key or 'column'}: BESIDE cell(s) {missing_beside} were planned "
             "and did not complete, yet the total came out right — which means a cell "
-            "of record ran in a beside's place. B4: the two populations are counted "
+            "of record ran in a beside's place. The two populations are counted "
             "separately precisely so that substitution cannot pass.")
     # A cell that STAMPED itself a beside but was never planned as one is the same
     # substitution from the other side, and the stamp is the only place the fact
@@ -4744,20 +4734,20 @@ def assert_column_complete(outcomes: Sequence[CellOutcome], expected_cells: int,
         raise ExpectedNShortfall(
             f"{node_key or 'column'}: cell(s) {undeclared} stamped themselves BESIDE "
             "but are not in the planned beside set — an undeclared beside inside the "
-            "expected-N of record (B4).")
+            "expected-N of record.")
     of_record, expected_of_record = len(outcomes) - len(beside), (
         expected_cells - len(beside))
     if of_record != expected_of_record:                           # pragma: no cover
         raise ExpectedNShortfall(
             f"{node_key or 'column'}: {of_record} cells OF RECORD completed, "
             f"{expected_of_record} planned ({len(beside)} BESIDE cells declared). "
-            "B4: a Σ-beside cell never counts toward the expected-N of the column "
+            "A Σ-beside cell never counts toward the expected-N of the column "
             "of record.")
     short = [o.cell_id for o in outcomes if o.n != n_per_cell]
     if short:
         raise ExpectedNShortfall(
             f"{node_key or 'column'}: cell(s) {short} are short of n={n_per_cell} "
-            "(§7's expected-N completeness guard)")
+            "(the expected-N completeness guard)")
 
 
 def cell_entropy_arrays(rows: Sequence[GenerationRecord],
@@ -4772,7 +4762,7 @@ def probe_cell(runtime: NodeRuntime, records: Sequence[GenerationRecord], *,
                layout: CanonicalLayout
                ) -> tuple[list[ProbeRow], dict[int, np.ndarray],
                           dict[int, np.ndarray]]:
-    """§2.6's batched two-forward probe over one cell, under `PROBE_GROUPING_READING`.
+    """The batched two-forward entropy probe over one cell, under `PROBE_GROUPING_READING`.
 
     Steered and unsteered run over the SAME token ids by construction (the records'
     `input_ids`), so the rise is a difference of two reads of one text, never of two
@@ -4792,7 +4782,7 @@ def probe_cell(runtime: NodeRuntime, records: Sequence[GenerationRecord], *,
             raise BehavioralHarnessError(
                 f"probe returned {len(steered)}/{len(unsteered)} rows for a group of "
                 f"{len(subset)} — a probe that drops rows would silently shorten a "
-                "cell's read (§9 item 10)")
+                "cell's read (the expected-N guard)")
         for rec, (es, _), (eu, nu) in zip(subset, steered, unsteered):
             es = np.asarray(es, dtype=np.float32)
             eu = np.asarray(eu, dtype=np.float32)
@@ -4846,7 +4836,7 @@ def run_cell(runtime: NodeRuntime, cell: CellSpec, *, alpha: float, pool: Prompt
         block = None
         panel = None
         if with_battery:
-            # §6 rides EVERY dose cell, including the bands — that is the point: the
+            # The battery rides EVERY dose cell, including the bands — that is the point: the
             # band rows at the same dose are the dose-matched capability floor.
             texts = [runtime.decode(r.generated_ids) for r in records]
             panel = coherence_panel(texts, [r.finished_with_eos for r in records])
@@ -4861,8 +4851,8 @@ def run_cell(runtime: NodeRuntime, cell: CellSpec, *, alpha: float, pool: Prompt
         runtime.end_cell()
     elapsed = time.monotonic() - t0
     tokens = sum(len(r.generated_ids) for r in records)
-    # M22: "the job is running" is not evidence of progress — the per-cell line IS the
-    # progress record, and it carries rc/tokens/elapsed exactly as §8 requires.
+    # "The job is running" is not evidence of progress — the per-cell line IS the
+    # progress record, and it carries rc/tokens/elapsed for every cell.
     logger.info("CELL %s rc=0 tokens_generated=%d elapsed=%.1fs n=%d",
                 cell.cell_id, tokens, elapsed, len(records))
     return records, rows, ent_s, ent_u, block, panel, elapsed, tokens
@@ -4873,7 +4863,7 @@ def characterize_layout_invariance(runtime: NodeRuntime, cell: CellSpec, *,
                                    layout: CanonicalLayout, corpus_sha: str,
                                    node_key: str, arm: str, n: int
                                    ) -> BatchInvarianceCharacterization:
-    """§2.7's DESCRIPTIVE B=8/B=1 re-run. M19: it cannot fail a gate.
+    """The DESCRIPTIVE B=8/B=1 re-run. Instrumentation: it cannot fail a gate.
 
     GPU reductions are not batch-size invariant; a divergence here is EXPECTED and is
     documented once per node so nobody later reads it as a defect. Any failure of the
@@ -4898,9 +4888,9 @@ def characterize_layout_invariance(runtime: NodeRuntime, cell: CellSpec, *,
                                node_key=node_key, arm=arm, n=n, with_battery=False)
             comparisons[B] = [np.asarray(r.generated_ids, dtype=np.int64)
                               for r in sorted(alt, key=lambda x: x.generation_id)]
-    except Exception as exc:                             # noqa: BLE001 — M19(a)
+    except Exception as exc:                             # noqa: BLE001 — named and recorded below
         logger.warning("batch-invariance characterization degraded (%s: %s) — "
-                       "recorded as measured=false; it cannot fail a gate (M19)",
+                       "recorded as measured=false; instrumentation cannot fail a gate",
                        type(exc).__name__, exc)
         measured = False
     return characterize_probe_batch_invariance(
@@ -4921,7 +4911,7 @@ def run_column(runtime: NodeRuntime, *, doc: Any, pool: PromptPool,
                mapping_authorization: Optional[MappingAuthorization] = None,
                ladder_authorization: Optional[LadderAuthorization] = None,
                take_attempt_lock: bool = True) -> ColumnResult:
-    """§2.1's one-load-per-node job, in order, with every §9 HALT live.
+    """The one-load-per-node column job, in order, with every `BehavioralHarnessError` HALT live.
 
     preflight → norm calibration → canonical-layout determination → all calibration
     cells → all transported cells → battery → entropy probe → in-job replay gate →
@@ -4934,26 +4924,25 @@ def run_column(runtime: NodeRuntime, *, doc: Any, pool: PromptPool,
     `corpus_sha_of_record` is the expectation the chain is asserted AGAINST and is a
     parameter, not a constant read from this module.
 
-    DURABILITY AND RESUMPTION (2026-08-05, Luxia's ruling; see the amendment note
-    above `RESUME_SUBTREE`). Every cell is banked ATOMICALLY the moment it completes,
+    DURABILITY AND RESUMPTION (see the note above `RESUME_SUBTREE`). Every cell is banked ATOMICALLY the moment it completes,
     so a killed column keeps everything it finished. `resume=True` re-verifies what is
     banked, requires this process to be the SAME RUN by every input that decides a
-    cell's contents, skips what it can prove, and runs the rest; §2.7's replay gate
-    then runs at the end over the FULL population as always. Neither path moves a byte
+    cell's contents, skips what it can prove, and runs the rest; the in-job replay
+    gate then runs at the end over the FULL population. Neither path moves a byte
     of the column of record: the manifest walk skips the bookkeeping subtree, and a
     skipped cell's outcome is rebuilt exactly — `elapsed_s` included — from its
     receipt and its files.
 
-    THE MAPPING MODE (2026-08-08). `mapping_authorization` is the run's half of the
-    two-key admission and defaults to None, which is every column that ever ran: with
-    it None and no mapping cell staged, `assert_mapping_column` asserts nothing and
-    this job is byte-for-byte the job it was. With it set, the column must be a PURE
+    THE MAPPING MODE. `mapping_authorization` is the run's half of the two-key
+    admission and defaults to None: with it None and no mapping cell staged,
+    `assert_mapping_column` asserts nothing and the mapping mode touches no byte of
+    the job. With it set, the column must be a PURE
     mapping column whose every cell names this exact spec.
 
-    THE AMENDED LADDER (2026-08-09). `ladder_authorization` is the run's half of the
-    second two-key admission and defaults to None, which is every column that ever ran:
-    with it None and no amended cell staged, `assert_amended_ladder_column` asserts
-    nothing and every dose validates against the frozen ladder as before. With it set,
+    THE AMENDED LADDER. `ladder_authorization` is the run's half of the second
+    two-key admission and defaults to None: with it None and no amended cell staged,
+    `assert_amended_ladder_column` asserts nothing and every dose validates against
+    the frozen ladder. With it set,
     every science cell in the column must name this exact spec — the amendment is
     whole-column, so a mixture is refused.
     """
@@ -4987,27 +4976,26 @@ def _run_column_locked(runtime: NodeRuntime, *, doc: Any, pool: PromptPool,
                        mapping_authorization: Optional[MappingAuthorization],
                        ladder_authorization: Optional[LadderAuthorization],
                        lock_block: Optional[dict]) -> ColumnResult:
-    """§2.1's job, inside the M55 attempt lock. See `run_column` for the contract."""
+    """The one-load column job, inside the attempt lock. See `run_column` for the contract."""
     node_key, arm, site = doc.node_key, doc.arm, doc.site
     n = int(n_per_cell or doc.n_per_cell)
 
-    # ---- preflight (M10: a first-class phase, never output truncation) --------
+    # ---- preflight (a first-class phase, never output truncation) ------------
     corpus_sha = assert_corpus_vintage(
         *[v for v in doc.vintage_links() if v is not None],
         expected=corpus_sha_of_record) if any(
             v is not None for v in doc.vintage_links()) else assert_corpus_vintage(
                 doc.corpus_manifest_sha256, expected=corpus_sha_of_record)
-    # HALT C: the role is the document's DECLARATION; the answer is re-derived here
-    # from the live registries either way. `getattr` because a document written by an
-    # older staging module carries no such field, and its absence means exactly what
-    # it meant then — no role declared.
+    # The site role is the document's DECLARATION; the answer is re-derived here from
+    # the live registries either way. `getattr` because a document may carry no such
+    # field, and its absence means no role declared.
     site_role = getattr(doc, "site_role", None)
     cross = site_cross_check(node_key, site, site_role=site_role)
     if pool.sha256 and doc.prompt_pool_sha256 and pool.sha256 != doc.prompt_pool_sha256:
         raise ArtifactShaMismatch(
             f"prompt pool sha {pool.sha256[:12]}… does not match the staged document's "
-            f"{doc.prompt_pool_sha256[:12]}… (M4). The pool of record is sha-frozen "
-            "(ruling 10) and a cell generated against another pool is another read.")
+            f"{doc.prompt_pool_sha256[:12]}…. The pool of record is sha-frozen, and a "
+            "cell generated against another pool is another read.")
     prompt_ids = [runtime.tokenize(p) for p in pool.prompts]
     assert_position_budget(max(len(i) for i in prompt_ids), doc.max_new_tokens,
                            runtime.position_ceiling(), node_key)
@@ -5023,7 +5011,7 @@ def _run_column_locked(runtime: NodeRuntime, *, doc: Any, pool: PromptPool,
         assert_alpha_zero_is_no_hook(*equivalence)          # raises on mismatch
         alpha0_ok = True
 
-    # ---- norm calibration (§2.5) ---------------------------------------------
+    # ---- in-job norm calibration ----------------------------------------------
     sample = prompt_ids[:NORM_SAMPLE_SIZE]
     measured_norm = float(runtime.measure_per_token_median_resid_norm(
         site=site, prompt_ids=sample))
@@ -5040,7 +5028,7 @@ def _run_column_locked(runtime: NodeRuntime, *, doc: Any, pool: PromptPool,
             "the collection stamps' median-of-MEAN-STATE norm — a DIFFERENT convention, "
             "recorded beside and never used for α (§2.5, rake M21b)"))
 
-    # ---- the cells, in §2.1's order ------------------------------------------
+    # ---- the cells, in the column job's order ---------------------------------
     specs = order_cells(doc.cell_specs())
     # THE MAPPING MODE's admission gate, BEFORE a cell fires and before the norm is
     # spent: a run whose two keys disagree stops here, not after the budget.
@@ -5056,7 +5044,7 @@ def _run_column_locked(runtime: NodeRuntime, *, doc: Any, pool: PromptPool,
                   for c in specs}
     # THE RUN'S IDENTITY — the closed list of things a resumed cell must have been
     # produced under. Built HERE and not earlier because two of its entries are
-    # measurements of this process: the frozen canonical layout and §2.5's in-job
+    # measurements of this process: the frozen canonical layout and the in-job
     # per-token median residual norm, which is what α is resolved from.
     identity = RunIdentity(
         node_key=node_key, arm=arm, site=site, n_per_cell=n,
@@ -5097,7 +5085,7 @@ def _run_column_locked(runtime: NodeRuntime, *, doc: Any, pool: PromptPool,
             if _float_key(receipt.alpha) != _float_key(alpha):
                 raise ResumeAlphaDrift(
                     f"{spec.cell_id}: banked at α={receipt.alpha!r} and this process "
-                    f"resolves α={alpha!r} for the same dose {spec.alpha_frac} (§2.5). "
+                    f"resolves α={alpha!r} for the same dose {spec.alpha_frac}. "
                     "A resumed column with two doses under one name is not a column.")
             outcome, block = rehydrate_banked_cell(
                 Path(work_root), spec, receipt)      # type: ignore[arg-type]
@@ -5110,7 +5098,7 @@ def _run_column_locked(runtime: NodeRuntime, *, doc: Any, pool: PromptPool,
             outcomes.append(outcome)
             skipped.append(spec.cell_id)
             logger.info("CELL %s SKIPPED (banked %s, re-verified: stamp + %d artifact "
-                        "shas + both §2.7 digests recomputed from raw)", spec.cell_id,
+                        "shas + both replay-gate digests recomputed from raw)", spec.cell_id,
                         receipt.banked_at, len(receipt.artifact_sha256))
             continue
         (records, rows, ent_s, ent_u, block, panel, elapsed,
@@ -5152,8 +5140,9 @@ def _run_column_locked(runtime: NodeRuntime, *, doc: Any, pool: PromptPool,
                         "OWED state (§10), never a silent absence."},
             per_cell_seed_roots={spec.cell_id: seed_roots[spec.cell_id]},
             scheduler_card_index=scheduler_card_index,
-            # HALT C / HALT D: the declarations this cell was staged with. Both
-            # default to the pre-ruling meaning when the document carries neither.
+            # The site-role and vector-class declarations this cell was staged with.
+            # Absent from the document, both default to the entropy-gradient, no-role
+            # reading.
             site_role=site_role,
             vector_class=(getattr(staged, "vector_class", None)
                           or EGV_VECTOR_CLASS) if staged else EGV_VECTOR_CLASS,
@@ -5169,10 +5158,10 @@ def _run_column_locked(runtime: NodeRuntime, *, doc: Any, pool: PromptPool,
             capability=block.model_dump() if block is not None else None,
             coherence=panel.model_dump() if panel is not None else None,
             stamp=stamp)
-        # ATOMIC PER-CELL BANKING (2026-08-05). The cell becomes durable HERE, into a
-        # temp directory renamed into place, and is attested by its own receipt — so
-        # a kill on the next cell costs exactly that cell. The bytes are the bytes the
-        # end-of-column path would have written; only the moment changed.
+        # ATOMIC PER-CELL BANKING. The cell becomes durable HERE, into a temp
+        # directory renamed into place, and is attested by its own receipt — so a kill
+        # on the next cell costs exactly that cell. The bytes are the bytes the
+        # end-of-column path writes; only the moment differs.
         if write and work_root is not None:
             paths = bank_cell_atomically(
                 Path(work_root) / "cells", outcome, records=records, ent_s=ent_s,
@@ -5183,13 +5172,13 @@ def _run_column_locked(runtime: NodeRuntime, *, doc: Any, pool: PromptPool,
     assert_column_complete(outcomes, len(specs), n_per_cell=n, node_key=node_key,
                            beside_cell_ids=[c.cell_id for c in specs if c.is_beside])
 
-    # ---- the in-job replay gate (§2.7) ---------------------------------------
+    # ---- the in-job replay gate -----------------------------------------------
     selection, strata, digest = select_replay_cells(specs, node_key, corpus_sha)
     role_mapping = replay_gate_role_mapping(specs)
     if is_mapping_column != (role_mapping == REPLAY_ROLE_MAPPING_MAPPING_ONLY):
         raise MappingColumnNotPure(          # pragma: no cover — a wiring assertion
             f"{node_key}: the admission gate calls this a "
-            f"{'mapping' if is_mapping_column else 'science'} column and §2.7's role "
+            f"{'mapping' if is_mapping_column else 'science'} column and the replay gate's role "
             f"mapping resolved to {role_mapping!r}. The two read the same cell set "
             "and must agree; a disagreement means one of them saw a different set.")
     token_replay: dict[str, str] = {}
@@ -5213,7 +5202,7 @@ def _run_column_locked(runtime: NodeRuntime, *, doc: Any, pool: PromptPool,
         entropy_first={c: entropy_first[c] for c in selection},
         entropy_replay=entropy_replay, role_mapping=role_mapping)
 
-    # ---- descriptive instrumentation (M19 — never a gate) --------------------
+    # ---- descriptive instrumentation (never a gate) ---------------------------
     invariance = None
     if characterize:
         target = by_id[strata["signal_at_0.3"]]
@@ -5228,7 +5217,7 @@ def _run_column_locked(runtime: NodeRuntime, *, doc: Any, pool: PromptPool,
         from metabasis.scripts.capability_battery import dose_metric_table
         try:
             table = dose_metric_table(blocks)
-        except Exception as exc:                         # noqa: BLE001 — M19(a)
+        except Exception as exc:                         # noqa: BLE001 — logged, never silent
             logger.warning("capability table not formed (%s: %s) — the per-cell blocks "
                            "are filed regardless", type(exc).__name__, exc)
             table = {"measured": False, "note": f"{type(exc).__name__}: {exc}"}
@@ -5254,9 +5243,9 @@ def _run_column_locked(runtime: NodeRuntime, *, doc: Any, pool: PromptPool,
         result = _write_column(result, raw=raw, work_root=Path(work_root),
                                identity=identity)
         # The resume report is BOOKKEEPING and lives outside the manifest, on purpose:
-        # `ColumnResult` is untouched by this amendment, so a resumed column's
-        # `column_result.json` differs from an uninterrupted twin's in the elapsed
-        # times of the cells that actually re-ran and in NOTHING else.
+        # `ColumnResult` carries no resume fields, so a resumed column's result file
+        # differs from an uninterrupted twin's in the elapsed times of the cells that
+        # actually re-ran and in NOTHING else.
         if resume or lock_block is not None:
             seam = sorted(set(skipped) & set(gate.cells))
             _atomic_write_text(
@@ -5271,7 +5260,7 @@ def _run_column_locked(runtime: NodeRuntime, *, doc: Any, pool: PromptPool,
                     "identity": json.loads(identity.model_dump_json()),
                     "replay_gate_passed": gate.passed,
                     "replay_gate_cells": gate.cells,
-                    # §2.7's fresh-process replay, PERFORMED rather than filed OWED:
+                    # The fresh-process replay, PERFORMED rather than filed OWED:
                     # these gate cells' first digests were produced by an earlier
                     # process and the gate reproduced them bitwise in this one.
                     "replay_gate_cells_across_the_process_seam": seam,
@@ -5285,8 +5274,8 @@ def _vector_basis_dump(staged: Optional[Any]) -> Optional[dict]:
 
     `getattr` + `model_dump` rather than an import: the staging module imports this
     one, and the engine only ever needs the SHAPE of the declaration. A document
-    written before HALT D carries no such attribute and yields None, which is the
-    entropy-gradient case and stamps nothing.
+    that declares no vector basis yields None, which is the entropy-gradient case
+    and stamps nothing.
     """
     basis = getattr(staged, "vector_basis", None) if staged else None
     if basis is None:
@@ -5308,12 +5297,11 @@ def _write_cell_files(d: Path, outcome: CellOutcome,
                       ent_u: dict[int, np.ndarray]) -> dict[str, str]:
     """Write ONE cell's artifacts into `d`, returning `raw_paths`.
 
-    Factored out of `_write_column` UNCHANGED — same files, same order, same
-    serializer arguments — because the 2026-08-05 resumability amendment writes each
-    cell twice over: once eagerly, into a temp directory that is renamed into place
-    the instant the cell completes (durability), and once, as a fall-back, from the
-    end-of-column banking path (compatibility). Both call this, so there is exactly
-    one definition of what a banked cell's bytes are.
+    Shared by both banking paths — same files, same order, same serializer
+    arguments: a cell is banked eagerly, into a temp directory that is renamed into
+    place the instant the cell completes (durability), and, as a fall-back, from the
+    end-of-column banking path for a cell nothing banked eagerly. Both call this, so
+    there is exactly one definition of what a banked cell's bytes are.
     """
     gen_path = d / CELL_ARTIFACT_FILES["generations"]
     gen_path.write_text("".join(
@@ -5344,7 +5332,7 @@ def _cell_raw_paths(cells_dir: Path, cell_id: str,
     """`raw_paths` for a cell that is already on disk — the receipt's file list.
 
     The same dict `_write_cell_files` returns, rebuilt without re-writing anything, so
-    a resumed column's `column_result.json` names its skipped cells exactly as the
+    a resumed column's result file names its skipped cells exactly as the
     uninterrupted column named them.
     """
     d = cells_dir / cell_id
@@ -5357,19 +5345,19 @@ def _write_column(result: ColumnResult, *, raw: dict, work_root: Path,
                   identity: Optional["RunIdentity"] = None) -> ColumnResult:
     """Bank the column: raw beside every claim, then a manifest over everything.
 
-    Raw generations and per-position entropy arrays are written per cell so a desk
-    recompute has the same inputs the filed numbers came from (§10's recipes), and the
-    manifest's shas are what make M4 checkable without re-running anything.
+    Raw generations and per-position entropy arrays are written per cell so an
+    independent recompute has the same inputs the filed numbers came from, and the
+    manifest's shas are what make a changed artifact detectable without re-running
+    anything.
 
-    SINCE THE RESUMABILITY AMENDMENT (2026-08-05) a cell is normally already banked by
-    the time this runs — `run_column` banks each cell atomically the moment it
-    completes — so this function's per-cell half is a no-op for those cells and it
-    writes only the column-level `column_result.json` and `manifest.json`. A cell that
-    is NOT yet on disk (a caller that banked nothing eagerly) is banked here, through
-    the same atomic path. Either way the bytes are the same bytes: the manifest walk
-    skips the `resume/` bookkeeping subtree by name, so the artifact map, the column
-    result and every cell's files are byte-for-byte what the pre-amendment module
-    wrote. What changed is WHEN they became durable, not WHAT they are.
+    A cell is normally already banked by the time this runs — `run_column` banks each
+    cell atomically the moment it completes — so this function's per-cell half is a
+    no-op for those cells and it writes only the column-level result and manifest
+    files. A cell that is NOT yet on disk (a caller that banked nothing eagerly) is
+    banked here, through the same atomic path. Either way the bytes are the same
+    bytes: the manifest walk skips the `resume/` bookkeeping subtree by name, so the
+    artifact map, the column result and every cell's files do not depend on WHEN the
+    cells became durable.
     """
     cells_dir = work_root / "cells"
     cells_dir.mkdir(parents=True, exist_ok=True)
@@ -5381,7 +5369,7 @@ def _write_column(result: ColumnResult, *, raw: dict, work_root: Path,
         if outcome.cell_id not in raw:                        # pragma: no cover
             raise BehavioralHarnessError(
                 f"{outcome.cell_id}: neither banked on disk nor held in memory — the "
-                "column cannot file raw beside its claim (§10)")
+                "column cannot file raw beside its claim")
         records, ent_s, ent_u = raw[outcome.cell_id]
         paths = bank_cell_atomically(
             cells_dir, outcome, records=records, ent_s=ent_s, ent_u=ent_u,
@@ -5412,44 +5400,44 @@ def _write_column(result: ColumnResult, *, raw: dict, work_root: Path,
     return result.model_copy(update={"manifest": manifest})
 
 
-# ------------------------------------ durability, resumption, residency (§2.1++)
-# THE 2026-08-05 AMENDMENT, in one paragraph. §2.1's job banked its whole column at
-# the end: a column killed at cell 50 of 51 left NOTHING on disk, even though every
-# generation was reproducible — seeds are per-(cell, gen_id) BY DESIGN (§2.3, ruling
-# 8, M5), so the system was always ~90% resumable and merely never wrote down what it
-# had done. Three pieces close that, and NONE of them may move a byte of the column
-# of record:
+# ---------------------------------------------- durability, resumption, residency
+# WHY A COLUMN IS RESUMABLE. Banking a whole column only at its end would let a
+# column killed at cell 50 of 51 leave NOTHING on disk, even though every generation
+# is reproducible — seeds are per-(cell, gen_id) BY DESIGN, so a cell's tape never
+# depends on which other cells ran. Three pieces make that reproducibility usable,
+# and NONE of them may move a byte of the column of record:
 #
 #   1. ATOMIC PER-CELL BANKING. A cell's artifacts are written into a temp directory
 #      and RENAMED into place when the cell completes. `rename(2)` on a directory is
-#      atomic on POSIX, so a cell exists whole — with its complete §2.8 stamp — or it
+#      atomic on POSIX, so a cell exists whole — with its complete stamp — or it
 #      does not exist. There is no half-cell state for a resume to have to reason
 #      about, which is the property everything below rests on.
 #   2. VERIFY-EVERYTHING RESUME. `--resume` inventories the banked cells and
 #      RE-VERIFIES each one (receipt, artifact shas, the engine's own stamp checker,
-#      and the §2.7 digests recomputed FROM the banked raw), then requires identity
+#      and the replay-gate digests recomputed FROM the banked raw), then requires identity
 #      with the current process on every input that decides what a cell contains. Any
 #      identity difference refuses the whole resume by the name of the condition; a
 #      cell that cannot be trusted is quarantined and re-run.
-#   3. THE M55 HANDSHAKE. An attempt directory has at most one live writer. A lock
+#   3. THE ATTEMPT-LOCK HANDSHAKE. An attempt directory has at most one live writer. A lock
 #      naming pid + process start time + boot id + host is taken before anything is
 #      written; a live holder refuses; a stale one is REPORTED with its contents and
 #      cleared explicitly.
 #
-# WHY A RESUMED §2.7 GATE IS STRONGER, NOT WEAKER. The replay gate re-generates K=3
+# WHY A RESUMED REPLAY GATE IS STRONGER, NOT WEAKER. The replay gate re-generates K=3
 # cells at the end and requires bitwise-identical token ids and float32 entropy
 # arrays. On a resumed column, a selected cell's FIRST digest may have been produced
-# by a previous PROCESS. That is not a weakening: §2.7's own fresh-process replay
+# by a previous PROCESS. That is not a weakening: the gate's own fresh-process replay
 # recipe is precisely "re-run one cell in a NEW process, same canonical layout, and
 # compare the banked digests", and the standing evidence is that this reproduces
 # bitwise. A resumed gate therefore performs the fresh-process replay AS the gate,
-# across the seam, rather than filing it OWED — and `resume/RESUME-REPORT.json`
-# records which gate cells crossed the seam so the strengthening is on the record
+# across the seam, rather than filing it OWED — and the resume report
+# (`RESUME_REPORT_NAME`) records which gate cells crossed the seam so the
+# strengthening is on the record
 # instead of being inferred.
 #: `resume/` — the attempt directory's BOOKKEEPING subtree. Receipts, the lockfile,
 #: the quarantine and the resume report live here and NONE of them is an artifact of
-#: record: the manifest walk skips this subtree by name, which is what keeps a banked
-#: column byte-identical to a pre-amendment one.
+#: record: the manifest walk skips this subtree by name, which is what keeps a
+#: resumed column byte-identical to an uninterrupted one.
 RESUME_SUBTREE = "resume"
 CELL_RECEIPT_SUBDIR = "cells"
 QUARANTINE_SUBDIR = "quarantine"
@@ -5473,9 +5461,9 @@ CELL_ARTIFACT_FILES: dict[str, str] = {
 
 #: The modules whose BYTES decide what a cell contains, relative to the package root.
 #: Not "the engine" loosely: this module draws the tokens, the staging module writes
-#: the document and half the stamp's provenance, the battery module produces
-#: `capability.json`, the §4.2 module supplies the verdict vocabulary, and `hooks.py`
-#: performs the injection itself. A resume that ran under different bytes for ANY of
+#: the document and half the stamp's provenance, the battery module produces each
+#: cell's capability artifact, the actuation-calibration module supplies the verdict
+#: vocabulary, and the residual-write hook module performs the injection itself. A resume that ran under different bytes for ANY of
 #: them would be splicing two different instruments into one column.
 IDENTITY_MODULES: tuple[str, ...] = (
     "scripts/run_behavioral_cells.py",
@@ -5500,9 +5488,10 @@ RESUME_SEAM_EVIDENCE = (
 def engine_module_shas() -> dict[str, Optional[str]]:
     """sha256 of every module in `IDENTITY_MODULES`, by package-relative path.
 
-    Read from DISK relative to this file rather than from an import, because
-    `hooks.py` needs torch and the desk's own interpreter has none: the identity of
-    the bytes must be computable in every configuration the selftest runs in (M44). A
+    Read from DISK relative to this file rather than from an import, because the hook
+    module needs torch and a CPU-only interpreter has none: the identity of the bytes
+    must be computable in every configuration the selftest runs in (with and without
+    torch). A
     module that cannot be read is recorded as `None` — an unknown, never an
     agreement — and `RunIdentity.assert_identical_to` refuses on it by name.
     """
@@ -5544,10 +5533,10 @@ class RunIdentity(BaseModel):
     what a cell contains. Each field's disagreement has its own exception class,
     because "the resume was refused" is not an actionable message and the responses
     differ completely (re-stage the document · re-point the corpus · reload the model ·
-    take the layout question to the desk).
+    re-open the layout question with a human reviewer).
 
     `measured_per_token_median_resid_norm` is the one entry that is not a sha of an
-    input. It is here because §2.5 resolves α from it IN JOB: two processes that
+    input. It is here because α is resolved from it IN JOB: two processes that
     measured different norms would give the re-run cells a different dose from their
     banked siblings, and the column would be inhomogeneous while looking whole.
     """
@@ -5584,7 +5573,7 @@ class RunIdentity(BaseModel):
                 f"{tag}the banked cells are another column: "
                 + "; ".join(f"{f} banked={getattr(banked, f)!r} "
                             f"now={getattr(self, f)!r}" for f in cols)
-                + ". One attempt directory is one (node, arm, site) column (§2.1).")
+                + ". One attempt directory is one (node, arm, site) column.")
         if self.cells_document_sha256 != banked.cells_document_sha256:
             raise ResumeCellsDocumentMismatch(
                 f"{tag}cells document {banked.cells_document_sha256[:12]}… was banked, "
@@ -5594,17 +5583,17 @@ class RunIdentity(BaseModel):
         if self.corpus_manifest_sha256 != banked.corpus_manifest_sha256:
             raise ResumeCorpusVintageMismatch(
                 f"{tag}corpus manifest {banked.corpus_manifest_sha256[:12]}… was "
-                f"banked, {self.corpus_manifest_sha256[:12]}… is of record now (§9 "
-                "item 2). The basis is also SEED MATERIAL (§2.3), so every re-run "
-                "cell would draw a different tape from its banked siblings.")
+                f"banked, {self.corpus_manifest_sha256[:12]}… is of record now. The "
+                "basis is also SEED MATERIAL for every generation's uniforms, so every "
+                "re-run cell would draw a different tape from its banked siblings.")
         if self.prompt_pool_sha256 != banked.prompt_pool_sha256:
             raise ResumePromptPoolMismatch(
                 f"{tag}prompt pool {banked.prompt_pool_sha256[:12]}… was banked, "
-                f"{self.prompt_pool_sha256[:12]}… is loaded now (ruling 10, M4) — a "
-                "cell generated against another pool is another read.")
+                f"{self.prompt_pool_sha256[:12]}… is loaded now — the pool of record "
+                "is sha-frozen, and a cell generated against another pool is another read.")
         if self.actuation_calibration_sha256 != banked.actuation_calibration_sha256:
             raise ResumeVerdictMismatch(
-                f"{tag}§4.2 verdict document differs: banked "
+                f"{tag}actuation-calibration verdict document differs: banked "
                 f"{(banked.actuation_calibration_sha256 or 'ABSENT (OWED)')[:12]}… vs "
                 f"{(self.actuation_calibration_sha256 or 'ABSENT (OWED)')[:12]}… now. "
                 "Half a column stamped OWED and half stamped with a verdict is two "
@@ -5617,7 +5606,7 @@ class RunIdentity(BaseModel):
             raise ResumeEngineModuleUnknown(
                 f"{tag}engine module sha UNKNOWN on one side for {unknown} — an "
                 "unreadable module is an unknown, and an unknown is never read as "
-                "agreement (§10: absence is a reportable state, not a pass).")
+                "agreement (absence is a reportable state, not a pass).")
         moved = sorted(k for k in self.engine_module_sha256
                        if self.engine_module_sha256[k]
                        != banked.engine_module_sha256.get(k))
@@ -5639,14 +5628,14 @@ class RunIdentity(BaseModel):
                 f"{tag}the CANONICAL LAYOUT differs on {lay}: "
                 + "; ".join(f"{k} banked={banked.canonical_layout.get(k)!r} "
                             f"now={self.canonical_layout.get(k)!r}" for k in lay)
-                + ". §2.2 freezes the layout before any cell fires and §2.7 defines "
-                "replay IN it; §9 item 13 makes a mid-column change a restart from "
-                "preflight, never a silent split. Batch invariance is a "
+                + ". The layout is frozen before any cell fires and the replay gate "
+                "is defined IN it; a mid-column change is a restart from preflight, "
+                "never a silent split. Batch invariance is a "
                 "CHARACTERIZED property, not an assumed one — B=40 is a different "
                 "experiment from B=80.")
         if self.model_config_sha256 != banked.model_config_sha256:
             raise ResumeModelConfigMismatch(
-                f"{tag}M9 drift anchor moved: banked "
+                f"{tag}model-config drift anchor moved: banked "
                 f"{(banked.model_config_sha256 or 'ABSENT')[:12]}… vs "
                 f"{(self.model_config_sha256 or 'ABSENT')[:12]}… now — a different "
                 "model config is loaded than the one the banked cells rode.")
@@ -5655,8 +5644,8 @@ class RunIdentity(BaseModel):
             raise ResumeNormDrift(
                 f"{tag}the in-job per-token median residual norm is "
                 f"{self.measured_per_token_median_resid_norm!r} and the banked cells "
-                f"rode {banked.measured_per_token_median_resid_norm!r}. §2.5 resolves "
-                "α = alpha_frac × this number, so the re-run cells would carry a "
+                f"rode {banked.measured_per_token_median_resid_norm!r}. The engine "
+                "resolves α = alpha_frac × this number, so the re-run cells would carry a "
                 "different dose from their banked siblings — an inhomogeneous column "
                 "that every downstream read would treat as one. Never rounded, never "
                 "tolerated.")
@@ -5667,8 +5656,8 @@ class CellReceipt(BaseModel):
 
     Written after the cell directory is renamed into place, so its presence means
     "this cell was banked WHOLE by a process that knew its own identity". A cell
-    directory without one is unattested: it may be a pre-amendment bank, or a rename
-    that landed the instant before a kill. Either way it is not trusted — it is
+    directory without one is unattested: it may come from a bank that wrote no
+    receipts, or a rename that landed the instant before a kill. Either way it is not trusted — it is
     quarantined and re-run, because a cell we cannot attest is cheaper to regenerate
     than to argue about.
 
@@ -5700,7 +5689,7 @@ class CellReceipt(BaseModel):
 
 
 class AttemptLock(BaseModel):
-    """M55's handshake, as a file. Enough to tell a live holder from a dead one."""
+    """The attempt-lock handshake, as a file. Enough to tell a live holder from a dead one."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -5755,7 +5744,7 @@ def _receipt_path(work_root: Path, cell_id: str) -> Path:
 
 
 def _fsync_path(path: Path, *, is_dir: bool = False) -> None:
-    """fsync a file or directory, degrading to a WARNING (M19) rather than failing.
+    """fsync a file or directory, degrading to a named WARNING rather than failing.
 
     The rename is what makes a cell atomic; the fsync is what makes it survive a
     power loss. A filesystem that refuses the second still gets the first, and saying
@@ -5791,7 +5780,7 @@ def bank_cell_atomically(cells_dir: Path, outcome: CellOutcome, *,
 
     The whole of piece 1. `rename(2)` on a directory is atomic on POSIX, so at every
     instant `cells/<cell_id>` either does not exist or is a complete cell with a
-    complete §2.8 stamp. A kill between two cells therefore costs exactly the cell in
+    complete stamp. A kill between two cells therefore costs exactly the cell in
     flight and nothing else, and no reader — a watch, a pull, the resume verifier —
     can ever observe a partially written cell.
 
@@ -5853,7 +5842,7 @@ def write_cell_receipt(work_root: Path, outcome: CellOutcome, *,
     return receipt
 
 
-# ---------------------------------------------------------------- the M55 lockfile
+# ---------------------------------------------------------- the attempt lockfile
 def _pid_alive(pid: int) -> bool:
     """Is there a process with this pid right now (says nothing about WHOSE)."""
     if pid <= 0:
@@ -5891,8 +5880,9 @@ def lock_holder_state(lock: AttemptLock) -> tuple[str, str]:
     """Classify a lockfile's holder: ('live'|'stale'|'foreign', why).
 
     Three answers and no fourth. FOREIGN is its own state rather than a stale case
-    because `/models` is shared storage: a pid on this host says nothing whatsoever
-    about a pid on the other node, and guessing is how M55 gets re-created quietly.
+    because a work root can sit on storage shared between machines: a pid on this
+    host says nothing whatsoever about a pid on another, and guessing is how two
+    writers end up in one attempt directory.
     """
     if lock.hostname != platform.node():
         return "foreign", (f"held by pid {lock.pid} on host {lock.hostname!r}; this is "
@@ -5926,7 +5916,7 @@ def read_attempt_lock(work_root: Path) -> Optional[AttemptLock]:
             f"{path} exists but is not a lock ({type(exc).__name__}: {exc}). It is "
             "REFUSED, never clobbered: an unparseable lock is most likely a lock "
             "being written by a live process right now, and the one thing that must "
-            "not happen is two writers in one attempt directory (M55).") from exc
+            "not happen is two writers in one attempt directory.") from exc
 
 
 def acquire_attempt_lock(work_root: Path, *, cells_document_sha256: str
@@ -5946,7 +5936,7 @@ def acquire_attempt_lock(work_root: Path, *, cells_document_sha256: str
         state, why = lock_holder_state(existing)
         if state == "live":
             raise AttemptLockHeld(
-                f"{work_root} is held: {why}. M55: a second writer in one attempt "
+                f"{work_root} is held: {why}. A second writer in one attempt "
                 "directory is how a cancelled job's orphan quietly corrupts the "
                 "column the replacement job is banking. Reap the holder by verified "
                 "ownership (/proc/<pid>/cmdline) or wait for it — never remove this "
@@ -5981,7 +5971,7 @@ def release_attempt_lock(work_root: Path, lock: AttemptLock) -> bool:
         return False
     if (current.pid, current.hostname, current.created_at) != (
             lock.pid, lock.hostname, lock.created_at):
-        logger.warning("attempt lock at %s is no longer ours (%s) — left in place",
+        logger.warning("attempt lock at %s is held by another process (%s) — left in place",
                        work_root, current.model_dump_json())
         return False
     (_resume_dir(work_root) / ATTEMPT_LOCK_NAME).unlink(missing_ok=True)
@@ -5991,7 +5981,7 @@ def release_attempt_lock(work_root: Path, lock: AttemptLock) -> bool:
 @contextlib.contextmanager
 def attempt_lock(work_root: Optional[Path], *, cells_document_sha256: str,
                  enabled: bool = True) -> Any:
-    """The M55 handshake as a scope. A `work_root` of None locks nothing."""
+    """The attempt-lock handshake as a scope. A `work_root` of None locks nothing."""
     if work_root is None or not enabled:
         yield None
         return
@@ -6024,7 +6014,7 @@ def recompute_cell_digests(cell_dir: Path) -> tuple[str, str]:
     """Re-derive (token_id_sha256, entropy_array_sha256) FROM the banked raw.
 
     The strongest half of resume verification, and the reason a sha of the file bytes
-    is not enough on its own: this re-runs §2.7's own digest definitions over the
+    is not enough on its own: this re-runs the replay gate's own digest definitions over the
     generations and the entropy arrays, so a banked cell is required to still MEAN
     what its stamp says it means, not merely to still weigh the same.
     """
@@ -6053,17 +6043,18 @@ def verify_banked_cell(work_root: Path, cell_id: str, *, spec: CellSpec,
       2. this run and the banked run are the SAME RUN (`ResumeIdentityRefused`
          family — column-scoped, propagated, never caught);
       3. every artifact the receipt names is present with the bytes it attests;
-      4. the banked stamp still passes THE ENGINE'S OWN §2.8 checker — the same
-         function the desk's checker calls, not a re-implementation of it;
-      5. the §2.7 digests still reproduce FROM the raw, and agree with both the
+      4. the banked stamp still passes THE ENGINE'S OWN stamp checker
+         (`assert_stamp_complete`) — the same function any downstream check calls,
+         not a re-implementation of it;
+      5. the replay-gate digests still reproduce FROM the raw, and agree with both the
          receipt and the stamp's own `replay_gate_digests`.
     """
     receipt_path = _receipt_path(work_root, cell_id)
     if not receipt_path.exists():
         raise BankedCellUnattested(
             f"{cell_id}: banked with no completion receipt at {receipt_path}. Either "
-            "it predates the resumability amendment or the process died between the "
-            "cell's rename and its attestation. Unattested is not trusted: the cell "
+            "it was banked by a process that wrote no receipts or the process died "
+            "between the cell's rename and its attestation. Unattested is not trusted: the cell "
             "is quarantined and re-run.")
     try:
         receipt = CellReceipt(**json.loads(receipt_path.read_text()))
@@ -6084,7 +6075,7 @@ def verify_banked_cell(work_root: Path, cell_id: str, *, spec: CellSpec,
         if actual != sha:
             raise BankedCellArtifactShaMismatch(
                 f"{cell_id}/{fname}: {actual[:12]}… on disk, {sha[:12]}… attested "
-                "(M4). The banked bytes changed after the cell was banked.")
+                "— the banked bytes changed after the cell was banked.")
     if receipt.kind != spec.kind or receipt.cell_id != cell_id:
         raise BankedCellUnattested(
             f"{cell_id}: the receipt describes {receipt.cell_id!r} of kind "
@@ -6095,7 +6086,7 @@ def verify_banked_cell(work_root: Path, cell_id: str, *, spec: CellSpec,
         assert_stamp_complete(stamp, cell_kind=spec.kind)
     except (StampIncompleteError, VectorClassContractError) as exc:
         raise BankedCellStampIncomplete(
-            f"{cell_id}: the banked stamp fails the engine's own §2.8 checker on "
+            f"{cell_id}: the banked stamp fails the engine's own stamp checker on "
             f"re-read ({type(exc).__name__}: {exc})") from exc
     if stamp.get("cell_id") != cell_id:
         raise BankedCellStampIncomplete(
@@ -6115,7 +6106,7 @@ def verify_banked_cell(work_root: Path, cell_id: str, *, spec: CellSpec,
                           f"stamp={str(banked.get('entropy_arrays'))[:12]}…")
     if mismatched:
         raise BankedCellDigestMismatch(
-            f"{cell_id}: the banked raw no longer reproduces its own §2.7 digests — "
+            f"{cell_id}: the banked raw does not reproduce its own replay-gate digests — "
             + "; ".join(mismatched))
     return receipt
 
@@ -6177,7 +6168,7 @@ def resume_preflight(work_root: Path, *, specs: Sequence[CellSpec],
     quarantined: list[dict] = []
     receipts: dict[str, CellReceipt] = {}
     # The cell that was in flight when the previous process died left its temp
-    # directory behind. It is not a cell — it never got its rename — and the M55 lock
+    # directory behind. It is not a cell — it never got its rename — and the attempt lock
     # has already established that nobody else is writing here, so it is removed and
     # named rather than left to accumulate across attempts.
     cells_dir = work_root / "cells"
@@ -6218,13 +6209,13 @@ def rehydrate_banked_cell(work_root: Path, spec: CellSpec, receipt: CellReceipt
                           ) -> tuple[CellOutcome, Optional[Any]]:
     """Rebuild a verified cell's `CellOutcome` (and battery block) from disk.
 
-    Byte-identity of a resumed column's `column_result.json` depends entirely on this
+    Byte-identity of a resumed column's result file depends entirely on this
     being EXACT rather than approximate — including `elapsed_s`, which comes from the
     receipt and is the time the cell actually took when it ran, not a zero and not the
     time it took to be read back.
 
-    The battery block is rebuilt too, and this is load-bearing rather than tidy: §6's
-    deltas are formed against the α=0 baseline's block, so a resumed column whose
+    The battery block is rebuilt too, and this is load-bearing rather than tidy: the
+    capability battery's deltas are formed against the α=0 baseline's block, so a resumed column whose
     BASELINE was skipped would otherwise form every re-run cell's `delta_vs_alpha0`
     against nothing and quietly file `None`s where the uninterrupted column filed
     numbers.
@@ -6255,12 +6246,12 @@ def rehydrate_banked_cell(work_root: Path, spec: CellSpec, receipt: CellReceipt
 def column_content_digest(work_root: Path) -> str:
     """ONE digest over a banked column's SCIENCE — what two runs must agree on.
 
-    Deliberately not a digest of the whole directory. `column_result.json` carries
-    `elapsed_s` and `manifest.json` shas `column_result.json`, so two runs of the same
+    Deliberately not a digest of the whole directory. The column result file carries
+    `elapsed_s` and the manifest shas the column result, so two runs of the same
     column — interrupted or not, and even two uninterrupted ones — can never agree on
     those two files' bytes, and a digest that included them could never be used to
     state the property that actually matters. This digest covers every per-cell
-    artifact byte-for-byte plus the §2.7 digests recomputed from the raw, which is the
+    artifact byte-for-byte plus the replay-gate digests recomputed from the raw, which is the
     whole of what a resumed column has to prove it reproduced.
     """
     rows: list[str] = []
@@ -6277,18 +6268,17 @@ def column_content_digest(work_root: Path) -> str:
 
 
 # --------------------------------------------------------- the model-residency driver
-# LUXIA'S RULING (2026-08-05 night): "one job = one card = one loaded model = an
-# ORDERED LIST of that model's cells documents through a shared runtime", with the
-# boundary drawn explicitly — RESIDENCY SHARING YES, CELL SHARING NO. A cell is 80
+# THE RESIDENCY RULE: one job = one card = one loaded model = an ORDERED LIST of that
+# model's cells documents through a shared runtime, with the boundary drawn
+# explicitly — RESIDENCY SHARING YES, CELL SHARING NO. A cell is 80
 # generations under ONE injection spec; batching across cells would change the
 # physics, so nothing here ever puts two columns' work into one forward. What is
 # shared is exactly the loaded weights, and the proof obligation is the mirror of
 # that: two columns through one runtime must produce the columns two separate runs
 # produce, bit for bit.
 #
-# The `NodeRuntime` injection made this a jobs-layer question, and the answer is
-# ALMOST yes: `run_column` already takes the runtime from its caller, so a loop is all
-# the orchestration needs. What it cannot do from outside is re-point a loaded runtime
+# Because `run_column` takes the runtime from its caller, residency is a jobs-layer
+# question, and a loop is ALMOST all the orchestration it needs. What it cannot do from outside is re-point a loaded runtime
 # at the next column's (arm, site, vector bank) SAFELY — the attributes are there to
 # poke, and poking them is how a hook survives a column or a column runs under the
 # previous one's arm. `repoint` is therefore engine-side, typed, and refuses the two
@@ -6330,7 +6320,7 @@ def assert_hooks_detached(runtime: Any, *, where: str) -> None:
 class ResidentColumn(BaseModel):
     """One column in a residency: where its document is and where its bank goes.
 
-    A column may be named by PATHS (the node-side driver's case) or handed over
+    A column may be named by PATHS (the residency driver's case) or handed over
     PRE-LOADED (an in-process caller's, and the CPU-toy proof's). Exactly one of each
     pair, because a plan that carried both could silently run a different column from
     the one it names.
@@ -6380,8 +6370,8 @@ def assert_no_attempt_dir_collision(plans: Sequence[ResidentColumn]) -> None:
                 f"columns {seen[key]} and {i} of this residency share the attempt "
                 f"directory {key}. Residency shares the loaded MODEL; each column "
                 "keeps its own attempt directory, its own preflight, its own gates, "
-                "its own stamps and its own replay gate (Luxia's boundary, "
-                "2026-08-05: residency sharing YES, cell sharing NO).")
+                "its own stamps and its own replay gate (the residency boundary: "
+                "residency sharing YES, cell sharing NO).")
         seen[key] = i
 
 
@@ -6389,14 +6379,14 @@ def run_resident_columns(runtime: Any, plans: Sequence[ResidentColumn], *,
                          stop_on_refusal: bool = True) -> list[dict]:
     """Run an ORDERED LIST of one model's columns through one loaded runtime.
 
-    Each column gets its full §2.1 treatment — its own preflight, its own layout
-    freeze, its own norm measurement, its own gates, its own stamps, its own §2.7
+    Each column gets the full column-job treatment — its own preflight, its own layout
+    freeze, its own norm measurement, its own gates, its own stamps, its own
     replay gate, its own attempt lock and its own manifest. The ONLY thing shared is
     the loaded weights. Between columns the hook is asserted detached, and the runtime
     is re-pointed through the typed `repoint` rather than by attribute assignment.
 
-    Column ORDER cannot move a bit: §2.3's uniforms are per-(cell, gen_id) sha256
-    material, so a cell's tape is a function of the cell and never of what ran before
+    Column ORDER cannot move a bit: every generation's uniforms are per-(cell, gen_id)
+    sha256 material, so a cell's tape is a function of the cell and never of what ran before
     it — which is the same property that makes resumption sound, used the other way
     round.
 
@@ -6476,13 +6466,14 @@ def run_resident_columns(runtime: Any, plans: Sequence[ResidentColumn], *,
 
 # ---------------------------------------------------------------- the HF runtime
 class HFNodeRuntime:
-    """`NodeRuntime` over a real HF causal LM — the node-side implementation.
+    """`NodeRuntime` over a real HF causal LM — the implementation that loads weights.
 
     ONE hook is registered for the whole column and its `alpha`/`start_pos` are mutated
-    per cell and per sub-batch (`hooks.py` reads both at every call), so the injection
+    per cell and per sub-batch (the residual-write hook in `metabasis.extraction.hooks`
+    reads both at every call), so the injection
     machinery is identical across cells by construction rather than by care. The α=0
     baseline runs WITH the hook attached, because the short-circuit is what makes it
-    bitwise no-hook (§2.4) and that is the property the shared baseline rests on.
+    bitwise no-hook and that is the property the shared baseline rests on.
     """
 
     def __init__(self, model: Any, tokenizer: Any, *, node_key: str, arm: str,
@@ -6528,7 +6519,7 @@ class HFNodeRuntime:
             try:
                 out["gpu"] = torch.cuda.get_device_name(0)
                 out["driver"] = getattr(torch.version, "cuda", None)
-            except Exception as exc:                     # noqa: BLE001 — M19(a)
+            except Exception as exc:                     # noqa: BLE001 — named in the trunk
                 out["gpu"] = f"(unavailable: {type(exc).__name__})"
                 out["measured"] = False
         return out
@@ -6536,9 +6527,9 @@ class HFNodeRuntime:
     def model_config_sha256(self) -> Optional[str]:
         try:
             doc = self.model.config.to_dict()
-        except Exception as exc:                         # noqa: BLE001 — M19(a)
-            logger.warning("model config unavailable (%s) — M9 anchor recorded as "
-                           "absent, never as agreement", exc)
+        except Exception as exc:                         # noqa: BLE001 — logged, never silent
+            logger.warning("model config unavailable (%s) — the model-config drift anchor "
+                           "is recorded as absent, never as agreement", exc)
             return None
         return hashlib.sha256(
             json.dumps(doc, sort_keys=True, default=str).encode()).hexdigest()
@@ -6581,7 +6572,7 @@ class HFNodeRuntime:
     def _vector_for(self, cell: CellSpec) -> Any:
         torch = self.torch
         if cell.vector_key is None:
-            # §2.4: the baseline runs WITH the hook attached; α=0 short-circuits, so
+            # The baseline runs WITH the hook attached; α=0 short-circuits, so
             # the direction is never read. A named placeholder beats a None branch
             # that would make the baseline a different code path from every other cell.
             v = np.ones(self._hidden, dtype=np.float32)
@@ -6589,7 +6580,7 @@ class HFNodeRuntime:
         if cell.vector_key not in self.vectors:
             raise NativeVectorUnavailable(
                 f"{cell.cell_id}: vector key {cell.vector_key!r} is not in the staged "
-                f"bank (keys: {sorted(self.vectors)}) — §9 item 3")
+                f"bank (keys: {sorted(self.vectors)}) — a missing staged vector is a HALT")
         v = np.asarray(self.vectors[cell.vector_key], dtype=np.float32).reshape(-1)
         if v.size != self._hidden:
             raise BehavioralHarnessError(
@@ -6618,7 +6609,7 @@ class HFNodeRuntime:
             self._handle = None
 
     def hook_attached(self) -> bool:
-        """The between-columns evidence for the residency driver (§2.1's boundary)."""
+        """The between-columns evidence for the residency driver (no hook crosses a column)."""
         return self._handle is not None
 
     def repoint(self, *, node_key: str, arm: str, site: int,
@@ -6636,8 +6627,8 @@ class HFNodeRuntime:
         if node_key != self.node_key:
             raise ResidencyModelMismatch(
                 f"this runtime has {self.node_key!r} LOADED and cannot be re-pointed at "
-                f"{node_key!r}. One job = one card = one loaded model (Luxia's "
-                "residency ruling, 2026-08-05); another model needs another residency.")
+                f"{node_key!r}. One job = one card = one loaded model; another model "
+                "needs another residency.")
         if self.hook_attached():
             raise ResidencyHookStillAttached(
                 f"{self.node_key}: re-pointing a runtime whose injection hook is still "
@@ -6658,8 +6649,8 @@ class HFNodeRuntime:
     def vram_probe(self, batch_size: int) -> float:
         """Fraction of device memory a probe at max sequence length uses at `B`.
 
-        Raises on a CPU-only device rather than returning a plausible number: M19's
-        rule is that a degraded probe takes the CONSERVATIVE bound, and
+        Raises on a CPU-only device rather than returning a plausible number: a
+        degraded probe takes the CONSERVATIVE bound, never a guessed one, and
         `choose_batch_size` implements exactly that when this raises.
         """
         torch = self.torch
@@ -6679,7 +6670,7 @@ class HFNodeRuntime:
 
     def measure_per_token_median_resid_norm(
             self, *, site: int, prompt_ids: Sequence[Sequence[int]]) -> float:
-        """§2.5: one batched teacher-forced forward; per-token residual norms; median.
+        """In-job norm calibration: one batched teacher-forced forward; per-token residual norms; median.
 
         The hook that carries the write is the same hook whose INPUT is measured here —
         `decoder_layers(model)[site]`'s incoming hidden states — so α is resolved
@@ -6711,7 +6702,7 @@ class HFNodeRuntime:
         if not captured:
             raise ResidualNormDeltaError(
                 f"L{site}: no hidden states captured — the site cannot be measured, so "
-                "no dose can be resolved against it (§2.5)")
+                "no dose can be resolved against it")
         hidden = captured[0]
         norms = hidden.norm(dim=-1).cpu().numpy()
         keep = np.asarray(mask, dtype=bool)
@@ -6721,7 +6712,7 @@ class HFNodeRuntime:
         return float(np.median(vals))
 
     def alpha_zero_equivalence(self) -> Optional[tuple[Any, Any]]:
-        """§2.4's once-per-node check, measured on this node's own first prompt."""
+        """The once-per-node α=0-is-no-hook check, measured on this model's own forward."""
         from metabasis.extraction.hooks import (ResidualWriteSpec,
                                                 attach_residual_write)
         torch = self.torch
@@ -6746,7 +6737,7 @@ class HFNodeRuntime:
             self.model, node_key=self.node_key, site=site,
             vector=np.ones(self._hidden, dtype=np.float32), n_tokens=4)
 
-    # -- the probe (§2.6) ---------------------------------------------------
+    # -- the entropy probe --------------------------------------------------
     def probe(self, records: Sequence[GenerationRecord], *, steered: bool
               ) -> list[tuple[np.ndarray, np.ndarray]]:
         torch = self.torch
@@ -6784,7 +6775,7 @@ class HFNodeRuntime:
                 len(rec.generated_ids)))
         return rows
 
-    # -- the battery (§6) ---------------------------------------------------
+    # -- the capability battery ---------------------------------------------
     def likelihood_nll(self) -> Callable[[str, str], float]:
         torch = self.torch
 
@@ -6832,13 +6823,13 @@ class HFNodeRuntime:
 
 
 def load_vectors(npz_path: Optional[Path]) -> dict[str, np.ndarray]:
-    """The staged vector bank, by key — every failure named (§9 item 3)."""
+    """The staged vector bank, by key — every failure named (`NativeVectorUnavailable`)."""
     if npz_path is None:
         return {}
     path = Path(npz_path)
     if not path.exists():
         raise NativeVectorUnavailable(
-            f"staged vector bank absent: {path} (§9 item 3). The cells document names "
+            f"staged vector bank absent: {path}. The cells document names "
             "it, so its absence is a HALT and not an empty bank.")
     try:
         with np.load(path) as z:
@@ -6851,12 +6842,12 @@ def load_vectors(npz_path: Optional[Path]) -> dict[str, np.ndarray]:
 def preflight_report(doc: Any, pool: PromptPool, *,
                      runtime: Optional[NodeRuntime] = None,
                      corpus_sha_of_record: str = CORPUS_SHA_V21) -> dict:
-    """M10's first-class exit-early preflight: resolve everything, fire nothing.
+    """The first-class exit-early preflight: resolve everything, fire nothing.
 
     Split deliberately into a WEIGHTLESS half (vintage chain, pool, site cross-check,
     cell arithmetic, replay-gate constitution, seed roots) and a LOADED half (position
     budget, VRAM ladder, hook admissibility, the α=0 identity, the measured norm). The
-    weightless half is exactly what the desk can re-run itself, and the loaded half
+    weightless half is exactly what anyone can re-run without weights, and the loaded half
     names what it could not check when no model is present — never silently omitting it.
     """
     specs = order_cells(doc.cell_specs())
@@ -6869,11 +6860,11 @@ def preflight_report(doc: Any, pool: PromptPool, *,
         "n_cells": len(specs), "cells_by_kind": kinds,
         "n_per_cell": doc.n_per_cell,
         "n_generations": len(specs) * doc.n_per_cell,
-        # the ladder IN FORCE — `DOSE_LADDER` for every column with no ratified
-        # amendment, so a frozen column's preflight report is unchanged (2026-08-09).
-        # The `amended_ladder` key below appears ONLY on an amended column, by the same
-        # rule `site_role` and `vector_class` follow on the stamp: a flag-absent run
-        # produces the byte-identical artifact it produced before the flag existed.
+        # the ladder IN FORCE — `DOSE_LADDER` for every column with no amended-ladder
+        # document, so a frozen column's preflight report does not depend on the
+        # amendment machinery. The `amended_ladder` key below appears ONLY on an amended
+        # column, by the same rule `site_role` and `vector_class` follow on the stamp: a
+        # flag-absent run produces the same bytes whether or not the flag exists.
         "dose_ladder": list(ladder_in_force(specs)),
         **({"amended_ladder": {
             "amended": True,
@@ -6936,19 +6927,19 @@ def preflight_report(doc: Any, pool: PromptPool, *,
 
 def load_model_and_tokenizer(model_path: str, *, dtype_name: str = "bfloat16"
                              ) -> tuple[Any, Any, str]:
-    """§2.1's ONE load, with §2.2's frozen attention/dtype choices applied at it."""
+    """The column job's ONE load, with the frozen attention/dtype/padding choices applied at it."""
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
     dtype = getattr(torch, dtype_name, torch.bfloat16)
     tok = AutoTokenizer.from_pretrained(model_path)
-    tok.padding_side = "left"                                  # §2.2
+    tok.padding_side = "left"                                  # part of the canonical layout
     common = {"attn_implementation": "eager",
               "device_map": "auto" if torch.cuda.is_available() else None}
-    # The dtype kwarg was RENAMED across the transformers versions this campaign spans
+    # The dtype kwarg differs across the transformers versions this code supports
     # (`torch_dtype` in 4.5x, `dtype` in 5.x). Trying one and falling back is the only
     # version-robust form: silently loading at the WRONG dtype would change every
-    # number in the column while the stamp still said bf16 (M9's drift surface).
+    # number in the column while the stamp still said bf16.
     try:
         model = AutoModelForCausalLM.from_pretrained(model_path, dtype=dtype, **common)
     except TypeError:
@@ -6960,7 +6951,7 @@ def load_model_and_tokenizer(model_path: str, *, dtype_name: str = "bfloat16"
     if actual != dtype_name:
         raise BehavioralHarnessError(
             f"requested dtype {dtype_name} but the loaded parameters are {actual} — "
-            "the collection regime is a stamped fact (§2.8) and a silent downgrade "
+            "the collection regime is a stamped fact and a silent downgrade "
             "would make every number in this column incomparable to the bank")
     model.eval()
     model.requires_grad_(False)
@@ -6972,12 +6963,12 @@ class _StubStepper:
     """A deterministic, PER-ROW-INDEPENDENT stepper — the layout-invariance witness.
 
     Why a stub at all, when a tiny real Llama would be more convincing: a real
-    forward's reductions are NOT batch-size invariant (§2.7 says so about GPUs, and
-    the selftest MEASURES it on CPU), so a real model can only CHARACTERIZE layout
+    forward's reductions are NOT batch-size invariant (true of GPUs, and the selftest
+    MEASURES it on CPU), so a real model can only CHARACTERIZE layout
     invariance, never prove it. This stub computes each row's logits from that row's
     own token history alone, in a fixed order, so it is exactly batch-invariant by
     construction — which isolates the property under test to the HARNESS's layout
-    logic, where the §2.2 contract actually lives.
+    logic, where the layout-invariance contract actually lives.
 
     The arithmetic is deliberately non-trivial (history-dependent, vocab-spread) so
     a bug that dropped or misordered a row's history would change its tokens.
@@ -7043,8 +7034,8 @@ class _ToyTokenizer:
         out = [self.bos_token_id]
         for m in messages:
             # NOT truncated: the pool's prompt lengths must genuinely vary, because
-            # equal lengths would hide both a left-padding bug and the §2.6
-            # probe-grouping question the harness has to answer.
+            # equal lengths would hide both a left-padding bug and the entropy
+            # probe's grouping question the harness has to answer.
             out += self.encode(m["content"], add_special_tokens=False)
         if add_generation_prompt:
             out.append(3)          # a template marker, so the two arms really differ
@@ -7056,7 +7047,7 @@ def _toy_pool(size: int = PROMPT_POOL_SIZE) -> PromptPool:
 
     Data-independent by construction: the selftest must run in a checkout with no
     gitignored data tree. Prompt lengths deliberately VARY across the pool, because
-    varying prompt length is what makes the §2.6 probe-grouping question real and
+    varying prompt length is what makes the probe-grouping question real and
     what a left-padding bug would hide.
     """
     strata = ("expository", "explanatory", "argumentative", "conversational")
@@ -7075,9 +7066,9 @@ def _toy_pool(size: int = PROMPT_POOL_SIZE) -> PromptPool:
 
 
 class _StubRuntime:
-    """A weightless `NodeRuntime` — the orchestration proof (rake M44).
+    """A weightless `NodeRuntime` — the orchestration proof in every configuration.
 
-    The §2.1 ORDER, the per-cell stamps, the completeness guard, the replay gate and
+    The column job's ORDER, the per-cell stamps, the completeness guard, the replay gate and
     the banking are the parts of this module that no GPU can be spared to test and that
     a mis-wire would corrupt silently. They are therefore proved here against a runtime
     whose every reading is a deterministic function of its inputs: the same
@@ -7153,8 +7144,8 @@ class _StubRuntime:
         """`HFNodeRuntime.repoint`'s contract, on the weightless runtime.
 
         Same two refusals, so the residency driver's boundary is proved in the
-        configuration with no deep-learning stack at all (M44) rather than only where
-        a GPU can be spared.
+        configuration with no deep-learning stack at all rather than only where a GPU
+        can be spared.
         """
         if node_key != self.node_key:
             raise ResidencyModelMismatch(
@@ -7246,7 +7237,7 @@ def _toy_document(pool: PromptPool, *, node: str, arm: str, site: int, corpus: s
 
 
 def _compact_cells(site: int) -> list[CellSpec]:
-    """The smallest cell set that can constitute the §2.7 gate (all three strata)."""
+    """The smallest cell set that can constitute the replay gate (all three strata)."""
     cells = [baseline_cell(site)]
     for key, kind, band in (("entropy_gradient", "calibration", None),
                             ("gRband1", "transported_band", "gRband"),
@@ -7260,7 +7251,7 @@ def _compact_cells(site: int) -> list[CellSpec]:
 
 
 def _toy_cells(site: int = 14) -> list[CellSpec]:
-    """A miniature of the §4 + §5 cell set: enough strata for the §2.7 gate."""
+    """A miniature of the calibration + transported cell set: enough strata for the replay gate."""
     cells = [baseline_cell(site)]
     for key, kind, band in (
             ("entropy_gradient", "calibration", None),
@@ -7278,12 +7269,13 @@ def _toy_cells(site: int = 14) -> list[CellSpec]:
 
 def _calibration_only_cells(site: int = 26, *, with_beside: bool = True
                             ) -> list[CellSpec]:
-    """A miniature of the CALIBRATION-ONLY column (B-1's case): no transported cell.
+    """A miniature of the CALIBRATION-ONLY column: no transported cell.
 
     Mirrors the staged qwen2.5-3b-instruct certification column in shape — the native
     lever over the full ladder, one Rband member over the full ladder, and (optionally)
     the designated Σ-beside cells at the scoring doses — which is exactly the column
-    that could not constitute the §2.7 gate before B-1 was ruled.
+    the science role mapping cannot constitute and the calibration-only role mapping
+    exists for.
     """
     cells = [baseline_cell(site)]
     for key, kind, band in (("entropy_gradient", "calibration", None),
@@ -7311,7 +7303,7 @@ _TOY_MAPPING_DOSES: tuple[float, ...] = (-0.25, -0.20, -0.15, 0.15, 0.20, 0.25)
 
 def _toy_mapping_spec_body(*, node: str, arm: str, site: int,
                            doses: Sequence[float] = _TOY_MAPPING_DOSES) -> dict:
-    """A `MappingSpec` document body, as the desk would file it."""
+    """A `MappingSpec` document body, in the shape an operator files one."""
     return {"schema_version": MAPPING_SPEC_SCHEMA_VERSION,
             "experiment_id": "selftest-dose-window",
             "node_key": node, "arm": arm, "site": site, "doses": list(doses),
@@ -7326,7 +7318,7 @@ def _mapping_cells(site: int, authorization: MappingAuthorization,
                    *, lever: str = "entropy_gradient") -> list[CellSpec]:
     """A miniature of the MAPPING column: the native lever + one Rband, spec doses.
 
-    The shape the ratified pre-statement describes — one lever cell and its band
+    The shape a dose-window mapping takes — one lever cell and its band
     members per mapped dose, no baseline (α=0 is the banked column's, by the
     shared-baseline design) — which is exactly the column neither science role
     mapping can constitute.
@@ -7342,14 +7334,14 @@ def _mapping_cells(site: int, authorization: MappingAuthorization,
     return cells
 
 
-#: The selftest's AMENDED ladder. Deliberately NOT the ratified mixtral ladder: the
+#: The selftest's AMENDED ladder. Deliberately NOT the mixtral amended ladder: the
 #: "this engine carries no per-node ladder" property is asserted below by walking this
 #: module's AST for exactly that tuple, and a selftest fixture equal to it would make
 #: the assertion pass by luck. It SHARES ±0.03 and ±0.10 with the frozen ladder and
 #: moves only the extremes — the overlap `MappingAuthorization` forbids and this
 #: mechanism requires, so every fixture built from it exercises the inverted law.
 _TOY_AMENDED_LADDER: tuple[float, ...] = (-0.2, -0.1, -0.03, 0.03, 0.1, 0.2)
-#: The ratified mixtral ladder, quoted ONLY as the needle the AST check hunts for. It
+#: The mixtral amended ladder, quoted ONLY as the needle the AST check hunts for. It
 #: is not a dose source: nothing constructs a cell or an authorization from it, and the
 #: check below fails if any module-level constant in this file ever equals it.
 _RATIFIED_MIXTRAL_LADDER_NEEDLE: tuple[float, ...] = (-0.15, -0.1, -0.03, 0.03,
@@ -7358,11 +7350,11 @@ _RATIFIED_MIXTRAL_LADDER_NEEDLE: tuple[float, ...] = (-0.15, -0.1, -0.03, 0.03,
 
 def _toy_ladder_spec_body(*, node: str, site: int,
                           ladder: Sequence[float] = _TOY_AMENDED_LADDER) -> dict:
-    """A `LadderSpec` document body, with the RATIFIED document's exact key set.
+    """A `LadderSpec` document body, with the key set a real ladder spec carries.
 
-    Keyed deliberately like `docs/desk/LADDER-SPEC-mixtral-recal-2026-08-09.json` —
-    same fields, same shape, different node and ladder — so this fixture proves the
-    loader accepts the document of record's schema rather than a schema invented here.
+    Keyed deliberately like the mixtral amended-ladder document — same fields, same
+    shape, different node and ladder — so this fixture proves the loader accepts the
+    document of record's schema rather than a schema invented here.
     """
     return {"schema_version": LADDER_SPEC_SCHEMA_VERSION,
             "experiment_id": "selftest-recal-amended-ladder",
@@ -7380,12 +7372,12 @@ def _toy_ladder_spec_body(*, node: str, site: int,
 
 
 def _amended_cells(site: int, authorization: LadderAuthorization) -> list[CellSpec]:
-    """`_toy_cells`' AMENDED twin: the same §4 + §5 shape, on the ratified ladder.
+    """`_toy_cells`' AMENDED twin: the same calibration + transported shape, on an amended ladder.
 
     Same kinds, same vector keys, same band families — only the ladder differs — so a
     diff against `_toy_cells` shows exactly what an amendment changes about a column
     and nothing else. The α=0 baseline is built by `baseline_cell` and carries NO
-    authorization, because it is the same cell under either ladder (§5.1).
+    authorization, because it is the same cell under either ladder.
     """
     cells = [baseline_cell(site)]
     for key, kind, band in (
@@ -7418,7 +7410,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
     def skip(name: str, why: str) -> None:
         """A NAMED skip: a block that cannot run here, recorded as run-and-absent.
 
-        RAKE M44: a selftest that CRASHES in a configuration is indistinguishable
+        A selftest that CRASHES in a configuration is indistinguishable
         from a selftest that FAILS, and neither says which. A named skip is a
         third state — the check did not run, the reason is on the record, and the
         suite's exit code stays 0 because nothing FAILED. The skip is counted in
@@ -7429,8 +7421,8 @@ def selftest() -> int:                                   # noqa: C901 — a chec
         checks.append((f"SKIPPED: {name}", True, why))
         logger.info("SKIP %s — %s", name, why)
 
-    # THE AVAILABILITY PROBE (rake M44). torch is absent from the desk's own repo
-    # .venv, so every torch-dependent BLOCK below is branched on this one probe
+    # THE AVAILABILITY PROBE. torch is absent from the repo's CPU-only .venv, so
+    # every torch-dependent BLOCK below is branched on this one probe
     # rather than on a bare import at its point of use. The properties that make
     # the harness legitimate — the seed table, the layout invariance, the dose
     # ladder, the stamp checklist, the replay-gate logic — are numpy-only BY
@@ -7441,7 +7433,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
         import torch
         _torch: Any = torch
         _no_torch = ""
-    except ImportError as exc:                       # the desk .venv configuration
+    except ImportError as exc:                       # the CPU-only .venv configuration
         _torch = None
         _no_torch = f"torch unavailable ({exc})"
 
@@ -7449,7 +7441,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
     node = "qwen2.5-3b-instruct"
     arm, site = "native", 26
 
-    # ---- 1. the seed table: determinism and the M5 contract -------------------
+    # ---- 1. the seed table: determinism and partial-rerun phase safety --------
     print("== selftest 1: seed table — same digest → same uniforms (§2.3, M25) ==")
     m1, s1, u1 = uniform_tape(corpus_sha=corpus, node_key=node, arm=arm, site=site,
                               cell_id="gentropy_gradient_L26_a+0.30", gen_id=7, n=8)
@@ -7462,8 +7454,8 @@ def selftest() -> int:                                   # noqa: C901 — a chec
     check("seed_int is the sha256[:8] big-endian integer, never `hash()`",
           s1 == int.from_bytes(hashlib.sha256(m1.encode()).digest()[:8], "big"),
           str(s1))
-    # M25(c) says to GREP new analysis code for `hash(` before archiving it as an
-    # operationalization of record. Running the grep as an assertion means the code
+    # `hash()` is salted per process by PYTHONHASHSEED, so a value derived from it
+    # cannot be reproduced. Running the grep for it as an assertion means the code
     # cannot be archived without it having been run. Backtick-quoted prose mentions
     # of `hash()` are excluded by the lookbehind; a real call site is not.
     import re as _re
@@ -7475,7 +7467,8 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                              cell_id="gRband1_L26_a-0.03", gen_id=7, n=8)
     check("a DIFFERENT cell at the same gen_id draws a different tape",
           sA != s1 and not np.array_equal(uA, u1), f"seeds {s1} vs {sA}")
-    # THE M5 CONTRACT: changed cell membership does not desync the others.
+    # PHASE SAFETY: a single RNG stream shifts phase when records are filtered;
+    # per-cell seeds mean changed cell membership does not desync the others.
     full = _toy_cells(site)
     subset = [c for c in full if c.vector_key != "gRband1"]
     tapes_full = {c.cell_id: uniform_tape(
@@ -7523,7 +7516,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
           SAMPLING_OF_RECORD.name)
 
     # ---- 2b. THE IDENTITY GATE: the batched kernel IS `sample_token` ----------
-    # The whole warrant for the 2026-08-01 vectorization. Any mismatch below is a
+    # The whole warrant for the vectorized kernel. Any mismatch below is a
     # FAILURE and never a tolerance: the two kernels are the same step or the fast
     # one does not run.
     print("== selftest 2b: the batched kernel is byte-identical to ruling 8's step ==")
@@ -7647,7 +7640,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                       ValueError),
           f"kernel of record: {SAMPLER_KERNEL_OF_RECORD.name}")
 
-    # ---- 3. LAYOUT INVARIANCE — the §2.2 replay-gate property -----------------
+    # ---- 3. LAYOUT INVARIANCE — the property the replay gate rests on ---------
     print("== selftest 3: layout invariance at B ∈ {80, 40, 20, 10, 1} (§2.2) ==")
     tok = _ToyTokenizer()
     pool = _toy_pool()
@@ -7799,7 +7792,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
           _raises(lambda: entropy_array_digest(
               [np.array([1.0], dtype=np.float64)]), ReplayGateNotBitwise))
 
-    # ---- 4b. the probe grouping (§2.6's resolved ambiguity) -------------------
+    # ---- 4b. the probe grouping (the entropy probe's resolved ambiguity) ------
     print("== selftest 4b: probe grouping — one valid mask per group ==")
     groups = probe_groups(ref, max_group=32)
     check("every probe group has ONE prompt_length (the mask-validity constraint)",
@@ -7876,7 +7869,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                        vector_key="gRband1", site=site, alpha_frac=0.3,
                        band_family="gRband").band_family == "gRband")
 
-    # ---- 5b. the Σ-beside BESIDE family (B4, Luxia 2026-08-04) ----------------
+    # ---- 5b. the Σ-beside BESIDE family (reported beside, never a gate input) -
     print("== selftest 5b: SigmaBand is a BESIDE family, never a gate input (B4) ==")
     sigma_cal = CellSpec(cell_id=f"SigmaBand1_L{site}_a+0.30", kind="calibration_band",
                          vector_key="SigmaBand1", site=site, alpha_frac=0.3,
@@ -8017,12 +8010,12 @@ def selftest() -> int:                                   # noqa: C901 — a chec
     check("the gate's token digest is computed in gen_id order",
           token_id_digest(ref) == token_id_digest(list(reversed(ref))))
 
-    # ---- 7b. B-1: the calibration-only ROLE MAPPING (RULED 2026-08-05) ---------
+    # ---- 7b. the calibration-only replay-gate ROLE MAPPING ---------------------
     print("== selftest 7b: B-1's calibration-only replay-gate role mapping ==")
-    # The BYTE ASSERT. Both constants were read off the run of the code BEFORE B-1 was
-    # implemented (/tmp/claude-output/gate-baseline-BEFORE-*.log, case
-    # "toy26|qwen2.5-3b-instruct"), so this check fails the moment the ruling's
-    # implementation perturbs a transported column's gate by so much as one byte.
+    # The BYTE ASSERT. Both constants were read off a run of the code without the
+    # calibration-only role mapping (case "toy26|qwen2.5-3b-instruct"), so this check
+    # fails the moment that mapping perturbs a transported column's gate by so much as
+    # one byte.
     B1_PRE_RULING_SELECTION = ("gentropy_gradient_L26_a+0.30",
                                "gRband1_L26_a-0.10",
                                "entropy_gradient_L26_a+0.03")
@@ -8138,7 +8131,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
               role_mapping=REPLAY_ROLE_MAPPING_CALIBRATION_ONLY),
               ReplayGateNotBitwise))
 
-    # ---- 8. stamp completeness against §2.8 ----------------------------------
+    # ---- 8. stamp completeness against the stamp checklist -------------------
     print("== selftest 8: stamp completeness as a §2.8 checklist assertion ==")
     os.environ["CUDA_VISIBLE_DEVICES"] = "3"
     stamp = _toy_stamp(cell=laddered[-1][0], alpha=laddered[-1][1],
@@ -8179,7 +8172,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                    naive_transplant_gate_row=None,
                    naive_transplant_verdict=None), cell_kind="calibration")))
 
-    # ---- 8b. B-2: the naive cell's four nullable map fields (RULED 2026-08-05) --
+    # ---- 8b. the naive cell's four nullable map fields -------------------------
     print("== selftest 8b: B-2's naive-cell stamp nullability ==")
     naive_stamp = dict(stamp, transport_map_fit_sha256=None, transport_map_family=None,
                        transport_map_arm=None, transport_map_corpus_vintage=None)
@@ -8262,7 +8255,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
               actuation_calibration={"job_id": "selftest", "verdict": "PASS"},
               per_cell_seed_roots=roots)),
           "transport_map=None + a banked naive row")
-    # ---- 8c. HALT D: the vector-class stamp contract (RULED 2026-08-05) --------
+    # ---- 8c. the vector-class stamp contract ----------------------------------
     print("== selftest 8c: HALT D's vector-class stamp contract (two bases) ==")
     _set_sha = "3c" * 32
     _basis = {"kind": "contrast-set", "sha256": _set_sha,
@@ -8427,7 +8420,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
           flagged["grade"] == GRADE_LINE and "excluded from mechanism aggregates"
           in flagged["naive_transplant_clause"])
 
-    # ---- 9. HALT semantics for the remaining §9 conditions --------------------
+    # ---- 9. HALT semantics for the remaining HALT conditions ------------------
     print("== selftest 9: §9 HALT conditions are named exceptions, not warnings ==")
     check("every HALT class descends from BehavioralHarnessError",
           all(issubclass(c, BehavioralHarnessError) for c in (
@@ -8488,7 +8481,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
           CanonicalLayout(batch_size=80, dtype="f32").frozen is False
           and freeze_layout(80, dtype="f32").frozen is True)
 
-    # ---- 10. preflight (M10 / M19) -------------------------------------------
+    # ---- 10. preflight (exit-early, conservative when degraded) ---------------
     print("== selftest 10: preflight is exit-early and M19-safe ==")
     B, measured, note = choose_batch_size(lambda b: 0.10 * (b / 10.0))
     check("preflight takes the LARGEST rung with ≥15% headroom",
@@ -8508,7 +8501,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
     check("a layout that cannot fit any rung still names the smallest, measured",
           choose_batch_size(lambda b: 0.99)[0] == min(BATCH_LADDER))
 
-    # ---- 11. prompt pool (ruling 10) -----------------------------------------
+    # ---- 11. prompt pool (the sha-frozen pool of record) ----------------------
     print("== selftest 11: the prompt pool of record (ruling 10) ==")
     check("the pool of record is 20 topics × 4 strata = 80",
           len(pool.prompts) == 80 and PROMPT_POOL_SIZE == 80)
@@ -8553,7 +8546,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
     # The BatchEncoding shape. `apply_chat_template` returns a bare list for some
     # tokenizers and a mapping for others — both appear on this roster at one
     # transformers version — and iterating the mapping yields its KEYS, which is
-    # how `int("input_ids")` reached a live node (3B certification, 2026-08-05).
+    # how `int("input_ids")` reaches the generation loop on a real tokenizer.
     # The stub below returns the mapping and nothing else changes, so this check
     # fails the moment the unwrap is removed again.
     class _MappingTemplateTokenizer(_ToyTokenizer):
@@ -8571,7 +8564,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
           render_prompt(pool.prompts[0], _mtok, "native")
           == render_prompt(pool.prompts[0], tok, "native"))
 
-    # ---- 12. ruling 4's bridge cell ------------------------------------------
+    # ---- 12. the bridge cell -------------------------------------------------
     print("== selftest 12: the bridge cell (ruling 4) ==")
     ran = BridgeCellDecision(pair="8b->qwen-7b", banked_config_recoverable=True,
                              dropped=False,
@@ -8594,7 +8587,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
           _raises(lambda: BridgeCellDecision(
               pair="p", banked_config_recoverable=True, dropped=False), ValueError))
 
-    # ---- 13. real-model characterization (availability-branched, M19) ---------
+    # ---- 13. real-model characterization (availability-branched, never a gate)
     print("== selftest 13: real-forward characterization (never a gate) ==")
     if _torch is None:
         skip("real-forward characterization: the REAL HF path, the batch-invariance\n         characterization, §2.4 on the real hook, and the hook-admissibility preflight",
@@ -8657,9 +8650,9 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                       if x != y:
                           first_div = i if first_div is None else min(first_div, i)
                           break
-          # M19: DESCRIPTIVE. A real forward's reductions are not batch-invariant, so
+          # DESCRIPTIVE. A real forward's reductions are not batch-invariant, so
           # this can only be characterized. The stub-stepper proof above is what
-          # asserts the harness's own §2.2 contract.
+          # asserts the harness's own layout-invariance contract.
           check("real-forward B=10 vs B=20 CHARACTERIZED (M19: cannot fail a gate)",
                 True,
                 f"bitwise={same}"
@@ -8695,7 +8688,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                     real, node_key="toy-llama", site=99,
                     vector=np.ones(32, dtype=np.float32)), SiteNotOfRecord))
           # ---- the REAL runtime, end to end ---------------------------------
-          # What the stub runtime proves about §2.1's ORDER and custody, this proves
+          # What the stub runtime proves about the column job's ORDER and custody, this proves
           # about the torch plumbing: one hook mutated across cells, the two-forward
           # probe, the battery under injection, the in-job norm measurement and the
           # replay gate, all against a genuine (tiny) forward.
@@ -8704,7 +8697,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                            for i, k in enumerate(("entropy_gradient",
                                                   "gentropy_gradient", "gRband1"))}
           # a node key the registries do NOT carry, on purpose: block 14 exercises
-          # a REGISTERED node (the §9-item-4 cross-check must agree there), and this
+          # a REGISTERED node (the site cross-check must agree there), and this
           # block exercises the torch plumbing on a model that is not any node.
           toy_node = "toy-llama"
           rt = HFNodeRuntime(real, tok, node_key=toy_node, arm=arm, site=1,
@@ -8757,7 +8750,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
         skip("real-forward characterization (transformers unavailable)",
              f"{exc} — the stub-stepper proofs above are the gate")
 
-    # ---- 14. THE COLUMN JOB, end to end, weightless (§2.1) --------------------
+    # ---- 14. THE COLUMN JOB, end to end, weightless ---------------------------
     print("== selftest 14: the §2.1 column job, orchestrated on a stub runtime ==")
     stub = _StubRuntime(pool, tok, arm, site)
     doc = _toy_document(pool, node=node, arm=arm, site=site, corpus=corpus,
@@ -8869,7 +8862,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                                                          len(column.cells),
                                                          n_per_cell=80),
                           ExpectedNShortfall))
-        # B4: expected-N is a gate, so a beside may not fill a hole in it, from either
+        # Expected-N is a gate, so a beside may not fill a hole in it, from either
         # side — a planned beside that did not run (the total is right because a cell
         # of record ran in its place), or a cell that stamped itself a beside without
         # being planned as one.
@@ -8896,7 +8889,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                   work_root=None, corpus_sha_of_record="7" * 64, characterize=False,
                   write=False), CorpusVintageError),
               "the basis is a PARAMETER — the engine hardcodes none for a run")
-        # M10: the preflight is a first-class mode and resolves without firing a cell
+        # The preflight is a first-class mode and resolves without firing a cell
         weightless = preflight_report(doc, pool, corpus_sha_of_record=corpus)
         loaded = preflight_report(doc, pool, runtime=_StubRuntime(pool, tok, arm, site),
                                   corpus_sha_of_record=corpus)
@@ -8913,7 +8906,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
               weightless["n_cells"] == 25 and weightless["n_generations"] == 100)
     os.environ["CUDA_VISIBLE_DEVICES"] = "3"
 
-    # ---- 15. the characterization layout (the §2.2/§2.7 clause conflict) -------
+    # ---- 15. the characterization layout (off-ladder, never a layout of record)
     print("== selftest 15: off-ladder characterization layouts are fenced ==")
     for B in CHARACTERIZATION_BATCH_SIZES:
         check(f"B={B} is admissible ONLY as a characterization layout",
@@ -8928,13 +8921,11 @@ def selftest() -> int:                                   # noqa: C901 — a chec
           freeze_layout(80, dtype="bfloat16").frozen
           and not freeze_layout(80, dtype="bfloat16").characterization_only)
 
-    # ---- 16. §4.2's verdict document and the CLI flag that carries it ---------
-    # The gap this closes (ledger ROUND-2, 2026-08-05): the frozen harness accepted
-    # `actuation_calibration_stamp` as a PYTHON kwarg only, so a CLI-fired column
-    # could not name a verdict that existed and stamped OWED — true for batch A/B,
-    # a FALSE provenance statement afterwards. Luxia's ruling ① adds the flag; these
-    # checks are the flag's contract, and 16b is the byte proof that WITHOUT it
-    # nothing moved.
+    # ---- 16. the actuation-calibration verdict document and its CLI flag ------
+    # Without the flag, a CLI-fired column cannot name a verdict that exists and
+    # stamps OWED — true before a verdict is filed, a FALSE provenance statement after.
+    # These checks are the flag's contract, and the CLI block below is the byte proof
+    # that WITHOUT the flag nothing moves.
     print("== selftest 16: §4.2's actuation-calibration verdict document (CLI flag) ==")
     cal_node, cal_arm, cal_site = "qwen2.5-3b-instruct", "native", 26
     cal_doc_body = {
@@ -8957,7 +8948,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
             return load_actuation_calibration(p, node_key=node, arm=arm, site=site)
 
     block = _load_cal(cal_doc_body)
-    # RAKE M44: every read of the block goes through `.get`, so a DROPPED key is a
+    # Every read of the block goes through `.get`, so a DROPPED key is a
     # named MISS with the missing name in its detail rather than a KeyError — a
     # crashing suite and a failing suite are indistinguishable, and only one of them
     # says what broke.
@@ -9066,7 +9057,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                         ActuationCalibrationSchemaError,
                         ActuationCalibrationMismatch)))
 
-    # 16d: THE LADDER IN FORCE in the verdict document (re-freeze #3, 2026-08-13).
+    # THE LADDER IN FORCE in the verdict document.
     print("== selftest 16d: §4.2's verdict document states THE LADDER IN FORCE ==")
     _frozen_block = _load_cal(cal_doc_body)
     check("(16d) ABSENT the pair, the block is what it always was — the frozen ladder "
@@ -9136,7 +9127,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
           _raises(lambda: _load_cal({**cal_doc_body, "dose_ladders": _amended_ladder}),
                   ActuationCalibrationSchemaError))
 
-    # 16b: the CLI, end to end, weightless — the flag's ONLY effect, byte-proved.
+    # The CLI, end to end, weightless — the flag's ONLY effect, byte-proved.
     print("== selftest 16b: the CLI's flag-absent path is byte-identical (B-1 style) ==")
     _saved_globals = {name: globals()[name] for name in
                       ("load_model_and_tokenizer", "HFNodeRuntime", "load_vectors")}
@@ -9243,7 +9234,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
               == [(c["cell_id"], c["token_id_sha256"], c["entropy_array_sha256"])
                   for c in _gate_flag["cells"]])
 
-        # ---- 16c. HALT C + HALT D end to end, through the CLI (B-1 style) -----
+        # ---- 16c. site role + vector class end to end, through the CLI ---------
         print("== selftest 16c: HALT C/D through the CLI — only the named keys move ==")
         from metabasis.scripts.build_behavioral_banks import VectorBasis
         _cset = "4d" * 32
@@ -9344,10 +9335,10 @@ def selftest() -> int:                                   # noqa: C901 — a chec
               "flag-absent path, proven on a fired column",
               all("site_role" not in s and "site_role" not in s["site_cross_check"]
                   for s in owed.values()))
-        # HALT C at the ENGINE's own re-derivation. The engine never trusts the
-        # staging module's answer — it re-asks the live registries in-job — so a
-        # robustness-site column that staging admitted would HALT node-side unless
-        # this path admits it too. That is the failure mode the ruling is about.
+        # The site-role check at the ENGINE's own re-derivation. The engine never
+        # trusts the staging module's answer — it re-asks the live registries in-job —
+        # so a robustness-site column that staging admitted would HALT at run time
+        # unless this path admits it too. That is the failure mode this guards.
         try:
             from metabasis.scripts.actuation_calibration import ROBUSTNESS_SITES
             # The refusal is raised by the STAGING module, which imports
@@ -9378,7 +9369,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                                                    site_role="robustness_site"),
                           _SNOR))
 
-    # ---- 17. atomic banking + resumption (the 2026-08-05 amendment) -----------
+    # ---- 17. atomic banking + resumption --------------------------------------
     print("== selftest 17: atomic per-cell banking and verify-everything resume ==")
     os.environ["CUDA_VISIBLE_DEVICES"] = "3"
 
@@ -9400,7 +9391,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
             # A kill, simulated INSIDE the process: the cell in flight never reaches
             # its rename, so the on-disk state is exactly the state a SIGKILL leaves.
             # (The subprocess os._exit version is the standalone proof; this is the
-            # version that can run in every configuration of the M44 matrix.)
+            # version that can run in every torch/no-torch, data/no-data configuration.)
             fired = {"n": 0}
             real = rt.begin_cell
 
@@ -9492,7 +9483,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
               f"{len(_moved)} moved leaf/leaves, non-timing: "
               f"{[p for p in _moved if not p.endswith('.elapsed_s')]}")
 
-        # M51 POSITIVE CONTROL: the digest is only evidence if it can move.
+        # POSITIVE CONTROL: the digest is only evidence if it can move.
         _canary = root / "canary"
         shutil.copytree(whole, _canary)
         _cpath = _canary / "cells" / banked_at_kill[0] / "generations.jsonl"
@@ -9689,7 +9680,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
               and column_content_digest(_again) == good_digest,
               f"{len(_rep['cells_skipped'])} verified, 0 run")
 
-    # ---- 17d. the M55 attempt-lock handshake ---------------------------------
+    # ---- 17d. the attempt-lock handshake -------------------------------------
     print("== selftest 17d: M55 — one live writer per attempt directory ==")
     with tempfile.TemporaryDirectory(prefix="behav_lock_") as td:
         root = Path(td)
@@ -9722,7 +9713,8 @@ def selftest() -> int:                                   # noqa: C901 — a chec
               and _cleared2["pid"] == _dead.pid and "stale_because" in _cleared2,
               _cleared2["stale_because"])
         release_attempt_lock(root, _l2)
-        # A FOREIGN host cannot be adjudicated here — /models is shared storage.
+        # A FOREIGN host cannot be adjudicated here — the attempt directory may sit
+        # on shared storage.
         _foreign_lock = _dead.model_copy(update={"hostname": "some-other-node",
                                                  "pid": os.getpid()})
         _atomic_write_text(_resume_dir(root) / ATTEMPT_LOCK_NAME,
@@ -9814,7 +9806,8 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                 load_residency_plan, plan_to_columns)
             # The driver imports the engine by MODULE PATH, so the class it raises is
             # the module's copy and not this file's when the selftest runs as
-            # `__main__` (the same two-copies fact documented at HALT C). Assert the
+            # `__main__` (the same two-copies fact documented at the site-role check
+            # above). Assert the
             # class the caller would actually catch.
             from metabasis.scripts.run_behavioral_cells import (
                 ResidencyPlanInvalid as _RPI)
@@ -9857,7 +9850,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                   _raises(lambda: plan_to_columns(load_residency_plan(_missing)),
                           _RPI))
 
-    # ---- 19. THE MAPPING MODE (2026-08-08, Luxia's ratified engine deviation) ----
+    # ---- 19. THE MAPPING MODE (a spec-scoped engine deviation) -----------------
     print("== selftest 19: the mapping mode — two keys, no licence, ladder untouched ==")
     check("(19) the FROZEN ladder is untouched, literally and by arity",
           DOSE_LADDER == (-0.3, -0.1, -0.03, 0.03, 0.1, 0.3)
@@ -10155,7 +10148,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
               "because the operator asserted something untrue about this run",
               _sci_plain == 0 and _sci_flagged == 2)
 
-    # ---- 20. THE AMENDED LADDER (re-freeze #2, 2026-08-09) ----------------------
+    # ---- 20. THE AMENDED LADDER -------------------------------------------------
     print("== selftest 20: the amended ladder — two keys, whole column, spec-driven ==")
     check("(20) the FROZEN ladder is STILL untouched, literally and by arity — the "
           "property re-freeze #2 was ratified on",
@@ -10163,9 +10156,9 @@ def selftest() -> int:                                   # noqa: C901 — a chec
           and len(DOSE_LADDER) == 6 and BASELINE_DOSE == 0.0
           and SCORING_DOSE_MAGNITUDE == 0.3,
           f"{DOSE_LADDER}")
-    # M58: a code property is asserted on the SYNTAX TREE, never on a substring of the
-    # source. The property: no module-level constant in this engine equals the ratified
-    # mixtral ladder — policy lives in the document, and a per-node ladder that had
+    # A code property is asserted on the SYNTAX TREE, never on a substring of the
+    # source. The property: no module-level constant in this engine equals the
+    # mixtral amended ladder — policy lives in the document, and a per-node ladder that had
     # crept back in as a constant is exactly what this check exists to catch. Walking
     # assignments (rather than grepping for "0.15") also means a constant spelled
     # differently — reordered, or written as a list — is still caught.
@@ -10562,7 +10555,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
         # The two mechanisms, in one place: neither flag pair reaches the other's
         # cells, and a mapping column is untouched by the amendment machinery. Its
         # cells document is rebuilt HERE rather than reused from section 19, whose
-        # temporary directory is already gone (a path that no longer exists would make
+        # temporary directory is already gone (a path that does not exist would make
         # this check pass for the wrong reason).
         _mdoc20 = _toy_document(pool, node=node, arm=arm, site=site, corpus=corpus,
                                 cells=_mapping_cells(site, _mauth), n_per_cell=4,
@@ -10578,11 +10571,10 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                                                            authorization=None))
               and ladder_in_force(_mcells) == DOSE_LADDER)
 
-    # ---- M59: the suite's own arithmetic, asserted rather than printed ----------
+    # ---- the suite's own arithmetic, asserted rather than printed --------------
     # SKIP IS NOT PASS, and a block that silently stopped running is indistinguishable
     # from a block that never existed unless the TOTAL is asserted. The floor is the
-    # count this file was merged at (re-freeze #2, 2026-08-09: 352 checks before the
-    # amended ladder, 382 after it, +30); it may only GROW, and a change that removes a
+    # count this file was merged at; it may only GROW, and a change that removes a
     # check has to change this constant in the same diff — which is exactly the moment
     # a reviewer gets to ask why. Named skips are counted apart and bounded by the
     # known set, so a block that STARTED skipping in a configuration where it used to
@@ -10601,7 +10593,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
     print(f"\nselftest: {len(failures)} failure(s)")
     for name, _, detail in failures:
         print(f"  MISS {name} {detail}")
-    # RAKE M44: the tail states coverage as well as the verdict, because a suite
+    # The tail states coverage as well as the verdict, because a suite
     # that ran 120 of 127 checks in this configuration and one that ran all 127 are
     # different facts, and only the first needs the other configuration to close it.
     print(f"selftest checks run: {len(checks)} ({len(skips)} named skip(s))")
@@ -10699,9 +10691,9 @@ def bench_sampler(*, batch: int = N_PER_CELL, vocab: int = 128256, steps: int = 
     """CPU cost of the two kernels over SYNTHETIC logits at the layout of record.
 
     What this is: the sampling step alone, isolated from the forward, because the
-    sampling step is the only thing the 2026-08-01 vectorization touched. What this is
-    NOT: a throughput number. The node-side seq/s certification measures a real
-    forward on a real card and is a separate job — a ratio measured here does not
+    sampling step is the only thing the vectorized kernel changes. What this is
+    NOT: a throughput number. A seq/s certification measures a real forward on a
+    real card and is a separate job — a ratio measured here does not
     become a column's speed-up, it bounds the part of the column that was slow for
     this reason.
 
@@ -10790,29 +10782,29 @@ def bench_sampler(*, batch: int = N_PER_CELL, vocab: int = 128256, steps: int = 
 # ---------------------------------------------------------------- CLI
 def main(argv: Optional[list[str]] = None) -> int:
     ap = argparse.ArgumentParser(
-        description="The node-side behavioral engine (BRIEF §2). Heimdall CLI only; "
-                    "the coordinator HTTP API is read-only verification.")
+        description="The behavioral engine: one model load, all of a column's cells, "
+                    "batched, with an in-job replay gate and a stamp per cell.")
     ap.add_argument("--selftest", action="store_true",
                     help="CPU-only, data-independent verification (no GPU, no weights)")
     ap.add_argument("--bench-sampler", action="store_true",
                     help="CPU cost of the reference vs vectorized sampling kernels "
                          "over synthetic logits (identity re-asserted on the benched "
-                         "blocks). Not a node throughput number.")
+                         "blocks). Not a column throughput number.")
     ap.add_argument("--bench-batch", type=int, default=N_PER_CELL)
     ap.add_argument("--bench-vocab", type=int, default=128256)
     ap.add_argument("--bench-steps", type=int, default=8)
     ap.add_argument("--preflight", action="store_true",
-                    help="M10: a first-class exit-early preflight mode, NEVER output "
+                    help="a first-class exit-early preflight mode, NEVER output "
                          "truncation. Resolves the pool, the site, the layout and "
                          "the hook admissibility, banks nothing, fires no cell.")
     ap.add_argument("--run", action="store_true",
-                    help="the full §2.1 one-load-per-node job")
+                    help="the full one-load column job")
     ap.add_argument("--node-key", default=None)
     ap.add_argument("--model-path", default=None)
     ap.add_argument("--arm-root", type=Path, default=None)
     ap.add_argument("--work-root", type=Path, default=None,
-                    help="node-side work root; all new node-side data lives under "
-                         "<NODE_DATA_ROOT>/metabasis-behavioral/<node> (standing rule 2026-07-29)")
+                    help="the attempt directory the column banks into, e.g. "
+                         "<DATA_ROOT>/metabasis-behavioral/<node>")
     ap.add_argument("--cells-json", type=Path, default=None,
                     help="staged cell specs (build_behavioral_banks.py output)")
     ap.add_argument("--prompt-pool", type=Path, default=None)
@@ -10827,23 +10819,22 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--corpus-sha-of-record", default=None,
                     help="the basis the vintage chain is asserted against. Defaults to "
                          "the document's own corpus sha, so this module hardcodes no "
-                         "basis for a run — the open v2.1/v3 ruling lives here.")
+                         "basis for a run — which corpus is of record is decided here.")
     ap.add_argument("--dtype", default="bfloat16")
     ap.add_argument("--job-id", default=None)
     ap.add_argument("--scheduler-card-index", default=None,
-                    help="M10: a scheduler job carries a card index; a rogue carries "
-                         "the sentinel, and §9 item 9 refuses the stamp without it")
+                    help="a scheduler job carries a card index; an unscheduled run "
+                         "carries the sentinel, and the stamp is refused without it")
     ap.add_argument("--actuation-calibration", type=Path, default=None,
-                    help="§4.2: the DESK's verdict document for THIS column's site "
+                    help="the actuation-calibration verdict document for THIS column's site "
                          "(JSON: node_key, site, arm, job_id, verdict, the three "
                          "criterion values, scoring_log_path, ledger_date). Validated "
                          "to name this column's node/site/arm and transcribed into "
                          "every cell's stamp. WITHOUT it the stamp reads OWED with "
-                         "its honest note, exactly as before this flag existed — "
-                         "which is the truth only while no verdict has been filed.")
+                         "its honest note — which is the truth only while no verdict "
+                         "has been filed.")
     ap.add_argument("--mapping-spec", type=Path, default=None,
-                    help="THE MAPPING MODE (Luxia's ratification 2026-08-08): the "
-                         "desk's dose-window spec for THIS column (JSON: "
+                    help="THE MAPPING MODE: the dose-window spec for THIS column (JSON: "
                          "experiment_id, node_key, arm, site, doses, "
                          "prestatement_of_record, ratified_by, ledger_date). "
                          "Validated to name this column; its sha256 and dose set must "
@@ -10853,12 +10844,12 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--mapping-mode", action="store_true",
                     help="THE MAPPING MODE's second key: the operator's explicit "
                          "assertion that THIS run fires a mapping column. A mapping "
-                         "cell licenses nothing — it can satisfy no §4.2 criterion "
+                         "cell licenses nothing — it can satisfy no actuation-calibration criterion "
                          "and license no transported-write cell — and the frozen "
                          "DOSE_LADDER is untouched for every science cell.")
     ap.add_argument("--ladder-spec", type=Path, default=None,
-                    help="THE AMENDED LADDER (re-freeze #2, 2026-08-09): the desk's "
-                         "ratified re-calibration document for THIS column's node and "
+                    help="THE AMENDED LADDER: the signed-off re-calibration document "
+                         "for THIS column's node and "
                          "site (JSON: experiment_id, node_key, site, ladder, "
                          "applies_to, replaces, ratification_lineage, "
                          "gate_reading_rule, comparability_rider, "
@@ -10873,24 +10864,25 @@ def main(argv: Optional[list[str]] = None) -> int:
                          "amendment is WHOLE-COLUMN (every arm, every lever, every "
                          "band at this node and site; the α=0 baseline is unchanged) "
                          "and mixing amended with frozen-ladder science cells in one "
-                         "column is refused. §4.2 stays desk-side: this engine runs "
-                         "and records the ladder, it never scores it.")
+                         "column is refused. The actuation-calibration verdict is scored "
+                         "elsewhere: this engine runs and records the ladder, it never "
+                         "scores it.")
     ap.add_argument("--no-characterize", action="store_true",
-                    help="skip §2.7's DESCRIPTIVE B=8/B=1 characterization (M19: it "
+                    help="skip the DESCRIPTIVE B=8/B=1 layout characterization (it "
                          "can never fail a gate, so skipping it costs no assertion)")
     ap.add_argument("--resume", action="store_true",
                     help="resume into an attempt dir this column already banked into: "
                          "every banked cell is RE-VERIFIED (receipt, artifact shas, "
-                         "the engine's own §2.8 stamp checker, and both §2.7 digests "
+                         "the engine's own stamp checker, and both replay-gate digests "
                          "recomputed from the raw) and identity is REQUIRED on the "
                          "cells document, the corpus/pool/verdict shas, the engine "
                          "module shas, the model config, the full canonical layout and "
                          "the measured norm α is resolved from. Any mismatch refuses "
                          "the whole resume by name; a cell that cannot be verified is "
-                         "quarantined and re-run. §2.7's replay gate then runs over "
+                         "quarantined and re-run. The replay gate then runs over "
                          "the FULL population as always.")
     ap.add_argument("--no-attempt-lock", action="store_true",
-                    help="M55: do NOT take the attempt-dir lock. For forensics on a "
+                    help="do NOT take the attempt-dir lock. For forensics on a "
                          "dead attempt directory only — never for a run that banks.")
     args = ap.parse_args(argv)
 
@@ -10934,7 +10926,8 @@ def main(argv: Optional[list[str]] = None) -> int:
                 "another column's stamp.", name.replace('_', '-'), given,
                 getattr(doc, name))
             return 2
-    # §4.2's stamp requirement, filled from the desk's document or left OWED. This is
+    # The actuation-calibration stamp requirement, filled from the verdict document
+    # or left OWED. This is
     # the ONLY thing the flag does: absent it, `actuation_calibration_stamp` stays
     # None and `run_column` writes the same OWED block it has always written.
     actuation_calibration_stamp: Optional[dict] = None
@@ -10951,7 +10944,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         # key below is present by construction — and if one ever is not, the run says
         # `None` here and the stamp still carries whatever the document filed.
         logger.info(
-            "§4.2 actuation calibration of record: %s L%s (%s) job %s — verdict %s "
+            "actuation calibration of record: %s L%s (%s) job %s — verdict %s "
             "(ρ %s · outside band %s · coherence %s); %s",
             *(actuation_calibration_stamp.get(k) for k in
               ("node_key", "site", "arm", "job_id", "verdict", "spearman_rho",
@@ -10979,7 +10972,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             logger.error("HALT (%s): %s", type(exc).__name__, exc)
             return 2
         logger.info(
-            "MAPPING MODE: spec %s (%s L%d, %s arm) doses %s — ratified by %s on %s, "
+            "MAPPING MODE: spec %s (%s L%d, %s arm) doses %s — signed off by %s on %s, "
             "pinned by %s. %s", mapping_spec.experiment_id, mapping_spec.node_key,
             mapping_spec.site, mapping_spec.arm, list(mapping_spec.doses),
             mapping_spec.ratified_by, mapping_spec.ledger_date.isoformat(),
@@ -11070,8 +11063,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         if runtime is None:                                   # pragma: no cover
             ap.error("--run needs --model-path")
         if args.work_root is None:
-            ap.error("--run needs --work-root (all new node-side data lives under "
-                     "<NODE_DATA_ROOT>/metabasis-behavioral/<node>, standing rule 2026-07-29)")
+            ap.error("--run needs --work-root (the attempt directory the column banks "
+                     "into, e.g. <DATA_ROOT>/metabasis-behavioral/<node>)")
         result = run_column(
             runtime, doc=doc, pool=pool, work_root=args.work_root,
             corpus_sha_of_record=basis, n_per_cell=args.n_per_cell,
@@ -11100,8 +11093,8 @@ def main(argv: Optional[list[str]] = None) -> int:
             "work_root": result.work_root, "grade": result.grade}, indent=1))
         return 0
     except BehavioralHarnessError as exc:
-        # §3/§9: an enactor never adjudicates a live HALT. The job stops, says which
-        # condition fired, and leaves the adjudication to the desk.
+        # A live HALT is never adjudicated in the job. The job stops, says which
+        # condition fired, and leaves the adjudication to a human reviewer.
         logger.error("HALT (%s): %s", type(exc).__name__, exc)
         return 2
     except (OSError, ImportError) as exc:
@@ -11111,7 +11104,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         if runtime is not None:
             try:
                 runtime.close()
-            except Exception as exc:                     # noqa: BLE001 — M19(a)
+            except Exception as exc:                     # noqa: BLE001 — logged, never silent
                 logger.warning("runtime close failed (%s: %s)",
                                type(exc).__name__, exc)
 

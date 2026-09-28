@@ -1,6 +1,6 @@
-"""A8 Leg-6 / Item 6 — the special-token anchor hypothesis (P8-TOK1 .55 / P8-TOK2 .40).
+"""The special-token anchor hypothesis (two frozen predictions, TOK1 and TOK2 below).
 
-Luxia's mechanism for the arm's one unexplained failure. Veos-perp is the axis that never
+A proposed mechanism for the one axis in the transport panel that never transports. Veos-perp is the axis that never
 transported: commutation .131 same-tokenizer vs .056 cross-tokenizer, the S5 termination
 rescue raised its COUPLING but left its TRANSPORT flat, and Veos_raw carries while
 Veos-perp does not. The hypothesis: Veos-perp is anchored to per-model SPECIAL-TOKEN
@@ -9,9 +9,11 @@ structurally cannot align, because special tokens have no cross-model semantic r
 in the paired observations.
 
 TOK1 — LOGIT-LENS ANCHOR READ (own-frame, convention-free; runs regardless).
-  Project Veos-perp and V7 through each model's OWN final norm + unembedding and compare
+  Project Veos-perp and the entropy-gradient vector (`V7_*` keys) through each model's OWN
+  final norm + unembedding and compare
   how much of the top-20 boosted-logit mass lands on that model's own EOS/special tokens.
-  Bar: Veos-perp's own-special share exceeds V7's by >=5x, in BOTH 8B and Qwen.
+  Bar: Veos-perp's own-special share exceeds the entropy gradient's by >=5x, in BOTH 8B
+  and Qwen.
 
   LN convention, named: these are RMSNorm models, y = (x / rms(x)) * w, so
       logit_t(x) = u_t . y = x . (w * u_t) / rms(x).
@@ -29,24 +31,25 @@ TOK2 — THE DECOMPOSITION RESCUE.
   envelope.
   Bar: at-null (.056) -> greater than 2x its envelope q95.
 
-  CONVENTION CAVEAT, NAMED (add-6 anticipates it): w is the FINAL-norm gain, while the
-  vectors live at mid sites (8B L16 / Qwen L21). The image is therefore exact for the
-  final-layer readout and an approximation at the injection site — there is no
-  intervening-layer-free definition. add-6's conditional says TOK2 scores CONDITION-UNMET
-  if the image is ill-defined at the capture convention; it is well-DEFINED but
-  site-approximate, so the number is reported WITH this caveat and the desk rules whether
-  that satisfies the letter. Nothing is silently adjusted.
+  CONVENTION CAVEAT, NAMED (the frozen prediction anticipates it): w is the FINAL-norm
+  gain, while the vectors live at mid sites (8B L16 / Qwen L21). The image is therefore
+  exact for the final-layer readout and an approximation at the injection site — there is
+  no intervening-layer-free definition. The prediction's conditional says TOK2 scores
+  CONDITION-UNMET if the image is ill-defined at the capture convention; it is well-DEFINED
+  but site-approximate, so the number is reported WITH this caveat and whether that
+  satisfies the prediction is left to the scorer. Nothing is silently adjusted.
 
-  Reported beside: the same projection applied to V7 (a specificity control — if removing
-  EOS directions also moves V7's commutation, the effect is not eos-specific), and the
+  Reported beside: the same projection applied to the entropy gradient (a specificity
+  control — if removing EOS directions also moves its commutation, the effect is not
+  eos-specific), and the
   fraction of each vector's norm that lives in the EOS span.
 
-EXPLORATORY BESIDE (no P): logit-lens of g.Veos-perp_8B in QWEN's frame — does the
+EXPLORATORY BESIDE (no prediction): logit-lens of g.Veos-perp_8B in QWEN's frame — does the
 transported direction point at any coherent token mass in the target vocabulary, or at
 noise? Top-20 table only, no verdict.
 
-UNSTAMPED (C section 8). No P self-scored. Node-side (needs weights).
-Run: PYTHONPATH=pipeline python -m metabasis.scripts.token_anchor_test --out <path>
+UNSTAMPED. No prediction is self-scored. Needs the model weights (both heads load on CPU).
+Run: python -m metabasis.scripts.token_anchor_test --out <path>
 """
 from __future__ import annotations
 
@@ -66,8 +69,8 @@ logger = logging.getLogger("token_anchor_test")
 
 ARM = Path("outputs/battery/arms/A8_conjugation")
 FIT_8B_QWEN = ARM / "leg1/fits/fit_8bL16__qwen-7bL21_native_proc_k512.npz"
-# Local weights dirs come from the run environment, never committed (the
-# original run used node-local snapshots; HF hub ids are the portable default).
+# Local weights dirs come from the run environment and are never committed; the
+# public HF hub ids are the portable default.
 MODELS = {
     "8b": {"path": os.environ.get("METABASIS_8B_PATH",
                                   "meta-llama/Llama-3.1-8B-Instruct"), "site": 16},
@@ -127,7 +130,7 @@ def anchor_detail(scores: np.ndarray, eos: list[int], specials: set[int], tok) -
 
     The top-20 share can read 0/0 for both vectors — true but uninformative, since a
     strongly-boosted special token could sit at rank 50 in a 128k vocabulary. This gives
-    the desk the ranks and standardised scores instead of a null division, plus the same
+    the scorer the ranks and standardised scores instead of a null division, plus the same
     share statistic at a wider K as a robustness column.
     """
     order = np.argsort(-scores)
@@ -222,7 +225,7 @@ def main() -> int:
             "instead of a null division."
             if blk["ratio_Veos_perp_over_V7"] is None else None)
         res["tok1"][m] = blk
-        logger.info("[TOK1 %s] Veos_perp special share %.4f vs V7 %.4f -> ratio %s",
+        logger.info("[TOK1 %s] Veos_perp special share %.4f vs entropy gradient %.4f -> ratio %s",
                     m, a or -1, b or -1, blk["ratio_Veos_perp_over_V7"])
 
     # ---------------------------------------------------------------- TOK2

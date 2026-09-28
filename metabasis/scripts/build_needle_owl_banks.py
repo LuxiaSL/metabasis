@@ -1,36 +1,38 @@
-"""A8 Leg-4F — injection banks for the two appended GPU legs (L4-g needle, L4-f/Leg-5 owl).
+"""Injection banks for the judged-needle and owl-transport GPU runs.
 
 Subcommands
 -----------
-needle : L4-g (P8-JX). Transported dir0 into Qwen at L21 — g.dir0_8B through the banked
-         Leg-1 Procrustes (native proc_k512), sign-anchored via read_transported_axes.load_axes
+needle : the judged needle. Transported dir0 into Qwen at L21 — g.dir0_8B through the banked
+         8B↔Qwen Procrustes (native proc_k512), sign-anchored via read_transported_axes.load_axes
          (recipe order "+ = analogical - contrastive", identical in both models).  Writes
          the injection npz + the multicell cells json: dose ladder +-{.03,.1,.3} plus
          dose-matched transported-R band cells plus an alpha=0 baseline.
 
-owl    : L4-f / Leg-5 (P8-5). The owl install vector carried the OTHER way — Qwen -> 8B via
-         the REVERSE Procrustes map (transpose; add-3 names it, rake-15 backs it).  Vdiverge
-         lives at QWEN L18, which is NOT one of the Leg-1 site grids, so this leg uses a
-         dedicated 8B-L16 <-> Qwen-L18 fit (leg4f_owl/) rather than applying an L18 vector
-         through an L19-domain map.  Writes:
-           * vec npz  {Valign_L16, Vdiverge_L16}  = unit(g_rev . the A6 unit vectors)
-           * ar  npz  {AR1..3_L16}                = transported Leg-1 R-band members
+owl    : the owl install vector carried the OTHER way — Qwen -> 8B via the REVERSE
+         Procrustes map (transpose; Procrustes is the family of record for reverse-direction
+         claims because its transpose is its inverse).  Vdiverge lives at QWEN L18, which is
+         NOT one of the 8B↔Qwen site grids, so this run uses a dedicated 8B-L16 <-> Qwen-L18
+         fit (leg4f_owl/) rather than applying an L18 vector through an L19-domain map.
+         Writes:
+           * vec npz  {Valign_L16, Vdiverge_L16}  = unit(g_rev . the banked owl unit vectors)
+           * ar  npz  {AR1..3_L16}                = transported 8B↔Qwen R-band members
            * stamps json (median_resid_norms.L16, a5 per-token convention)
-         and, as the docket's "RAW unconjugated Vdiverge (the should-fail null)", a SECOND
+         and, as the "RAW unconjugated Vdiverge (the should-fail null)", a SECOND
          vec npz built by naive coordinate identification (zero-pad 3584 -> 4096, unit).
-         THAT OPERATIONALISATION IS THE ENACTOR'S — the raw Qwen vector has no dimensional
-         image in 8B, so "unconjugated" has to be given a concrete meaning; zero-padding is
-         the literal "coordinates transfer" null that X-5 denies. Flagged for the desk.
+         THAT OPERATIONALISATION IS A CHOICE MADE HERE, NOT GIVEN — the raw Qwen vector has
+         no dimensional image in 8B, so "unconjugated" has to be given a concrete meaning;
+         zero-padding is the literal "coordinates transfer" null that the transport claim
+         denies. The stamp flags it so a reader can weigh another reading.
 
-Identity checks run before anything is written (the docket's requirement: "if the vector
-cannot be identity-verified, PARK the leg"):
-  * cos(Valign, Vdiverge) must reproduce the banked construction.json value (0.316)
-  * both A6 vectors must be unit (they are banked unit; raw norms live in the stamp)
+Identity checks run before anything is written (if the vector cannot be identity-verified,
+the owl run is PARKED rather than built on an unverified vector):
+  * cos(Valign, Vdiverge) must reproduce the value banked in the owl construction stamp (0.316)
+  * both owl vectors must be unit (they are banked unit; raw norms live in the stamp)
   * the fit npz sha256 is recorded in the output stamp
 
-UNSTAMPED (C§8).  Run (repo root):
-  PYTHONPATH=pipeline python -m metabasis.scripts.build_needle_owl_banks needle
-  PYTHONPATH=pipeline python -m metabasis.scripts.build_needle_owl_banks owl
+UNSTAMPED.  Run (repo root):
+  python -m metabasis.scripts.build_needle_owl_banks needle
+  python -m metabasis.scripts.build_needle_owl_banks owl
 """
 from __future__ import annotations
 
@@ -52,12 +54,14 @@ logger = logging.getLogger("build_needle_owl_banks")
 ARM = Path("outputs/battery/arms/A8_conjugation")
 LEG4 = ARM / "leg4"
 def _node_root() -> str:
-    """Cluster-side work root for generated cells. Required from the submitting
-    environment, never committed (values live in the local runbook, off-repo)."""
+    """Work root for generated cells on the machine that runs them.
+
+    It differs per machine, so it comes from the environment and is kept out of the
+    source; unset, the script refuses rather than guessing a path."""
     root = os.environ.get("METABASIS_NODE_WORK_ROOT")
     if not root:
-        raise SystemExit("METABASIS_NODE_WORK_ROOT not set — cluster work root, "
-                         "see the local (off-repo) runbook for the value")
+        raise SystemExit("METABASIS_NODE_WORK_ROOT not set — export the work root on "
+                         "the machine that will run the generated cells")
     return root + "/leg4"
 DOSES = (0.03, 0.1, 0.3, -0.03, -0.1, -0.3)
 N_PER_CELL_SEEDS = 1          # 20 topics x 4 strata x 1 seed = 80 gens/cell
@@ -75,7 +79,7 @@ def _norm(stamps: Path, site: int) -> float:
     return float(json.loads(stamps.read_text())["median_resid_norms"][f"L{site}"])
 
 
-# ------------------------------------------------------------------- L4-g needle
+# -------------------------------------------------------------- judged needle
 def build_needle() -> int:
     fit = ARM / "leg1/fits/fit_8bL16__qwen-7bL21_native_proc_k512.npz"
     tm = load_transport_map(fit)
@@ -131,7 +135,7 @@ def build_needle() -> int:
     return 0
 
 
-# --------------------------------------------------------------------- L4-f owl
+# -------------------------------------------------------------------- owl run
 def build_owl() -> int:
     fit = ARM / "leg4f_owl/fits/fit_8bL16__qwen-7bL18_native_proc_k512.npz"
     if not fit.exists():
@@ -149,8 +153,8 @@ def build_owl() -> int:
         "adapter_path_banked": con["adapter_path"],
     }
     if abs(ident["cos_Valign_Vdiverge_recomputed"] - con["cos_Valign_Vdiverge"]) > 0.002:
-        raise SystemExit("IDENTITY CHECK FAILED — parking the owl leg per the docket "
-                         f"({ident})")
+        raise SystemExit("IDENTITY CHECK FAILED — parking the owl run: the vector does "
+                         f"not reproduce its banked construction ({ident})")
     site = 16
     rev = {"Valign_L16": _unit(tm.transport(v_align, direction="rev")),
            "Vdiverge_L16": _unit(tm.transport(v_div, direction="rev"))}

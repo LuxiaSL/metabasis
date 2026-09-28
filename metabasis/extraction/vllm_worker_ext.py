@@ -1,9 +1,9 @@
 """The TP-CAPABLE ATTACHMENT — the metabasis instrument inside every vLLM rank.
 
-Lifted BY VALUE from the beside tool `metabasis_worker_ext.py`
-(sha256 c24547985ca1790c941fd8ef3ac7aadf9b2126d68ff0ef186d7dce70e5666c87) at
-re-freeze #4, 2026-08-20. UNSTAMPED (C§8): this module files ingredients and
-never scores a bar.
+Lifted BY VALUE from a standalone worker-extension tool (sha256
+c24547985ca1790c941fd8ef3ac7aadf9b2126d68ff0ef186d7dce70e5666c87), with one
+semantic change, documented at the span-rule import in `mb_attach`. UNSTAMPED:
+this module files ingredients and never scores a bar.
 
 WHY THIS EXISTS. The certified lane attaches its hooks by reaching into the
 engine IN-PROCESS (`vllm_lane_smoke._find_model`, which walks
@@ -33,7 +33,7 @@ vLLM's own `torch.set_num_threads(1)` — and the column tool runs ~98 CPU torch
 selftest checks BEFORE `LLM()`. Forking worker processes from a parent already
 dirtied by an OpenMP thread pool is the hang. Discriminated by value: plain vLLM
 with the same `OMP_NUM_THREADS=8` + CPU torch warmup hangs under fork and passes
-under spawn (jobs `2b709ccc886c`, `cb93dd7f4919`). **The fix is
+under spawn, in paired runs that differ only in the start method. **The fix is
 `VLLM_WORKER_MULTIPROC_METHOD=spawn`**, exported by the runner; it is INERT at
 TP=1 because `UniProcExecutor` forks nothing. The precise C-level mechanism
 (OpenMP thread-pool mutex inheritance across fork) is inferred, not captured;
@@ -54,11 +54,11 @@ shas are pinned in this module's selftest):
     and strips vocab padding (`logits[..., :org_vocab_size]`,
     vllm/model_executor/layers/logits_processor.py:102). Every rank therefore
     sees the identical FULL-vocab 2-D tensor, so the certified reduction is
-    already correct; the desk reads rank 0 and uses the other ranks as a free
+    already correct; the reader takes rank 0 and uses the other ranks as a free
     cross-rank agreement check — a check the parent-side proxies ENFORCE rather
     than observe (`metabasis.extraction.vllm_tp_proxy`).
 
-THE `mb_` PREFIX IS A CONTRACT, NOT A STYLE. `worker_base.py:269-275` asserts the
+THE `mb_` PREFIX IS A CONTRACT, NOT A STYLE. vllm/v1/worker/worker_base.py:269-275 asserts the
 extension class shares no attribute name with the Worker class and ABORTS engine
 construction on a collision, so an unprefixed `model`, `rank` or `attach` would
 take the whole engine down at load. Every public name here is `mb_`-prefixed and
@@ -85,8 +85,8 @@ RPC_SURFACE: frozenset[str] = frozenset({
 })
 
 #: sha256 of the two CERTIFIED extraction modules this attachment drives. They
-#: are byte-unchanged by re-freeze #4 — the TP-correctness argument is that they
-#: were already right — and the selftest refuses if either moves.
+#: are used byte-unchanged — the TP-correctness argument is that they were already
+#: right — and the selftest refuses if either moves.
 CERTIFIED_MODULE_SHA256: dict[str, str] = {
     "vllm_residual_write.py":
         "fafc07d78201b5e8ca909244dff419a892daf0fd316eb3520f648887a05d514f",
@@ -109,7 +109,7 @@ def _mb_code_on_path() -> None:
 class MetabasisWorkerExtension:
     """Mixed into vLLM's Worker in EVERY TP rank; methods reached by collective_rpc.
 
-    Every public attribute is `mb_`-prefixed: worker_base.py:269-275 asserts that
+    Every public attribute is `mb_`-prefixed: vllm/v1/worker/worker_base.py:269-275 asserts that
     the extension shares no attribute name with the Worker class, and an
     unprefixed name (`model`, `rank`, `attach`) would abort engine construction.
     """
@@ -155,15 +155,15 @@ class MetabasisWorkerExtension:
         # COLUMN TOOL rather than re-derived, so the span rule cannot drift
         # between the TP=1 and TP>1 lanes.
         #
-        # RE-FREEZE #4 DELTA, AND THE ONLY SEMANTIC ONE IN THIS LIFT. The beside
-        # tool imported the flat node-side module (`from vllm_lane_column import
-        # …`), which resolves against the runner's `PYTHONPATH=$TOOLS`. In the
-        # repo the column tool IS `metabasis.scripts.vllm_lane_column`, and
-        # keeping the flat import would let a redeployed tree silently take its
-        # span rule from a STALE beside copy while the parent took it from the
-        # repo — two span rules in one column, which is precisely the drift this
-        # import exists to prevent. The repo path is therefore named explicitly
-        # and there is no fallback: an unresolvable span rule is a refusal.
+        # THE ONLY SEMANTIC DIFFERENCE FROM THE STANDALONE TOOL. A flat import
+        # (`from vllm_lane_column import …`) would resolve against whatever the
+        # runner's PYTHONPATH carries. The column tool IS
+        # `metabasis.scripts.vllm_lane_column`, and a flat import would let a
+        # redeployed tree silently take its span rule from a STALE standalone copy
+        # while the parent took it from the package — two span rules in one
+        # column, which is precisely the drift this import exists to prevent. The
+        # package path is therefore named explicitly and there is no fallback: an
+        # unresolvable span rule is a refusal.
         try:
             from metabasis.scripts.vllm_lane_column import span_mask_from_positions
         except ImportError as exc:                                   # no fallback
@@ -358,7 +358,7 @@ class MetabasisWorkerExtension:
         return [float(x) for x in st["cap"].flat()]
 
     def mb_measure_sec25(self) -> dict[str, Any]:
-        """§2.5 median residual norm, reduced ON THE RANK.
+        """The in-job per-token median residual norm, reduced ON THE RANK.
 
         The captures are (tokens x d_model) activations; shipping them to the
         parent would move hundreds of MB per column for a single scalar, so the
@@ -379,13 +379,13 @@ class MetabasisWorkerExtension:
                 "median": float(med)}
 
 
-# ── selftest (desk-side, CPU, no vLLM, no weights, torch OPTIONAL) ────────────
+# ── selftest (CPU, no vLLM, no weights, torch OPTIONAL) ──────────────────────
 
 def selftest() -> int:                                            # noqa: C901
     """Every load-bearing property of the attachment, provable with no GPU.
 
-    TORCH IS OPTIONAL BY DESIGN (rake M44). The desk's own repo .venv has no
-    torch, and the properties that make this attachment legitimate — the `mb_`
+    TORCH IS OPTIONAL BY DESIGN: the selftest must pass in both a torch and a
+    no-torch configuration. The repo .venv has no torch, and the properties that make this attachment legitimate — the `mb_`
     prefix contract, the RPC surface, the no-module-scope-import rule, the
     certified modules' shas, the pre-attach refusals — are all provable without
     a deep-learning stack. The methods that genuinely need torch (`mb_attach`,
@@ -411,7 +411,7 @@ def selftest() -> int:                                            # noqa: C901
     src = _Path(__file__).read_text()
     tree = ast.parse(src)
 
-    # -- 1. the `mb_` prefix contract (worker_base.py:269-275) ----------------
+    # -- 1. the `mb_` prefix contract (vllm/v1/worker/worker_base.py:269-275) --
     public = [n for n in vars(MetabasisWorkerExtension) if not n.startswith("_")]
     ok(bool(public) and all(n.startswith("mb_") for n in public),
        "every PUBLIC attribute of the extension is `mb_`-prefixed — vLLM's "
@@ -459,7 +459,8 @@ def selftest() -> int:                                            # noqa: C901
        "never attached, instead of raising AttributeError through the RPC")
 
     # -- 4. AST: nothing heavy is imported at MODULE scope --------------------
-    # PROPERTY, NOT A STRING NEEDLE (rake M58): the module must not import the
+    # PROPERTY, NOT A STRING NEEDLE (a grep for the import text could be satisfied
+    # by a comment, an AST walk cannot): the module must not import the
     # extraction modules (or torch, or numpy) at module scope, because MB_CODE
     # is only on `sys.path` after `_mb_code_on_path()` runs inside the worker.
     top_imports: set[str] = set()
@@ -491,7 +492,7 @@ def selftest() -> int:                                            # noqa: C901
 
     # -- 6. the docstring carries the diagnosis and the source citations ------
     # Tested against `__doc__` (prose, an ARTIFACT) rather than by grepping this
-    # file, so the check's own text cannot satisfy it — rake M58(2).
+    # file, so the check's own text cannot satisfy it.
     doc = __doc__ or ""
     for needle, what in (
             ("VLLM_WORKER_MULTIPROC_METHOD=spawn", "the fix"),
@@ -629,7 +630,7 @@ def selftest() -> int:                                            # noqa: C901
            "mb_attach carries BOTH refusals (double attachment, and a hidden "
            "width that is not the banked vector's)", f"{len(raises)} raises")
 
-    # -- 10. M59: the suite's own arithmetic ----------------------------------
+    # -- 10. the suite's own arithmetic: a check floor and a skip ceiling -----
     SELFTEST_CHECK_FLOOR = 46
     KNOWN_SKIP_CEILING = 1
     ok(len(checks) >= SELFTEST_CHECK_FLOOR and len(skips) <= KNOWN_SKIP_CEILING,

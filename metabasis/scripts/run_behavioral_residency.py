@@ -1,16 +1,16 @@
 """The model-residency driver: one job, one card, one loaded model, many columns.
 
-LUXIA'S RULING (2026-08-05 night), which this file enacts and nothing more: **one job
-= one card = one loaded model = an ORDERED LIST of that model's cells documents
-through a shared runtime**, with the boundary drawn explicitly — **residency sharing
-YES, cell sharing NO**. A cell is 80 generations under ONE injection spec; batching
-across cells would change the physics, so nothing here ever puts two columns' work
-into one forward. What is shared is exactly the loaded weights.
+The rule this file enacts and nothing more: **one job = one card = one loaded model =
+an ORDERED LIST of that model's cells documents through a shared runtime**, with the
+boundary drawn explicitly — **residency sharing YES, cell sharing NO**. A cell is 80
+generations under ONE injection spec; batching across cells would change the physics,
+so nothing here ever puts two columns' work into one forward. What is shared is
+exactly the loaded weights.
 
-WHY THIS IS A DRIVER AND NOT AN ENGINE MODULE. §2.1's job already takes its runtime
-from its caller (`NodeRuntime`), so the loop is the only new orchestration — and the
-one thing a loop cannot safely do from outside is re-point a loaded runtime at the
-next column's (arm, site, vector bank). That lives in the engine, typed, as
+WHY THIS IS A DRIVER AND NOT AN ENGINE MODULE. The engine's column job already takes
+its runtime from its caller (`NodeRuntime`), so the loop is the only new orchestration
+— and the one thing a loop cannot safely do from outside is re-point a loaded runtime
+at the next column's (arm, site, vector bank). That lives in the engine, typed, as
 `HFNodeRuntime.repoint` with its two refusals (`ResidencyModelMismatch` when the
 document names another model, `ResidencyHookStillAttached` when a hook survived a
 column), beside `run_resident_columns`, which is where the between-columns assertions
@@ -18,11 +18,12 @@ are made and where the CPU-toy proof drives it. This file is the CLI and the mod
 load: it parses a typed plan, loads ONE model, and hands the ordered list over.
 
 PER-COLUMN INTEGRITY IS UNTOUCHED. Every column gets its own preflight, its own
-canonical-layout freeze, its own §2.5 norm measurement, its own §4/§5 gates, its own
-§2.8 stamps, its own §2.7 replay gate, its own M55 attempt lock and its own manifest.
-Column ORDER cannot move a bit: §2.3's uniforms are per-(cell, gen_id) sha256 material
-(ruling 8 / M5), so a cell's tape is a function of the cell and never of what ran
-before it — the same property that makes resumption sound, used the other way round.
+canonical-layout freeze, its own in-job norm measurement, its own actuation and
+completeness gates, its own per-cell stamps, its own replay gate, its own attempt lock
+and its own manifest. Column ORDER cannot move a bit: each generation's uniforms are
+per-(cell, gen_id) sha256 material, so a cell's tape is a function of the cell and
+never of what ran before it — the same property that makes resumption sound, used the
+other way round.
 
 RESUMPTION RIDES ALONG. A plan may mark any column `"resume": true`; a completed
 column is skipped whole (every cell verified, nothing to run), a partial one resumes
@@ -32,8 +33,8 @@ residency restartable at the granularity of the wave rather than of the job.
     python -m metabasis.scripts.run_behavioral_residency --plan <PLAN>.json
     python -m metabasis.scripts.run_behavioral_residency --plan <PLAN>.json --dry-run
 
-Heimdall CLI only for submission; the coordinator HTTP API is read-only verification.
-All new node-side data lives under <NODE_DATA_ROOT> (standing rule 2026-07-29).
+Work roots in the plan are paths on the machine that runs the job, under a data root
+supplied by the operator (<DATA_ROOT>); none is committed here.
 """
 from __future__ import annotations
 
@@ -107,8 +108,8 @@ class ResidencyPlan(BaseModel):
             raise ValueError(
                 f"columns share attempt director{'ies' if len(dupes) > 1 else 'y'} "
                 f"{dupes}. Residency shares the loaded MODEL; each column keeps its "
-                "own attempt directory, its own gates and its own manifest (Luxia's "
-                "boundary, 2026-08-05: residency sharing YES, cell sharing NO).")
+                "own attempt directory, its own gates and its own manifest (the "
+                "residency boundary: residency sharing YES, cell sharing NO).")
         return self
 
 
@@ -180,9 +181,8 @@ def _summary(records: list[dict]) -> list[dict]:
 
 def main(argv: Optional[list[str]] = None) -> int:
     ap = argparse.ArgumentParser(
-        description="The model-residency driver (Luxia's ruling, 2026-08-05): one "
-                    "job, one card, one loaded model, an ordered list of that "
-                    "model's columns. Heimdall CLI only for submission.")
+        description="The model-residency driver: one job, one card, one loaded "
+                    "model, an ordered list of that model's columns.")
     ap.add_argument("--plan", type=Path, required=True,
                     help=f"a {RESIDENCY_SCHEMA_VERSION} plan document")
     ap.add_argument("--dry-run", action="store_true",
@@ -190,8 +190,8 @@ def main(argv: Optional[list[str]] = None) -> int:
                          "exit — no model is loaded and no cell fires")
     ap.add_argument("--continue-past-refusal", action="store_true",
                     help="do NOT stop the residency on a column's HALT. Off by "
-                         "default: an enactor never adjudicates a live HALT (§3/§9), "
-                         "and columns already banked are safe either way.")
+                         "default: a live HALT is resolved by a human, never by the "
+                         "running job, and columns already banked are safe either way.")
     args = ap.parse_args(argv)
 
     runtime: Any = None
@@ -235,7 +235,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         if runtime is not None:
             try:
                 runtime.close()
-            except Exception as exc:                     # noqa: BLE001 — M19(a)
+            except Exception as exc:                     # noqa: BLE001 — logged, never swallowed silently
                 logger.warning("runtime close failed (%s: %s)",
                                type(exc).__name__, exc)
 

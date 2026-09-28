@@ -1,28 +1,30 @@
-"""A8 Leg-4F / L4-e — TRANSITIVITY: does the algebra's composition axiom hold for g?
-(CPU, near-free; frozen bar P8-T .55, A8-add-3.)
+"""PATH INDEPENDENCE: does the algebra's composition axiom hold for the transport map g?
+(CPU, near-free; the .70 bar below was frozen before the direct fit existed.)
 
-Frozen form: fit g_direct(3B -> Qwen) on the SHARED-TEXT subset of the Leg-0 and Leg-1
-banks (S2 is byte-identical by stamp; any shared S1/S3 rows verified by text sha256),
-then compare against the composed map g_comp = g(8B->Qwen) . g(3B->8B) at MATCHED k:
+Frozen form: fit g_direct(3B -> Qwen) on the SHARED-TEXT subset of the 3B↔8B and
+8B↔Qwen banks (S2 is byte-identical by stamp; any shared S1/S3 rows verified by text
+sha256), then compare against the composed map g_comp = g(8B->Qwen) . g(3B->8B) at
+MATCHED k:
 
-    bar := mean over the 5-axis panel {V7, Vrep_perp, Vconf, V_temp, dir0}
+    bar := mean over the 5-axis panel {entropy gradient, Vrep_perp, Vconf, V_temp, dir0} (`PANEL`)
            of cos(g_direct . v, g_comp . v)   >= .70      (aggregation: MEAN, stated)
 
 Named beside (reported, unscored): a_hat_direct(3B->Qwen) = cos(g_direct.V7_3b, V7_qwen)
 vs the multiplicative composition a_hat(3B->8B) x a_hat(8B->Qwen) = .514 x .332 = .171 —
 does one hop lose less than two?
 
-RANK GUARD (add-3, binding): k <= n_train/1.2, and k512 is FORBIDDEN at n < 620.  The
+RANK GUARD (binding): k <= n_train/1.2, and k512 is FORBIDDEN at n < 620 — above that
+rank a Procrustes fit has more freedom than the training rows can pin down. The
 shared subset is ~470 texts, so this script fits k in {32, 128} + ridge and builds
 g_comp at the SAME k.  The guard's arithmetic is recomputed and filed at run time; if a
 requested k violates it the script drops that k and says so.
 
-Fork (add-3): shared subset < 250 texts after sha-verification => a one-model replay
-block is pre-authorized before fitting.  Reported, not silently handled.
+Fork: shared subset < 250 texts after sha-verification => a one-model replay block is
+pre-authorized before fitting.  Reported, not silently handled.
 
-UNSTAMPED (C§8).  Mechanics only — the desk scores P8-T.
+UNSTAMPED.  Mechanics only — the result is scored by a reader, not by this code.
 
-Run (repo root): PYTHONPATH=pipeline python -m metabasis.scripts.path_independence
+Run (repo root): python -m metabasis.scripts.path_independence
                  [--build-only] [--selftest]
 """
 from __future__ import annotations
@@ -82,7 +84,7 @@ def shared_subset() -> tuple[list[dict], dict]:
 def build_subset_root() -> dict:
     entries, qc = shared_subset()
     if qc["fork_replay_block_needed"]:
-        logger.warning("shared subset %d < 250 — add-3 fork: a one-model replay block is "
+        logger.warning("shared subset %d < 250 — below the fork threshold, a one-model replay block is "
                        "pre-authorized. NOT firing it automatically; reported.",
                        qc["n_shared"])
     (SUB / "corpus").mkdir(parents=True, exist_ok=True)
@@ -90,12 +92,12 @@ def build_subset_root() -> dict:
     man = json.dumps({"entries": entries}, indent=1)
     (SUB / "corpus/corpus_manifest.json").write_text(man)
 
-    # 3B states come from the Leg-0 banks (keyed by leg-0 ids); Qwen from Leg-1.
+    # 3B states come from the 3B↔8B banks (keyed by their text ids); Qwen from the 8B↔Qwen banks.
     leg0_ids = {e["text_sha256"]: e["text_id"] for e in entries}
     leg1_entries = json.loads((ARM / "leg1/corpus/corpus_manifest.json").read_text())["entries"]
     sha_to_leg1 = {_sha(e["text"]): e["text_id"] for e in leg1_entries}
     order = [e["text_sha256"] for e in entries]
-    ids_out = [e["text_id"] for e in entries]        # canonical = leg-0 ids
+    ids_out = [e["text_id"] for e in entries]        # canonical = the 3B↔8B corpus ids
     for model, src_root, key in (("3b", ARM, leg0_ids),
                                  ("qwen-7b", ARM / "leg1", sha_to_leg1)):
         for arm in ("native", "raw"):

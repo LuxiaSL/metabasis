@@ -1,11 +1,11 @@
-"""C3 certifying consequence (b) — per-token entropy under V_temp steering (PREFLIGHT §4 (b)).
+"""Certifying consequence (b) — per-token entropy under V_temp (temperature-vector) steering.
 
 Lightweight: re-applies each cell's banked injection (from metadata), forwards over the
 generated tokens ONCE, records ONLY per-position next-token entropy (no raw tensors → zero
 storage). Reports, per cell: mean STEERED entropy (injection on, the distribution the steered
 gen sampled from) and mean UNSTEERED entropy (same tokens, injection off) → the rise. (b) =
 does V_temp raise steered entropy ABOVE the matched-norm Rc nulls, dose-ordered (toward the
-hot-sampling t09 profile)? First-read → outer loop; nothing stamped.
+hot-sampling t09 profile)? The output is a first read for a human to judge; nothing is stamped.
 """
 from __future__ import annotations
 
@@ -23,8 +23,8 @@ from metabasis.extraction.hooks import ResidualWriteSpec, attach_residual_write
 def _ent_nll_over_gen(model, ids: torch.Tensor, P: int,
                       spec: ResidualWriteSpec | None) -> tuple[np.ndarray, np.ndarray]:
     """Per-position next-token ENTROPY + NLL (surprisal of the ACTUAL generated token) over the
-    generated span. Entropy = state of the distribution; NLL = -log p(token) the likelihood rung
-    of the A1 detector hierarchy reads."""
+    generated span. Entropy = state of the distribution; NLL = -log p(token), the base-model
+    likelihood that the likelihood rung of the detector hierarchy reads."""
     h = attach_residual_write(model, spec) if spec is not None else None
     with torch.no_grad():
         logits = model(ids, use_cache=False).logits[0].float()   # [T, vocab]
@@ -41,13 +41,13 @@ def _ent_nll_over_gen(model, ids: torch.Tensor, P: int,
 
 def add_null_ratios(rows: list[dict], null_prefixes: tuple,
                     keys=("mean_entropy_steered", "entropy_rise", "base_model_nll")) -> None:
-    """Attach matched-null (÷-Rc) columns with the 14m item-4 ZERO-DENOMINATOR GUARD.
+    """Attach matched-null (÷-Rc) columns with a ZERO-DENOMINATOR GUARD.
 
     A ratio to a signed near-zero baseline (e.g. entropy_rise, whose nulls hover at ~0) is
-    uninformative and explodes (the legacy -29.889 column). Guard: suppress `_over_Rc`
+    uninformative and explodes (an unguarded entropy_rise ratio reads like -29.9). Guard: suppress `_over_Rc`
     (-> None) when |null_mean| is within the null's own SD of zero; ALWAYS emit the band
     readout `_vs_Rc_band` (null min/max/mean/sd + z + outside-band flag), which is the
-    correct V7-specificity statistic for a difference-from-zero quantity. Same function
+    correct specificity statistic for a difference-from-zero quantity. Same function
     used by the live replay and the GPU-free --reaggregate path (one source of truth)."""
     for r in rows:
         if r.get("is_null"):
@@ -83,10 +83,11 @@ def main() -> None:
     ap.add_argument("--cells", nargs="+", default=None, help="cell dir names under c3-run-dir")
     ap.add_argument("--null-prefixes", default="RC",
                     help="comma-separated vector-name prefixes (upper) treated as matched-norm "
-                         "nulls for the ÷-null ratio; default RC (C3). 14j leg-2 on vmb_b7_3b: RBAND.")
+                         "nulls for the ÷-null ratio; default RC. Banks whose nulls are named RBAND* "
+                         "(e.g. vmb_b7_3b) pass RBAND.")
     ap.add_argument("--reaggregate-from", type=Path, default=None,
                     help="GPU-FREE: re-derive the ÷-Rc columns from an existing out-json's raw rows "
-                         "with the zero-denom guard (14m item-4 fix; corrected artifact alongside).")
+                         "with the zero-denominator guard, writing the corrected artifact to --out-json.")
     ap.add_argument("--out-json", type=Path, required=True)
     args = ap.parse_args()
     args.out_json.parent.mkdir(parents=True, exist_ok=True)

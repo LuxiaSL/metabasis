@@ -5,7 +5,7 @@ and literally cannot render a source label, because a `BlindDeck` does not
 carry one. The leak selftest greps the rendered bytes for every column,
 model, side, dose and axis token in the population and requires zero hits.
 
-Ergonomics (brief requirement 3 — "the point"):
+Ergonomics — the judge's throughput is the point of the tool:
 
     1 / ←      pick Text 1              n     note on this pair
     2 / →      pick Text 2              s     session-notes pane

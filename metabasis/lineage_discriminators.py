@@ -1,9 +1,9 @@
 """Checkpoint-identity discriminators, valued on BOTH sides, and the check that
-they actually separate — rake M17(a) as code.
+they actually separate, as code rather than as a checklist.
 
-WHY THIS EXISTS. Rake M9 says checkpoint identity is judged by metadata, never
-by a directory name. Rake M17 says the metadata SET is per-lineage and must be
-SHOWN to work before it is trusted: on the Mixtral lineage the base and instruct
+WHY THIS EXISTS. Checkpoint identity is judged by metadata, never by a
+directory name, because a directory can hold anything. And the metadata SET is
+per-lineage and must be SHOWN to work before it is trusted: on the Mixtral lineage the base and instruct
 repos ship a byte-identical `config.json` AND a byte-identical
 `generation_config.json`, so the reflexive Llama/Qwen recipe passes silently on
 the wrong checkpoint; on the DeepSeek-V3 lineage the ENTIRE metadata surface
@@ -19,7 +19,7 @@ every field a roster node RELIES on is one that demonstrably separates, and
 exists yet, so the gap is a listed row rather than an unexamined assumption.
 
 Everything here is OFFLINE: the values are digests already recorded in
-`metabasis.roster` node notes and in the desk's verification reports. Nothing
+`metabasis.roster` node notes and in the checkpoint verification reports. Nothing
 fetches, nothing loads weights, nothing needs a checkpoint on disk. That is the
 point — the demo has to be re-runnable long after the weights move.
 
@@ -28,7 +28,7 @@ the verification reports quote them). A pair is compared over the COMMON prefix:
 differing there PROVES separation; agreeing there with unequal recorded lengths
 proves nothing and is reported as INCONCLUSIVE rather than counted as a pass.
 
-Run (repo root, PYTHONPATH=.):
+Run (repo root):
   python -m metabasis.lineage_discriminators
 """
 from __future__ import annotations
@@ -128,7 +128,7 @@ class LineageIdentity(BaseModel):
 
 # ────────────────────────────────────────────────────────────────────────────
 # The registry. Every value below is a digest already on record in the roster
-# node notes / the desk's verification reports; nothing here was re-derived.
+# node notes / the checkpoint verification reports; nothing here was re-derived.
 # ────────────────────────────────────────────────────────────────────────────
 LINEAGES: tuple[LineageIdentity, ...] = (
     LineageIdentity(
@@ -298,9 +298,9 @@ def separation_problems(lineages: tuple[LineageIdentity, ...] = LINEAGES
                         ) -> list[str]:
     """Every recorded discriminator that does NOT demonstrably separate.
 
-    This is rake M17(a) mechanized: "before trusting any identity check, fetch
-    the confusable siblings' metadata and show the chosen discriminator actually
-    separates them." An empty list means every claim in the registry is backed
+    The rule this mechanizes: before trusting any identity check, fetch the
+    confusable siblings' metadata and show the chosen discriminator actually
+    separates them. An empty list means every claim in the registry is backed
     by two recorded values that differ.
     """
     problems: list[str] = []
@@ -332,7 +332,7 @@ def unregistered_lineages(lineages: tuple[LineageIdentity, ...] = LINEAGES
 
     Absence is a RESULT, not a failure: several roster nodes have no confusable
     sibling worth the name, and for others (the 405B) the sibling's metadata was
-    never recorded on our side. Either way it belongs on a list rather than in
+    never recorded. Either way it belongs on a list rather than in
     nobody's head.
     """
     covered = {entry.model_key for entry in lineages}
@@ -362,8 +362,8 @@ def table(lineages: tuple[LineageIdentity, ...] = LINEAGES) -> str:
 def _comparator_selftest() -> list[str]:
     """Prove the comparator can FAIL, so a green run is not a rubber stamp.
 
-    Rake M19(c) in miniature: a check whose failing branch is never exercised
-    proves only that a process exited 0. Every separation verdict is driven here
+    A check whose failing branch is never exercised proves only that a process
+    exited 0. Every separation verdict is driven here
     on synthetic values, including the case the registry must never contain.
     """
     failures: list[str] = []
