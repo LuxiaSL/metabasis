@@ -1,78 +1,81 @@
 """CPU staging for the behavioral column — transported objects, bands, cells, stamps.
 
-`BRIEF-behavioral-phase-2026-07-29.md` (sha `475bc2a8…`) §2 names three modules; this
-is the first of them: "CPU staging: transported objects, random bands, cell specs,
-stamps. (Successor to `build_injection_banks.py` / `build_reverse_banks.py`, which are
-the templates of record for construction and stamping.)" The engine
-(`run_behavioral_cells.py`) consumes what this module emits; the scorer
-(`score_behavioral_column.py`) consumes what the engine produces.
+The behavioral phase has three modules, and this is the first of them: CPU staging
+of transported objects, random bands, cell specs and stamps. It succeeds
+`build_injection_banks.py` / `build_reverse_banks.py`, which are the templates of
+record for construction and stamping. The engine (`run_behavioral_cells.py`)
+consumes what this module emits; the behavioral-column scorer consumes what the
+engine produces. The phase's governing document is pinned by
+`run_behavioral_cells.BRIEF_SHA256` and quoted into every stamp.
 
 WHAT THIS MODULE IS, AND WHAT IT DELIBERATELY IS NOT
 
   * It is the CPU half: it resolves artifacts FROM DISK, verifies their shas and their
     corpus vintage, constructs the transported objects and the random bands, plans the
-    51-cell column, and writes one `cells.json` + one bank stamp + one manifest.
+    51-cell column, and writes one `<bank>/cells.json` + one bank stamp + one manifest.
   * It fires nothing, loads no weights, and imports no deep-learning stack. Every
     number it writes is either a sha, a dose fraction, or a vector coordinate.
-  * **It never self-scores** (C§8) and everything it stamps is `UNSTAMPED (C§8)`.
+  * **It never self-scores**, and everything it stamps carries the UNSTAMPED grade line.
 
 BASIS-AGNOSTIC BY CONSTRUCTION — the standing constraint on this build. The corpus /
-basis identity is an open Luxia ruling (v2.1 today, v3 upcoming), so **no corpus sha,
+basis identity is an open decision (v2.1 or v3), so **no corpus sha,
 no vector path, no fit path and no state path is hardcoded here**. Everything arrives
 through a `BankSpec` (a JSON file), and `corpus_sha_of_record` is a SPEC FIELD whose
 only default is the campaign's current constant, overridable per build and per CLI
 invocation. Re-pointing this module at another basis is editing a spec, never editing
-this file. The one thing that is frozen is the SHAPE of the column (§4.1 + §5.1's cell
-table, the signed ladder, n/cell) — that is the brief, not the basis.
+this file. The one thing that is frozen is the SHAPE of the column (the calibration +
+transported cell table, the signed ladder, n/cell) — that is the design, not the basis.
 
-THE AMENDED LADDER, STAGING SIDE (re-freeze #2 item 4, 2026-08-09). The signed ladder
-above is the DEFAULT, not the only admissible one: a node whose response window was
-measured and RATIFIED may be staged on an amended ladder, and the mechanism is the
-engine's, imported whole. Two keys, exactly the engine's pair: `--ladder-spec PATH`
-(the CONTENT — the desk's ratified document, read by the ENGINE's `load_ladder_spec`
+THE AMENDED LADDER, STAGING SIDE. The signed ladder above is the DEFAULT, not the only
+admissible one: a node whose response window was measured and APPROVED may be staged on
+an amended ladder, and the mechanism is the engine's, imported whole. Two keys, exactly
+the engine's pair: `--ladder-spec PATH` (the CONTENT — the approved ladder document,
+read by the ENGINE's `load_ladder_spec`
 and validated to name THIS column's node and site) and `--amended-ladder` (the
 AUTHORIZATION — this operator, this invocation, meant it). Either alone is refused by
-name; WITHOUT BOTH this module is byte-for-byte what it was, down to the staged JSON.
+name; WITHOUT BOTH this module stages the frozen ladder byte-for-byte, down to the
+staged JSON.
 The amendment is WHOLE-COLUMN — every lever, every band, the Σ-besides and the naive
-null all move onto the ratified ladder, the α=0 baseline is unchanged — and the planner
+null all move onto the approved ladder, the α=0 baseline is unchanged — and the planner
 hands its finished column to the engine's own `assert_amended_ladder_column` before
 returning it, so a MIXED column cannot be staged at all rather than being caught later.
 No ladder is written here: this module holds no dose constant of its own and never will
-(§2.5 as amended: no ladder without a ratified document).
+(no ladder without an approved document).
 
-THE BANDS THAT DO NOT EXIST YET. The census (`--census`) is the first-class product of
-this module precisely because the v2.1 random bands (`Rband*` native, `gRband*`
-transported) have never been built for any node: it reports, per required artifact,
+THE BANDS THAT MAY NOT EXIST. The census (`--census`) is the first-class product of
+this module precisely because the random bands (`Rband*` native, `gRband*`
+transported) are not banked for every node: it reports, per required artifact,
 present/absent + sha + how many of the 51 cells its absence kills, and it NEVER raises
 on absence — "which objects are owed" is the answer a preflight exists to produce
-(§4.3's from-disk re-derivation, and the certification HALT's census). `--build`
+(readiness is re-derived from disk, never trusted from a snapshot). `--build`
 refuses on a non-READY census rather than improvising. A band that must be constructed
 rather than consumed has a NAMED deterministic recipe (`RandomBandRecipe`,
-sha256-seeded per member, M25-safe) that is only ever run when a spec asks for it in
+sha256-seeded per member, never `hash()` or an unseeded RNG) that is only ever run
+when a spec asks for it in
 writing.
 
 CPU self-test (no weights, no GPU, no data tree, no torch):
 
     python -m metabasis.scripts.build_behavioral_banks --selftest
 
-RAKE M44 — THE CONFIGURATION MATRIX IS THE MERGE BAR. Every reported count names the
-configuration it was measured in (cwd, data-tree presence, venv). This module has no
-torch dependency at all — by design, since §10's verification recipes are desk acts and
-the desk's own repo `.venv` carries numpy/pydantic/scipy and nothing else — and its
-selftest is data-independent (temp dirs and synthetic artifacts throughout, never a
-cwd-relative banked path, the dcbe7d7 pattern). It therefore expects the SAME count in
+NAMED CONFIGURATIONS — THE CONFIGURATION MATRIX IS THE MERGE BAR. Every reported count
+names the configuration it was measured in (cwd, data-tree presence, venv). This module
+has no torch dependency at all — by design, since its verification recipes run in a
+CPU-only venv that carries numpy/pydantic/scipy and nothing else — and its selftest is
+data-independent (temp dirs and synthetic artifacts throughout, never a cwd-relative
+banked path). It therefore expects the SAME count in
 all four cells of {torch, no torch} × {data tree, no data tree}, and a named skip
 appears only if the live registries cannot be imported at all.
 
-RAKE M45 — this module's selftest raises rather than `sys.exit()`s on an internal
+RAISE, NEVER EXIT — this module's selftest raises rather than `sys.exit()`s on an internal
 refusal, and `main` returns an int, so an all-module sweep records a result instead of
 dying at this file.
 
 Typical use (repo root; the spec lives beside the bank it builds, off-repo):
 
-    python -m metabasis.scripts.build_behavioral_banks --example-spec > spec.json
-    python -m metabasis.scripts.build_behavioral_banks --spec spec.json --census
-    python -m metabasis.scripts.build_behavioral_banks --spec spec.json --build
+    python -m metabasis.scripts.build_behavioral_banks --example-spec > <spec>.json
+    python -m metabasis.scripts.build_behavioral_banks --spec <spec>.json --census
+    python -m metabasis.scripts.build_behavioral_banks --spec <spec>.json --build
 """
 from __future__ import annotations
 
@@ -112,27 +115,27 @@ logger = logging.getLogger("build_behavioral_banks")
 #: recognize rather than guessing at a field, so this string is load-bearing.
 CELLS_SCHEMA_VERSION = "behavioral-cells/1"
 
-#: §4.1 + §5.1's cell table, as arithmetic rather than prose. A planned full column
-#: must equal this or the plan is short (§9 item 10 / M23: one short is a rake).
+#: The column's cell table (calibration half + transported half), as arithmetic
+#: rather than prose. A planned full column must equal this or the plan is short, and
+#: a count one short is a defect, never a rounding.
 N_BAND_MEMBERS = 3
 N_CALIBRATION_SIGNAL_CELLS = len(DOSE_LADDER)                    # 6
 N_CALIBRATION_BAND_CELLS = N_BAND_MEMBERS * len(DOSE_LADDER)     # 18
 N_BASELINE_CELLS = 1
 N_TRANSPORTED_SIGNAL_CELLS = len(DOSE_LADDER)                    # 6
 N_TRANSPORTED_BAND_CELLS = N_BAND_MEMBERS * len(DOSE_LADDER)     # 18
-N_NAIVE_CELLS = len(SCORING_DOSES)                               # 2 (ruling 5)
+N_NAIVE_CELLS = len(SCORING_DOSES)                               # 2 (naive null)
 N_FULL_COLUMN_CELLS = (N_BASELINE_CELLS + N_CALIBRATION_SIGNAL_CELLS
                        + N_CALIBRATION_BAND_CELLS + N_TRANSPORTED_SIGNAL_CELLS
                        + N_TRANSPORTED_BAND_CELLS + N_NAIVE_CELLS)          # 51
 
-#: **B4 (Luxia, 2026-08-04): 6 Σ-beside cells per DESIGNATED row.** The arithmetic is
-#: derived from the pre-statement's own pairing convention rather than asserted:
-#: §4.1/§5.1 pair every band MEMBER with every dose the signal it controls rides, which
-#: is why the isotropic band is `N_BAND_MEMBERS × len(DOSE_LADDER) == 18`. The Σ band is
-#: a BESIDE quoted at the SCORING doses only — the ±.3 pair that §4.2(b) and §5.5 read
-#: and the same two doses ruling 5's naive null fires at — so the same pairing
-#: convention over `SCORING_DOSES` gives `3 × 2 == 6`. The 18-cell alternative (the full
-#: signed ladder) was the other option filed to Luxia at staging; she ruled 6.
+#: **6 Σ-beside cells per DESIGNATED row.** The arithmetic is derived from the
+#: pre-statement's own pairing convention rather than asserted: the cell table pairs
+#: every band MEMBER with every dose the signal it controls rides, which is why the
+#: isotropic band is `N_BAND_MEMBERS × len(DOSE_LADDER) == 18`. The Σ band is a BESIDE
+#: quoted at the SCORING doses only — the ±.3 pair the gate reads and the same two doses
+#: the naive null fires at — so the same pairing convention over `SCORING_DOSES` gives
+#: `3 × 2 == 6`. The 18-cell alternative (the full signed ladder) is not taken.
 N_SIGMA_BESIDE_CELLS = N_BAND_MEMBERS * len(SCORING_DOSES)       # 6
 #: The doses a Σ-beside cell is staged at, in ladder order (a subset of DOSE_LADDER, so
 #: `CellSpec`'s frozen-ladder validator accepts every one of them). The FROZEN default;
@@ -141,12 +144,12 @@ N_SIGMA_BESIDE_CELLS = N_BAND_MEMBERS * len(SCORING_DOSES)       # 6
 SIGMA_BESIDE_DOSES: tuple[float, ...] = tuple(
     d for d in DOSE_LADDER if d in SCORING_DOSES)
 
-#: THE AMENDED LADDER's staging-side reading of "the SCORING doses" — an ENACTOR
-#: READING, recorded the way `AMENDED_LADDER_SIGNAL_ROLE_READING` was so the desk can
-#: rule differently without hunting for the assumption. DESK-OWED.
+#: THE AMENDED LADDER's staging-side reading of "the SCORING doses" — a READING, not a
+#: frozen rule, recorded the way `AMENDED_LADDER_SIGNAL_ROLE_READING` is so a reviewer
+#: can overrule it without hunting for the assumption.
 #:
 #: Two of this module's cell families are quoted at the SCORING doses rather than across
-#: the whole ladder: ruling 5's naive null (±0.3, ~4% of a pair's budget) and B4's
+#: the whole ladder: the naive null (±0.3, ~4% of a pair's budget) and the
 #: Σ-beside (3 members × the same two doses). Both derive from `SCORING_DOSES`, which is
 #: the FROZEN ladder's own extreme pair — so on a column re-calibrated to a narrower
 #: window there is no such cell to stage. Read literally, staging an amended column
@@ -157,14 +160,14 @@ SIGMA_BESIDE_DOSES: tuple[float, ...] = tuple(
 #: which is not a re-calibration mechanism.
 #:
 #: So "the scoring doses" are read on THE LADDER IN FORCE, as its two EXTREME rungs —
-#: the same generalization the ratified spec makes for §4.2(b) in its own
+#: the same generalization the approved ladder spec makes for the gate in its own
 #: `gate_reading_rule` ("both |0.3|" reads "both extreme doses"), and the same one the
-#: engine already makes for §2.7's signal role. The ARITY is preserved exactly (2 doses,
+#: engine already makes for the signal role. The ARITY is preserved exactly (2 doses,
 #: so `N_NAIVE_CELLS` and `N_SIGMA_BESIDE_CELLS` are the numbers they were), and on the
-#: frozen ladder the pair IS `SCORING_DOSES`, so every column staged before this ruling
-#: is staged byte-identically. The named alternative — drop the naive and Σ halves from
-#: an amended column — was NOT taken: it changes the column's SHAPE (§4.1/§5.1's table)
-#: to accommodate a dose reading, and the ratified document says the amendment applies
+#: frozen ladder the pair IS `SCORING_DOSES`, so every frozen-ladder column is staged
+#: byte-identically. The named alternative — drop the naive and Σ halves from an
+#: amended column — is NOT taken: it changes the column's SHAPE (the cell table) to
+#: accommodate a dose reading, and the approved document says the amendment applies
 #: to "the whole science column at this (node_key, site)".
 AMENDED_LADDER_SCORING_DOSE_READING = (
     "enactor reading (re-freeze #2 item 4, 2026-08-09), DESK-OWED: on a column staged "
@@ -176,7 +179,7 @@ AMENDED_LADDER_SCORING_DOSE_READING = (
     "pair IS ±0.3, so nothing about it moves. The amendment is WHOLE-COLUMN: no science "
     "cell is left on the frozen ladder, because a mixed column is refused.")
 
-#: Ruling 5: the behavioral naive-transplant null fires at ±0.3 ONLY (~4% of a pair's
+#: The behavioral naive-transplant null fires at ±0.3 ONLY (~4% of a pair's
 #: budget), and the object injected is the coordinate-identified RAW source vector —
 #: no map. Named here so the construction is a constant, not a habit.
 NAIVE_KEY_PREFIX = "naive"
@@ -185,10 +188,10 @@ NAIVE_CONSTRUCTION = (
     "map), unit-normalized; ruling 5's behavioral null asks whether the two spaces "
     "already share a frame, in the same currency as the claim")
 
-#: §2.5/§5.1: the staged document carries dose FRACTIONS. α of record is resolved
-#: IN-JOB from the measured per-token median residual norm, so any α this module writes
-#: is provisional and labeled as such — rake M21b's silent-fallback finding says the
-#: resolution must be explicit and never inherited.
+#: The staged document carries dose FRACTIONS. α of record is resolved IN-JOB from
+#: the measured per-token median residual norm, so any α this module writes is
+#: provisional and labeled as such — a silently inherited α is a fallback nobody chose,
+#: so the resolution must be explicit.
 PROVISIONAL_ALPHA_NOTE = (
     "PROVISIONAL ONLY. α of record = frac × the PER-TOKEN median residual norm MEASURED "
     "IN-JOB at the site (§2.5); the engine re-resolves every α after its in-job norm "
@@ -200,16 +203,13 @@ PROVISIONAL_ALPHA_NOTE = (
 #: Bands are banked UNIT (the write hook re-normalizes at attach), so "matched-norm" is
 #: realized at attach time by the SAME α the signal cell uses — the construction only
 #: has to supply an orientation, and it supplies it from a digest so it is reproducible
-#: from the recipe string alone (M25: never `hash()`, never an unseeded RNG).
+#: from the recipe string alone (never `hash()`, never an unseeded RNG).
 #:
-#: RULED 2026-08-04 (session 12; `PRESTATEMENT-behavioral-harness-ceremony-2026-08-04.md`
-#: §2, sha `386b500a…`) — the recipe of record is ISOTROPIC and its seed material is
-#: this template VERBATIM. Before the ruling this module carried a PROPOSAL template
-#: (`{basis_sha}|{owner}|L{site}|{family}|member{index:02d}`, family hardcoded to the
-#: literal "band"), which is why `--construct-bands` refused: there was no recipe of
-#: record to build against. The refusal now lifts for EXACTLY this recipe string and
-#: still refuses everything else, so a band built years from now is re-derivable from
-#: the stamp alone and a band built under any other recipe cannot exist.
+#: The recipe of record is ISOTROPIC and its seed material is this template VERBATIM,
+#: as the behavioral-harness pre-statement fixes it. `--construct-bands` builds EXACTLY
+#: this recipe string and refuses everything else, so a band built years from now is
+#: re-derivable from the stamp alone and a band built under any other recipe cannot
+#: exist.
 BAND_RECIPE_OF_RECORD = "isotropic-unit-gaussian/prestatement-2026-08-04-§2"
 RANDOM_BAND_SEED_TEMPLATE = (
     "{corpus_sha}|{node_key}|{arm}|L{site}|{band_kind}|{vector_key}|member{m:02d}")
@@ -221,7 +221,7 @@ RANDOM_BAND_CONSTRUCTION = (
     "re-normalizes at attach, so matched-norm is realized by the cell's own α and only "
     "ORIENTATION is load-bearing (banked convention, build_injection_banks.py stamp)")
 
-#: §2's Σ-BESIDE, ruled on the DESIGNATED CELLS ONLY (open word O-2). Members are
+#: The pre-statement's Σ-BESIDE, on the DESIGNATED CELLS ONLY. Members are
 #: Σ^{1/2}g renormalized to unit — randoms that "look like" typical residual
 #: directions, a strictly harder null than isotropic. **LABELED BESIDE, never the null
 #: of record, never inside any gate.** `band_kind` is `SigmaBand` so its seed material
@@ -237,7 +237,7 @@ SIGMA_BAND_CONSTRUCTION = (
     "banked ridge is applied and named rather than dropped. BESIDE ONLY — never the "
     "null of record, never an input to any gate (pre-statement §2, ruling O-2)")
 
-#: The two cells Luxia designated for the Σ-beside (O-2), as DATA. A designation is
+#: The two cells designated for the Σ-beside, as DATA. A designation is
 #: (node, arm, site, band family) — the tuple a cell is identified by — so the guard is
 #: mechanical and a third Σ cell cannot be added by prose. `vector_key` is deliberately
 #: NOT part of the designation: a cell's band travels with the cell, not with the key.
@@ -251,7 +251,7 @@ SIGMA_BESIDE_DESIGNATIONS: dict[str, tuple[str, str, int, str]] = {
 
 # ---------------------------------------------------------------- error taxonomy
 class BankStagingError(BehavioralHarnessError):
-    """Base class for staging-side refusals. Every one is a §9 HALT or a §5.4 law."""
+    """Base class for staging-side refusals. Every one is a named HALT or the lesion-recipe law."""
 
 
 class SpecError(BankStagingError):
@@ -268,7 +268,7 @@ class CensusNotReady(BankStagingError):
 
 
 class ConstructionRefused(BankStagingError):
-    """§5.4's lesion-recipe law, or a construction this module will not perform.
+    """The lesion-recipe law, or a construction this module will not perform.
 
     "The staging module asserts that no transported object's construction contains a
     subtraction of a target-side entropy-gradient component, and refuses to build one."
@@ -283,7 +283,7 @@ class DimensionMismatch(BankStagingError):
     """A vector does not fit the space it is being carried into or out of."""
 
 
-# --- HALT C (Luxia's ruling 1, 2026-08-05): the site guard's robustness-site role ---
+# --- HALT C: the site guard's robustness-site role ---------------------------------
 class SiteRoleRefused(SiteNotOfRecord):
     """A DECLARED site role does not license the site being staged.
 
@@ -296,22 +296,22 @@ class SiteRoleRefused(SiteNotOfRecord):
 class RobustnessSiteNotRegistered(SiteRoleRefused):
     """`site_role="robustness_site"` was declared for a site no registry carries.
 
-    §4.2's remedy (i) re-calibrates at the node's REGISTERED robustness site — a
+    The robustness remedy re-calibrates at the node's REGISTERED robustness site — a
     registered site, never a new one. A spec that could nominate any site by
     writing a role string would be site-fishing with an extra field.
     """
 
 
 class RobustnessSiteOffGrid(SiteRoleRefused):
-    """The declared robustness site is not on the node's fixed fit grid (`SITES`).
+    """The declared robustness site is missing from the node's fixed fit grid (`SITES`).
 
     Separate from `RobustnessSiteNotRegistered` because the remedies differ: this
-    one is a registry disagreement (`ROBUSTNESS_SITES` vs `SITES`) and is a desk
-    HALT, not a spec typo.
+    one is a registry disagreement (`ROBUSTNESS_SITES` vs `SITES`) and is a
+    registry HALT to resolve, not a spec typo.
     """
 
 
-# --- HALT D (Luxia's ruling 2, 2026-08-05): the vector-class contract -------------
+# --- HALT D: the vector-class contract --------------------------------------------
 class VectorClassContractError(SpecError):
     """The vector-class declaration and the object it describes disagree.
 
@@ -327,8 +327,8 @@ class VectorClassContractError(SpecError):
 class FDGateWaiverRefused(VectorClassContractError):
     """`fd_gate_not_applicable` was claimed by an object that must still be gated.
 
-    The FD gate is the entropy-gradient object's OWN acceptance test (§9 item 3:
-    present, FD-gated and FD-PASS at the basis of record). A CAA/PCA class object
+    The FD gate is the entropy-gradient object's OWN acceptance test (the vector
+    must be present, FD-gated and FD-PASS at the basis of record). A CAA/PCA class object
     has no FD-gate analogue — its builder's stamp says so in as many words — but
     an EGV that waived the gate would be an ungated lever wearing a new field.
     """
@@ -343,16 +343,17 @@ class VectorBasisConflated(VectorClassContractError):
 
 
 # ---------------------------------------------------------------- spec types
-#: HALT C: the two site ROLES §4.2 distinguishes. `site_of_record` is the ruled site
-#: a column normally fires at; `robustness_site` is remedy (i)'s REGISTERED second
+#: HALT C: the two site ROLES the design distinguishes. `site_of_record` is the
+#: registered site a column normally fires at; `robustness_site` is the robustness
+#: remedy's REGISTERED second
 #: site (gemma3-27b L41, llama-3.1-70b-instruct L43 — the only two in the campaign).
 #: A role is DECLARED in the spec or it does not exist: `None` means "no role was
 #: declared", which is the default and refuses exactly as this module always did.
 SiteRole = Literal["site_of_record", "robustness_site"]
 
 #: HALT D: the vector CLASS a reference declares. `entropy_gradient` is the campaign's
-#: object of record and the default, so a spec written before this ruling means
-#: exactly what it meant before. The other two are the class-pilot's constructions
+#: object of record and the default, so a spec that names no class means the
+#: entropy-gradient object. The other two are the class-pilot's constructions
 #: (`build_contrast_vectors`: text-contrast CAA of record + the repeng-PCA method row).
 VectorClass = Literal["entropy_gradient", "caa", "repeng_pca"]
 #: The one class whose acceptance test IS the FD gate. Everything keyed off this name
@@ -360,7 +361,7 @@ VectorClass = Literal["entropy_gradient", "caa", "repeng_pca"]
 EGV_VECTOR_CLASS: str = "entropy_gradient"
 CLASS_VECTOR_CLASSES: tuple[str, ...] = ("caa", "repeng_pca")
 
-#: HALT E (2026-08-05, the standing HALT-D ruling at its fourth site). The KEY the
+#: HALT E (the HALT-D contract applied to object keys). The KEY the
 #: campaign's entropy-gradient objects are banked under, before their `_L<site>`
 #: suffix. It spells the same word as `EGV_VECTOR_CLASS` because the object of record
 #: and its class share a name — kept as its own constant so a reader is never asked
@@ -376,7 +377,7 @@ SITE_SUFFIX_RE = re.compile(r"_L\d+$")
 #: HALT E: how a vector CLASS reads inside a provenance sentence. The entropy-gradient
 #: phrasing is the exact wording every banked transported cell already carries, so an
 #: EGV column's provenance does not move by one byte; a class object gets its own name
-#: instead of the campaign's, which is the whole point of the ruling.
+#: instead of the campaign's, which is the whole point.
 VECTOR_CLASS_PHRASE: dict[str, str] = {
     "entropy_gradient": "entropy-gradient",
     "caa": "CAA",
@@ -389,7 +390,7 @@ def vector_class_phrase(vector_class: str) -> str:
 
     A class added to `VectorClass` later and not to the table above still reads as
     ITSELF (hyphenated), never as "entropy-gradient" — a missing table row must not
-    be able to reintroduce the false provenance this ruling closes.
+    be able to reintroduce the false provenance this table closes.
     """
     return VECTOR_CLASS_PHRASE.get(vector_class, vector_class.replace("_", "-"))
 
@@ -402,11 +403,10 @@ VectorBasisKind = Literal["corpus-manifest", "contrast-set"]
 class VectorBasis(BaseModel):
     """WHICH basis an object stands on, with the KIND named beside the sha.
 
-    HALT D's fix in one type. Before this, a stamp carried a bare
-    `corpus_manifest_sha256` for everything, so a CAA object could only be stamped by
-    writing the corpus sha into a field that means "the basis this object was built
-    from" — false provenance — or by leaving a hole. A basis is now a (kind, sha256)
-    pair, and the kind is a closed vocabulary, so the GENERATION basis and the VECTOR
+    HALT D's fix in one type. With a bare `corpus_manifest_sha256` for everything, a
+    CAA object could only be stamped by writing the corpus sha into a field that means
+    "the basis this object was built from" — false provenance — or by leaving a hole.
+    A basis is a (kind, sha256) pair, and the kind is a closed vocabulary, so the GENERATION basis and the VECTOR
     basis can sit in one stamp without either being readable as the other.
     """
 
@@ -414,16 +414,16 @@ class VectorBasis(BaseModel):
 
     kind: VectorBasisKind
     sha256: str = Field(min_length=64, max_length=64)
-    #: the pin/ruling this basis is of record under, quoted rather than implied — a
-    #: contrast set is admissible only because its sha is RULED in a pin file
+    #: the pin this basis is of record under, quoted rather than implied — a
+    #: contrast set is admissible only because its sha is pinned in a pin file
     #: (`build_contrast_vectors.assert_contrast_set_pinned`), and the stamp should
-    #: say which ruling, not just which bytes.
+    #: say which pin, not just which bytes.
     provenance: str = ""
 
     @field_validator("sha256")
     @classmethod
     def _is_hex(cls, v: str) -> str:
-        int(v, 16)              # raises ValueError on a non-hex digest (M40)
+        int(v, 16)              # raises ValueError on a non-hex digest
         return v
 
 
@@ -434,26 +434,25 @@ class VectorRef(BaseModel):
 
     key: str = Field(min_length=1, description="npz key inside `npz`")
     npz: Path
-    #: expected sha of the npz. Verified when present (M4); an absent expectation is
+    #: expected sha of the npz. Verified when present (a mismatch HALTs); an absent expectation is
     #: recorded as UNVERIFIED in the census rather than treated as agreement.
     sha256: Optional[str] = None
-    #: `*_fd_gate.json` and `*_stamps.json` beside the npz, per the banked convention.
+    #: `<stem>_fd_gate.json` and `<stem>_stamps.json` beside the npz, per the banked convention.
     fd_gate: Optional[Path] = None
     build_stamp: Optional[Path] = None
     provenance: str = ""
-    #: The BLAS thread count `sha256` above was banked at (Luxia ruling
-    #: 2026-08-01). None = the digest predates the ruling and its count is
-    #: UNRECORDED — a fact to be QUOTED when the file on disk disagrees, never
-    #: inferred, even though every deployed job script of that vintage exported
-    #: OMP_NUM_THREADS=1. This exists so a sha mismatch can name both sides:
+    #: The BLAS thread count `sha256` above was banked at. None = the digest was
+    #: banked without a thread record and its count is UNRECORDED — a fact to be
+    #: QUOTED when the file on disk disagrees, never inferred, even where the job
+    #: scripts of that vintage exported OMP_NUM_THREADS=1. This exists so a sha mismatch can name both sides:
     #: without it the census could only say what the file on disk was built at.
     expected_thread_count: Optional[int] = Field(
         default=None, ge=1,
-        description="thread count of record for `sha256`; None = pre-ruling")
+        description="thread count of record for `sha256`; None = unrecorded")
 
     #: HALT D. WHAT KIND OF OBJECT THIS IS. Defaulted to the campaign's object of
-    #: record, so every spec written before the 2026-08-05 ruling means exactly what
-    #: it meant before and its census/stamp bytes do not move.
+    #: record, so a spec that names no class means the entropy-gradient object and
+    #: its census/stamp bytes do not move.
     vector_class: VectorClass = EGV_VECTOR_CLASS  # type: ignore[assignment]
     #: HALT D. The FD gate DOES NOT APPLY to this object — admissible for a CLASS
     #: vector ONLY. `build_contrast_vectors`'s own stamp is the authority for the
@@ -494,7 +493,7 @@ class VectorRef(BaseModel):
             raise FDGateWaiverRefused(
                 f"{self.key}: vector_class={self.vector_class!r} claims "
                 "fd_gate_not_applicable. The FD gate is the entropy-gradient "
-                "object's OWN acceptance test (§9 item 3: present, FD-gated and "
+                "object's OWN acceptance test (present, FD-gated and "
                 "FD-PASS at the basis of record) — waiving it would bank an "
                 "UNGATED lever. The waiver is admissible for a class object "
                 f"({', '.join(CLASS_VECTOR_CLASSES)}) and for nothing else.")
@@ -511,7 +510,7 @@ class VectorRef(BaseModel):
                 "it was built from (build_contrast_vectors refuses to build from a "
                 "set whose sha256 is not RULED in a pin file); writing the corpus "
                 "sha instead would be false provenance, and writing nothing would "
-                "be a hole. Both are refused here (§9 item 2).")
+                "be a hole. Both are refused here.")
         if self.is_class_vector and self.vector_basis.kind != "contrast-set":
             raise VectorBasisConflated(
                 f"{self.key}: a class object's vector_basis.kind is "
@@ -530,19 +529,20 @@ class VectorRef(BaseModel):
 
 
 class RandomBandRecipe(BaseModel):
-    """The RULED isotropic band recipe (pre-statement §2) — the only one that builds.
+    """The isotropic band recipe of record (the behavioral-harness pre-statement's) —
+    the only one that builds.
 
-    The v2.1/v3 bands do not exist anywhere as banked files (the certification census
-    found zero rband files in the node tree; the v1 anamnesis `load_axes` banks were the
-    precedent and have no successor). This recipe is what a band IS built from, written
+    The v2.1/v3 bands are not banked as files (the certification census finds zero
+    rband files; the v1 anamnesis `load_axes` banks are the precedent and have no
+    successor). This recipe is what a band IS built from, written
     so the members are re-derivable from the recipe string alone — and `recipe_of_record`
     pins it to the ruled string, so a spec cannot smuggle in a different construction
     while still passing `--construct-bands`.
 
     Every field of the seed material is a field here, in the ruled order:
     `{corpus_sha}|{node_key}|{arm}|L{site}|{band_kind}|{vector_key}|member{m:02d}`.
-    `band_kind` phase-separates the native band from the transported one (§4.1's
-    `Rband*` vs `gRband*`), and `vector_key` phase-separates two bands that ride the
+    `band_kind` phase-separates the native band from the transported one (`Rband*`
+    vs `gRband*`), and `vector_key` phase-separates two bands that ride the
     same cell for different objects.
     """
 
@@ -565,7 +565,7 @@ class RandomBandRecipe(BaseModel):
     #: does not itself say. The seed material names the CELL (target node, target site,
     #: arm); the draw happens in the space the member starts in, which is the target's
     #: for `Rband` (a native control at the node's own site) and the SOURCE's for
-    #: `gRband`, because §5.1's transported band is "the source's randoms through the
+    #: `gRband`, because the transported band is "the source's randoms through the
     #: SAME map" — the control travels the same road as the signal or it is not a
     #: control for transport. Recorded explicitly so the two readings can never blur.
     draw_space_key: str = Field(min_length=1)
@@ -578,12 +578,12 @@ class RandomBandRecipe(BaseModel):
         if self.band_kind == "Rband" and self.draw_space_key != self.node_key:
             raise ValueError(
                 f"Rband draws in the node's OWN space: draw_space_key="
-                f"{self.draw_space_key!r} != node_key={self.node_key!r} (§4.1: the "
+                f"{self.draw_space_key!r} != node_key={self.node_key!r} (the "
                 "native band asks whether the SITE actuates)")
         if self.band_kind == "gRband" and self.draw_space_key == self.node_key:
             raise ValueError(
                 f"gRband draws in the SOURCE's space and is carried through the same "
-                f"map (§5.1); draw_space_key={self.draw_space_key!r} is the target "
+                f"map; draw_space_key={self.draw_space_key!r} is the target "
                 "itself, which would make the control a native band wearing a "
                 "transported name")
         return self
@@ -593,7 +593,7 @@ class RandomBandRecipe(BaseModel):
         if self.recipe_of_record != BAND_RECIPE_OF_RECORD:
             raise ValueError(
                 f"recipe_of_record={self.recipe_of_record!r} is not the ruled recipe "
-                f"{BAND_RECIPE_OF_RECORD!r} (pre-statement §2). This module builds ONE "
+                f"{BAND_RECIPE_OF_RECORD!r}. This module builds ONE "
                 "band recipe and refuses every other by name.")
         if self.construction != RANDOM_BAND_CONSTRUCTION:
             raise ValueError(
@@ -610,7 +610,7 @@ class RandomBandRecipe(BaseModel):
 
 
 class SigmaBandRecipe(BaseModel):
-    """§2's Σ-BESIDE — the stricter null, on the two DESIGNATED cells only (O-2).
+    """The Σ-BESIDE — the stricter null, on the two DESIGNATED cells only.
 
     Never the null of record and never an input to a gate: `build_sigma_band` refuses
     to build for any cell outside `SIGMA_BESIDE_DESIGNATIONS`, and every member it does
@@ -659,7 +659,7 @@ class SigmaBandRecipe(BaseModel):
         if self.recipe_of_record != SIGMA_BAND_RECIPE_OF_RECORD:
             raise ValueError(
                 f"recipe_of_record={self.recipe_of_record!r} is not the ruled Σ-beside "
-                f"recipe {SIGMA_BAND_RECIPE_OF_RECORD!r} (pre-statement §2 / O-2)")
+                f"recipe {SIGMA_BAND_RECIPE_OF_RECORD!r}")
         if self.construction != SIGMA_BAND_CONSTRUCTION:
             raise ValueError(
                 "Σ-beside construction text differs from the ruled construction")
@@ -676,7 +676,7 @@ class SigmaBandRecipe(BaseModel):
 class BandRef(BaseModel):
     """A random band: `Rband*` (native control) or `gRband*` (transported control).
 
-    §4.1 keeps the two distinct in name and in stamp: `Rband*` asks whether the SITE
+    The two stay distinct in name and in stamp: `Rband*` asks whether the SITE
     actuates, `gRband*` asks whether the TRANSPORT carries. Conflating them is the
     fastest way to make a null uninterpretable, so the family is a typed field and the
     key prefix is derived from it rather than typed twice.
@@ -690,7 +690,7 @@ class BandRef(BaseModel):
     n_members_required: int = N_BAND_MEMBERS
     #: present only when the spec authorizes CONSTRUCTING the band in writing.
     recipe: Optional[RandomBandRecipe] = None
-    #: the Σ-shaped BESIDE, on the two designated cells only (O-2). Never the null of
+    #: the Σ-shaped BESIDE, on the two designated cells only. Never the null of
     #: record; carried on the band it sits beside so the two are read together.
     sigma_beside: Optional[SigmaBandRecipe] = None
 
@@ -699,8 +699,8 @@ class BandRef(BaseModel):
         if self.members and len(self.members) != self.n_members_required:
             raise ValueError(
                 f"{self.family}: {len(self.members)} banked members, expected "
-                f"{self.n_members_required} (§4.1/§5.1's 3-member band; ruling 3 froze "
-                "the behavioral band at 3 transported members)")
+                f"{self.n_members_required} (the behavioral band is frozen at 3 "
+                "members)")
         if self.recipe is not None and self.recipe.n_members != self.n_members_required:
             raise ValueError(
                 f"{self.family}: recipe builds {self.recipe.n_members} members but the "
@@ -709,7 +709,7 @@ class BandRef(BaseModel):
             raise ValueError(
                 f"{self.family}: recipe's band_kind is {self.recipe.band_kind!r} — the "
                 "seed material would phase-separate the band from its own cell "
-                "(§4.1 keeps Rband* and gRband* distinct in name AND in seed)")
+                "(Rband* and gRband* stay distinct in name AND in seed)")
         if (self.sigma_beside is not None
                 and self.sigma_beside.beside_band_kind != self.family):
             raise ValueError(
@@ -728,18 +728,18 @@ class TransportMapRef(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     fit: Path
-    family: str = Field(min_length=1, description="e.g. proc_k128 (ruling 1)")
+    family: str = Field(min_length=1, description="e.g. proc_k128 (the family of record)")
     arm: Literal["native", "raw"]
     direction: Literal["fwd", "rev"] = "fwd"
     sha256: Optional[str] = None
-    #: the corpus vintage the MAP was fit at (§2.8 requires it on every stamp).
+    #: the corpus vintage the MAP was fit at (every stamp carries it).
     corpus_vintage: Optional[str] = None
 
 
 class ComposedMapRef(BaseModel):
     """A TWO-HOP composed map: source → hub → target, through two banked hub legs.
 
-    The composed-object behavioral leg (brief ruling 6 / pre-statement §4) carries the
+    The composed-object behavioral leg carries the
     SOURCE's object back to the hub through `hub_to_source` in REVERSE and out to the
     target through `hub_to_target` FORWARDS. That is exactly the arithmetic
     `read_composed_predictions.composed_exchange_rate` performs on the two banked hub
@@ -762,7 +762,7 @@ class ComposedMapRef(BaseModel):
     #: the hub→TARGET leg, ridden FORWARDS (hub space → target space).
     hub_to_target: TransportMapRef
     #: the pre-statement's ranking rule for the pair, recorded so the artifact and the
-    #: spec agree on WHY this pair is here (B2: the product of the two legs' âs).
+    #: spec agree on WHY this pair is here (the product of the two legs' âs).
     selection_rule: str = ""
     a_hat_hub_to_source: Optional[float] = None
     a_hat_hub_to_target: Optional[float] = None
@@ -777,7 +777,7 @@ class ComposedMapRef(BaseModel):
                 raise ValueError(
                     f"{name} is banked in the {leg.arm!r} arm but the composed map "
                     f"runs in {self.arm!r} — a behavioral cell inherits ONE arm from "
-                    "the map it rides (v3 prereg §3.2), so two legs in different arms "
+                    "the map it rides (the webtext-v3 arm rule), so two legs in different arms "
                     "are not composable")
             if leg.family != self.family:
                 raise ValueError(
@@ -807,17 +807,17 @@ class BankSpec(BaseModel):
     node_key: str = Field(min_length=1, description="the TARGET node")
     arm: Literal["native", "raw"]
     site: int = Field(ge=0, description="the target's site of record")
-    #: HALT C (Luxia's ruling, 2026-08-05). The ROLE `site` is being staged in.
-    #: `None` — the default and every pre-ruling spec — declares no role and is
-    #: refused exactly as this module always refused: any site ≠ SITE_OF_RECORD
-    #: HALTs. `"robustness_site"` is §4.2's frozen remedy (i) and admits ONLY the
+    #: HALT C. The ROLE `site` is being staged in.
+    #: `None` — the default, and every spec that names no role — declares no role and
+    #: is refused by the plain site guard: any site ≠ SITE_OF_RECORD HALTs.
+    #: `"robustness_site"` is the frozen robustness remedy and admits ONLY the
     #: node's REGISTERED robustness site (gemma3-27b L41, llama-3.1-70b L43), and
     #: only when that site is also on the fixed fit grid. The role is a WRITTEN
     #: declaration in the spec because that is what makes it not site-fishing:
     #: `actuation_calibration.assert_no_site_fishing` already implements exactly
     #: this admissibility, and the staging guard was the one layer that lacked it.
     site_role: Optional[SiteRole] = None
-    #: the SOURCE of the transported half (the hub, under ruling 6's slate).
+    #: the SOURCE of the transported half (the hub, under the composed-object slate).
     source_key: Optional[str] = None
     source_site: Optional[int] = None
     #: the pair string the naive-transplant gate is keyed by, e.g. "8b->qwen-7b".
@@ -825,18 +825,18 @@ class BankSpec(BaseModel):
 
     corpus_manifest: Optional[Path] = None
     #: the basis of record for THIS build. Defaults to the campaign's current corpus
-    #: constant and is overridable — the open v2.1/v3 ruling lives exactly here.
+    #: constant and is overridable — the open v2.1/v3 basis decision lives exactly here.
     corpus_sha_of_record: str = CORPUS_SHA_V21
     prompt_pool: Optional[Path] = None
 
-    #: §4's lever: the node's OWN native entropy-gradient vector at its own site.
+    #: The calibration lever: the node's OWN native entropy-gradient vector at its own site.
     native_vector: Optional[VectorRef] = None
     native_band: BandRef = BandRef(family="Rband")
-    #: §5's signal: the SOURCE's entropy-gradient vector, carried through the map.
+    #: The transported signal: the SOURCE's entropy-gradient vector, carried through the map.
     source_vector: Optional[VectorRef] = None
     source_band: BandRef = BandRef(family="gRband")
     transport_map: Optional[TransportMapRef] = None
-    #: the composed-object alternative to `transport_map` (brief ruling 6 / B2). Exactly
+    #: the composed-object alternative to `transport_map`. Exactly
     #: one of the two is set on a transported column: a direct pair fit OR a two-hop
     #: through the crowned hub, never both, because a cell rides ONE road.
     composed_map: Optional[ComposedMapRef] = None
@@ -851,7 +851,7 @@ class BankSpec(BaseModel):
     #: `SHAPE-REHEARSAL, NOT A READ`). Empty = an ordinary column.
     label: str = ""
     out_dir: Path = Path("staging/behavioral-banks")
-    #: banked norm conventions, recorded and passed through to the engine (§2.5). The
+    #: banked norm conventions, recorded and passed through to the engine. The
     #: engine MEASURES its own and records the delta rather than absorbing it.
     banked_per_token_median_resid_norm: Optional[float] = None
     banked_mean_state_median_resid_norm: Optional[float] = None
@@ -861,15 +861,15 @@ class BankSpec(BaseModel):
     def _halves_have_what_they_need(self) -> "BankSpec":
         if self.include_transported and self.source_key is None:
             raise ValueError(
-                "the transported half needs a `source_key` (§5.2's slate names the "
+                "the transported half needs a `source_key` (the slate names the "
                 "source; a transported object with no named source is unstampable)")
         if self.include_naive and not self.include_transported:
             raise ValueError(
-                "ruling 5's naive null is a control FOR the transported half; staging "
+                "the naive null is a control FOR the transported half; staging "
                 "it alone would bank a null with nothing to falsify")
         if self.n_per_cell > 0 and self.label == "" and self.n_per_cell != N_PER_CELL:
             raise ValueError(
-                f"n/cell is frozen at {N_PER_CELL} (§5.1/§11); a reduced n is a "
+                f"n/cell is frozen at {N_PER_CELL}; a reduced n is a "
                 "rehearsal and must carry a `label` saying so")
         if self.transport_map is not None and self.composed_map is not None:
             raise ValueError(
@@ -880,7 +880,7 @@ class BankSpec(BaseModel):
             sig = band.sigma_beside
             if sig is None:
                 continue
-            # The Σ-beside designates a CELL TUPLE (O-2). A spec that carried a recipe
+            # The Σ-beside designates a CELL TUPLE. A spec that carried a recipe
             # describing SOMEONE ELSE's cell would pass `assert_sigma_beside_designated`
             # (which reads the recipe, not the spec) while banking the beside into this
             # column, so the two are tied together here.
@@ -889,7 +889,7 @@ class BankSpec(BaseModel):
                 raise ValueError(
                     f"{half}: Σ-beside recipe describes "
                     f"({sig.node_key}, {sig.arm}, L{sig.site}) but this spec is "
-                    f"({self.node_key}, {self.arm}, L{self.site}) — O-2 designates "
+                    f"({self.node_key}, {self.arm}, L{self.site}) — the Σ-beside designates "
                     "CELLS, and a beside cannot be banked into a cell it was not "
                     "designated for")
             assert_sigma_beside_designated(sig)
@@ -904,11 +904,11 @@ class BankSpec(BaseModel):
     def source_object_key(self) -> str:
         """The SOURCE object's name, site suffix stripped — the transported stem.
 
-        HALT E (2026-08-05). The transported and naive keys were HARDCODED to
-        `entropy_gradient` at four sites, so a CAA column stamped CAA content under
-        an entropy-gradient name (false provenance — HALT D's own defect class), and
-        every axis of one node produced identical cell ids, collapsing four per-column
-        gate selections into one per-node. The name now comes from the object itself.
+        HALT E. Transported and naive keys HARDCODED to `entropy_gradient` would
+        stamp CAA content under an entropy-gradient name (false provenance — HALT D's
+        own defect class), and every axis of one node would produce identical cell
+        ids, collapsing four per-column gate selections into one per-node. The name
+        comes from the object itself.
 
         An EGV column's source key is `entropy_gradient_L<source site>`, whose stem is
         `entropy_gradient`, so every banked column keeps the byte-identical
@@ -918,7 +918,7 @@ class BankSpec(BaseModel):
 
         An absent `source_vector` (a plan written before its vector is banked; the
         build refuses without one) falls back to the campaign's object of record,
-        which is what every pre-ruling spec meant.
+        which is what a spec that names no class means.
         """
         if self.source_vector is None:
             return EGV_OBJECT_KEY
@@ -926,12 +926,12 @@ class BankSpec(BaseModel):
 
     @property
     def transported_key(self) -> str:
-        """§5's transported object key: `g` + the source object's own name."""
+        """The transported object key: `g` + the source object's own name."""
         return f"{self.transported_prefix}{self.source_object_key}"
 
     @property
     def naive_key(self) -> str:
-        """Ruling 5's naive-null key: `naive_` + the source object's own name.
+        """The naive-null key: `naive_` + the source object's own name.
 
         The null is the SAME object without the map, so it is named after the same
         object; a naive cell keyed `naive_entropy_gradient` beside a transported
@@ -969,7 +969,7 @@ CensusRole = Literal["corpus", "prompt_pool", "native_vector", "native_band",
 
 
 class ArtifactRow(BaseModel):
-    """One from-disk row of §4.3's re-derived preflight — never trusted, always read."""
+    """One from-disk row of the re-derived preflight — never trusted, always read."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -982,13 +982,12 @@ class ArtifactRow(BaseModel):
     sha_verified: Optional[bool] = None
     corpus_vintage: Optional[str] = None
     fd_gate_passed: Optional[bool] = None
-    #: how many of the planned cells this row's absence kills — the ledger's own
-    #: framing ("kills 42/51 cells"), computed rather than narrated.
+    #: how many of the planned cells this row's absence kills ("kills 42/51
+    #: cells"), computed rather than narrated.
     cells_at_risk: int = 0
     ready: bool = False
     blocking_reason: Optional[str] = None
-    #: Populated ONLY when the two sides' thread counts differ (Luxia ruling
-    #: 2026-08-01, scope 3). A byte difference a count mismatch explains is a
+    #: Populated ONLY when the two sides' thread counts differ. A byte difference a count mismatch explains is a
     #: CHARACTERIZED break; the same difference reported bare reads as
     #: corruption, and the two demand opposite responses. None on agreement,
     #: which is why it is a separate field rather than prose inside
@@ -1006,7 +1005,7 @@ class ArtifactRow(BaseModel):
 
 
 class BankCensus(BaseModel):
-    """The from-disk readiness table. Reports; does not raise (§4.3)."""
+    """The from-disk readiness table. Reports; does not raise."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -1056,7 +1055,7 @@ class StagedCell(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     spec: CellSpec
-    #: §2.5: provisional only. See PROVISIONAL_ALPHA_NOTE.
+    #: provisional only; the engine resolves α in-job. See PROVISIONAL_ALPHA_NOTE.
     provisional_alpha: Optional[float] = None
 
     @field_validator("spec", mode="before")
@@ -1084,8 +1083,8 @@ class StagedCell(BaseModel):
     build_stamp: Optional[dict] = None
     #: HALT D. The class of the object THIS cell rides, carried per cell because a
     #: cell rides exactly one vector — the same place `fd_gate`/`build_stamp` already
-    #: live. Defaulted to the object of record, so an EGV column's document means
-    #: exactly what it meant before the ruling.
+    #: live. Defaulted to the object of record, so an EGV column's document carries
+    #: no class it did not ask for.
     vector_class: VectorClass = EGV_VECTOR_CLASS  # type: ignore[assignment]
     #: HALT D. The VECTOR basis for a class cell (kind `contrast-set`), None for an
     #: EGV cell whose basis is the generation basis and is carried by the vintage
@@ -1099,7 +1098,7 @@ class StagedCell(BaseModel):
             raise VectorBasisMissing(
                 f"{self.spec.cell_id}: vector_class={self.vector_class!r} with no "
                 "`vector_basis` — a class cell's VECTOR basis is the ruled contrast "
-                "set and the engine will refuse to stamp it (§9 item 2).")
+                "set and the engine will refuse to stamp it.")
         if self.vector_class == EGV_VECTOR_CLASS and self.vector_basis is not None:
             raise VectorBasisConflated(
                 f"{self.spec.cell_id}: an entropy-gradient cell carries a "
@@ -1124,8 +1123,8 @@ class CellsDocument(BaseModel):
     site: int
     #: HALT C. The role the column's site was staged in, carried into the job so the
     #: engine's own re-derived cross-check asks the SAME question the staging module
-    #: answered (§4.3 forbids trusting a snapshot; it does not forbid carrying the
-    #: declaration). None = no role declared = the pre-ruling behaviour.
+    #: answered (readiness is never trusted from a snapshot, but a declaration may be
+    #: carried). None = no role declared = the plain site guard.
     site_role: Optional[SiteRole] = None
     source_key: Optional[str] = None
     pair: Optional[str] = None
@@ -1137,7 +1136,7 @@ class CellsDocument(BaseModel):
     n_per_cell: int = N_PER_CELL
     max_new_tokens: int = MAX_NEW_TOKENS
     label: str = ""
-    #: every link of the vintage chain the engine re-asserts (§9 item 2). A None is a
+    #: every link of the vintage chain the engine re-asserts. A None is a
     #: HOLE and is reported as one — never as agreement.
     vintage_chain: dict[str, Optional[str]] = Field(default_factory=dict)
     banked_norms: dict[str, Optional[float]] = Field(default_factory=dict)
@@ -1157,7 +1156,7 @@ class CellsDocument(BaseModel):
         if offsite:
             raise ValueError(
                 f"cells at site(s) {offsite} in a document for L{self.site} — one "
-                "document is one (node, arm, site) column (§2.1's one load per node)")
+                "document is one (node, arm, site) column (one model load per node)")
         return self
 
     def cell_specs(self) -> list[CellSpec]:
@@ -1197,7 +1196,7 @@ def unit(v: np.ndarray) -> np.ndarray:
 def _read_json(path: Optional[Path], *, what: str) -> Optional[dict]:
     """Read a JSON sidecar, degrading to None with a WARNING rather than crashing.
 
-    M19: a degraded read is described, never silent — and never upgraded to a pass.
+    A degraded read is described, never silent — and never upgraded to a pass.
     """
     if path is None or not path.exists():
         return None
@@ -1215,17 +1214,17 @@ def load_npz_vector(ref: VectorRef) -> np.ndarray:
 
     Tolerant on nothing: a missing file, a missing key and a non-1-D array are three
     different defects and each says which it is, because "the vector is wrong" is not
-    an actionable message at 3 a.m. on a node.
+    an actionable message at 3 a.m. mid-run.
     """
     if not ref.npz.exists():
         raise NativeVectorUnavailable(
-            f"{ref.key}: no vector npz at {ref.npz} (§9 item 3)")
+            f"{ref.key}: no vector npz at {ref.npz} (the vector must be present and FD-gated)")
     try:
         with np.load(ref.npz) as z:
             if ref.key not in z.files:
                 raise NativeVectorUnavailable(
                     f"{ref.key}: key absent from {ref.npz} (keys: {sorted(z.files)}) — "
-                    "a near-miss key would silently rotate every α (rake M12)")
+                    "a near-miss key would silently rotate every α")
             arr = np.asarray(z[ref.key], dtype=np.float64)
     except (OSError, ValueError, EOFError) as exc:
         raise NativeVectorUnavailable(
@@ -1239,21 +1238,21 @@ def load_npz_vector(ref: VectorRef) -> np.ndarray:
 
 
 def verify_sha(path: Path, expected: Optional[str], *, what: str) -> tuple[str, Optional[bool]]:
-    """(actual, verified?) — M4: a mismatch on a number-bearing artifact is a HALT."""
+    """(actual, verified?) — a mismatch on a number-bearing artifact is a HALT."""
     actual = sha256_file(path)
     if expected is None:
         return actual, None
     if actual != expected:
         raise ArtifactShaMismatch(
-            f"{what}: {path} sha {actual[:12]}… != expected {expected[:12]}… (§9 item "
-            "1 / M4). A sha mismatch on a number-bearing artifact is a HALT and an "
-            "enactor never adjudicates a live HALT.")
+            f"{what}: {path} sha {actual[:12]}… != expected {expected[:12]}…. A sha "
+            "mismatch on a number-bearing artifact is a HALT, and a live HALT is never "
+            "adjudicated by the run that hit it.")
     return actual, True
 
 
 # ---------------------------------------------------------------- constructions
 #: The operations this module will perform on a vector, as a closed set. Anything
-#: outside it is refused by name, which is what makes §5.4's law mechanical rather
+#: outside it is refused by name, which is what makes the lesion-recipe law mechanical rather
 #: than a habit: a lesion recipe cannot be spelled here at all.
 Construction = Literal["transport", "coordinate_identify", "random_band", "identity"]
 
@@ -1264,7 +1263,7 @@ FORBIDDEN_CONSTRUCTIONS: tuple[str, ...] = (
 
 
 def assert_construction_admissible(construction: str, *, key: str = "") -> None:
-    """§5.4's lesion-recipe law at the construction site, not only in prose.
+    """The lesion-recipe law at the construction site, not only in prose.
 
     "The staging module asserts that no transported object's construction contains a
     subtraction of a target-side entropy-gradient component, and refuses to build one."
@@ -1277,7 +1276,7 @@ def assert_construction_admissible(construction: str, *, key: str = "") -> None:
         if bad in low:
             raise LesionRecipeViolation(
                 f"{key or '(object)'}: construction {construction!r} names {bad!r} — "
-                "§5.4's lesion-recipe law forbids building any object in this column "
+                "the lesion-recipe law forbids building any object in this column "
                 "by projecting out the direction known to produce the behavior. "
                 "REFUSED at construction, which is where the law binds.")
     if low not in ("transport", "coordinate_identify", "random_band", "identity"):
@@ -1309,7 +1308,7 @@ def transport_vector(transport: Callable[[np.ndarray], np.ndarray], v: np.ndarra
 
 
 def coordinate_identify(v: np.ndarray, target_dim: int, *, key: str = "") -> np.ndarray:
-    """Ruling 5's naive transplant: zero-pad / truncate, NO map, then unit.
+    """The naive transplant: zero-pad / truncate, NO map, then unit.
 
     This is the null the column's own headline has to beat: if the transported object
     only works because the two spaces already share a residual coordinate frame, this
@@ -1332,9 +1331,9 @@ def coordinate_identify(v: np.ndarray, target_dim: int, *, key: str = "") -> np.
 def random_band_member(recipe: RandomBandRecipe, index: int) -> np.ndarray:
     """One member of a constructed random band — reproducible from the recipe string.
 
-    M25: the seed is a sha256 digest of a NAMED material string, never `hash()` and
+    The seed is a sha256 digest of a NAMED material string, never `hash()` and
     never an unseeded default RNG, so the band is re-derivable years later from the
-    stamp alone. The material is the RULED template (pre-statement §2) built through
+    stamp alone. The material is the template of record built through
     `RandomBandRecipe.seed_material`, so the string in the stamp and the string that
     seeded the draw are the same string by construction.
     """
@@ -1353,7 +1352,7 @@ def random_band_member(recipe: RandomBandRecipe, index: int) -> np.ndarray:
 
 def build_random_band(recipe: RandomBandRecipe, family: Literal["Rband", "gRband"]
                       ) -> dict[str, np.ndarray]:
-    """The whole band, keyed `{family}{i}` in member order (§4.1's naming).
+    """The whole band, keyed `{family}{i}` in member order (the banked naming).
 
     `family` must be the recipe's own `band_kind`: the key prefix and the seed material
     are two views of the same fact, and letting them disagree would bank a `gRband`
@@ -1363,7 +1362,7 @@ def build_random_band(recipe: RandomBandRecipe, family: Literal["Rband", "gRband
         raise ConstructionRefused(
             f"{recipe.node_key}: asked for a {family} band from a "
             f"{recipe.band_kind} recipe — the key prefix and the seed material must "
-            "name the same band (§4.1)")
+            "name the same band")
     return {f"{family}{i}": random_band_member(recipe, i)
             for i in range(1, recipe.n_members + 1)}
 
@@ -1477,7 +1476,7 @@ def build_sigma_band(recipe: SigmaBandRecipe) -> tuple[dict[str, np.ndarray], di
         raise ArtifactShaMismatch(
             f"Σ-beside {recipe.designation}: {recipe.sigma_npz} sha "
             f"{facts['sigma_sha256'][:12]}… != expected {recipe.sigma_sha256[:12]}… "
-            "(M4 — a sha mismatch on a number-bearing artifact is a HALT)")
+            "(a sha mismatch on a number-bearing artifact is a HALT)")
     band = {f"{SIGMA_BAND_KIND}{i}": sigma_band_member(recipe, i, sigma_half=half)
             for i in range(1, recipe.n_members + 1)}
     facts.update({
@@ -1496,22 +1495,21 @@ def build_sigma_band(recipe: SigmaBandRecipe) -> tuple[dict[str, np.ndarray], di
     return band, facts
 
 
-# ---------------------------------------------------------------- the census (§4.3)
+# ---------------------------------------------------------------- the census
 def _thread_mismatch_note(ref: VectorRef, *, what: str) -> Optional[str]:
     """A LABELED thread-count mismatch between a banked digest and the file on disk.
 
-    SCOPE 3 OF THE 2026-08-01 RULING, at the one place in this module where a
-    rebuild meets a banked pre-ruling artifact: `verify_sha` compares the bytes
-    on disk against the digest the spec carries, and before this the ONLY thing
-    it could report was that they differ. It could not say whether they differ
-    because something is wrong or because eigh was run at a different thread
-    count — a difference that is bitwise-expected (eigh is deterministic at a
+    This is the one place in this module where a rebuild meets a banked artifact
+    that may carry no thread record: `verify_sha` compares the bytes on disk
+    against the digest the spec carries, and on its own it can only report that
+    they differ. It cannot say whether they differ because something is wrong or
+    because eigh was run at a different thread count — a difference that is bitwise-expected (eigh is deterministic at a
     FIXED count and its bytes move across counts) and completely benign.
 
     BOTH sides are quoted whenever they differ:
 
       * the BANKED side comes from `VectorRef.expected_thread_count`, which is
-        None for every digest banked before the ruling. That reads as
+        None for every digest banked without a thread record. That reads as
         "unrecorded", NOT as 1: the deployed job scripts of that vintage did
         export OMP_NUM_THREADS=1, but the digest does not say so and an
         inference is not a record.
@@ -1521,7 +1519,7 @@ def _thread_mismatch_note(ref: VectorRef, *, what: str) -> Optional[str]:
         — the file may well have been built somewhere else.
 
     Returns None only when both counts are known AND equal. A missing build
-    stamp is a mismatch to be quoted, not an agreement (M19: a degraded read is
+    stamp is a mismatch to be quoted, not an agreement (a degraded read is
     described, never upgraded to a pass).
     """
     banked = (None if ref.expected_thread_count is None else
@@ -1560,11 +1558,11 @@ def _vector_row(name: str, role: CensusRole, ref: Optional[VectorRef], *,
     try:
         sha, verified = verify_sha(ref.npz, ref.sha256, what=name)
     except ArtifactShaMismatch as exc:
-        #  A SHA MISMATCH IS STILL A HALT (M4) — this does not soften it. What
-        #  it adds is the one distinction the halt could not make on its own:
+        #  A SHA MISMATCH IS STILL A HALT — this does not soften it. What it
+        #  adds is the one distinction the halt could not make on its own:
         #  whether the two artifacts were built at DIFFERENT thread counts, in
-        #  which case the byte difference is the characterized 2026-08-01 break
-        #  rather than corruption. Both counts are quoted, never one.
+        #  which case the byte difference is the characterized thread-count
+        #  break rather than corruption. Both counts are quoted, never one.
         note = _thread_mismatch_note(ref, what=name)
         return ArtifactRow(
             name=name, role=role, path=str(ref.npz), present=True,
@@ -1580,9 +1578,9 @@ def _vector_row(name: str, role: CensusRole, ref: Optional[VectorRef], *,
 
     # HALT D, part (a): the FD gate is REQUIRED unless the object's own class says it
     # has no analogue, and only a CLASS object may say that (`VectorRef` refuses the
-    # claim from an EGV at construction). So an entropy-gradient vector still hits the
-    # exact same requirement it hit before the ruling — including a class-pilot column
-    # that forgets to declare its class.
+    # claim from an EGV at construction). So an entropy-gradient vector always hits
+    # the requirement — including a class-pilot column that forgets to declare its
+    # class.
     waived = ref.fd_gate_not_applicable
     if require_fd_gate and not waived and fd_passed is not True:
         reasons.append("FD gate absent or not PASSED (§9 item 3)")
@@ -1704,10 +1702,10 @@ def _map_row(name: str, tm: Optional[TransportMapRef], *, cells_at_risk: int,
 
 
 def census(spec: BankSpec) -> BankCensus:
-    """§4.3's first act: RE-DERIVE readiness from disk, and report rather than raise.
+    """The first act of a column: RE-DERIVE readiness from disk, and report rather than raise.
 
-    "The enactor's first act is a vector-inventory preflight that re-derives this table
-    from disk rather than trusting it, because vectors are landing nightly." A census
+    The vector-inventory preflight re-derives this table from disk rather than trusting
+    it, because vectors land continuously and any snapshot is stale. A census
     that stopped at the first gap would hide the rest, so every row is computed and the
     verdict is a property of the table.
     """
@@ -1821,14 +1819,14 @@ def census(spec: BankSpec) -> BankCensus:
         planned_cells=planned, rows=tuple(rows), label=spec.label)
 
 
-# ---------------------------------------------------------------- the plan (§4.1/§5.1)
+# ---------------------------------------------------------------- the plan
 def planned_cell_count(spec: BankSpec, *, of_record_only: bool = False) -> int:
     """The cell arithmetic this spec plans — computed, never narrated.
 
     `of_record_only=True` returns the column WITHOUT its Σ-beside cells: the count the
-    §4.1/§5.1 table fixes and the one §7's expected-N guard asserts on the column of
-    record. Keeping the two counts separate is what stops a beside from filling a hole
-    (B4: never a gate input, and expected-N is a gate).
+    cell table fixes and the one the expected-N guard asserts on the column of record.
+    Keeping the two counts separate is what stops a beside from filling a hole (a
+    beside is never a gate input, and expected-N is a gate).
     """
     n = N_BASELINE_CELLS
     if spec.include_calibration:
@@ -1843,7 +1841,7 @@ def planned_cell_count(spec: BankSpec, *, of_record_only: bool = False) -> int:
 
 
 def planned_sigma_beside_count(spec: BankSpec) -> int:
-    """B4's 6 cells per DESIGNATED row, counted from the designations the spec carries."""
+    """The Σ-beside's 6 cells per DESIGNATED row, counted from the designations the spec carries."""
     n = 0
     if spec.include_calibration and spec.native_band.sigma_beside is not None:
         n += N_SIGMA_BESIDE_CELLS
@@ -1852,13 +1850,13 @@ def planned_sigma_beside_count(spec: BankSpec) -> int:
     return n
 
 
-# --------------------------------------------- the ladder in force (re-freeze #2)
+# --------------------------------------------- the ladder in force
 def doses_in_force(authorization: Optional[LadderAuthorization]) -> tuple[float, ...]:
-    """The ladder this column is STAGED on: the ratified one, or the frozen default.
+    """The ladder this column is STAGED on: the approved amended one, or the frozen default.
 
     The staging-side twin of the engine's `ladder_in_force`, which reads the answer off
     a cell SET; here the question is asked before any cell exists, so it is asked of the
-    authorization. `None` — every column staged before re-freeze #2 — answers
+    authorization. `None` — every column staged without an amendment — answers
     `DOSE_LADDER`, and no caller of this function has a second source of doses.
     """
     return DOSE_LADDER if authorization is None else authorization.ladder
@@ -1874,10 +1872,10 @@ def scoring_doses_in_force(authorization: Optional[LadderAuthorization]
     for why the generalization is made at all and what the named alternative was.
 
     The pair is `(min, max)` of the ladder rather than `±max(|dose|)`: both members are
-    then rungs of the ladder in force by construction, so a document ratifying an
+    then rungs of the ladder in force by construction, so a document approving an
     ASYMMETRIC ladder still stages a scoring pair its own cells can carry. (The engine's
-    §2.7 signal role reads a MAGNITUDE, `extreme_magnitude`; the two agree on every
-    symmetric ladder, which the ratified mixtral document is.)
+    signal role reads a MAGNITUDE, `extreme_magnitude`; the two agree on every
+    symmetric ladder, which the approved mixtral document is.)
     """
     ladder = doses_in_force(authorization)
     return (min(ladder), max(ladder))
@@ -1885,11 +1883,11 @@ def scoring_doses_in_force(authorization: Optional[LadderAuthorization]
 
 def sigma_beside_doses_in_force(authorization: Optional[LadderAuthorization]
                                 ) -> tuple[float, ...]:
-    """B4's Σ-beside doses on the ladder in force — `SIGMA_BESIDE_DOSES` when frozen.
+    """The Σ-beside doses on the ladder in force — `SIGMA_BESIDE_DOSES` when frozen.
 
     Written as the same filter `SIGMA_BESIDE_DOSES` is written as, so the two cannot
     drift: the scoring doses that are ALSO rungs, in ladder order. Its arity is what
-    `N_SIGMA_BESIDE_CELLS` counts against, and it is 2 under any ratified ladder.
+    `N_SIGMA_BESIDE_CELLS` counts against, and it is 2 under any approved ladder.
     """
     scoring = scoring_doses_in_force(authorization)
     return tuple(d for d in doses_in_force(authorization) if d in scoring)
@@ -1901,7 +1899,7 @@ def _ladder_cells(vector_key: str, site: int, *, kind: CellKind,
                   norm: float,
                   ladder_authorization: Optional[LadderAuthorization] = None
                   ) -> list[tuple[CellSpec, float]]:
-    """One vector's science cells, on the ladder in force (§2.5 as amended 2026-08-09).
+    """One vector's science cells, on the ladder in force.
 
     TWO APPLIERS, NEVER A PARAMETER ON ONE — the engine's own shape, kept here so that
     reading either applier answers "which doses does this path take?" with no branch to
@@ -1932,10 +1930,10 @@ def _sigma_beside_cells(recipe: SigmaBandRecipe, site: int, *, kind: CellKind,
     ANNOUNCE cells that could never be built. Refusing at plan time is what makes the
     designation part of the engine-facing contract rather than of the builder alone.
 
-    THE AMENDED LADDER (2026-08-09): a Σ-beside is a SCIENCE cell, so an amendment
-    reaches it too — the doses come from `sigma_beside_doses_in_force` and the
-    authorization rides every cell. With no authorization the doses are
-    `SIGMA_BESIDE_DOSES` and the cells are byte-for-byte the cells B4 ruled.
+    THE AMENDED LADDER: a Σ-beside is a SCIENCE cell, so an amendment reaches it too —
+    the doses come from `sigma_beside_doses_in_force` and the authorization rides every
+    cell. With no authorization the doses are `SIGMA_BESIDE_DOSES` and the cells are
+    byte-for-byte the frozen-ladder Σ-beside cells.
     """
     assert_sigma_beside_designated(recipe)
     assert_no_lesion_recipe(provenance, SIGMA_BAND_KIND)
@@ -1971,7 +1969,7 @@ def _class_of(ref: Optional[VectorRef]) -> dict:
     not exist while sitting beside a signal cell that is allowed none.
 
     An absent ref (a calibration-only column has no source vector) is the object of
-    record's default, which is what every pre-ruling column carries.
+    record's default, which is what every column that names no class carries.
     """
     if ref is None or not ref.is_class_vector:
         return {}
@@ -1985,24 +1983,25 @@ def plan_cells(spec: BankSpec, *, vector_npz: Optional[str] = None,
                provisional_norm: Optional[float] = None,
                ladder_authorization: Optional[LadderAuthorization] = None
                ) -> list[StagedCell]:
-    """§4.1 + §5.1's cell table for one column, in fire order.
+    """The cell table (calibration half + transported half) for one column, in fire order.
 
-    Order is calibration-then-transported on purpose: §4's gate is a GATE, and a node
-    whose site fails it gets no transported cell at that site, so the engine runs the
-    calibration block first and the desk can read a verdict from a partial column.
+    Order is calibration-then-transported on purpose: the calibration gate is a GATE,
+    and a node whose site fails it gets no transported cell at that site, so the engine
+    runs the calibration block first and a reader can take a verdict from a partial
+    column.
 
     Every α here is PROVISIONAL (see `PROVISIONAL_ALPHA_NOTE`): the engine measures the
     per-token median residual norm in-job and re-resolves. When no banked norm exists —
     the ordinary case for a new node — the unit placeholder 1.0 is used so the numbers
     in the document are transparently fractions rather than plausible-looking doses.
 
-    THE AMENDED LADDER (re-freeze #2, 2026-08-09). `ladder_authorization` is the RUN's
+    THE AMENDED LADDER. `ladder_authorization` is the RUN's
     half of the two-key ceremony, derived by the engine's `load_ladder_spec` from a
     document that has already been validated to name this column. It reaches every
-    SCIENCE cell and only those: the α=0 baseline is built exactly as §5.1 shares it
+    SCIENCE cell and only those: the α=0 baseline is built exactly as both halves share it
     (α=0 is α=0 under any ladder, and `CellSpec` refuses an authorization on it by
-    name). `None` is the frozen ladder and the default, and this function then makes
-    precisely the calls it made before the field existed.
+    name). `None` is the frozen ladder and the default, and this function then stages
+    the frozen-ladder column exactly.
 
     The finished column is handed to the ENGINE's `assert_amended_ladder_column` before
     it is returned — unconditionally, the way the engine's CLI runs it. That is what
@@ -2110,7 +2109,7 @@ def plan_cells(spec: BankSpec, *, vector_npz: Optional[str] = None,
         nprov = (f"{NAIVE_CONSTRUCTION}; {spec.source_key or 'source'} → "
                  f"{spec.node_key} L{spec.site}, pair {spec.pair or '(unnamed)'}")
         assert_no_lesion_recipe(nprov, key)
-        # Ruling 5's ±0.3, read on the ladder in force — `SCORING_DOSES` itself for
+        # The naive null's ±0.3, read on the ladder in force — `SCORING_DOSES` itself for
         # every frozen-ladder column. See `AMENDED_LADDER_SCORING_DOSE_READING`.
         for frac in scoring_doses_in_force(ladder_authorization):
             cell = CellSpec(
@@ -2129,22 +2128,22 @@ def plan_cells(spec: BankSpec, *, vector_npz: Optional[str] = None,
     expected = planned_cell_count(spec)
     if len(cells) != expected:
         raise ExpectedNShortfall(
-            f"{spec.node_key}: planned {len(cells)} cells, the §4.1+§5.1 table says "
-            f"{expected} (§9 item 10 / M23: a count one short is a rake, not a "
+            f"{spec.node_key}: planned {len(cells)} cells, the cell table says "
+            f"{expected} (a count one short is a defect, not a "
             "rounding)")
     # …and again on the column MINUS its besides, so a Σ cell can never be the reason
-    # the total came out right (B4: never a gate input, and expected-N is a gate).
+    # the total came out right (a beside is never a gate input, and expected-N is a gate).
     of_record = [c for c in cells if not c.spec.is_beside]
     expected_of_record = planned_cell_count(spec, of_record_only=True)
     if len(of_record) != expected_of_record:                      # pragma: no cover
         raise ExpectedNShortfall(
             f"{spec.node_key}: planned {len(of_record)} cells OF RECORD, the "
-            f"§4.1+§5.1 table says {expected_of_record} "
+            f"cell table says {expected_of_record} "
             f"({len(cells) - len(of_record)} Σ-beside cells were staged beside them)")
     # THE AMENDED LADDER's admission gate, run on the finished column by the ENGINE's
     # own function — unconditionally, exactly as the engine's CLI runs it before the
-    # model loads. With no authorization and no amended cell (every column staged before
-    # re-freeze #2) it asserts nothing and returns False, so this line costs the frozen
+    # model loads. With no authorization and no amended cell (every frozen-ladder
+    # column) it asserts nothing and returns False, so this line costs the frozen
     # path nothing. With one it is what makes a MIXED column unstageable: purity, the
     # two-keys-are-the-same-key test and "the flag is not a mode to leave on" are all
     # asserted HERE, in the staging module, with the job's own messages.
@@ -2159,7 +2158,7 @@ def _registered_robustness_site(node_key: str) -> Optional[int]:
     """The node's REGISTERED robustness site, or None — read, never inferred.
 
     Its own function so the refusal path can consult the registry without the
-    §4.2 module's import being load-bearing for an ordinary HALT message.
+    actuation-calibration module's import being load-bearing for an ordinary HALT message.
     """
     try:
         from metabasis.scripts.actuation_calibration import ROBUSTNESS_SITES
@@ -2170,33 +2169,32 @@ def _registered_robustness_site(node_key: str) -> Optional[int]:
 
 def site_cross_check(node_key: str, site: int, *,
                      site_role: Optional[SiteRole] = None) -> dict:
-    """§2.8's `SITES`/`SITE_OF_RECORD` cross-check, from the LIVE registries.
+    """The custody `SITES`/`SITE_OF_RECORD` cross-check, from the LIVE registries.
 
     Reports rather than raises for an unknown node (the registries do not carry every
     key), but RAISES when they carry the node and disagree with the site being staged:
-    a retired site (gemma L36, 70B L17) must never resolve by default (§9 item 4).
+    a retired site (gemma L36, 70B L17) must never resolve by default.
 
-    HALT C (Luxia's ruling, 2026-08-05 morning). `site_role` is the DECLARED role the
+    HALT C. `site_role` is the DECLARED role the
     site is being staged in, and it is the ONLY thing that can admit a site other than
     the site of record:
 
-      * `None` — no role declared, the default, and what every spec written before the
-        ruling carries — behaves EXACTLY as this function always behaved, down to the
-        returned dict's keys: any site ≠ `SITE_OF_RECORD` HALTs. The ruling widened
-        what a spec may SAY, never what silence means.
+      * `None` — no role declared, the default, and what every spec that names no role
+        carries — is the plain guard, down to the returned dict's keys: any site ≠
+        `SITE_OF_RECORD` HALTs. A role widens what a spec may SAY, never what silence
+        means.
       * `"site_of_record"` — the same checks, said out loud. The only difference from
         `None` is that the returned dict records the role.
-      * `"robustness_site"` — §4.2's frozen remedy (i). Admissible only when the node
+      * `"robustness_site"` — the frozen robustness remedy. Admissible only when the node
         has a REGISTERED robustness site, the staged site IS it, and it is on the
         fixed fit grid. `actuation_calibration.assert_no_site_fishing` is then called
         on the same (node, site) as the final word, so the two layers cannot drift:
-        that module already implemented this admissibility and this guard was the one
-        layer that lacked it, which is what blocked gemma3-27b's L41 column.
+        that module implements this admissibility, and without this role the guard
+        would block a registered robustness column such as gemma3-27b's L41.
 
     A declared role never LOOSENS the grid check and never invents a site: the role
     selects which registry row is allowed to license the site, and every row comes
-    from the campaign's registries, never from behavioral evidence (§4.2's closing
-    prohibition).
+    from the campaign's registries, never from behavioral evidence.
     """
     try:
         from metabasis.scripts.fit_transport_maps import SITES
@@ -2209,7 +2207,7 @@ def site_cross_check(node_key: str, site: int, *,
     out = {"SITES": list(grid) or None, "SITE_OF_RECORD": ruled, "staged_site": site}
     # A role appears in the record ONLY when one was declared. An undeclared role is
     # not "site_of_record" written in invisible ink — it is silence, and the stamp of
-    # a column staged before the ruling must not grow a key it never carried.
+    # a column staged with no role must not grow a key it never asked for.
     if site_role is not None:
         out["site_role"] = site_role
 
@@ -2220,27 +2218,27 @@ def site_cross_check(node_key: str, site: int, *,
         except ImportError as exc:                            # pragma: no cover
             raise RobustnessSiteNotRegistered(
                 f"{node_key}: a robustness-site column cannot be staged without the "
-                f"§4.2 registry ({exc}) — the role is admitted by a REGISTERED row "
+                f"robustness-site registry ({exc}) — the role is admitted by a REGISTERED row "
                 "or not at all") from exc
         registered = dict(ROBUSTNESS_SITES).get(node_key)
         if registered is None:
             raise RobustnessSiteNotRegistered(
                 f"{node_key}: site_role='robustness_site' declared for L{site}, but "
                 f"this node has NO registered robustness site (registered: "
-                f"{sorted(dict(ROBUSTNESS_SITES))}). §4.2's remedy (i) re-calibrates "
+                f"{sorted(dict(ROBUSTNESS_SITES))}). The robustness remedy re-calibrates "
                 "at a REGISTERED site — a role string cannot register one.")
         if site != registered:
             raise RobustnessSiteNotRegistered(
                 f"{node_key}: site_role='robustness_site' declared for L{site}, but "
                 f"the REGISTERED robustness site is L{registered}. Sites come from "
-                "curves and Luxia's rulings, never from a spec field (§4.2).")
+                "curves and recorded site decisions, never from a spec field.")
         if grid and site not in grid:
             raise RobustnessSiteOffGrid(
                 f"{node_key}: robustness site L{site} is not on the fixed fit grid "
-                f"{grid} — the two registries disagree, which is a desk HALT rather "
-                "than a preference (§9 item 4).")
+                f"{grid} — the two registries disagree, which is a registry HALT rather "
+                "than a preference.")
         # The final word is the module that already implements this admissibility,
-        # called on the same (node, site) — so a future change to §4.2's rule lands
+        # called on the same (node, site) — so a future change to the robustness rule lands
         # in ONE place and this guard cannot silently diverge from it.
         assert_no_site_fishing(
             node_key, site,
@@ -2257,15 +2255,15 @@ def site_cross_check(node_key: str, site: int, *,
 
     if ruled is not None and site != ruled:
         # The remedy pointer is appended for EXACTLY one case — an undeclared column
-        # standing on the node's own REGISTERED robustness site, i.e. the enactor who
+        # standing at its node's own REGISTERED robustness site, i.e. a spec that
         # forgot the declaration — so the refusal text every other caller sees
-        # (including every column ever banked) is byte-identical to the pre-ruling
-        # engine's. A hint is worth a HALT round-trip; a moved message is not.
+        # (including every column ever banked) stays byte-identical. A hint is worth a
+        # HALT round-trip; a moved message is not.
         hint = ""
         if site_role is None and _registered_robustness_site(node_key) == site:
-            hint = (" If this is §4.2's remedy (i), the spec must SAY so: declare "
+            hint = (" If this is the robustness remedy, the spec must SAY so: declare "
                     "site_role='robustness_site' and the REGISTERED robustness site "
-                    "is admitted (Luxia's ruling, 2026-08-05). Silence is refused.")
+                    "is admitted. Silence is refused.")
         raise SiteNotOfRecord(
             f"{node_key}: staging cells at L{site} but SITE_OF_RECORD is L{ruled} "
             "(§9 item 4). A retired site must never resolve by default." + hint)
@@ -2279,7 +2277,7 @@ def site_cross_check(node_key: str, site: int, *,
 
 # ---------------------------------------------------------------- the build
 class BuildResult(BaseModel):
-    """What one `--build` produced, with every artifact's sha (M4/M43)."""
+    """What one `--build` produced, with every artifact's sha."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -2310,7 +2308,7 @@ def build_banks(spec: BankSpec, *, construct_bands: bool = False,
     the one place a bank CONTENT decision is taken, and it is taken in writing, twice
     (a recipe in the spec plus a flag on the command line).
 
-    THE AMENDED LADDER (2026-08-09): `ladder_authorization` is the run's ratified key,
+    THE AMENDED LADDER: `ladder_authorization` is the run's approved key,
     built by `main` from the `--ladder-spec` / `--amended-ladder` pair and already
     validated to name this column. It touches the PLAN and the STAMP and nothing else —
     no vector, no band draw, no map and no sha depends on which ladder is in force, so
@@ -2404,7 +2402,7 @@ def build_banks(spec: BankSpec, *, construct_bands: bool = False,
             in_dir, out_dir_ = comp.hub_to_source.direction, comp.hub_to_target.direction
             # `hub_to_source` is a hub→source leg ridden BACKWARDS and `hub_to_target`
             # a hub→target leg ridden FORWARDS, each composed with whatever orientation
-            # the fit was banked in (§8.3). `_flip` turns a banked orientation into the
+            # the fit was banked in. `_flip` turns a banked orientation into the
             # one this hop needs, so a mirror-banked leg composes identically.
             def _flip(d: str) -> str:
                 return "rev" if d == "fwd" else "fwd"
@@ -2454,7 +2452,7 @@ def build_banks(spec: BankSpec, *, construct_bands: bool = False,
                     f"transported band recipe is anchored to "
                     f"{sband.recipe.corpus_sha[:12]}… but this bank's basis of record "
                     f"is {spec.corpus_sha_of_record[:12]}… — refused")
-            # The members are drawn in the SOURCE's space (§5.1: the control travels
+            # The members are drawn in the SOURCE's space (the control travels
             # the same road as the signal) and keyed `gRband*` on arrival; the seed
             # material names the CELL, which is why the recipe carries both.
             built = build_random_band(sband.recipe, "gRband")
@@ -2511,7 +2509,7 @@ def build_banks(spec: BankSpec, *, construct_bands: bool = False,
                      "corpus_vintage": comp.hub_to_target.corpus_vintage,
                      "map_gate": map_gates["hub_to_target"]},
                 ],
-                # §2.8 wants ONE fit sha per stamp field; a composed road has two, so
+                # Custody wants ONE fit sha per stamp field; a composed road has two, so
                 # the field carries a digest OVER the two in leg order and the legs are
                 # listed above. A stamp that named only one leg would be unreproducible.
                 "fit_sha256": hashlib.sha256(
@@ -2653,9 +2651,9 @@ def _vintage_of(ref: Optional[VectorRef]) -> Optional[str]:
 
 
 # ---------------------------------------------------------------- the bank stamp
-#: The §2.8 fields this CPU module can populate. The rest are IN-JOB facts (CVD, the
-#: canonical layout, the measured norms, the replay digests) and are filled by the
-#: engine's `build_stamp`. Partitioning them explicitly is what lets the desk's
+#: The custody stamp fields this CPU module can populate. The rest are IN-JOB facts
+#: (CVD, the canonical layout, the measured norms, the replay digests) and are filled
+#: by the engine's `build_stamp`. Partitioning them explicitly is what lets a
 #: completeness checker distinguish "not staged" from "not yet run".
 STAGED_STAMP_FIELDS: tuple[str, ...] = (
     "corpus_manifest_sha256", "behavioral_prompt_pool_sha256", "site",
@@ -2682,18 +2680,17 @@ def bank_stamp(spec: BankSpec, *, cells: Sequence[StagedCell],
                band_seed_materials: Optional[dict[str, str]] = None,
                sigma_beside: Optional[dict[str, dict]] = None,
                ladder_authorization: Optional[LadderAuthorization] = None) -> dict:
-    """The staging half of §2.8's custody, as one document.
+    """The staging half of the custody stamp, as one document.
 
     Everything here is a fact this module established from disk or constructed itself.
     Nothing is defaulted into existence: an unknown is written as `None` and shows up
-    in the desk's OWED column (§10), which is the point.
+    as OWED in a verification pass, which is the point.
 
-    THE AMENDED LADDER (2026-08-09): `dose_ladder` states the ladder ACTUALLY STAGED,
+    THE AMENDED LADDER: `dose_ladder` states the ladder ACTUALLY STAGED,
     and an `amended_ladder` block appears BESIDE it — never instead of it — quoting the
     frozen ladder and naming the document by id and by sha. The block is written only
     when the column is amended, by the same rule HALT D's `vector_class` follows below,
-    so a frozen-ladder bank stamp is byte-identical to the one this function wrote
-    before the mechanism existed. Stating one without the other is the failure the block
+    so a frozen-ladder bank stamp carries no amendment keys at all. Stating one without the other is the failure the block
     exists to prevent: a stamp whose `dose_ladder` had silently moved would let an
     amended column present as a frozen-ladder one downstream.
     """
@@ -2721,8 +2718,8 @@ def bank_stamp(spec: BankSpec, *, cells: Sequence[StagedCell],
                       "this bank is re-pointable at another corpus/basis by editing "
                       "the spec, never this module",
         "behavioral_prompt_pool_sha256": prompt_pool_sha256,
-        # the ladder IN FORCE — `DOSE_LADDER` for every column with no ratified
-        # amendment, so a frozen bank stamp's field is the field it always was.
+        # the ladder IN FORCE — `DOSE_LADDER` for every column with no approved
+        # amendment, so a frozen bank stamp's field is the frozen ladder.
         "dose_ladder": list(doses_in_force(ladder_authorization)),
         "baseline_dose": BASELINE_DOSE,
         "n_per_cell": spec.n_per_cell,
@@ -2820,9 +2817,9 @@ def bank_stamp(spec: BankSpec, *, cells: Sequence[StagedCell],
                                   "filled_in_job": list(IN_JOB_STAMP_FIELDS)},
     }
     # THE AMENDED LADDER. The bank says which ladder it was STAGED on, with the document
-    # that ratified the replacement named by id and by sha and the frozen ladder quoted
+    # that approved the replacement named by id and by sha and the frozen ladder quoted
     # beside — the staging-side counterpart of the engine's per-cell badge, and written
-    # ONLY on an amended column. A desk reading this stamp alone can tell which ladder
+    # ONLY on an amended column. A reader of this stamp alone can tell which ladder
     # the 51 cells below carry, which is what makes the comparability rider enforceable
     # before a single generation exists.
     if ladder_authorization is not None:
@@ -2844,8 +2841,8 @@ def bank_stamp(spec: BankSpec, *, cells: Sequence[StagedCell],
             "note": AMENDED_LADDER_NOTE,
         }
     # HALT D. THE TWO BASES, BOTH NAMED — and written ONLY when the column actually
-    # carries a class object, so an entropy-gradient column's stamp is byte-identical
-    # to the pre-ruling engine's (the flag-absent condition of the re-freeze).
+    # carries a class object, so an entropy-gradient column's stamp carries no class
+    # keys at all.
     class_refs = [(half, ref) for half, ref in
                   (("native_vector", spec.native_vector),
                    ("source_vector", spec.source_vector))
@@ -2889,7 +2886,7 @@ def example_spec() -> dict:
     A CLASS column's vector ref (HALT D) is the same object with three fields moved::
 
         "source_vector": {"key": "caa_formality_L26", "npz": "<PATH>/caa_….npz",
-                          "build_stamp": "<PATH>/caa_…_stamps.json",
+                          "build_stamp": "<PATH>/caa_<axis>_L26_stamps.json",
                           "vector_class": "caa",
                           "fd_gate": null, "fd_gate_not_applicable": true,
                           "vector_basis": {"kind": "contrast-set",
@@ -2905,7 +2902,7 @@ def example_spec() -> dict:
         "arm": "native",
         "site": 0,
         # HALT C: omit (or null) for an ordinary column at its site of record;
-        # "robustness_site" for §4.2's remedy (i) at the node's REGISTERED
+        # "robustness_site" for the robustness remedy at the node's REGISTERED
         # robustness site, which is the ONLY thing that admits a second site.
         "site_role": None,
         "source_key": "<SOURCE-NODE-KEY (the hub, under ruling 6)>",
@@ -2981,7 +2978,7 @@ def load_spec(path: Path) -> BankSpec:
 # ---------------------------------------------------------------- CPU self-test
 def _toy_vector_npz(dirpath: Path, key: str, dim: int, *, seed: int,
                     vintage: Optional[str], fd_pass: bool = True) -> VectorRef:
-    """A synthetic banked vector + its two sidecars — data-independent (M44(c))."""
+    """A synthetic banked vector + its two sidecars — data-independent by construction."""
     rng = np.random.default_rng(seed)
     npz = dirpath / f"{key}.npz"
     np.savez(npz, **{key: rng.standard_normal(dim).astype(np.float32)})
@@ -3039,7 +3036,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
         logger.info("%s %s %s", "PASS" if ok else "MISS", name, detail)
 
     def skip(name: str, why: str) -> None:
-        """A NAMED skip (rake M44): a third state, distinct from pass and fail."""
+        """A NAMED skip: a third state, distinct from pass and fail."""
         skips.append(name)
         checks.append((f"SKIPPED: {name}", True, why))
         logger.info("SKIP %s — %s", name, why)
@@ -3051,7 +3048,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
         root = Path(td)
         d_src, d_tgt = 12, 10
 
-        # ---- 1. constructions: the closed set and §5.4's law ------------------
+        # ---- 1. constructions: the closed set and the lesion-recipe law -------
         print("== selftest 1: constructions are a CLOSED set (§5.4's law) ==")
         check("the admissible constructions pass",
               all(_ok(lambda c=c: assert_construction_admissible(c))
@@ -3069,7 +3066,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
               _raises(lambda: unit(np.zeros(4)), ConstructionRefused)
               and _raises(lambda: unit(np.array([np.nan, 1.0])), ConstructionRefused))
 
-        # ---- 2. the RULED random band recipe (M25-safe, reproducible) ---------
+        # ---- 2. the random band recipe of record (sha-seeded, reproducible) ---
         print("== selftest 2: the constructed random band — the RULED recipe (M25) ==")
         recipe = RandomBandRecipe(
             corpus_sha=basis, node_key="toy-node", arm="native", site=7,
@@ -3272,7 +3269,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                   _sigma_recipe(sigma_npz=root / "no_such_sigma.npz")),
                   ConstructionRefused))
 
-        # ---- 3. coordinate identification (ruling 5's naive null) -------------
+        # ---- 3. coordinate identification (the naive null) --------------------
         print("== selftest 3: the naive transplant's coordinate identification ==")
         v = np.arange(1.0, d_src + 1.0)
         padded = coordinate_identify(v, d_src + 4, key="naive")
@@ -3382,8 +3379,8 @@ def selftest() -> int:                                   # noqa: C901 — a chec
               not census(bad_sha).ready
               and any("sha" in (r.blocking_reason or "").lower()
                       for r in census(bad_sha).owed))
-        #  ── the 2026-08-01 ruling, scope 3: a sha mismatch between a rebuild
-        #  and a banked PRE-RULING digest must read as a LABELED count
+        #  ── thread counts: a sha mismatch between a rebuild and a banked
+        #  digest with no thread record must read as a LABELED count
         #  mismatch, never as a silent byte diff. Three cases, all exercised.
         thread_stamp = root / "threaded_stamps.json"
         thread_stamp.write_text(json.dumps({
@@ -3451,7 +3448,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                   for r in census(spec.model_copy(
                       update={"pair": "src->never-banked"})).rows))
 
-        # ---- 6. the plan (§4.1 + §5.1's table) --------------------------------
+        # ---- 6. the plan (the column's cell table) -----------------------------
         print("== selftest 6: the cell plan is the brief's own arithmetic ==")
         cells = plan_cells(spec)
         kinds = [c.spec.kind for c in cells]
@@ -3493,7 +3490,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
         check("the calibration-only plan is 25 cells and names no transport",
               len(plan_cells(spec.model_copy(update={
                   "include_transported": False, "include_naive": False}))) == 25)
-        # M19(c) / M23: the shortfall guard is EXERCISED, not merely written. The
+        # The shortfall guard is EXERCISED, not merely written. The
         # table's arity is injected out from under the planner, which is the only way
         # a plan can disagree with its own arithmetic.
         check("a plan short of the table's arity is an ExpectedNShortfall (M23)",
@@ -3880,7 +3877,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                               SiteNotOfRecord),
                       "a retired site must never resolve by default")
 
-        # ---- 10b. HALT C: the robustness-site role (RULED 2026-08-05) ----------
+        # ---- 10b. HALT C: the robustness-site role -----------------------------
         print("== selftest 10b: HALT C — robustness_site admissibility ==")
         try:
             from metabasis.scripts.actuation_calibration import (
@@ -3894,8 +3891,8 @@ def selftest() -> int:                                   # noqa: C901 — a chec
         if halt_c_ok:
             rob_node, rob_site = "gemma3-27b", _ROB["gemma3-27b"]
             grid = tuple(dict(_SITES2).get(rob_node, ()))
-            # (1) TODAY'S REFUSAL, UNCHANGED. No role declared → exactly the
-            # pre-ruling behaviour, which is what blocked gemma L41's column.
+            # (1) THE PLAIN REFUSAL, UNCHANGED. No role declared → the plain site
+            # guard, which refuses gemma's registered L41 robustness column.
             check("(HALT C) with NO site_role, the registered robustness site is "
                   "STILL refused — the ruling widened what a spec may SAY, never "
                   "what silence means",
@@ -3921,7 +3918,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                   rob_out["SITES"] == list(grid)
                   and rob_out["SITE_OF_RECORD"] != rob_site
                   and rob_site in rob_out["SITES"])
-            # (3) THE ADMISSIBILITY IS THE §4.2 MODULE'S, not a second reading.
+            # (3) THE ADMISSIBILITY IS THE ACTUATION-CALIBRATION MODULE'S, not a second reading.
             check("(HALT C) the guard admits EXACTLY what assert_no_site_fishing "
                   "admits — the same (node, site) passes there too",
                   _ok(lambda: _fishing(rob_node, rob_site,
@@ -3987,7 +3984,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                   rob_stamp["site_cross_check"]["site_role"] == "robustness_site"
                   and rob_stamp["site"] == rob_site)
 
-        # ---- 11. HALT D: the vector-class contract (RULED 2026-08-05) ----------
+        # ---- 11. HALT D: the vector-class contract -----------------------------
         print("== selftest 11: HALT D — the vector-class contract, two bases ==")
         set_sha = "1a" * 32
         (root / "classvec").mkdir(exist_ok=True)
@@ -4067,7 +4064,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
               not wrong_row.ready
               and "RULED set" in (wrong_row.blocking_reason or ""),
               (wrong_row.blocking_reason or "")[:80])
-        # …(b) and the EGV's refusal SURVIVES, which is the point of the ruling.
+        # …(b) and the EGV's refusal SURVIVES, which is the point of the contract.
         (root / "egv_nogate").mkdir(exist_ok=True)
         egv_nofd = _toy_vector_npz(root / "egv_nogate", "entropy_gradient", d_tgt,
                                    seed=13, vintage=corpus_sha, fd_pass=False)
@@ -4224,9 +4221,9 @@ def selftest() -> int:                                   # noqa: C901 — a chec
               vector_class_phrase("repeng_pca") == "repeng-PCA"
               and "entropy" not in vector_class_phrase("some_future_class"))
 
-        # (c) THE COLLISION THE ENACTOR NOTICED: four axes of ONE node had one set
-        # of cell ids between them, so the §2.7 gate selected the same three cells
-        # four times. Four distinct selections is the fix, measured through the
+        # (c) THE CELL-ID COLLISION: with a hardcoded object key, four axes of ONE
+        # node would share one set of cell ids, so the replay gate would select the
+        # same three cells four times. Four distinct selections is the fix, measured through the
         # engine's own selector.
         gate_reads = {axis: select_replay_cells(
             [c.spec for c in plan_cells(s)], s.node_key, s.corpus_sha_of_record)
@@ -4268,11 +4265,11 @@ def selftest() -> int:                                   # noqa: C901 — a chec
               {"gentropy_gradient", "naive_entropy_gradient"}
               <= _npz_keys(Path(egv_built.vectors_npz)))
 
-        # ---- 13. THE AMENDED LADDER at staging (re-freeze #2 item 4) ----------
+        # ---- 13. THE AMENDED LADDER at staging ---------------------------------
         print("== selftest 13: the AMENDED LADDER — staging's two keys ==")
         # The engine owns the mechanism and its fixtures; both are IMPORTED rather than
-        # re-written, which is the whole point of this brief. `_toy_ladder_spec_body`
-        # carries the RATIFIED document's exact key set, and the needle is the ratified
+        # re-written, so staging and engine cannot disagree. `_toy_ladder_spec_body`
+        # carries the APPROVED document's exact key set, and the needle is the approved
         # mixtral ladder itself — imported (never re-typed) so this module still holds
         # no per-node ladder literal, which is what the AST property below asserts.
         from metabasis.scripts.run_behavioral_cells import (
@@ -4320,7 +4317,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
               str(plain_doc.bank_stamp["dose_ladder"]))
 
         # --- (b) an AMENDED column stages, whole-column ------------------------
-        # n/cell is reduced so the end-to-end preflight below is cheap; §5.1 freezes it
+        # n/cell is reduced so the end-to-end preflight below is cheap; the design freezes it
         # at 80, so the reduction carries the LABEL the spec validator demands of any
         # rehearsal — and the label rides the CLI round-trip in (e).
         amended_spec = spec_c.model_copy(update={
@@ -4392,7 +4389,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                   [c.spec for c in am_doc.cells], authorization=lauth,
                   node_key="toy-node")))
         # THE COUNTERFACTUAL, and the reason `AMENDED_LADDER_SCORING_DOSE_READING`
-        # exists: had ruling 5's null been left at the literal ±0.3, this is the column
+        # exists: had the naive null been left at the literal ±0.3, this is the column
         # staging would have produced — and it is refused, so the reading is forced
         # rather than chosen.
         naive_key = amended_spec.naive_key
@@ -4504,7 +4501,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
               and _engine(frozen_res.cells_json, "--ladder-spec", str(lspec_path),
                           "--amended-ladder")[0] == 2)
 
-        # --- (g) M58: the AST property, never a string grep --------------------
+        # --- (g) the AST property, never a string grep -------------------------
         # This module must hold NO ladder of its own. Walking module-level assignments
         # (rather than grepping for "0.15") also catches a constant spelled differently
         # — reordered, or written as a list — and the needle is IMPORTED from the engine
@@ -4561,16 +4558,14 @@ def selftest() -> int:                                   # noqa: C901 — a chec
               f"{len(staged_constants)} module-level numeric constant(s) walked, "
               f"offenders {offenders}")
 
-    # ---- M59: the suite's own arithmetic, asserted rather than printed ---------
+    # ---- the suite's own arithmetic, asserted rather than printed -------------
     # SKIP IS NOT PASS, and a block that silently stopped running is indistinguishable
-    # from a block that never existed unless the TOTAL is asserted. Adopted here from
-    # the engine's suite at re-freeze #2 item 4 (2026-08-09): the floor is the count
-    # STANDING WHEN THIS CHECK RUNS, so it is one below the total this file was merged
-    # at — 167 checks before the amended-ladder staging block, 183 after it (+16: 15
-    # mechanism checks and this one). It may only GROW: a change that removes a check
+    # from a block that never existed unless the TOTAL is asserted. The same guard the
+    # engine's suite carries: the floor is the count STANDING WHEN THIS CHECK RUNS, so
+    # it is one below the suite's total. It may only GROW: a change that removes a check
     # has to change this constant in the same diff, which is exactly the moment a
     # reviewer gets to ask why.
-    # This module's suite is configuration-invariant by construction (M44), so its known
+    # This module's suite is configuration-invariant by construction, so its known
     # skip set is EMPTY and a block that started skipping fails here.
     # The map consumption block (6d) adds 9 checks: floor 191, total 192.
     SELFTEST_CHECK_FLOOR = 191
@@ -4587,7 +4582,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
     print(f"\nselftest: {len(failures)} failure(s)")
     for name, _, detail in failures:
         print(f"  MISS {name} {detail}")
-    # RAKE M44: the tail states coverage as well as the verdict.
+    # Named configurations: the tail states coverage as well as the verdict.
     print(f"selftest checks run: {len(checks)} ({len(skips)} named skip(s))")
     for name in skips:
         print(f"  SKIPPED {name}")
@@ -4595,7 +4590,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
 
 
 def _shortfall_probe() -> None:
-    """Exercise §9 item 10's guard by injecting a table arity the planner cannot meet.
+    """Exercise the expected-N guard by injecting a table arity the planner cannot meet.
 
     The guard can only fire when the plan and the table disagree, and they cannot
     disagree by accident — so the arity is injected and restored. Test scaffolding, run
