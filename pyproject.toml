@@ -20,6 +20,10 @@ gpu = [
     # GPU; lazily imported, so single-GPU collection runs without it.
     "accelerate>=0.26",
 ]
+# vLLM execution lane (metabasis/scripts/vllm_lane_column.py and
+# metabasis/extraction/vllm_*): the steering hook rides vLLM's
+# `worker_extension_cls`, which the lane was built and run against at 0.15.1.
+vllm = ["vllm>=0.15.1"]
 # Corpus building (one parquet source format, lazy import).
 corpus = ["pyarrow"]
 # Blind two-alternative judge harness (lazy import; the API key comes from the environment).

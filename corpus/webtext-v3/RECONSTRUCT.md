@@ -5,7 +5,7 @@ The corpus is published as a reconstruction: pinned inputs -> the frozen chunker
 ## The command
 
 ```
-python -m metabasis.scripts.build_webtext_corpus --seed 80 --n-per-stratum 300 --tokenizer meta-llama/Llama-3.1-8B-Instruct --out-dir <OUT>
+python -m metabasis.scripts.build_webtext_corpus --seed 80 --n-per-stratum 300 --tokenizer meta-llama/Llama-3.1-8B-Instruct --tokenizer-revision 0e9e39f249a16976918f6564b8830bc894c89659 --out-dir <OUT>
 ```
 
 ## What it must produce
@@ -27,7 +27,7 @@ Each entry's body verifies against its `text_sha256` in the metadata manifest, s
 | `stackexchange` | `flax-sentence-embeddings/stackexchange_title_body_jsonl` | `a3d99bf21570ed043e19e41af46f3f19bf4e4bb6` | `astronomy.stackexchange.com.jsonl.gz`, `bicycles.stackexchange.com.jsonl.gz`, `biology.stackexchange.com.jsonl.gz`, `cooking.stackexchange.com.jsonl.gz`, `engineering.stackexchange.com.jsonl.gz`, `philosophy.stackexchange.com.jsonl.gz` |
 
 - **PG-19 books** come from the immutable asset root `https://storage.googleapis.com/deepmind-gutenberg/` using the file list pinned above; the stamp records a sha256 for every book and for `metadata.csv`.
-- **Tokenizer**: `meta-llama/Llama-3.1-8B-Instruct` — a PIN, not a convenience. The chunk boundaries are its token counts. The stamp records a sha256 for every tokenizer file used. (It is a gated repo: accept the license once, then it resolves from the local cache. A different tokenizer produces a different corpus and the builder will say so by producing a different sha.)
+- **Tokenizer**: `meta-llama/Llama-3.1-8B-Instruct` at revision `0e9e39f249a16976918f6564b8830bc894c89659` — a PIN, not a convenience. The chunk boundaries are its token counts, so the revision is required: the repository name alone resolves to whatever its default branch holds. The stamp records the revision and a sha256 for every tokenizer file used. (It is a gated repo: accept the license once, then it resolves from the local cache. A different tokenizer produces a different corpus and the builder will say so by producing a different sha.)
 - **Seed**: 80. **Per-document chunk cap**: 10, at evenly spaced positions.
 - **Per-stratum reading pins** (they select the pool, so they are part of the reconstruction):
   - `wikitext`: 300 texts; documents read = every document in the pinned files; edge trim = 0

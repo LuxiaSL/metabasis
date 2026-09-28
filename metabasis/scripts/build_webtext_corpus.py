@@ -74,6 +74,21 @@ from metabasis.scripts.build_paired_corpus import (  # noqa: F401 — re-exporte
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("build_webtext_corpus")
 
+#: The tokenizer is pinned by repository AND revision. At this revision the
+#: tokenizer's files digest to TOKENIZER_FILES_SHA256 — the digests recorded by
+#: the build that produced the published `corpus_manifest.json` sha — so this
+#: revision reproduces that corpus. A build of TOKENIZER_REF at this revision
+#: refuses to run if any of the three files digests differently.
+TOKENIZER_REVISION = "0e9e39f249a16976918f6564b8830bc894c89659"
+TOKENIZER_FILES_SHA256: dict[str, str] = {
+    "tokenizer.json":
+        "79e3e522635f3171300913bb421464a87de6222182a0570b9b2ccba2a964b2b4",
+    "tokenizer_config.json":
+        "177c7b61e616fecb84c17ce0591acb92c6c4d60e9ac5ababfb940ff23bbcd424",
+    "special_tokens_map.json":
+        "6f38c73729248f6c127296386e3cdde96e254636cc58b4169d3fd32328d9a8ec",
+}
+
 CORPUS_NAME = "webtext-v3"
 CORPUS_VERSION = "staging-draft"
 DEFAULT_OUT_DIR = Path("staging/webtext-v3-draft")
@@ -136,6 +151,7 @@ class WebtextSpec(BaseModel, frozen=True):
     version: str = CORPUS_VERSION
     seed: int
     tokenizer_ref: str
+    tokenizer_revision: str = Field(pattern=r"^[0-9a-f]{40}$")
     tok_min: int
     tok_max: int
     tok_close: int
@@ -263,10 +279,30 @@ PINS: dict[StratumKey, SourcePin] = {p.key: p for p in
                                      (PIN_WIKITEXT, PIN_C4, PIN_PG19, PIN_STACKEXCHANGE)}
 
 
-def default_spec(seed: int, n_per_stratum: int, tokenizer_ref: str) -> WebtextSpec:
+def resolve_tokenizer_revision(tokenizer_ref: str,
+                               tokenizer_revision: Optional[str]) -> str:
+    """The revision a build tokenizes at: explicit, or the pin for TOKENIZER_REF.
+
+    A tokenizer other than TOKENIZER_REF has no pinned revision here, so it must
+    be given one — a repository name alone resolves to whatever its default
+    branch holds on the day of the build.
+    """
+    if tokenizer_revision is not None:
+        return tokenizer_revision
+    if tokenizer_ref == TOKENIZER_REF:
+        return TOKENIZER_REVISION
+    raise WebtextBuildError(
+        f"tokenizer {tokenizer_ref!r} has no pinned revision: pass "
+        f"--tokenizer-revision <40-hex commit> so the build is reproducible")
+
+
+def default_spec(seed: int, n_per_stratum: int, tokenizer_ref: str,
+                 tokenizer_revision: Optional[str] = None) -> WebtextSpec:
     return WebtextSpec(
         seed=seed,
         tokenizer_ref=tokenizer_ref,
+        tokenizer_revision=resolve_tokenizer_revision(tokenizer_ref,
+                                                      tokenizer_revision),
         tok_min=S2_TOK_MIN, tok_max=S2_TOK_MAX, tok_close=S2_TOK_CLOSE,
         max_shards_per_doc=MAX_SHARDS_PER_DOC,
         carrier_prompt=S2_CARRIER_PROMPT,
@@ -311,12 +347,13 @@ def _ntokens(tok: Tokenizer, text: str) -> int:
     return len(tok.encode(text, add_special_tokens=False))
 
 
-def load_tokenizer(ref: str) -> Tokenizer:
+def load_tokenizer(ref: str, revision: Optional[str] = None) -> Tokenizer:
     """The chunker's token counts ARE the corpus: no heuristic fallback.
 
     build_paired_corpus degrades to a word-count heuristic when the tokenizer is
     missing; that is fine for a stamped informational count and fatal here, because
     it would silently produce a DIFFERENT corpus under the same command. HALT.
+    `revision` pins the repository commit the tokenizer is read at.
     """
     try:
         from transformers import AutoTokenizer
@@ -325,8 +362,10 @@ def load_tokenizer(ref: str) -> Tokenizer:
             f"transformers is required to chunk deterministically ({e})") from e
     for local_only in (True, False):
         try:
-            tok = AutoTokenizer.from_pretrained(ref, local_files_only=local_only)
-            logger.info("tokenizer %s (local_files_only=%s)", ref, local_only)
+            tok = AutoTokenizer.from_pretrained(ref, revision=revision,
+                                                local_files_only=local_only)
+            logger.info("tokenizer %s@%s (local_files_only=%s)", ref,
+                        (revision or "default-branch")[:12], local_only)
             return tok
         except Exception as e:  # noqa: BLE001 — try the network once, then HALT
             last = e
@@ -808,7 +847,9 @@ def build_stamp(spec: WebtextSpec, results: list[StratumResult],
             "seed": spec.seed,
             "streams": "numpy SeedSequence(entropy=seed, spawn_key=(stratum_ordinal,))",
         },
-        "tokenizer": {"ref": spec.tokenizer_ref, "files_sha256": tokenizer_files},
+        "tokenizer": {"ref": spec.tokenizer_ref,
+                      "revision": spec.tokenizer_revision,
+                      "files_sha256": tokenizer_files},
         "sources": {r.key: {"pin": PINS[r.key].model_dump(), "license_check":
                             licenses.get(r.key, {}), **r.info} for r in results},
         "token_summary": {"all": token_summary([e.n_tokens for e in entries]),
@@ -1064,12 +1105,14 @@ def render_reconstruct(spec: WebtextSpec, stamp: dict[str, Any], cmd: str) -> st
     a(f"- **PG-19 books** come from the immutable asset root "
       f"`{PG19_ASSET_ROOT}` using the file list pinned above; the stamp records a "
       f"sha256 for every book and for `metadata.csv`.")
-    a(f"- **Tokenizer**: `{spec.tokenizer_ref}` — a PIN, not a convenience. The "
-      f"chunk boundaries are its token counts. The stamp records a sha256 for "
-      f"every tokenizer file used. (It is a gated repo: accept the license once, "
-      f"then it resolves from the local cache. A different tokenizer produces a "
-      f"different corpus and the builder will say so by producing a different "
-      f"sha.)")
+    a(f"- **Tokenizer**: `{spec.tokenizer_ref}` at revision "
+      f"`{spec.tokenizer_revision}` — a PIN, not a convenience. The chunk "
+      f"boundaries are its token counts, so the revision is required: the "
+      f"repository name alone resolves to whatever its default branch holds. The "
+      f"stamp records the revision and a sha256 for every tokenizer file used. "
+      f"(It is a gated repo: accept the license once, then it resolves from the "
+      f"local cache. A different tokenizer produces a different corpus and the "
+      f"builder will say so by producing a different sha.)")
     a(f"- **Seed**: {spec.seed}. **Per-document chunk cap**: "
       f"{spec.max_shards_per_doc}, at evenly spaced positions.")
     a("- **Per-stratum reading pins** (they select the pool, so they are part of "
@@ -1097,7 +1140,7 @@ def render_reconstruct(spec: WebtextSpec, stamp: dict[str, Any], cmd: str) -> st
 
 
 # ---------------------------------------------------------------- the build
-def _tokenizer_file_shas(ref: str) -> dict[str, str]:
+def _tokenizer_file_shas(ref: str, revision: Optional[str] = None) -> dict[str, str]:
     """sha256 of the tokenizer's own files — the pin behind the chunk boundaries."""
     out: dict[str, str] = {}
     try:
@@ -1106,7 +1149,7 @@ def _tokenizer_file_shas(ref: str) -> dict[str, str]:
         return out
     for name in ("tokenizer.json", "tokenizer_config.json", "special_tokens_map.json"):
         try:
-            p = cached_file(ref, name, local_files_only=True)
+            p = cached_file(ref, name, revision=revision, local_files_only=True)
         except Exception:  # noqa: BLE001 — optional files
             continue
         if p:
@@ -1114,9 +1157,30 @@ def _tokenizer_file_shas(ref: str) -> dict[str, str]:
     return out
 
 
+def verify_tokenizer_files(ref: str, revision: str, shas: dict[str, str]) -> None:
+    """Refuse the pinned tokenizer if its files are not the recorded bytes.
+
+    Applies to TOKENIZER_REF at TOKENIZER_REVISION, whose file digests are known;
+    any other (ref, revision) is recorded in the stamp but has nothing to be
+    checked against.
+    """
+    if ref != TOKENIZER_REF or revision != TOKENIZER_REVISION:
+        return
+    wrong = {name: (shas.get(name), want)
+             for name, want in TOKENIZER_FILES_SHA256.items()
+             if shas.get(name) != want}
+    if wrong:
+        raise WebtextBuildError(
+            f"tokenizer {ref}@{revision[:12]} does not have the recorded file "
+            f"bytes: {wrong} (got, want). A different tokenizer file cuts "
+            f"different chunks; refusing to build")
+
+
 def build(spec: WebtextSpec, out_dir: Path, cache_dir: Optional[Path],
           cmd: str, check_licenses: bool = True) -> dict[str, Any]:
-    tok = load_tokenizer(spec.tokenizer_ref)
+    tok = load_tokenizer(spec.tokenizer_ref, spec.tokenizer_revision)
+    tok_shas = _tokenizer_file_shas(spec.tokenizer_ref, spec.tokenizer_revision)
+    verify_tokenizer_files(spec.tokenizer_ref, spec.tokenizer_revision, tok_shas)
     licenses: dict[str, Any] = {}
     if check_licenses:
         for st in spec.strata:
@@ -1138,8 +1202,7 @@ def build(spec: WebtextSpec, out_dir: Path, cache_dir: Optional[Path],
     (out_dir / "corpus_manifest.json").write_bytes(full)
     (out_dir / "corpus_manifest.meta.json").write_bytes(meta)
     stamp = build_stamp(spec, results, entries, licenses,
-                        _sha_bytes(full), _sha_bytes(meta),
-                        _tokenizer_file_shas(spec.tokenizer_ref))
+                        _sha_bytes(full), _sha_bytes(meta), tok_shas)
     census = render_census(spec, stamp)
     reconstruct = render_reconstruct(spec, stamp, cmd)
     (out_dir / "COMPOSITION-CENSUS.md").write_text(census, encoding="utf-8")
@@ -1240,7 +1303,9 @@ def selftest() -> int:  # noqa: C901 — a checklist
               f"network=not-used")
 
     tok = _StubTokenizer()
-    spec = default_spec(seed=80, n_per_stratum=3, tokenizer_ref="stub/selftest")
+    stub_rev = "0" * 40
+    spec = default_spec(seed=80, n_per_stratum=3, tokenizer_ref="stub/selftest",
+                        tokenizer_revision=stub_rev)
 
     # ---- 1. the pins are typed, complete, and self-consistent -----------------
     print("== selftest 1: the pins ==")
@@ -1358,7 +1423,7 @@ def selftest() -> int:  # noqa: C901 — a checklist
     # ---- 6. assembly guards ---------------------------------------------------
     print("== selftest 6: assembly refuses a corpus it cannot vouch for ==")
     small = default_spec(seed=80, n_per_stratum=len(entries),
-                         tokenizer_ref="stub/selftest")
+                         tokenizer_ref="stub/selftest", tokenizer_revision=stub_rev)
     one = WebtextSpec(**{**small.model_dump(), "strata": (small.strata[1],)})
     res = [StratumResult(key="c4", entries=entries, info={"pool_size": len(entries)})]
     check("a clean stratum assembles", _ok(lambda: assemble(one, res)))
@@ -1491,6 +1556,51 @@ def selftest() -> int:  # noqa: C901 — a checklist
     check("the default tokenizer pin is the one v2.1's S2 chunks were cut with",
           default_spec(80, 300, TOKENIZER_REF).tokenizer_ref == TOKENIZER_REF)
 
+    print("== selftest 10: the tokenizer is pinned by REVISION too ==")
+    pinned = default_spec(80, 300, TOKENIZER_REF)
+    check("the default tokenizer resolves to its pinned 40-hex revision",
+          pinned.tokenizer_revision == TOKENIZER_REVISION
+          and len(TOKENIZER_REVISION) == 40
+          and all(c in "0123456789abcdef" for c in TOKENIZER_REVISION),
+          TOKENIZER_REVISION[:12])
+    check("a tokenizer with NO pinned revision is refused, not resolved to a branch",
+          _raises(lambda: default_spec(80, 300, "some/other-tokenizer"),
+                  WebtextBuildError))
+    check("…and builds once a revision is named",
+          default_spec(80, 300, "some/other-tokenizer",
+                       tokenizer_revision="a" * 40).tokenizer_revision == "a" * 40)
+    check("a revision that is not a 40-hex commit is refused",
+          _raises(lambda: default_spec(80, 300, TOKENIZER_REF,
+                                       tokenizer_revision="main"), Exception))
+    check("the recorded tokenizer file digests pass verification",
+          _ok(lambda: verify_tokenizer_files(TOKENIZER_REF, TOKENIZER_REVISION,
+                                             dict(TOKENIZER_FILES_SHA256))))
+    drifted = {**TOKENIZER_FILES_SHA256, "tokenizer.json": "0" * 64}
+    check("a tokenizer file whose bytes differ from the record is REFUSED",
+          _raises(lambda: verify_tokenizer_files(TOKENIZER_REF, TOKENIZER_REVISION,
+                                                 drifted), WebtextBuildError))
+    check("a MISSING tokenizer file is refused (nothing to verify is not a pass)",
+          _raises(lambda: verify_tokenizer_files(
+              TOKENIZER_REF, TOKENIZER_REVISION,
+              {k: v for k, v in TOKENIZER_FILES_SHA256.items()
+               if k != "special_tokens_map.json"}), WebtextBuildError))
+    check("the stamp records the tokenizer revision",
+          stamp["tokenizer"]["revision"] == stub_rev)
+    recon10 = render_reconstruct(pinned, {"manifest_sha256": "m" * 64,
+                                          "meta_manifest_sha256": "n" * 64},
+                                 "cmd")
+    check("RECONSTRUCT names the revision and says it is required",
+          TOKENIZER_REVISION in recon10 and "revision is required" in recon10)
+    import contextlib
+    import io
+    with contextlib.redirect_stderr(io.StringIO()):
+        try:
+            main(["--selftest", "--no-such-flag"])
+            code10: object = None
+        except SystemExit as exc:
+            code10 = exc.code
+    check("an unknown flag is a usage error, never ignored", code10 == 2)
+
     failures = [c for c in checks if not c[1]]
     print(f"\nselftest: {len(failures)} failure(s)")
     for name, _, detail in failures:
@@ -1507,7 +1617,10 @@ def selftest() -> int:  # noqa: C901 — a checklist
 def _cmdline(args: argparse.Namespace) -> str:
     return (f"python -m metabasis.scripts.build_webtext_corpus "
             f"--seed {args.seed} --n-per-stratum {args.n_per_stratum} "
-            f"--tokenizer {args.tokenizer} --out-dir <OUT>")
+            f"--tokenizer {args.tokenizer} "
+            f"--tokenizer-revision "
+            f"{resolve_tokenizer_revision(args.tokenizer, args.tokenizer_revision)} "
+            f"--out-dir <OUT>")
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -1521,6 +1634,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--n-per-stratum", type=int, default=DEFAULT_N_PER_STRATUM)
     ap.add_argument("--tokenizer", default=TOKENIZER_REF,
                     help="tokenizer PIN — the chunk boundaries are its token counts")
+    ap.add_argument("--tokenizer-revision", default=None, metavar="COMMIT",
+                    help=f"the tokenizer repository commit (40 hex). Defaults to "
+                         f"{TOKENIZER_REVISION} for {TOKENIZER_REF}, whose files "
+                         f"are then verified against the recorded digests; required "
+                         f"for any other --tokenizer. Recorded in the stamp.")
     ap.add_argument("--no-license-check", action="store_true",
                     help="skip the pinned-revision license verification (NOT for "
                          "a corpus anyone will cite)")
@@ -1531,7 +1649,15 @@ def main(argv: Optional[list[str]] = None) -> int:
     if args.selftest:
         return selftest()
 
-    spec = default_spec(args.seed, args.n_per_stratum, args.tokenizer)
+    try:
+        spec = default_spec(args.seed, args.n_per_stratum, args.tokenizer,
+                            args.tokenizer_revision)
+    except WebtextBuildError as e:
+        logger.error("HALT: %s", e)
+        return 2
+    except ValueError as e:                  # pydantic: a malformed revision
+        logger.error("HALT: --tokenizer-revision is not a 40-hex commit (%s)", e)
+        return 2
     cache = args.cache_dir.expanduser().resolve() if args.cache_dir else None
     if cache is not None:
         cache.mkdir(parents=True, exist_ok=True)
