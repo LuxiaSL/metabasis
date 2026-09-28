@@ -7137,10 +7137,10 @@ class RecordDelta(BaseModel):
 class RecordComparison(BaseModel):
     """`--verify-against`: two records compared on NUMBERS AND IDENTITIES only.
 
-    Timestamps and prose are EXCLUDED by construction, not by tolerance: the
-    desk's words are the desk's, and a record re-emitted a day later carries a
-    different `filed_utc` by definition. What must be identical is every number
-    and every slot identity — that is what makes a promoted producer a promotion
+    Timestamps and prose are EXCLUDED by construction, not by tolerance: prose
+    is written by whoever files the record, and a record re-emitted a day later
+    carries a different `filed_utc` by definition. What must be identical is
+    every number and every slot identity — that is what makes a promoted producer a promotion
     rather than a rewrite.
     """
     banked: str
@@ -7159,10 +7159,10 @@ class RecordComparison(BaseModel):
                  "detail); the sha256 of every provenance artifact IS compared"],
         description="what this comparison deliberately does not read")
     #: Populated ONLY when the numbers already disagree AND the two records
-    #: name different thread counts (Luxia ruling 2026-08-01, scope 3). It
-    #: EXPLAINS a difference; it never manufactures one, which is why it is
-    #: computed after the deltas rather than beside them: every one of these
-    #: records is compared against a banked pre-ruling one, and a note that
+    #: name different thread counts, because BLAS reductions move the last
+    #: digits across thread counts. It EXPLAINS a difference; it never
+    #: manufactures one, which is why it is computed after the deltas rather
+    #: than beside them: a banked record may carry no thread stamp, and a note that
     #: fired on every clean verify would be noise a reader learns to skip.
     thread_count_mismatch: Optional[str] = Field(
         default=None,
@@ -7182,7 +7182,7 @@ def _slot_index(record: dict[str, Any], label: str) -> dict[str, dict[str, Any]]
                        str(slot.get("arm")), str(slot.get("family")))
         if key in out:
             raise RecordEmissionError(
-                f"{label}: duplicate slot {key} — rake M18: a comparison dict "
+                f"{label}: duplicate slot {key} — a comparison dict "
                 f"gets a duplicate-key assertion, because a collapsed key "
                 f"reports a false pass at n−1")
         out[key] = slot
@@ -7270,7 +7270,7 @@ def compare_filing_records(banked: Path, emitted: Path) -> RecordComparison:
                 if field in b_block or field in e_block:
                     compare(f"{key}/{block_key}", field, b_block.get(field),
                             e_block.get(field))
-    #  ── THE 2026-08-01 RULING, SCOPE 3 ───────────────────────────────────────
+    #  ── THREAD COUNT AS AN EXPLANATION ───────────────────────────────────────
     #  Every number in these records was computed from banked fits, and those
     #  fits came off `np.linalg.svd`; the composed path then multiplies matrices,
     #  which is a BLAS reduction of its own. All of that is bitwise-deterministic
@@ -7289,17 +7289,18 @@ def compare_filing_records(banked: Path, emitted: Path) -> RecordComparison:
     return result
 
 
-# ══════════════════════════════════════════ THE WEBTEXT-V3 SCORING LANE (§8)
+# ══════════════════════════════════════════ THE WEBTEXT-V3 SCORING LANE
 #  WHAT THIS IS, AND WHAT IT IS NOT.
 #
-#  The frozen webtext-v3 §8 ceremony has four mechanical steps, and step 2 is
-#  already DONE: the prediction artifact is built, sha'd and desk-attested, and
-#  its 240-slot list "is the denominator of every gate, forever". This lane is
+#  The prediction ceremony of the frozen webtext-v3 pre-registration (under
+#  docs/planning/) has four mechanical steps, and step 2 is already DONE: the
+#  prediction artifact is built, sha'd and attested by a stamp, and its
+#  240-slot list "is the denominator of every gate, forever". This lane is
 #  step 3 — "Fit scoreable pairs → â_obs. Score." — and nothing else:
 #
-#    (a) it VERIFIES the desk's stamp against the artifact before reading a
-#        single prediction (§8 step 2 makes that binding: "the fit lane refuses
-#        to run without the stamp");
+#    (a) it VERIFIES the sealing stamp against the artifact before reading a
+#        single prediction (the ceremony makes that binding: "the fit lane
+#        refuses to run without the stamp");
 #    (b) it LOADS the sealed artifact as the denominator. Not one â_comp is
 #        recomputed here. The composed column was filed before any pair was fit
 #        and re-deriving it at scoring time would let a scorer move a
@@ -7310,37 +7311,38 @@ def compare_filing_records(banked: Path, emitted: Path) -> RecordComparison:
 #    (d) it scores every one of the five columns at BOTH bands with the
 #        near-zero carve-out per the frozen text;
 #    (e) it emits the scored record carrying the gate arithmetic — G-comp-v3,
-#        G-comp-v3-tight, G-extension and §8's branch structure.
+#        G-comp-v3-tight, G-extension and the ceremony's branch structure.
 #
 #  DESCRIPTIVE EMISSION ONLY. The arithmetic of a threshold is computation; the
 #  VERDICT it carries is not. Nothing here stamps, adjudicates, rules a branch
 #  or writes under `outputs/` — every block says so, in the builder's own idiom
 #  ("adjudication: NONE"), because a tool that ruled on its own output would be
 #  inventing the authority for it.
-#: The sealed artifact's schema, by NAME and VERSION (rake M26): a schema bump
-#: is visible to a mechanical sweep instead of hiding inside a string literal.
+#: The sealed artifact's schema, by NAME and VERSION: a version-pinned constant
+#: carries its version in its name, so a schema bump is visible to a mechanical
+#: sweep instead of hiding inside a string literal.
 SCHEMA_V3_PREDICTION_ARTIFACT_V1 = "webtext-v3-prediction-artifact/v1"
 #: What this lane emits.
 SCHEMA_V3_SCORED_RECORD_V1 = "webtext-v3-scored-record/v1"
-#: The desk stamp's own opening line, checked by value.
+#: The sealing stamp's own opening line, checked by value.
 V3_STAMP_TEXT = "THE §8.2 PREDICTION ARTIFACT IS SEALED — desk attestation"
 #: Where the stamp sits when the operator does not name it: BESIDE the artifact,
 #: under the sealing act's own filename. A default, never a search.
 V3_STAMP_FILENAME = "ARTIFACT-STAMP-PREDICTIONS-webtext-v3.json"
 
-#: §8 "Bands and carve-out": ±.05 primary, ±.025 beside-with-teeth. Named with
+#: The frozen bands: ±.05 primary, ±.025 beside-with-teeth. Named with
 #: their gates so a reader never has to remember which half-width feeds which.
 V3_BAND_PRIMARY_HALF_WIDTH = 0.05
 V3_BAND_CO_PRIMARY_HALF_WIDTH = 0.025
-#: §8's three thresholds, verbatim.
+#: The three frozen gate thresholds, verbatim.
 V3_GATE_COMP_THRESHOLD = 0.80
 V3_GATE_COMP_TIGHT_THRESHOLD = 0.80
 V3_GATE_EXTENSION_THRESHOLD = 0.70
-#: §8: "The floor-clearing count (|â_obs| ≥ .08)". The SAME numeral as the
+#: The frozen floor-clearing count (|â_obs| ≥ .08). The SAME numeral as the
 #: near-zero carve-out and a DIFFERENT rule — the carve-out reads |â_comp|
 #: (a property of the prediction, marked at filing), the floor reads |â_obs|
 #: (a property of the observation, evaluated only now). They are separate
-#: constants because they answer separate questions and a future ruling could
+#: constants because they answer separate questions and a future contract could
 #: move one without the other.
 V3_FLOOR_CLEARING_ABS = NEAR_ZERO_CARVE_OUT
 
@@ -7349,16 +7351,16 @@ class V3ArtifactError(ComposedPathError):
     """A webtext-v3 prediction artifact is not what it claims to be.
 
     ALWAYS LOUD, and always by naming the contract. The artifact is the frozen
-    denominator of every §8 gate; a scorer that half-parsed it, or that scored
+    denominator of every frozen gate; a scorer that half-parsed it, or that scored
     a file which is not the sealed one, would produce a rate over a population
     nobody froze — and the rate would look exactly like a real one.
     """
 
 
 class PredictionStampError(V3ArtifactError):
-    """The desk's seal does not verify against the artifact.
+    """The sealing stamp does not verify against the artifact.
 
-    §8 step 2 made this binding: "The prediction artifact is sha'd and
+    The frozen ceremony makes this binding: "The prediction artifact is sha'd and
     timestamp-attested BEFORE the first direct-pair fit job is submitted; the
     fit lane refuses to run without the stamp (the census no-peeking mechanism,
     made binding)." A scoring lane that read the artifact without checking the
@@ -7378,7 +7380,7 @@ class PairFitsAbsentError(ComposedPathError):
 
 
 class PredictionArtifactStamp(BaseModel):
-    """The desk's seal over the §8.2 prediction artifact. READ-ONLY over it."""
+    """The seal over the webtext-v3 prediction artifact. READ-ONLY over it."""
     model_config = {"extra": "allow"}
 
     stamp: str
@@ -7413,18 +7415,19 @@ class StampVerification(BaseModel):
 def verify_prediction_stamp(artifact: Path,
                             stamp: Optional[Path] = None
                             ) -> tuple[PredictionArtifactStamp, StampVerification]:
-    """Verify the desk's seal over `artifact`. HALTS on any disagreement.
+    """Verify the sealing stamp over `artifact`. HALTS on any disagreement.
 
     `stamp` defaults to the sealing act's own filename BESIDE the artifact —
-    one named path, never a search (rake M12's discipline at stamp grain).
+    one named path, never a search, so a stamp from another tree can never
+    answer for this artifact.
     """
     artifact = Path(artifact)
     stamp_path = (Path(artifact).parent / V3_STAMP_FILENAME if stamp is None
                   else Path(stamp))
     if not stamp_path.is_file():
         raise PredictionStampError(
-            f"no desk stamp at {stamp_path}. §8 step 2 binds the fit/scoring "
-            f"lane to REFUSE without it — the census no-peeking mechanism. "
+            f"no sealing stamp at {stamp_path}. The frozen ceremony binds the "
+            f"fit/scoring lane to REFUSE without it — the census no-peeking mechanism. "
             f"Name it with --stamp, or seal the artifact first; this lane does "
             f"not search for one and never proceeds unstamped")
     if not artifact.is_file():
@@ -7443,7 +7446,7 @@ def verify_prediction_stamp(artifact: Path,
         parsed = PredictionArtifactStamp(**doc)
     except Exception as exc:                                  # noqa: BLE001
         raise PredictionStampError(
-            f"stamp {stamp_path} is not a desk attestation of the §8.2 "
+            f"stamp {stamp_path} is not an attestation of the webtext-v3 "
             f"prediction artifact: {exc}. Expected keys `stamp`, `sealed_utc`, "
             f"`artifact`, `artifact_sha256`, `prereg`, `frozen_count_N`, "
             f"`fully_filed`") from exc
@@ -7451,7 +7454,7 @@ def verify_prediction_stamp(artifact: Path,
         raise PredictionStampError(
             f"stamp {stamp_path} carries {parsed.stamp!r}, which is not the "
             f"sealing act's own text {V3_STAMP_TEXT!r}. A stamp is checked by "
-            f"VALUE, never trusted by filename (rake M26)")
+            f"VALUE, never trusted by filename")
     digest = sha256_of(artifact)
     filename_matches = Path(parsed.artifact).name == artifact.name
     verification = StampVerification(
@@ -7467,13 +7470,13 @@ def verify_prediction_stamp(artifact: Path,
             f"HALT — the stamp {stamp_path} seals {parsed.artifact!r} but this "
             f"lane was pointed at {artifact.name!r}. Two artifacts and one "
             f"seal is not a verification; refusing rather than scoring a file "
-            f"the desk did not attest")
+            f"the stamp does not attest")
     if not verification.sha_matches:
         raise PredictionStampError(
             f"HALT — {artifact} hashes to {digest}, not the sealed "
-            f"{parsed.artifact_sha256}. The desk's seal is over a DIFFERENT "
+            f"{parsed.artifact_sha256}. The seal is over a DIFFERENT "
             f"byte sequence, so this file is not the frozen denominator of "
-            f"§8's gates. Nothing is scored: a rate computed over an unsealed "
+            f"the webtext-v3 gates. Nothing is scored: a rate computed over an unsealed "
             f"population would look exactly like a real one")
     logger.info("stamp VERIFIED: %s seals %s (sha %s…, N=%d, %d fully filed)",
                 stamp_path.name, artifact.name, digest[:12],
@@ -7534,7 +7537,7 @@ class V3Slot(BaseModel):
 
 
 class V3HubColumn(BaseModel):
-    """One of §8 step 2's five simultaneously-filed hub columns."""
+    """One of the five simultaneously-filed hub columns of the sealed artifact."""
     model_config = {"extra": "allow"}
 
     hub: str
@@ -7563,7 +7566,8 @@ class V3ExtensionSubLine(BaseModel):
 
 
 class V3PredictionArtifact(BaseModel):
-    """The sealed §8.2 artifact. THE DENOMINATOR — never recomputed, only read."""
+    """The sealed webtext-v3 prediction artifact. THE DENOMINATOR — never
+    recomputed, only read."""
     model_config = {"extra": "allow"}
 
     artifact: str
@@ -7593,10 +7597,11 @@ class V3PredictionArtifact(BaseModel):
             if column.of_record:
                 return column.hub
         raise V3ArtifactError(
-            "the sealed artifact declares NO of-record hub column. §8 step 2 "
-            "names one — 'the of-record column through the 8b incumbent' — and "
-            "the branch structure is stated in terms of it, so an artifact "
-            "without one cannot be scored against §8 at all")
+            "the sealed artifact declares NO of-record hub column. The frozen "
+            "ceremony names one — 'the of-record column through the 8b "
+            "incumbent' — and the branch structure is stated in terms of it, so "
+            "an artifact without one cannot be scored against the frozen gates "
+            "at all")
 
 
 def load_v3_prediction_artifact(path: Path, stamp: Optional[Path] = None
@@ -7604,8 +7609,8 @@ def load_v3_prediction_artifact(path: Path, stamp: Optional[Path] = None
                                            StampVerification]:
     """The sealed artifact, AFTER its stamp verifies. Both, or neither.
 
-    The stamp check runs FIRST and unconditionally: §8 step 2 binds the lane to
-    refuse unstamped, and a lane that parsed first would have already read the
+    The stamp check runs FIRST and unconditionally: the frozen ceremony binds
+    the lane to refuse unstamped, and a lane that parsed first would have already read the
     predictions by the time it noticed the seal was wrong.
     """
     path = Path(path)
@@ -7665,8 +7670,9 @@ def load_v3_prediction_artifact(path: Path, stamp: Optional[Path] = None
         raise V3ArtifactError(
             f"the sealed artifact {path} is internally inconsistent and is NOT "
             f"the denominator it claims to be:\n  " + "\n  ".join(problems)
-            + "\n(§8: 'the denominator of every gate is that artifact's list "
-              "and never changes after it is sha'd' — a list that disagrees "
+            + "\n(the frozen contract: 'the denominator of every gate is that "
+              "artifact's list and never changes after it is sha'd' — a list "
+              "that disagrees "
               "with itself cannot be that)")
     logger.info("artifact loaded: %s — N=%d slots × %d hub columns "
                 "(of-record %s)", path.name, artifact.frozen_count_N,
@@ -7707,7 +7713,7 @@ class V3PairFitRef(BaseModel):
 def require_pair_fits_root(root: Path) -> Path:
     """The pair-fit tree, or a CLEAN refusal naming what is owed.
 
-    §8's order is mechanical: predictions are sealed BEFORE the first
+    The ceremony's order is mechanical: predictions are sealed BEFORE the first
     direct-pair fit job is submitted, so an absent tree is the ordinary state
     of the world while the wave runs — not a bug, and not something to paper
     over with an empty record.
@@ -7715,8 +7721,8 @@ def require_pair_fits_root(root: Path) -> Path:
     root = Path(root)
     if not root.is_dir():
         raise PairFitsAbsentError(
-            f"no direct pair fits at {root} — the §8 step-3 wave has not "
-            f"landed desk-side. This lane REFUSES rather than emitting a "
+            f"no direct pair fits at {root} — the step-3 pair-fit wave has "
+            f"not landed where this lane reads. This lane REFUSES rather than emitting a "
             f"scored record whose every slot is UNSCORED: that record would "
             f"quote a 0% gate rate, and a 0% that means 'the disk is empty' is "
             f"indistinguishable in a readout from a 0% that means 'transport "
@@ -7732,7 +7738,7 @@ def resolve_pair_fit(slot: V3Slot, pairs_root: Path) -> V3PairFitRef:
     landed 236 of 240 fits must produce four NAMED gaps, not a traceback. The
     lane's REFUSAL is at tree grain (`require_pair_fits_root`); at slot grain
     an absence is scored as UNSCORED and counted against the frozen
-    denominator, which is what §8's "never changes" clause requires.
+    denominator, which is what the frozen "never changes" clause requires.
 
     BOTH DIRECTIONS are probed (`pair_fit_probes_under`), slot-ordered first:
     the wave banks ONE fit per unordered pair, so a slot whose own ordering is
@@ -7775,17 +7781,16 @@ def observed_ahat_for_slot(slot: V3Slot, fit: V3PairFitRef,
     is the same object the v2.1 lane reads, so "the observed column is the same
     quantity" is a property of the code rather than of two copies agreeing.
 
-    THE REVERSE READING IS THE v2.1 RECORD'S CONSTRUCTION, UNMODIFIED. The §5.5
-    asymmetry enactment (2026-07-27, `outputs/collection/enactment-archives/
-    asymmetry-555/`) read BOTH directions of a pair out of ONE banked fit object
-    exactly this way — `asym_rider.py`, on the direct pair fit
+    THE REVERSE READING IS THE v2.1 RECORD'S CONSTRUCTION, UNMODIFIED. The v2.1
+    asymmetry measurement read BOTH directions of a pair out of ONE banked fit
+    object exactly this way, on the direct pair fit
     `fit_3bL14__8bL16_native_<family>.npz`:
 
         a_f = exchange_rate(tm, v3, v8, direction="fwd")   # 3b -> 8b
         a_r = exchange_rate(tm, v8, v3, direction="rev")   # 8b -> 3b
 
-    and `asym_reads.py` identically over the hub legs (`exchange_rate(tm, v_hub,
-    v_m, "fwd")` / `exchange_rate(tm, v_m, v_hub, "rev")`). The argument ORDER
+    and identically over the hub legs (`exchange_rate(tm, v_hub, v_m, "fwd")` /
+    `exchange_rate(tm, v_m, v_hub, "rev")`). The argument ORDER
     is the SLOT's — source vector first, target vector second — in both
     directions; only the `direction` keyword changes, and `TransportMap`'s own
     adjoint owns the arithmetic. Nothing about direction is re-derived here.
@@ -7884,8 +7889,9 @@ def _v3_check_band(prediction_id: str, hub: str, predicted: float,
             f"the FROZEN filed ± {half_width} = [{want_lo}, {want_hi}] "
             f"(|Δ| lo {abs(lo - want_lo):.3e}, hi {abs(hi - want_hi):.3e}, tol "
             f"{BAND_ARITHMETIC_TOLERANCE:.0e}). Bands never move after the "
-            f"seal, so this artifact disagrees with §8's frozen contract and "
-            f"is NOT scored — the desk rules on which side is wrong")
+            f"seal, so this artifact disagrees with the frozen contract and "
+            f"is NOT scored — which side is wrong is for a reviewer to settle, "
+            f"never for the scorer")
     return [lo, hi]
 
 
@@ -7893,7 +7899,7 @@ def _v3_scored_band(predicted: float, band: Sequence[float],
                     magnitude_only: bool, half_width: float) -> list[float]:
     """The band the comparison actually runs against.
 
-    §8's carve-out is "inherited verbatim from the parent", so this is
+    The frozen carve-out is "inherited verbatim from the parent", so this is
     `_scored_band_for`'s rule at a parameterized half-width: magnitude-only
     moves the comparison onto |·| and the band travels with it, at 4 dp so the
     magnitude band is the same KIND of object the sealed signed band is.
@@ -7998,14 +8004,14 @@ class V3ScoredSlot(BaseModel):
 
 
 class V3ColumnGate(BaseModel):
-    """§8's gate arithmetic for ONE hub column. MECHANICAL — never a verdict."""
+    """The frozen gate arithmetic for ONE hub column. MECHANICAL — never a verdict."""
     STATUS: str = (
         "MECHANICAL — a threshold's arithmetic, computed. The RULING on what "
         "it means is the desk's; nothing here stamps or adjudicates anything.")
     hub: str
     of_record: bool
 
-    #: G-comp-v3, over the FROZEN list — §8: "the denominator of every gate is
+    #: G-comp-v3, over the FROZEN list — "the denominator of every gate is
     #: that artifact's list and never changes after it is sha'd".
     n_frozen: int
     n_scored: int
@@ -8027,7 +8033,7 @@ class V3ColumnGate(BaseModel):
     g_comp_v3_tight_threshold: float = V3_GATE_COMP_TIGHT_THRESHOLD
     g_comp_v3_tight_meets_threshold: Optional[bool] = None
 
-    #: Both core gates — §8: "Both gates must pass for the structure claim at
+    #: Both core gates — frozen text: "Both gates must pass for the structure claim at
     #: full strength; tight-fail/floor-pass = the named partial 'structure
     #: holds at the coarse band only.'"
     both_core_gates_meet_thresholds: Optional[bool] = None
@@ -8048,7 +8054,7 @@ class V3ColumnGate(BaseModel):
 
 
 class V3BranchStructure(BaseModel):
-    """§8's pre-named branch structure (review A-F6). NAMED, never ruled."""
+    """The frozen pre-named branch structure. NAMED, never ruled."""
     STATUS: str = (
         "MECHANICAL — which of §8's pre-named branches the column arithmetic "
         "lands in. §8 named these BEFORE any fit; this block reports which one "
@@ -8063,7 +8069,7 @@ class V3BranchStructure(BaseModel):
 
 
 class V3ScoredRecord(BaseModel):
-    """The §8 step-3 scored record. DESCRIPTIVE EMISSION ONLY."""
+    """The webtext-v3 step-3 scored record. DESCRIPTIVE EMISSION ONLY."""
     record: str = SCHEMA_V3_SCORED_RECORD_V1
     STATUS: str = (
         "DESCRIPTIVE — computation only. This lane recomputes NO prediction, "
@@ -8094,7 +8100,7 @@ class V3ScoredRecord(BaseModel):
     #: The direction census over the SCORED slots. The pair-fit wave banks one
     #: object per unordered pair, so a full wave over a both-directions slot
     #: list reads roughly half and half; a census that is all-`fwd` on such a
-    #: list is the resolution gap the first §8.3 run hit, visible as a number.
+    #: list is a resolver probing one ordering only, visible as a number.
     n_slots_direction_fwd: int = 0
     n_slots_direction_rev: int = 0
     bands: dict[str, float] = {
@@ -8116,7 +8122,7 @@ def score_v3_column(slot: V3Slot, column: V3ColumnPrediction,
                     observed: Optional[float]) -> V3ScoredColumn:
     """Score ONE column of ONE slot at BOTH bands. Pure arithmetic.
 
-    Every branch is decided by §8's frozen rules and nothing else: no band is
+    Every branch is decided by the frozen rules and nothing else: no band is
     recomputed, no threshold is read from the environment, and no column's
     verdict depends on another column's.
     """
@@ -8247,7 +8253,7 @@ def _artifact_column_order(slot: V3Slot) -> list[V3ColumnPrediction]:
 
 def _column_gate(hub: str, of_record: bool, scored_slots: Sequence[V3ScoredSlot],
                  frozen_n: int) -> V3ColumnGate:
-    """§8's three gates' arithmetic for one hub column."""
+    """The three frozen gates' arithmetic for one hub column."""
     rows = [(s, c) for s in scored_slots for c in s.columns if c.hub == hub]
     gate = V3ColumnGate(hub=hub, of_record=of_record, n_frozen=frozen_n,
                         n_scored=0, n_unscored_no_fit=0,
@@ -8330,7 +8336,7 @@ def _column_gate(hub: str, of_record: bool, scored_slots: Sequence[V3ScoredSlot]
 
 def _branch_structure(artifact: V3PredictionArtifact,
                       gates: Sequence[V3ColumnGate]) -> V3BranchStructure:
-    """§8's pre-named branch structure (review A-F6), selected by arithmetic."""
+    """The frozen pre-named branch structure, selected by arithmetic."""
     of_record_hub = artifact.of_record_hub
     by_hub = {gate.hub: gate for gate in gates}
     incumbent = by_hub.get(of_record_hub)
@@ -8394,7 +8400,7 @@ def score_v3_artifact(artifact: V3PredictionArtifact,
                       verification: StampVerification,
                       pairs_root: Path,
                       vectors_root: Optional[Path] = None) -> V3ScoredRecord:
-    """§8 step 3, end to end: â_obs per slot, every column at both bands, gates.
+    """Ceremony step 3, end to end: â_obs per slot, every column at both bands, gates.
 
     The pair-fits tree is required to EXIST (`require_pair_fits_root`) before a
     slot is touched; per-slot absences inside a present tree are named gaps and
@@ -8535,7 +8541,8 @@ def resolve_v3_pair_fits(artifact: V3PredictionArtifact,
     The assertion mode behind the reverse-direction fix: against a landed wave
     of 120 UNORDERED fit objects and a frozen list of 240 ORDERED slots, this
     must report 240/240 resolvable — 120 forward and 120 reverse — and it does
-    so without touching a single number the desk has not yet asked for.
+    so without reading a single number, so resolution can be checked before
+    anything is scored.
     """
     pairs_root = require_pair_fits_root(pairs_root)
     report = V3PairFitResolution(
@@ -8576,8 +8583,8 @@ def write_v3_scored_record(record: V3ScoredRecord, out: Path,
     out = Path(out)
     if out.exists() and not overwrite:
         raise ScoringError(
-            f"a scored record already exists at {out}. Scoring is a DESK ACT "
-            f"performed once per record against frozen bands; pass "
+            f"a scored record already exists at {out}. Scoring is a deliberate "
+            f"act performed once per record against frozen bands; pass "
             f"--overwrite-scored to replace it deliberately")
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(record.model_dump_json(indent=1))
@@ -8727,9 +8734,8 @@ def selftest() -> int:                                   # noqa: C901 — a chec
           "the MoE rung and its dense family-mate share the site of record "
           "(⋆L15 both) — the sparsity raises the ceiling, not the site")
     check(site_of_record("gemma3-27b") == 38,
-          "gemma3-27b resolves at its RULED site L38 (Luxia 2026-07-29, six-site "
-          "â evidence table `7f59af50…`; L41 robustness, the carried-provisional "
-          "L36 retired)")
+          "gemma3-27b resolves at its site of record L38 (six-site â evidence "
+          "table; L41 robustness, the carried-provisional L36 retired)")
     try:
         compose_pair("gemma3-27b", "phi-4", source_site=36)
         check(False, "gemma's retired L36 must refuse")
@@ -8738,36 +8744,32 @@ def selftest() -> int:                                   # noqa: C901 — a chec
               f"gemma's retired L36 refuses: {exc!s:.60}")
     check(site_of_record("llama-3.1-70b-instruct") == 37,
           "70B site of record is L37 (L43 robustness, L17 retired)")
-    #  No retired-site refusal check rides with the 3.3-70B: this node was
-    #  SCAN-REGISTRY ONLY before the ruling, so it has no prior registration to
-    #  retire — unlike gemma's L36 and the 3.1-70B's L17 above.
+    #  No retired-site refusal check rides with the 3.3-70B: this model was
+    #  SCAN-REGISTRY ONLY before its site was fixed, so it has no prior
+    #  registration to retire — unlike gemma's L36 and the 3.1-70B's L17 above.
     check(site_of_record("llama-3.3-70b-instruct") == 58,
-          "llama-3.3-70b-instruct resolves at its RULED site L58 (desk "
-          "2026-07-29 under Luxia's overnight delegation 2, five-site â "
-          "evidence table `e6d584aa…`; L63 robustness). Its 3.1 vintage-mate "
-          "rules to L37 from its own table — independent registrations")
+          "llama-3.3-70b-instruct resolves at its site of record L58 "
+          "(five-site â evidence table; L63 robustness). Its 3.1 vintage-mate "
+          "sits at L37 from its own table — independent registrations")
     #  No retired-site refusal check rides with the 405B either, and for the
     #  same reason as the 3.3-70B directly above: it was SCAN-REGISTRY ONLY
-    #  before the ruling, so there is no prior registration to retire. The
+    #  before its site was fixed, so there is no prior registration to retire. The
     #  refusal checks exist for gemma's L36 and the 3.1-70B's L17, which were
     #  registered and then MOVED; a first registration has nothing to refuse.
     check(site_of_record("llama-3.1-405b-instruct") == 99,
-          "llama-3.1-405b-instruct resolves at its RULED site L99 (desk "
-          "2026-07-29 under Luxia's overnight delegation 2, five-site â "
-          "evidence table `04f2a2c4…`; L107 robustness). Unanimous rank-1 in "
+          "llama-3.1-405b-instruct resolves at its site of record L99 "
+          "(five-site â evidence table; L107 robustness). Unanimous rank-1 in "
           "all four robustness columns; the r² peak L43 ranks 3rd/4th on â and "
           "goes sub-null on the rebuilt-L16 hub — never re-derive this from r²")
     #  No retired-site refusal check rides with qwen3-30b-a3b either, and for the
-    #  third time the same reason: SCAN-REGISTRY ONLY before the ruling, so there
-    #  is no prior registration to retire. Only gemma's L36 and the 3.1-70B's L17
-    #  were ever registered-then-MOVED, and only they get refusal checks; a first
-    #  registration has nothing to refuse. Note this is also NOT a delegated
-    #  ruling — Luxia ruled it first-hand off a table the overnight pass parked.
+    #  third time the same reason: SCAN-REGISTRY ONLY before its site was fixed,
+    #  so there is no prior registration to retire. Only gemma's L36 and the
+    #  3.1-70B's L17 were ever registered-then-MOVED, and only they get refusal
+    #  checks; a first registration has nothing to refuse.
     check(site_of_record("qwen3-30b-a3b") == 38,
-          "qwen3-30b-a3b resolves at its RULED site L38 (Luxia DIRECTLY, "
-          "2026-07-29 morning, off the PARKED five-site â evidence table "
-          "`13527972…`; L35 robustness). The top pair {L35, L38} is unanimous "
-          "but rank-1 flips 2–2, so this site is a RULING on evidence, never a "
+          "qwen3-30b-a3b resolves at its site of record L38 (five-site â "
+          "evidence table; L35 robustness). The top pair {L35, L38} is unanimous "
+          "but rank-1 flips 2–2, so this site is a JUDGEMENT on evidence, never a "
           "table maximum — and it is the campaign's one non-inverting node "
           "(r(r²,â) = +.58), because here the r² peak IS the deep site")
     check(site_of_record("phi-3.5-mini-instruct") == 13,
@@ -9362,7 +9364,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
           "never scored, by construction and not by convention")
 
     print("== selftest 17: the directional-constants schema, and its refusals ==")
-    #  ADDENDUM 2026-07-29-H. The readout is produced by a DIFFERENT lane, so
+    #  The directional constants readout is produced by a DIFFERENT lane, so
     #  every departure from the named contract must halt with a message that
     #  states the contract — that is how the two lanes reconcile without a
     #  round trip through a person's memory.
@@ -9971,7 +9973,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                   f"it at filing time (exit {exc.code})")
 
     print("== selftest 21: the resolution-provenance ledger (E4 A1) ==")
-    #  The ledger must (a) exist for EVERY resolve, hit or miss, (b) name the
+    #  The provenance record must (a) exist for EVERY resolve, hit or miss, (b) name the
     #  tree AND the vintage that answered, (c) change nothing about what the
     #  resolvers return, and (d) get LOUD exactly where a vintage confusion is
     #  born — a resolve that falls THROUGH a set v2.1 root to a pre-v2.1 tree.
@@ -10046,7 +10048,8 @@ def selftest() -> int:                                   # noqa: C901 — a chec
     check(V21_ROOT is None, "selftest 21 leaves no root set")
 
     print("== selftest 22: filed-paths mode — pinned, loud, never a fallback ==")
-    #  The mode E4 anomaly A1 asks for: scoring/null tooling pins resolution to
+    #  The mode that closes the vintage-confusion gap (a filed v2.1 leg silently
+    #  served from the frozen tree): scoring/null tooling pins resolution to
     #  a record's OWN resolved paths. Every refusal below is the same refusal —
     #  a pin that cannot answer must HALT, because the fallback it would take is
     #  the probe order, which answers from the frozen tree the record is not.
@@ -10126,11 +10129,11 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                       f"would test the pin, not the resolver: {exc!s:.60}")
         check(FILED_PATHS is None, "filed_paths_scope restores the pin on exit")
 
-        #  THE A1 SHAPE ITSELF: the pin must beat a probe that WOULD HAVE
-        #  SUCCEEDED. `alpha`/`beta` above are synthetic and resolve to nothing,
-        #  so they cannot show this; a REGISTERED model whose frozen-tree map is
-        #  banked can, and that is exactly the case anomaly A1 describes — the
-        #  probe order answers, from the wrong vintage, and the pin must win.
+        #  THE VINTAGE-CONFUSION SHAPE ITSELF: the pin must beat a probe that
+        #  WOULD HAVE SUCCEEDED. `alpha`/`beta` above are synthetic and resolve to
+        #  nothing, so they cannot show this; a REGISTERED model whose frozen-tree
+        #  map is banked can, and that is exactly the dangerous case — the probe
+        #  order answers, from the wrong vintage, and the pin must win.
         unpinned_ref = resolve_hub_map(probe_model, probe_site, "native",
                                        FAMILY_OF_RECORD)
         if unpinned_ref.available:
@@ -10193,8 +10196,8 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                   f"list, in order ({len(loose.probed_paths)} of "
                   f"{len(ordinary)} probed before it stopped)")
             #  THE INVARIANT, asserted with NO dependence on the ambient data
-            #  tree: whatever answered, the resolve sits at its own ledger
-            #  position, it did NOT come from the pin, and it carries the
+            #  tree: whatever answered, the resolve sits at its own position in
+            #  the provenance record, it did NOT come from the pin, and it carries the
             #  UNPINNED note. That is the whole contract — "permitted, warned,
             #  never silent" — and `resolve_hub_map` attaches the note on BOTH
             #  its probe-hit and its every-probe-missed branch, so neither
@@ -10211,10 +10214,9 @@ def selftest() -> int:                                   # noqa: C901 — a chec
             #  ...and `source` itself is asserted per CONFIGURATION rather than
             #  assumed, because whether a probe can hit depends on whether the
             #  data tree is present at cwd — which is a property of the
-            #  invocation, not of the resolver (rake M15's family). Before this
-            #  the clause read `source == "probe"` unconditionally and therefore
-            #  passed only where `outputs/` happened to exist; run from a
-            #  worktree (which has no data tree) it failed on MAIN too.
+            #  invocation, not of the resolver. Asserting `source == "probe"`
+            #  unconditionally would pass only where `outputs/` happens to exist
+            #  and fail from any checkout without a data tree.
             check(loose_prov[0].source == ("probe" if loose.available
                                            else "absent"),
                   f"and its `source` is the honest one for this checkout: "
@@ -10769,8 +10771,8 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                   and "named_gap_CLOSED" in doc26["emission"],
                   "the emission block asserts M33(b) and records that the star "
                   "column's named gap is closed")
-            #  Re-emission over a filed record is refused (a filed sha is
-            #  ledgered), and the comparison of a record with ITSELF is the
+            #  Re-emission over a filed record is refused (a filed record's sha
+            #  is cited elsewhere and must keep naming the same bytes), and the comparison of a record with ITSELF is the
             #  zero-delta anchor for --verify-against.
             try:
                 with v21_root_scope(collection26,
@@ -10793,9 +10795,8 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                   f"{same26.max_abs_delta:.1e} over "
                   f"{same26.n_fields_compared} field(s) — the anchor that proves "
                   f"the comparison reads anything at all")
-            #  And it can FAIL: a hand-moved number must be caught (rake M19(c)'s
-            #  lesson in miniature — a check whose failing branch never runs is
-            #  not known to work).
+            #  And it can FAIL: a hand-moved number must be caught — a check
+            #  whose failing branch never runs is not known to work.
             moved26 = root26 / "record-moved.json"
             doc_moved = json.loads(out26.read_text())
             doc_moved["predictions"][0]["star_prediction"]["predicted"] = 0.9999
@@ -10806,8 +10807,8 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                   f"and a single moved number is CAUGHT: "
                   f"{len(diff26.deltas)} disagreement(s), max |Δ| "
                   f"{diff26.max_abs_delta:.4f}")
-            #  THE 2026-08-01 RULING, SCOPE 3, at the one place this module
-            #  compares a fresh record against a banked one. Both directions of
+            #  THE THREAD-COUNT NOTE, at the one place this module compares a
+            #  fresh record against a banked one. Both directions of
             #  the field are exercised: it must fire when the counts differ and
             #  a difference exists, and it must stay silent on a clean compare.
             check(same26.thread_count_mismatch is None,
@@ -10975,8 +10976,8 @@ def selftest() -> int:                                   # noqa: C901 — a chec
         name28 = "fit_8bL16__someML37_native_proc_k128.npz"
         (root28 / "fits_v21_local").mkdir(parents=True)
         (root28 / "fits_v21_local" / name28).write_bytes(b"local")
-        #  The /models placement pattern (Luxia ruling 2026-07-29): the real tree
-        #  lives on the RAID and the arm reaches it through a symlinked directory.
+        #  The relocated-data pattern: the real tree lives on a separate data
+        #  volume and the arm reaches it through a symlinked directory.
         store28 = Path(td28) / "models-store" / "fits_v21_relocated"
         store28.mkdir(parents=True)
         (store28 / name28).write_bytes(b"relocated")
@@ -10995,7 +10996,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
         check(found28 == sorted(found28),
               "results are sorted, so a sweep row's on-disk list is stable "
               "across runs")
-        #  A CYCLE must terminate (M38(a)). A symlink pointing at an ancestor
+        #  A CYCLE must terminate. A symlink pointing at an ancestor
         #  makes `os.walk(followlinks=True)` loop forever unless visits are
         #  tracked; this is the branch that proves the guard runs.
         (root28 / "fits_v21_local" / "loop").symlink_to(
@@ -11025,15 +11026,15 @@ def selftest() -> int:                                   # noqa: C901 — a chec
               f"dialect {listing_bare.dialect!r}")
 
         #  DIALECT 2: `./`-prefixed WITH `#` headers, the shape `find . | xargs
-        #  sha256sum` writes. Rake M42(d): the old parser keyed rows verbatim, so
-        #  every lookup missed and a good manifest read as "not listed"; and it
-        #  accepted any two-token line, so a two-word `#` comment became a phantom
-        #  row named after its own second word. Both are asserted fixed.
+        #  sha256sum` writes. A parser that keyed rows verbatim would miss every
+        #  lookup, so a good manifest would read as "not listed"; one that
+        #  accepted any two-token line would turn a two-word `#` comment into a
+        #  phantom row named after its own second word. Both are asserted absent.
         dotted29 = root29 / "MANIFEST-dotted.sha256"
         dotted29.write_text(
             "# corpus-v2.1 node-side manifest\n"
             "# generated 2026-07-29\n"
-            "# phantom\n"                     # exactly TWO tokens — the M42(d) trap
+            "# phantom\n"                     # exactly TWO tokens — the phantom-row trap
             f"{sha_py}  ./wp_composition.py\n"
             f"{sha_js}  ./wp_composition.json\n")
         listing_dot = parse_sha256_manifest(dotted29)
@@ -11086,7 +11087,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
               "a well-formed manifest generated LAST audits clean, with no "
               "findings at all")
 
-        #  M42(b): the write-ordering slip. An artifact written after its manifest
+        #  The write-ordering slip. An artifact written after its manifest
         #  makes an honest file read as tampered.
         import time as _time
         late29 = root29 / "MANIFEST-late.sha256"
@@ -11144,7 +11145,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
 
         #  THE CLI: a directory sweep, exiting nonzero on any finding, and 0 on a
         #  tree of clean manifests. Both branches, because an audit that cannot
-        #  fail proves nothing (rake M19(c)).
+        #  fail proves nothing.
         check(main(["--manifest-audit", str(root29)]) == 1,
               "--manifest-audit over a tree WITH findings exits nonzero, so a "
               "desk sweep can be a gate rather than a report nobody reads")
@@ -11170,7 +11171,9 @@ def selftest() -> int:                                   # noqa: C901 — a chec
               "the sweep reports it and carries on over the rest")
 
     print("== selftest 30: the hub-vector basis — one path per basis, no fallback ==")
-    #  RAKE M12 AT BASIS GRAIN. Three properties, and the third is the one that
+    #  ONE TREE PER COMPUTATION, AT BASIS GRAIN: a readout fed vectors from the
+    #  wrong tree crashes nothing and is simply wrong. Three properties, and the
+    #  third is the one that
     #  actually protects a filing: (a) both registered bases resolve BY
     #  CONSTRUCTION against a fixture, (b) an unregistered basis REFUSES, and
     #  (c) a registered basis whose file is absent stays absent — it never
@@ -11311,8 +11314,8 @@ def selftest() -> int:                                   # noqa: C901 — a chec
 
     # ══════════════════════════ 31: THE v2.1 LANE IS UNCHANGED (the byte proof)
     print("== selftest 31: the v2.1 lane's resolution is BYTE-UNCHANGED ==")
-    #  RAKE M44's rule (a) in code: this configuration is "no root set, no pin
-    #  set, default hub, default basis" — the one every existing caller runs in
+    #  A selftest count names the configuration it was measured in: this one is
+    #  "no root set, no pin set, default hub, default basis" — the one every existing caller runs in
     #  — and the claim is that the generalization moved NOTHING in it. Proved
     #  path-by-path rather than asserted, because a probe list that quietly
     #  gained an entry is exactly the change that reads as "still works".
@@ -11470,8 +11473,8 @@ def selftest() -> int:                                   # noqa: C901 — a chec
             check(False, "a non-directory root must be refused")
         except CorpusVintageError:
             check(True, "a non-directory --v3-root refuses")
-        #  The machinery itself, against the SYNTHETIC digest (rake M44(c): the
-        #  fixture is data-independent — it never touches a banked tree).
+        #  The machinery itself, against the SYNTHETIC digest: the fixture is
+        #  data-independent — it never touches a banked tree.
         with v3_root_scope(good33, expected_corpus_sha=synthetic_sha33) as sha33:
             check(sha33 == synthetic_sha33 and V3_ROOT == good33
                   and V3_CORPUS_SHA == synthetic_sha33,
@@ -11569,8 +11572,8 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                   f"{exc34e!s:.56}")
 
     print("== selftest 35: the §8 lane end-to-end on a HAND-COMPUTED fixture ==")
-    #  RAKE M44(c): everything below is synthesized on a temp tree. No banked
-    #  artifact is touched, so this configuration is identical from any cwd.
+    #  Everything below is synthesized on a temp tree. No banked artifact is
+    #  touched, so this configuration is identical from any cwd.
     #
     #  THE FIXTURE, AND WHY EVERY NUMBER IN IT IS EXACT.
     #  The direct pair map is the IDENTITY proc map (va = vb = Ω = I_4,
@@ -11601,7 +11604,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
     #    gemma  G-comp-v3      4/4 = 1.000 >= 0.80 PASS
     #           G-tight        3/3 = 1.000 >= 0.80 PASS
     #           G-extension    1/1 = 1.000 >= 0.70 PASS
-    #    branch: of-record fails both, a race column passes both => §8 BRANCH (b)
+    #    branch: of-record fails both, a race column passes both => BRANCH (b)
     with _tmp30.TemporaryDirectory(prefix="composed_v3score_") as td35:
         fx35 = Path(td35)
         pairs35 = fx35 / "pairs"
@@ -11848,7 +11851,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
 
     print("== selftest 36: carve-out × floor-clearing, at column grain ==")
     #  Hand-computed unit checks on `score_v3_column` — no disk, no fits, so
-    #  these run identically in every configuration (rake M44(c)).
+    #  these run identically in every configuration.
     def _fixture_slot36(prediction_id: str = "v3-prediction/a→b/native-k256"
                         ) -> V3Slot:
         return V3Slot(
@@ -11873,7 +11876,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
         return V3ColumnPrediction(**payload)
 
     slot36 = _fixture_slot36()
-    #  (1) THE INTERSECTION §8 DOES NOT ADDRESS: a near-zero PREDICTION whose
+    #  (1) THE INTERSECTION THE FROZEN TEXT DOES NOT ADDRESS: a near-zero PREDICTION whose
     #      OBSERVATION clears the floor. Literal reading applied, and flagged.
     inter36 = score_v3_column(slot36, _fixture_column36(0.0700), 0.5000)
     check(inter36.magnitude_only is True and inter36.floor_clearing is True
@@ -11943,13 +11946,12 @@ def selftest() -> int:                                   # noqa: C901 — a chec
           "prediction intact — reported, never dropped")
 
     print("== selftest 37: ONE unordered fit object, BOTH ordered slots ==")
-    #  RAKE M44(c): synthesized on a temp tree, identical from any cwd.
+    #  Synthesized on a temp tree, identical from any cwd.
     #
     #  THE FACT THIS FIXTURE IS ABOUT. A semi-orthogonal Procrustes fit is an
-    #  object of the UNORDERED pair. The 2026-08-04 wave banked 120 objects
-    #  under the canonical direction against 240 ORDERED frozen slots, and the
-    #  first §8.3 run scored 120/240 because the resolver probed only the
-    #  slot's own ordering. Both slots must come out of the ONE object, in
+    #  object of the UNORDERED pair. The pair-fit wave banks 120 objects under
+    #  the canonical direction against 240 ORDERED frozen slots, so a resolver
+    #  that probed only the slot's own ordering would score 120/240. Both slots must come out of the ONE object, in
     #  their OWN directions, with DIFFERENT values.
     #
     #  THE FIXTURE, AND WHY fwd ≠ rev BY CONSTRUCTION. d = 4, k = 2, and the
@@ -11962,8 +11964,8 @@ def selftest() -> int:                                   # noqa: C901 — a chec
     #      v_B = (√.75, 0, 0.3, 0.4)   b := vb·v_B = (0.3, 0.4)   ‖b‖ = 0.5
     #
     #  For a proc map both directions share ONE numerator N = aᵀ Ω b and differ
-    #  only in which projection normalizes it (the §5.5 identity, ledger
-    #  2026-07-27: â_rev/â_fwd = ‖va·v_src‖/‖vb·v_tgt‖ = ceil_src/ceil_tgt):
+    #  only in which projection normalizes it (the asymmetry identity
+    #  â_rev/â_fwd = ‖va·v_src‖/‖vb·v_tgt‖ = ceil_src/ceil_tgt):
     #
     #      a Ω = (0.8, 0) @ [[0,1],[-1,0]] = (0, 0.8)
     #      N   = (0, 0.8) · (0.3, 0.4) = 0.32
@@ -12294,8 +12296,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                          "actually banked on disk. EXITS NONZERO if any banked "
                          "hub map is unreachable from the registry.")
     ap.add_argument("--v21-root", type=Path, default=None,
-                    help="root of a corpus-v2.1 re-bank mirror (Addendum G "
-                         "§G1's go-forward basis). Its fits_v21_<model>/ hub "
+                    help="root of a corpus-v2.1 re-bank mirror (the "
+                         "go-forward basis). Its fits_v21_<model>/ hub "
                          "maps and vectors/<model>/ banks are PREPENDED to the "
                          "existing probes; the root must prove its vintage via "
                          "corpus/corpus_manifest.json. MUTUALLY EXCLUSIVE WITH "
@@ -12309,7 +12311,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     choices=sorted(FAMILY_OF_RECORD_BY_BASIS),
                     help="WHICH BASIS THIS RUN IS ON. Default corpus-v2.1 — "
                          "every existing mode is byte-identical under it. "
-                         "`webtext-v3` selects the §8 lane: it sets the "
+                         "`webtext-v3` selects the v3 scoring lane: it sets the "
                          "webtext-v3 family of record "
                          f"({FAMILY_OF_RECORD_WEBTEXT_V3}), verifies and sets "
                          "the --v3-root, and is REQUIRED by --score-v3.")
@@ -12328,19 +12330,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     help=f"path of the vintage manifest RELATIVE to --v3-root "
                          f"(default {V3_CORPUS_MANIFEST_RELPATH})")
     ap.add_argument("--score-v3", type=Path, default=None,
-                    help="THE §8 STEP-3 SCORING LANE. Names the SEALED §8.2 "
-                         "prediction artifact. The lane verifies the desk "
-                         "stamp against it (§8 step 2 binds the lane to refuse "
-                         "unstamped), loads its slot list as the denominator "
+                    help="THE WEBTEXT-V3 STEP-3 SCORING LANE. Names the SEALED "
+                         "webtext-v3 prediction artifact. The lane verifies the "
+                         "sealing stamp against it (the frozen ceremony binds "
+                         "the lane to refuse unstamped), loads its slot list as the denominator "
                          "— never recomputing one â_comp — computes â_obs per "
                          "slot from the direct pair fits, scores every hub "
                          "column at BOTH bands with the carve-out, and emits "
                          "the gate arithmetic (G-comp-v3, G-comp-v3-tight, "
-                         "G-extension, the §8 branch structure). DESCRIPTIVE "
-                         "EMISSION ONLY — stamps and adjudications are the "
-                         "desk's. Requires --basis webtext-v3.")
+                         "G-extension, the frozen branch structure). "
+                         "DESCRIPTIVE EMISSION ONLY — this lane stamps and "
+                         "adjudicates nothing. Requires --basis webtext-v3.")
     ap.add_argument("--stamp", type=Path, default=None,
-                    help=f"the desk's seal over the artifact (default: "
+                    help=f"the sealing stamp over the artifact (default: "
                          f"{V3_STAMP_FILENAME} BESIDE it — one named path, "
                          f"never a search). Its artifact_sha256 is recomputed "
                          f"and compared before a single prediction is parsed.")
@@ -12357,7 +12359,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                          "reverse / unresolved), then STOP. No vector is "
                          "loaded, no transport map is read, no â_obs is "
                          "computed, no column is scored and no record is "
-                         "written — scoring is a DESK act, and this mode "
+                         "written — scoring is a deliberate act, and this mode "
                          "exists so the resolution surface can be asserted "
                          "against real data without performing it. Exits "
                          "nonzero if any frozen slot is unresolvable.")
@@ -12367,7 +12369,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                          f"are checked against the ones the SEALED artifact "
                          f"names; a disagreement beyond the root HALTS.")
     ap.add_argument("--scored-v3-out", type=Path, default=None,
-                    help="where the §8 scored record is written (default: "
+                    help="where the webtext-v3 scored record is written (default: "
                          "beside the artifact as scored-<artifact name>). A "
                          "SEPARATE flag from --scored-out, which belongs to "
                          "the v2.1 scoring act — one path, one artifact.")
@@ -12375,18 +12377,20 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     choices=sorted(HUB_VECTOR_BASES),
                     help=f"which collection basis the hub's OWN vector (xi, the "
                          f"descriptive companions' hub axis) is read from. ONE "
-                         f"path per basis, no fallback (rake M12); an "
+                         f"path per basis, no fallback (a readout never mixes "
+                         f"trees); an "
                          f"unregistered basis is refused. Default "
                          f"{DEFAULT_HUB_VECTOR_BASIS} — the filing lane flips "
                          f"this EXPLICITLY, never by default.")
     ap.add_argument("--hub-vector-root", type=Path, default=None,
                     help="relocate the chosen basis's root (its stem, which is "
                          "the wave's identity, is unchanged). For pointing at a "
-                         "node arm root or a re-banked tree without editing a "
+                         "relocated arm root or a re-banked tree without editing a "
                          "constant — still ONE named path, never a probe order.")
     ap.add_argument("--filed-paths", type=Path, default=None,
                     help="a FILED prediction record whose own `resolved` paths "
-                         "PIN resolution (E4 anomaly A1). Every hub map and "
+                         "PIN resolution, so a filed leg is never served from "
+                         "another vintage. Every hub map and "
                          "vector is taken from the record instead of probed, so "
                          "scoring and null tooling re-derive the artifacts the "
                          "record was filed from rather than whatever the probe "
@@ -12397,44 +12401,43 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--filed-paths-allow-unpinned", action="store_true",
                     help="let keys the record does not file fall through to the "
                          "normal probes. Each one is WARNED and recorded in the "
-                         "provenance ledger as UNPINNED — never silent, because "
+                         "provenance record as UNPINNED — never silent, because "
                          "a probe answers from the frozen tree first and the "
                          "record was filed from v2.1.")
     ap.add_argument("--provenance-out", type=Path, default=None,
-                    help="write the resolution-provenance ledger here: which "
+                    help="write the resolution-provenance record here: which "
                          "tree answered every resolve, and which vintage. A "
                          "SEPARATE artifact from --out on purpose — the "
                          "composed readout's shape does not move for it.")
     ap.add_argument("--directional-constants", type=Path, default=None,
                     help=f"a {SCHEMA_DIRECTIONAL_CONSTANTS_V1} readout of "
-                         f"per-model c_out/c_in (ADDENDUM 2026-07-29-H). With "
+                         f"per-model c_out/c_in. With "
                          f"--candidates or --source-model/--target-model it "
                          f"emits the DIRECTIONAL column: "
                          f"directional-prediction/<src>→<tgt>/<arm>-k128, "
                          f"predicted = c_src^out · c_tgt^in, ±.05 band frozen "
-                         f"at filing. The SYMMETRIC star column is untouched "
-                         f"(H item 2).")
+                         f"at filing. The SYMMETRIC star column is untouched.")
     ap.add_argument("--directional-out", type=Path, default=None,
                     help="write the directional readout JSON here. A SEPARATE "
                          "artifact from --out on purpose: the composed "
                          "readout's shape does not move for the new column.")
     ap.add_argument("--star-constants", type=Path, default=None,
                     help=f"a {SCHEMA_SYMMETRIC_CONSTANTS_V1} artifact of "
-                         f"per-model symmetric coefficients c_M (prereg §3). "
+                         f"per-model symmetric coefficients c_M. "
                          f"With --candidates or --source-model/--target-model it "
                          f"emits the SYMMETRIC STAR column: "
                          f"star-prediction/<src>→<tgt>/<arm>-k128, predicted = "
                          f"c_src · c_tgt at {FILED_DECIMALS} dp with the frozen "
                          f"±.05 band of the filed value. The column's TERMS are "
-                         f"untouched (Addendum H item 2) — only the arithmetic's "
-                         f"home moved into the tool.")
+                         f"untouched — the tool only computes them.")
     ap.add_argument("--star-out", type=Path, default=None,
                     help="write the symmetric-star readout JSON here. A SEPARATE "
                          "artifact from --out and --directional-out, for the "
                          "same reason: no existing readout's shape moves so a "
                          "column can arrive.")
     ap.add_argument("--emit-record", action="store_true",
-                    help="EMIT A RACING FILING RECORD (rake M33(b)): all three "
+                    help="EMIT A RACING FILING RECORD, produced by the tool and "
+                         "re-parsed by its own scorer: all three "
                          "predictor columns produced in-process, the selection "
                          "rule applied and proved, every block pre-flighted "
                          "through the CONSUMER's own band/carve-out checks and "
@@ -12442,7 +12445,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                          "Requires --star-constants, --directional-constants, "
                          "--slate, --gate-column, --batch and --out.")
     ap.add_argument("--slate", type=Path, default=None,
-                    help="the DESK's ranked-slate artifact (its "
+                    help="the ranked-slate artifact (its "
                          "`remaining_ranked` list is the population of record). "
                          "This tool reads it; it never re-ranks and never "
                          "re-derives a population.")
@@ -12453,25 +12456,25 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                          "standing pre-filing gate.")
     ap.add_argument("--batch", default=None,
                     help="the batch label of record (e.g. 'batch-8'). REQUIRED "
-                         "with --emit-record and never defaulted: three banked "
-                         "records carry a stale label because a per-batch copy "
-                         "of the emitter did default it.")
+                         "with --emit-record and never defaulted: a defaulted "
+                         "label is how a record ends up carrying another "
+                         "batch's name.")
     ap.add_argument("--slate-size", type=int, default=None,
-                    help="how many slots the ruling files (14 for batches 5-7)")
+                    help="how many slots the batch files (14 for batches 5-7)")
     ap.add_argument("--forced-hub", default=None,
-                    help="an audit hub whose prereg §3 audit pairs are "
+                    help="an audit hub whose pre-registered audit pairs are "
                          "PROTOCOL-FORCED into the slate. Needs --audit-set; the "
                          "forced set is asserted to BE that enumeration by model "
                          "identity and orientation, or the emission HALTs.")
     ap.add_argument("--audit-set", default=None,
-                    help="comma list of prereg §3's audit-set models, for "
+                    help="comma list of the pre-registered audit-set models, for "
                          "--forced-hub")
     ap.add_argument("--narrative", type=Path, default=None,
-                    help="a JSON sidecar of the DESK's PROSE (ruling, authority, "
-                         "disclosures, the frozen E4.1 clause). Merged at NAMED "
+                    help="a JSON sidecar of the record's PROSE (the decision, "
+                         "authority, disclosures, the frozen E4.1 clause). Merged at NAMED "
                          "keys only; an unrecognized key HALTs. Omit it and the "
                          "record NAMES its prose as not supplied — this tool "
-                         "composes no ruling and invents no disclosure.")
+                         "composes no decision and invents no disclosure.")
     ap.add_argument("--verify-against", type=Path, default=None,
                     help="after emitting, compare the new record to this BANKED "
                          "one on the NUMBERS AND SLOT IDENTITIES ONLY "
@@ -12480,17 +12483,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                          "proof for a moved producer.")
     ap.add_argument("--overwrite-record", action="store_true",
                     help="permit replacing an existing filing record — a "
-                         "deliberate desk act, never the default (a filed "
-                         "record's sha is ledgered)")
+                         "deliberate act, never the default (a filed record's "
+                         "sha is cited elsewhere and must keep naming the same "
+                         "bytes)")
     ap.add_argument("--repo-root", type=Path, default=None,
                     help="root the record's provenance paths are relativized "
                          "against (default: cwd, which is where the data tree's "
                          "relative `outputs/` already resolves from)")
     ap.add_argument("--manifest-audit", type=Path, nargs="+", default=None,
                     metavar="PATH",
-                    help="RAKE M42 audit over sha256 manifests: each PATH is a "
+                    help="structural audit over sha256 manifests: each PATH is a "
                          "manifest file, or a DIRECTORY swept (following "
-                         "symlinks, rake M38) for *.sha256. Reports manifests "
+                         "symlinks, so relocated subtrees are seen) for *.sha256. Reports manifests "
                          "that LIST THEMSELVES (which can never verify clean), "
                          "covered artifacts written AFTER their manifest (the "
                          "manifest must be generated LAST), missing rows and "
@@ -12501,7 +12505,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     help="a FILED prediction record to score. Requires "
                          "--observed; never runs at filing time.")
     ap.add_argument("--observed", type=Path, default=None,
-                    help='the desk-supplied observed â artifact: {"corpus_'
+                    help='the supplied observed â artifact: {"corpus_'
                          'manifest_sha256": "<fit vintage>", "observed": '
                          '[{"source","target","arm","family","a_hat", '
                          '"corpus_manifest_sha256","fit_path","observed_utc"}]}')
@@ -12510,21 +12514,21 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                          "the filing record as scored-<record name>)")
     ap.add_argument("--alpha-companion", type=Path, default=None,
                     help=f"a {SCHEMA_CONSTANT_ALPHA_COMPANION_V1} artifact "
-                         f"(Addendum D §D2), supplied by the DESK. Never "
+                         f"(the constant-α baseline), supplied externally. Never "
                          f"computed here: ᾱ is a grand mean over the scored "
-                         f"set and §D3's permutation null is a desk "
-                         f"computation. Omit it and the scored record names "
+                         f"set and its permutation null is computed outside "
+                         f"this tool. Omit it and the scored record names "
                          f"the companion OWED.")
     ap.add_argument("--overwrite-scored", action="store_true",
                     help="permit replacing an existing scored record — a "
-                         "deliberate desk act, never the default")
+                         "deliberate act, never the default")
     ap.add_argument("--pairs-json", type=Path, default=CANDIDATE_PAIRS_JSON,
                     help=f"candidate-pair enumeration (default {CANDIDATE_PAIRS_JSON})")
     ap.add_argument("--archive-dir", type=Path, default=ARCHIVE_ROOT,
                     help="the archived operationalization of record")
     #  The choices are the UNION (`FAMILIES_ALL`): `read_exchange_rates.FAMILIES`
     #  is the v2.1-era enumeration and carries no `proc_k256`, which is the
-    #  webtext-v3 §3.2 family of record. v2.1's own order is preserved and its
+    #  webtext-v3 family of record. v2.1's own order is preserved and its
     #  default is untouched, so this is a superset and never a reordering.
     ap.add_argument("--family", default=None, choices=FAMILIES_ALL,
                     help=f"fit family (default: the BASIS's family of record — "
@@ -12601,8 +12605,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "which artifact answers a resolve: the pin names it outright, the "
             "root re-orders the probes. Combined, pinned keys would come from "
             "the record and unpinned ones from the root — a mixed regime whose "
-            "vintage is a per-key fact, which is exactly what E4 anomaly A1 was "
-            "about. Pin to the record, or point at the root; not both.")
+            "vintage is a per-key fact, which is exactly the vintage confusion "
+            "a pin exists to prevent. Pin to the record, or point at the root; "
+            "not both.")
     #  THE THIRD VINTAGE, AT THE SAME DOOR. `--v21-root` and `--v3-root` are two
     #  answers to "which artifact" per key; combined, some sides of a prediction
     #  resolve v2.1 and some v3, which is a prediction on neither basis.
@@ -12628,9 +12633,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "on the wrong objects. Run the gate on its own.")
     if args.score_v3 is not None and args.basis != "webtext-v3":
         ap.error(
-            "--score-v3 requires --basis webtext-v3. The §8 lane's family of "
-            f"record is {FAMILY_OF_RECORD_WEBTEXT_V3}, its vintage gate is the "
-            "frozen v3 corpus sha and its bands are §8's — naming the basis is "
+            "--score-v3 requires --basis webtext-v3. The v3 scoring lane's "
+            f"family of record is {FAMILY_OF_RECORD_WEBTEXT_V3}, its vintage "
+            "gate is the frozen v3 corpus sha and its bands are the frozen v3 "
+            "bands — naming the basis is "
             "how a run says which contract it is under, and defaulting it "
             "would let a v2.1 invocation score a v3 artifact.")
     for flag, value in (("--stamp", args.stamp),
@@ -12655,13 +12661,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "probes already.")
     if (args.score_record is None) != (args.observed is None):
         ap.error(
-            "--score-record and --observed go together. Scoring is a DESK ACT "
-            "against observed â values the desk produces at first-read; this "
+            "--score-record and --observed go together. Scoring is a deliberate "
+            "act against observed â values produced at first-read; this "
             "tool never observes, never fits, and never auto-scores at filing "
             "time — it only builds the machine-readable artifact.")
     if args.alpha_companion is not None and args.score_record is None:
         ap.error(
-            "--alpha-companion is a SCORING input (Addendum D §D2's constant-α "
+            "--alpha-companion is a SCORING input (the constant-α "
             "baseline) and only applies with --score-record/--observed. It is "
             "never consulted at filing time: a baseline scored before the fit "
             "exists would have nothing to be a baseline against.")
@@ -12709,7 +12715,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if missing:
             ap.error(
                 f"--emit-record needs {', '.join(missing)}. A filing record is "
-                f"emitted ONCE, its sha is ledgered and its bands never move, so "
+                f"emitted ONCE, its sha is cited and its bands never move, so "
                 f"every input is named explicitly and none is defaulted.")
         if args.gate:
             ap.error(
@@ -12734,14 +12740,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if value is not None and not args.emit_record:
             ap.error(f"{flag} only means anything with --emit-record.")
 
-    #  THE M42 AUDIT is a standalone structural read over manifests: it loads no
+    #  THE MANIFEST AUDIT is a standalone structural read over manifests: it loads no
     #  map, resolves no registry and needs no vintage, so it runs before every
     #  other mode's setup and returns on its own.
     if args.manifest_audit is not None:
         manifests: list[Path] = []
         for target in args.manifest_audit:
             if target.is_dir():
-                #  Symlink-following (rake M38): under the /models placement rule a
+                #  Symlink-following: when data is relocated behind symlinks a
                 #  manifest can sit inside a relocated subtree, and a sweep that
                 #  missed it would report a clean audit of the trees it could see.
                 for dirpath, _dirs, files in os.walk(target, followlinks=True):
@@ -12754,7 +12760,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                              f"{[str(t) for t in args.manifest_audit]}")
         n_unclean = 0
         n_self = 0
-        print(f"\nMANIFEST AUDIT (rake M42) — {len(manifests)} manifest(s)")
+        print(f"\nMANIFEST AUDIT — {len(manifests)} manifest(s)")
         for target in sorted(set(manifests)):
             try:
                 audit = audit_manifest(target)
@@ -12827,7 +12833,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         except SymmetricConstantsError as exc:
             #  An EXPECTED halt with a meaningful message: the constants artifact
             #  is not the contract this module consumes. Reported cleanly and
-            #  nonzero so the desk's constants lane can be reconciled from it.
+            #  nonzero so the constants lane can be reconciled from it.
             print(f"\nSYMMETRIC CONSTANTS HALT — {exc}")
             return 1
 
@@ -12956,9 +12962,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(f"\ncandidates: {len(computed.predictions)}/{total} filable, "
               f"{len(computed.na_at_filing)}/{total} N/A-AT-FILING")
 
-    #  THE SYMMETRIC STAR COLUMN (prereg §3). Emitted only when the constants
-    #  artifact is supplied, into its OWN readout: nothing above this point
-    #  changes shape, and the column's TERMS are untouched (Addendum H item 2).
+    #  THE SYMMETRIC STAR COLUMN (predicted = c_src · c_tgt). Emitted only when
+    #  the constants artifact is supplied, into its OWN readout: nothing above
+    #  this point changes shape, and the column's TERMS are untouched.
     star_readout: Optional[StarReadout] = None
     if star_constants is not None and (args.candidates or args.source_model):
         star_readout = StarReadout(
@@ -13013,7 +13019,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                         args.star_out, len(star_readout.predictions),
                         len(star_readout.na_at_filing))
 
-    #  THE DIRECTIONAL COLUMN (Addendum 2026-07-29-H). Emitted only when the
+    #  THE DIRECTIONAL COLUMN (predicted = c_src^out · c_tgt^in). Emitted only when the
     #  constants readout is supplied, into its OWN readout: nothing above this
     #  point changes shape, and the symmetric star column is untouched.
     directional_readout: Optional[DirectionalReadout] = None
@@ -13097,8 +13103,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             print(f"{one.pair_id} [{one.arm}::{one.family}] "
                   f"â_comp = {one.a_comp:+.17g}")
 
-    #  EMITTING THE FILING RECORD (rake M33(b)). Runs after every column's own
-    #  mode above, so a single invocation can both print the columns and file.
+    #  EMITTING THE FILING RECORD. The filing-block shape is a contract that
+    #  only a parse proves, so the record is produced here and re-parsed by the
+    #  scorer rather than assembled from readout rows. Runs after every column's
+    #  own mode above, so a single invocation can both print the columns and file.
     if args.emit_record:
         assert (star_constants is not None
                 and directional_constants is not None)      # argparse enforced
@@ -13120,7 +13128,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 repo_root=args.repo_root, overwrite=args.overwrite_record)
         except (RecordEmissionError, ScoringError, ValueError,
                 MapNotConsumableError) as exc:
-            #  An EXPECTED halt: the ruling, the slate and the data disagree, or a
+            #  An EXPECTED halt: the policy, the slate and the data disagree, or a
             #  block would have violated the consumer's own contract. Reported
             #  cleanly and nonzero — nothing partial is left on disk beyond the
             #  file the write step may already have produced, which the parse
@@ -13237,7 +13245,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             print(f"\nSCORING HALT — {exc}")
             return 1
 
-    #  ───────────────────────── THE WEBTEXT-V3 §8 STEP-3 SCORING LANE
+    #  ───────────────────────── THE WEBTEXT-V3 STEP-3 SCORING LANE
     if args.score_v3 is not None:
         artifact_path = Path(args.score_v3)
         pairs_root = (args.pair_fits_root if args.pair_fits_root is not None
@@ -13252,7 +13260,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         except V3ArtifactError as exc:
             #  An EXPECTED halt with a meaningful message: the seal does not
             #  verify, or the file is not the sealed contract. Reported cleanly
-            #  and NONZERO — §8 step 2 binds the lane to refuse.
+            #  and NONZERO — the frozen ceremony binds the lane to refuse.
             print(f"\nARTIFACT HALT — {exc}")
             return 1
         print(f"\nSTAMP VERIFIED — {Path(verification.stamp_path).name} seals "
@@ -13266,7 +13274,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             #  THE RESOLUTION HALF, ALONE. Nothing below this block runs: no
             #  vector is opened, no map is loaded, no â_obs exists. The mode is
             #  an assertion about the FILE SURFACE against real data, and
-            #  scoring real data is the desk's act, not a side effect of a check.
+            #  scoring real data is a deliberate act, not a side effect of a check.
             try:
                 resolution = resolve_v3_pair_fits(artifact, pairs_root)
             except PairFitsAbsentError as exc:
@@ -13372,7 +13380,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
               f"is arithmetic; the stamp, the ruling and the branch "
               f"adjudication are the desk's.")
 
-    #  THE RESOLUTION-PROVENANCE LEDGER (E4 anomaly A1). Printed only when the
+    #  THE RESOLUTION-PROVENANCE RECORD: which tree and vintage answered each
+    #  resolve, so a vintage confusion is visible. Printed only when the
     #  operator asked for a pin or for the artifact: the no-root stdout of every
     #  existing mode is a frozen surface (the E1 gate and the --candidates
     #  column are re-run byte-for-byte at review), so this reports on demand and
