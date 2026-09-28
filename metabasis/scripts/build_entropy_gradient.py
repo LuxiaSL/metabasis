@@ -245,16 +245,16 @@ class BuildRequest(BaseModel):
                                            ">0 chunks it (OOM fallback, same algebra)")
     max_seq_len: Optional[int] = Field(
         default=None, ge=2,
-        description="prereg ADDENDUM 2026-07-27-B position-ceiling deviation: truncate "
+        description="pre-registered position-ceiling deviation: truncate "
                     "every text to its FIRST `max_seq_len` tokens. MUST match the value "
                     "the node's registry row carries (`RosterNode.max_seq_len`), because "
-                    "the addendum requires ONE truncation across collection, spot-replay, "
+                    "the deviation requires ONE truncation across collection, spot-replay, "
                     "target builds and behavioral reads — a build that truncates "
                     "differently from the collection would live in a different space "
                     "than the transport maps were fit in.")
     expect_n_truncated: Optional[int] = Field(
         default=None, ge=0,
-        description="ratified corpus-wide truncation count (148 for gpt2-xl). When set, "
+        description="pre-registered corpus-wide truncation count (148 for gpt2-xl). When set, "
                     "the build re-derives the count from THIS node's tokenizer over the "
                     "WHOLE frozen corpus and refuses to run if it disagrees — the "
                     "deviation is then a verified fact of the build, not a claim.")

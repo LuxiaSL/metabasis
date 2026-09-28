@@ -3,31 +3,34 @@
 Two registries, deliberately separate (do not merge them), and they OVERLAP:
 
 - `fit_transport_maps.SITES` — the **fixed fit grid**. A model appears there
-  only after the desk has ratified its site of record from an alignment-curve
-  scan (or it is a carried, banked model). Membership means "we know where
+  only after its site of record has been chosen from an alignment-curve scan
+  and registered (or it is a carried, banked model). Membership means "we know where
   this model's sites are", and the fit CLIs will run it with no `--src-sites`
   / `--tgt-sites` override.
 - `SCAN_GRIDS` here — the **scan grid** each roster node was collected and
-  curve-scanned on: the computed 12 sites, plus any ruled extension. Membership
+  curve-scanned on: the computed 12 sites, plus any registered extension. Membership
   means "this grid is what we looked at".
 
 A node may also carry deviations that travel with it wherever it is used:
-`max_seq_len` (a position-ceiling truncation, prereg ADDENDUM 2026-07-27-B),
-`scan_grid_extension` (ruled extra sites when the default window failed to
-bracket the peak), and `blocked_reason` (collection forbidden until a ruling).
+`max_seq_len` (a position-ceiling truncation, pre-registered as a deviation in
+the transport-campaign pre-registration under docs/planning/),
+`scan_grid_extension` (registered extra sites when the default window failed to
+bracket the peak), and `blocked_reason` (collection forbidden until the named
+block is resolved).
 They live here, not in job scripts, because every use of a node — collection,
 spot-replay, target build, behavioral read — has to agree about them.
 
-Before ratification a node is in SCAN_GRIDS ONLY: "we are still looking", and
-every run must pass its grid explicitly. Ratification does not MOVE the node —
-it ADDS the key to `SITES` and leaves it here, so the scan that produced the
-site of record stays re-derivable from the same registry that drove it. The
-wave-1 seven (ratified by Luxia 2026-07-27) are in both. `audit_registries()`
+Before graduation a node is in SCAN_GRIDS ONLY: "we are still looking", and
+every run must pass its grid explicitly. Graduation (registering the site of
+record) does not MOVE the node — it ADDS the key to `SITES` and leaves it here,
+so the scan that produced the site of record stays re-derivable from the same
+registry that drove it. The wave-1 seven are in both. `audit_registries()`
 is the guard for that overlap: a key in both registries must have a fixed grid
 drawn FROM its own scan grid (sites from curves, never fiat), and prefix
 relations between bank keys stay flagged either way.
 
-The prereg (frozen, `PREREG-transport-campaign-2026-07-26.md` §4) says:
+The frozen transport-campaign pre-registration (docs/planning/), in its sites
+and collection-discipline section, says:
 *"Sites from curves, never fiat: every NEW model gets an alignment-curve site
 scan (12-site grid, pick the peak — the OLMo precedent) before its fit grid is
 fixed."* This module is that rule as code — the grid is COMPUTED from
@@ -35,13 +38,13 @@ fixed."* This module is that rule as code — the grid is COMPUTED from
 re-derive it from a checkpoint's `config.json`.
 
 The OLMo precedent, for the shape of the read this grid feeds:
-`smalls/fits_olmo/cp2_summary.json` — hub 8B at its banked sites (L14/16/18)
+`outputs/battery/arms/A8_conjugation/smalls/fits_olmo/cp2_summary.json` — hub 8B at its banked sites (L14/16/18)
 × the candidate's grid, all four fit families, both arms; the alignment curve
 is held-out r² at `proc_k128` per site-pair, with `r2_null_shuffled_q95` beside
 and `cka_after` secondary. OLMo-2-7B (base) peaked at L16, r²=.6445 from 8bL14.
 
 Weights paths are NEVER hardcoded here: `weights_dirname` is the *basename*
-convention (a fixed weights root on the collection node), and the actual directory
+convention (under one fixed weights root per machine), and the actual directory
 is passed to the collector via `--model-path`.
 """
 from __future__ import annotations
@@ -94,12 +97,12 @@ class RosterNode(BaseModel):
 
     key: str = Field(description="bank key; keys the state banks and every path")
     model_id: str = Field(description="HF repo id (the checkpoint of record)")
-    roster_row: int = Field(description="row in the frozen prereg roster table")
+    roster_row: int = Field(description="row in the frozen pre-registered roster table")
     arms: tuple[str, ...] = Field(description="template arms this node runs")
     num_hidden_layers: int
     hidden_size: int
     weights_dirname: str = Field(
-        description="basename convention under the collection node's weights root "
+        description="basename convention under the collection machine's weights root "
                     "(the full path is passed via --model-path; never hardcoded)")
     checkpoint_identity: Literal["instruct", "base"]
     config_sha256: str | None = Field(
@@ -112,27 +115,27 @@ class RosterNode(BaseModel):
                     "job preflight's corpus-length check is mechanical, not folklore.")
     scan_grid_extension: tuple[int, ...] = Field(
         default=(),
-        description="Ruled additional sites, appended to the computed 12-site grid. "
+        description="Registered additional sites, appended to the computed 12-site grid. "
                     "A DEVIATION FROM THE DEFAULT INSTRUMENT, only ever set by an "
-                    "explicit desk/Luxia ruling recorded in the ledger, and only for "
-                    "the reason the ruling names — the [0.15,0.85] 12-site rule stands "
-                    "as the default. Kept separate from the computed grid so the rule "
+                    "explicit, recorded site decision, and only for the reason that "
+                    "decision names (the row's notes carry it) — the [0.15,0.85] "
+                    "12-site rule stands as the default. Kept separate from the computed grid so the rule "
                     "and the exception never blur: `scan_grid` is always re-derivable "
                     "from num_hidden_layers alone.")
     max_seq_len: int | None = Field(
         default=None,
-        description="prereg ADDENDUM 2026-07-27-B: if set, every use of this node "
+        description="pre-registered position-ceiling deviation: if set, every use of this node "
                     "truncates each text to its FIRST `max_seq_len` tokens "
                     "(`--max-seq-len`). Lives in the registry rather than in a job "
                     "script so collection, spot-replay, target builds and behavioral "
-                    "reads cannot silently disagree — the addendum requires ONE "
+                    "reads cannot silently disagree — the deviation requires ONE "
                     "truncation for all uses.")
     blocked_reason: str | None = Field(
         default=None,
         description="non-None => this node MUST NOT be collected. Set when a "
                     "verified, non-negotiable blocker exists (e.g. the frozen corpus "
                     "does not fit the architecture). Job preflights assert this is "
-                    "None; the desk clears it only with an explicit ruling.")
+                    "None; it is cleared only by an explicit, recorded decision.")
     notes: str = ""
 
     @property
@@ -193,8 +196,8 @@ class RosterNode(BaseModel):
 
 
 # Wave 1 of the collection phase: the seven cheap new nodes. Architecture facts
-# read from each checkpoint's own config.json on 2026-07-26 (shas below);
-# chat-template / eos / arm facts verified at build_ids level on the same date.
+# read from each checkpoint's own config.json (shas below); chat-template / eos /
+# arm facts verified at build_ids level against the same checkpoints.
 WAVE1: tuple[RosterNode, ...] = (
     RosterNode(
         key="olmo2-7b-instruct", model_id="allenai/OLMo-2-1124-7B-Instruct",
@@ -251,11 +254,12 @@ WAVE1: tuple[RosterNode, ...] = (
               "agree, which is what the arm-consistency rule cares about."),
 )
 
-# Hub rungs 2 (2026-07-27): three more pairs to firm the star constants before the
-# first prediction batch. Architecture facts read from each checkpoint's own
-# config.json on 2026-07-27 (shas below), on the collection node, in the collection
-# venv (transformers 5.3.0); checkpoint identity verified per rake M9 — eos ids +
-# generation_config + chat-template sha, NEVER the directory name.
+# Hub rungs 2: three more pairs to firm the star constants before the first
+# prediction batch. Architecture facts read from each checkpoint's own
+# config.json (shas below) in the collection venv (transformers 5.3.0);
+# checkpoint identity verified by content — eos ids + generation_config +
+# chat-template sha, NEVER the directory name, because a directory name on a
+# shared weight store says nothing about what is in it.
 HUB_RUNGS_2: tuple[RosterNode, ...] = (
     RosterNode(
         key="pythia-6.9b", model_id="EleutherAI/pythia-6.9b",
@@ -342,9 +346,9 @@ HUB_RUNGS_2: tuple[RosterNode, ...] = (
               "(rake M9: another user's hand-written chat template)."),
 )
 
-# The MoE chat rung (2026-07-28): roster row 18. Architecture facts read from the
-# checkpoint's own config.json on the collection node; checkpoint identity verified
-# per rake M9 — eos ids + generation_config + HUB CROSS-CHECK of the config sha,
+# The MoE chat rung: roster row 18. Architecture facts read from the
+# checkpoint's own config.json; checkpoint identity verified by content —
+# eos ids + generation_config + HUB CROSS-CHECK of the config sha,
 # NEVER the directory name (the sibling `Qwen3-30B-A3B-Base` directory on the same
 # shared store is a DIFFERENT checkpoint and does not satisfy row 18).
 MOE_CHAT: tuple[RosterNode, ...] = (
@@ -378,15 +382,15 @@ MOE_CHAT: tuple[RosterNode, ...] = (
               "by this checkpoint and by no other Qwen3-30B-A3B directory on the node."),
 )
 
-# The big-chain single-card rungs (2026-07-28): roster rows 12 and 19, the two
-# members of the big-chain pull that fit ONE card. Architecture facts read from
-# each checkpoint's own config.json on the shared weight store; identity verified
-# per rake M9 — config.json sha CROSS-CHECKED AGAINST THE HUB, plus eos ids and
+# The big-chain single-card rungs: roster rows 12 and 19, the two members of
+# the big-chain pull that fit ONE card. Architecture facts read from each
+# checkpoint's own config.json on the shared weight store; identity verified by
+# content — config.json sha CROSS-CHECKED AGAINST THE HUB, plus eos ids and
 # generation_config, NEVER the directory name and never template presence.
 # The other two big-chain repos (rows 20 and 21, Llama-3.1-405B-Instruct and
-# DeepSeek-V3) are downloaded and M9-verified but DELIBERATELY ABSENT here: both
-# are multicard-only, and the multicard scan design is held for a ruling. Adding
-# a key here is what makes a node collectable, so their absence is the block.
+# DeepSeek-V3) are multicard-only and live in BIG_CHAIN_MULTICARD below, behind
+# the certified sharded path. Adding a key to a group is what makes a node
+# collectable, so absence from every group is the block.
 BIG_CHAIN_SINGLE_CARD: tuple[RosterNode, ...] = (
     RosterNode(
         key="llama-3.3-70b-instruct", model_id="meta-llama/Llama-3.3-70B-Instruct",
@@ -495,14 +499,13 @@ BIG_CHAIN_SINGLE_CARD: tuple[RosterNode, ...] = (
               "the same as row 13."),
 )
 
-# The big-chain MULTICARD rungs (2026-07-28): roster rows 20 and 21, the two
+# The big-chain MULTICARD rungs: roster rows 20 and 21, the two
 # members of the big-chain pull that exceed one card and therefore collect
-# through the certified sharded path (prereg §4; ledger collection/shard-cert,
-# where a forced 8-way sharded 8B collection came out byte-identical to a fresh
-# single-device one). Architecture facts read from each checkpoint's own
-# config.json on the shared weight store; identity verified per rakes M9 AND
-# M17 — the discriminator is chosen per lineage and SHOWN to separate the
-# confusable siblings before it is trusted.
+# through the certified sharded path (its certification: a forced 8-way sharded
+# 8B collection is byte-identical to a fresh single-device one). Architecture
+# facts read from each checkpoint's own config.json on the shared weight store;
+# identity verified by content, and the discriminator is chosen per lineage and
+# SHOWN to separate the confusable siblings before it is trusted.
 #
 # Both nodes are sharded-only by arithmetic, not by preference: 755.96 GiB
 # (row 20) and 1249.88 GiB (row 21) of bf16 weights against a 179.06 GiB card.
@@ -631,13 +634,13 @@ BIG_CHAIN_MULTICARD: tuple[RosterNode, ...] = (
               "accepted-and-ignored rather than raising; the branch taken is recorded."),
 )
 
-# The CARRIED banked nodes (2026-07-29). Prereg roster rows 1-6 (3b, 8b,
+# The CARRIED banked nodes. Pre-registered roster rows 1-6 (3b, 8b,
 # qwen-7b, dsv2-lite, gemma-3-27b, olmo2-7b) were collected and banked before
 # this campaign's registries existed. They are NOT new collections — every one
-# is already ratified in `fit_transport_maps.SITES` — so a row here does
+# is already registered in `fit_transport_maps.SITES` — so a row here does
 # something different from every group above: it does not make the node
-# collectable, it gives an already-banked node the M9 DRIFT-DETECTION GUARD (a
-# config sha anchor) that every other roster node carries and these had none of.
+# collectable, it gives an already-banked node the DRIFT-DETECTION GUARD (a
+# config sha anchor) that every other roster node carries.
 # A carried node therefore enters ROSTER ALREADY GRADUATED, which is why its row
 # number sits below wave-1's and its scan grid is the grid the scan ceremony
 # actually ran rather than a grid still to be run.
@@ -650,12 +653,11 @@ BIG_CHAIN_MULTICARD: tuple[RosterNode, ...] = (
 # Adding a key here has one mechanical consequence worth stating: SCAN_GRIDS
 # gains the key, so `sites_for`/`scan_grid_table`/`collectable` start reporting
 # it. It changes NO site registration — `fit_transport_maps.SITES` and
-# `read_composed_predictions.SITE_OF_RECORD` are set from RULINGS, never from a
-# roster row, and this row moved neither. gemma3-27b's carried-provisional L36
-# was subsequently RETIRED by Luxia's site ruling (2026-07-29): the registered
-# grid is now (38, 41), ⋆ L38, and the ruling is recorded where the
-# registrations live, not here (see the interleave note below for the
-# architecture facts the ruling consumed).
+# `read_composed_predictions.SITE_OF_RECORD` are set by site decisions, never
+# from a roster row, and this row moves neither. gemma3-27b's carried-provisional
+# L36 is RETIRED: the registered grid is (38, 41), ⋆ L38, and that registration
+# lives where the registrations live, not here (see the interleave note below
+# for the architecture facts the site choice consumed).
 CARRIED_BANKED: tuple[RosterNode, ...] = (
     RosterNode(
         key="gemma3-27b", model_id="google/gemma-3-27b-it",
@@ -754,7 +756,7 @@ CARRIED_BANKED: tuple[RosterNode, ...] = (
               "which is why a flat-root sweep does not find them (rake M35)."),
 )
 
-# The BEHAVIORAL TIER (2026-07-29): prereg roster row 22, and the first node on
+# The BEHAVIORAL TIER: pre-registered roster row 22, and the first node on
 # the roster whose reason for existing is the TRANSPORTED-WRITE column rather
 # than the fit/star column. The tier is a ROLE, and the role is narrower than
 # every group above it: row 22 is a write TARGET only — NO native
@@ -767,9 +769,9 @@ CARRIED_BANKED: tuple[RosterNode, ...] = (
 #
 # `RosterNode` HAS NO TIER FIELD and this group does not add one: the roster
 # models role distinctions with `arms`, `roster_row` and named deviations, and
-# states the rest in the row's own notes (row 16's "raw arm only, per prereg row
-# 16" is the precedent). The tier is therefore recorded in the notes, first line
-# and in the prereg's words, plus this header — not as a new column that only
+# states the rest in the row's own notes (row 16's raw-arm-only note is the
+# precedent). The tier is therefore recorded in the notes, first line and in the
+# pre-registration's words, plus this header — not as a new column that only
 # one row would ever value.
 #
 # The other reason row 22 exists: falcon-mamba-7b-instruct is the FIRST
@@ -780,13 +782,12 @@ CARRIED_BANKED: tuple[RosterNode, ...] = (
 # artifact of the attention stack.
 #
 # zamba2-7b — the other SSM-lineage candidate from the same pull — is
-# DELIBERATELY ABSENT. It is hard-parked on an upstream transformers defect and
-# its row waits on Luxia's shim ruling. Adding a key here is what makes a node
-# collectable, so the absence IS the block (the BIG_CHAIN_MULTICARD precedent,
-# applied to a defect instead of to a scan design).
+# DELIBERATELY ABSENT. It is hard-parked on an upstream transformers defect, and
+# its row waits on a decision about a compatibility shim. Adding a key here is
+# what makes a node collectable, so the absence IS the block.
 #
-# Architecture, identity and corpus facts below are the SSM TOOLING GATE of
-# 2026-07-29 — measured on the checkpoint, not re-derived here.
+# Architecture, identity and corpus facts below are the SSM TOOLING GATE's —
+# measured on the checkpoint, not re-derived here.
 BEHAVIORAL_TIER: tuple[RosterNode, ...] = (
     RosterNode(
         key="falcon-mamba-7b-instruct",
@@ -871,29 +872,27 @@ BEHAVIORAL_TIER: tuple[RosterNode, ...] = (
               "as always and is never hardcoded here."),
 )
 
-# The webtext-v3 SCALE ADD (2026-08-03): roster row 24, the third checkpoint the
-# frozen webtext-v3 prereg §5 names in the CORE roster ("the 17 collected star
-# nodes + Qwen2.5-72B-Instruct + Llama-3.1-8B base + Qwen2.5-7B base") and the
-# only one of the three that is an INSTRUCT checkpoint. It exists for the §7 C2
-# READ (recipe-vs-range): this node's descriptive hub rank and median |e| against
+# The webtext-v3 SCALE ADD: roster row 24, the third checkpoint the frozen
+# webtext-v3 pre-registration (docs/planning/) names in its CORE roster ("the 17
+# collected star nodes + Qwen2.5-72B-Instruct + Llama-3.1-8B base + Qwen2.5-7B
+# base") and the only one of the three that is an INSTRUCT checkpoint. It exists
+# for the hub law's recipe-vs-range READ (C2): this node's descriptive hub rank and median |e| against
 # two PRE-NAMED outcomes — top-tier-equivalent at 72B supports the recipe
 # reading, degradation to llama-3.1-70b-instruct's tier supports the
 # range-artifact reading — scored by a paired sign test against row 11 on their
 # shared slots. The row is therefore only useful if it is comparable to the
 # 70Bs, which is what the grid note below is about.
 #
-# ⚠ BANK KEY, AND IT IS A CHOICE THIS ROW HAD TO MAKE: the frozen §5/§7 prose
+# ⚠ BANK KEY, AND IT IS A CHOICE THIS ROW HAD TO MAKE: the frozen roster and hub-law prose
 # names this checkpoint "Qwen2.5-72B-Instruct" and "qwen2.5-72b" and registers no
 # bank key. `qwen2.5-72b-instruct` continues the family's OWN key convention on
 # this roster (rows 8/9/10: qwen2.5-3b-instruct · qwen2.5-14b-instruct ·
-# qwen2.5-32b-instruct) rather than the prose's short form. Nothing was collected
-# under any other spelling — the bank does not exist yet — so this is a naming
-# decision and not a rename.
+# qwen2.5-32b-instruct) rather than the prose's short form. Nothing is collected
+# under any other spelling, so this is a naming decision and not a rename.
 #
-# ARCHITECTURE + IDENTITY are read from the staged, sha-certified pull of
-# 2026-08-03 (ledger "THE ROSTER-V3 WEIGHTS ARE STAGED"), never from this file's
-# memory: the checkpoint's own config.json at the pinned revision, and the
-# node-side `.metabasis-provenance.json` the fetcher wrote beside it.
+# ARCHITECTURE + IDENTITY are read from the staged, sha-certified weight pull,
+# never from this file's memory: the checkpoint's own config.json at the pinned
+# revision, and the provenance record the fetcher wrote beside the weights.
 V3_SCALE_ADD: tuple[RosterNode, ...] = (
     RosterNode(
         key="qwen2.5-72b-instruct", model_id="Qwen/Qwen2.5-72B-Instruct",
@@ -1003,18 +1002,19 @@ V3_SCALE_ADD: tuple[RosterNode, ...] = (
               "passed via --model-path and is never hardcoded here."),
 )
 
-# The webtext-v3 BASE SIBLINGS (2026-08-03): the two base checkpoints the frozen
-# webtext-v3 prereg §5 names in the CORE roster ("the 17 collected star nodes +
+# The webtext-v3 BASE SIBLINGS: the two base checkpoints the frozen webtext-v3
+# pre-registration names in its CORE roster ("the 17 collected star nodes +
 # Qwen2.5-72B-Instruct + Llama-3.1-8B base + Qwen2.5-7B base"). They exist to make
-# the §C4 base-vs-instruct sibling read possible: each is the pretrain parent of a
+# the hub law's base-vs-instruct sibling read (C4) possible: each is the pretrain parent of a
 # checkpoint already on the roster, so the pair differs in post-training and in
 # nothing else.
 #
-# ⚠ THE `roster_row` NUMBERS ARE REGISTRY BOOKKEEPING, NOT A CITATION, AND THE
-# DESK MAY RENUMBER THEM WITH ONE EDIT. The numbered roster TABLE is the campaign
-# prereg's (rows 1–23); the webtext-v3 prereg names these three adds in PROSE and
-# numbers none of them. `roster_row` is a required field, so a number had to be
-# written: 24/25/26 continue the campaign table in the order §5 lists the adds
+# ⚠ THE `roster_row` NUMBERS ARE REGISTRY BOOKKEEPING, NOT A CITATION, AND THEY
+# CAN BE RENUMBERED WITH ONE EDIT. The numbered roster TABLE is the campaign
+# pre-registration's (rows 1–23); the webtext-v3 pre-registration names these
+# three adds in PROSE and numbers none of them. `roster_row` is a required field,
+# so a number had to be written: 24/25/26 continue the campaign table in the order
+# the webtext-v3 roster lists the adds
 # (Qwen2.5-72B-Instruct · Llama-3.1-8B base · Qwen2.5-7B base) — row 24 is
 # `V3_SCALE_ADD` above. Nothing keys off the number.
 #
@@ -1022,39 +1022,37 @@ V3_SCALE_ADD: tuple[RosterNode, ...] = (
 # it buys anywhere in this module: SCAN_GRIDS gains the key, so `MODEL_KEYS =
 # SITES ∪ SCAN_GRIDS` accepts it and `collect_mean_states.py --model` will run it.
 # A row registers NO site by itself — sites from curves, never fiat, and the
-# frozen §5 requires exactly that ("Core models without a registered site at
+# frozen webtext-v3 roster requires exactly that ("Core models without a registered site at
 # freeze receive the site-curve ceremony inside their collection window,
 # registered BEFORE any fit of theirs is quoted").
 #
-# THE CEREMONY HAS NOW RUN FOR BOTH OF THESE KEYS AND LUXIA HAS RULED
-# (2026-08-03, on the sibling scan curves; ledger "TWO SITE RULINGS"): both are
-# registered in `fit_transport_maps.SITES` and
+# THE SITE-CURVE CEREMONY HAS RUN FOR BOTH OF THESE KEYS, on the sibling scan
+# curves: both are registered in `fit_transport_maps.SITES` and
 # `read_composed_predictions.SITE_OF_RECORD`, and each carries a
-# `scan_grid_extension` of ONE site — the ruled SAME-SITE pair-read site that the
-# computed 12 never visited. The per-row notes below carry the evidence; the
-# extension field is what keeps the ratification invariant honest about it (a
+# `scan_grid_extension` of ONE site — the registered SAME-SITE pair-read site that
+# the computed 12 never visited. The per-row notes below carry the evidence; the
+# extension field is what keeps the graduation invariant honest about it (a
 # site registered off the effective scan grid is a fiat grid by construction, and
-# `fiat_grid_problems` would fail the import). Row 24 above has SINCE had its own
-# ceremony too (Luxia, 2026-08-04, sites (58, 63) ⋆ L58) — so all three frozen §5
-# CORE adds are now registered — but it needs NO extension, because both of its
-# ruled sites are on its computed grid. The extension mechanism is what these two
+# `fiat_grid_problems` would fail the import). Row 24 above has had its own
+# ceremony too (sites (58, 63) ⋆ L58) — so all three webtext-v3 CORE adds are
+# registered — but it needs NO extension, because both of its registered sites
+# are on its computed grid. The extension mechanism is what these two
 # rows need and row 24 does not.
 #
-# ARMS ARE RAW-ONLY, BY DESK RULING (2026-08-03, ledger block of record) — and
-# note that this is a RULING and not an inference from the checkpoints: llama-base
-# has no chat template and could not run a native arm anyway, but qwen-base SHIPS
-# one, and its presence proves nothing (rake M9: a template on a base checkpoint
-# is a packaging fact, not an identity). The rule comes from the frozen webtext-v3
-# prereg §3.2 instead: "any slot with a base-model endpoint is scored in
+# ARMS ARE RAW-ONLY, BY DECISION — and note that this is a decision and not an
+# inference from the checkpoints: llama-base has no chat template and could not
+# run a native arm anyway, but qwen-base SHIPS one, and its presence proves
+# nothing (a template on a base checkpoint is a packaging fact, not an identity).
+# The rule comes from the frozen webtext-v3 pre-registration's rebank section
+# instead: "any slot with a base-model endpoint is scored in
 # raw::proc_k256 (the parent's arm rule, inherited)". The raw arm is the arm these
 # nodes are read in, so it is the arm they are collected in — the pythia-6.9b and
 # gpt2-xl precedent, reached here for a different reason.
 #
-# Architecture facts below are the M17(a) SEPARATION EVIDENCE staged 2026-08-03
-# (desk logs `/tmp/claude-output/wtv3-wave1-sibling-arch.log` and
-# `…-sibling-discriminators.log`, cited in the wave-1 collection enactor's
-# report): read from each checkpoint's own config.json on the node, at the pinned
-# revision, in the collection venv. The scan grids are the COMPUTED
+# Architecture facts below are the SIBLING SEPARATION EVIDENCE (the discriminator
+# is shown to separate each base checkpoint from its instruct sibling before it is
+# trusted): read from each checkpoint's own config.json at the pinned revision, in
+# the collection venv. The scan grids are the COMPUTED
 # `scan_grid(num_hidden_layers)` values, read from that evidence rather than
 # re-derived here — and `scan_grid` reproduces both exactly, which is the point of
 # never typing a grid.
@@ -1065,11 +1063,10 @@ V3_BASE_SIBLINGS: tuple[RosterNode, ...] = (
         weights_dirname="Llama-3.1-8B", checkpoint_identity="base",
         config_sha256="54acfad3cffe057640904ca8a1e83525e6551c70c7a04c641f5a9eda0bbf64bd",
         max_position_embeddings=131072,
-        # RULED BY LUXIA 2026-08-03 (ledger "TWO SITE RULINGS"): L16 is the §7
-        # C4 SAME-SITE pair-read site, matched to instruct `8b`'s L16, and the
-        # computed [0.15,0.85] grid (odd sites only on a 32-layer stack) never
-        # visits it. Recorded HERE, as the ruled deviation, because
-        # `fit_transport_maps.SITES` registers it and the ratification invariant
+        # L16 is the hub law's C4 SAME-SITE pair-read site, matched to instruct
+        # `8b`'s L16, and the computed [0.15,0.85] grid (odd sites only on a
+        # 32-layer stack) never visits it. Recorded HERE, as the registered
+        # deviation, because `fit_transport_maps.SITES` registers it and the graduation invariant
         # checks registrations against the EFFECTIVE scan grid — see the notes.
         scan_grid_extension=(16,),
         notes="WEBTEXT-V3 CORE ADD (frozen prereg §5): the pretrain PARENT of the "
@@ -1140,8 +1137,8 @@ V3_BASE_SIBLINGS: tuple[RosterNode, ...] = (
         weights_dirname="Qwen2.5-7B", checkpoint_identity="base",
         config_sha256="267ce68584c5f24c3b267d934db2de68dd21d1ca677fb78ed809eb60067f7642",
         max_position_embeddings=131072,
-        # RULED BY LUXIA 2026-08-03, exactly as on the llama sibling above: L21
-        # is the §7 C4 SAME-SITE pair-read site, matched to instruct `qwen-7b`'s
+        # Exactly as on the llama sibling above: L21 is the hub law's C4
+        # SAME-SITE pair-read site, matched to instruct `qwen-7b`'s
         # L21, and the computed 28-layer grid does not visit it (it holds 20 and
         # 22, straddling it).
         scan_grid_extension=(21,),
@@ -1211,19 +1208,20 @@ ROSTER: dict[str, RosterNode] = {
 #: model key -> the grid it was actually collected and curve-scanned on. This is
 #: what `--sites` should carry for a scan collection, and what `--tgt-sites`
 #: should carry for the scan fit. Normally the computed 12 sites; for a node with
-#: a ruled extension (pythia-6.9b, gpt2-xl, gemma3-27b) it is the EFFECTIVE grid,
+#: a registered extension (pythia-6.9b, gpt2-xl, gemma3-27b) it is the EFFECTIVE grid,
 #: because that is what the bank holds and what reproduces the published curve.
 SCAN_GRIDS: dict[str, tuple[int, ...]] = {
     k: n.effective_scan_grid for k, n in ROSTER.items()}
 
 
-# ------------------------------------------------- the §7 race candidates' revisions
+# ------------------------------------------------- the hub-law race candidates' revisions
 #: WHY THIS TABLE EXISTS, AND WHAT IT IS NOT.
 #:
-#: The §7 selection criterion crowns "the SMALLEST eligible candidate by total
-#: parameter count, config-derived at the pinned revision and recorded in the
-#: race artifact". When the race ran (2026-08-04) **no pinned revision was on
-#: record anywhere in the campaign** for any of the five candidates: roster rows
+#: The hub law's selection criterion (webtext-v3 pre-registration) crowns "the
+#: SMALLEST eligible candidate by total parameter count, config-derived at the
+#: pinned revision and recorded in the race artifact". At race time **no pinned
+#: revision was on record anywhere in the campaign** for any of the five
+#: candidates: roster rows
 #: carry `model_id` and a `config_sha256` but no revision, and collection stamps
 #: carry a local checkpoint path and that path's `config_sha256` — a revision
 #: appears in neither. What the race could record was the revision each repo's
@@ -1231,8 +1229,8 @@ SCAN_GRIDS: dict[str, tuple[int, ...]] = {
 #: this table pins. It is a PROVENANCE ANCHOR, not a claim that the campaign
 #: chose these revisions in advance.
 #:
-#: THREE OF THE FIVE ARE BOUND TO THE COLLECTED CHECKPOINT BY VALUE — the node
-#: cross-check of 2026-08-04 sha256'd each candidate's LOCAL config.json and
+#: THREE OF THE FIVE ARE BOUND TO THE COLLECTED CHECKPOINT BY VALUE — the
+#: race-time cross-check sha256'd each candidate's LOCAL config.json and
 #: compared it against the webtext-v3 collection stamps' `trunk.config_sha256`
 #: (10 of 10 rows MATCH, both arms, zero mismatches). On top of that:
 #:
@@ -1262,7 +1260,7 @@ SCAN_GRIDS: dict[str, tuple[int, ...]] = {
 #: here, and a `config-sha-identity` binding must actually exhibit the identity
 #: it claims.
 class PinnedRevision(BaseModel):
-    """One §7 race candidate's revision, pinned at race time with its provenance.
+    """One hub-law race candidate's revision, pinned at race time with its provenance.
 
     Every sha here is a sha256 of a `config.json` — three DIFFERENT config.json
     files that happen (where the binding says so) to be the same bytes:
@@ -1327,10 +1325,10 @@ class PinnedRevision(BaseModel):
         return self
 
 
-#: The five §7 race candidates, revisions resolved at race time 2026-08-04.
-#: Parameter totals and revisions from the race's own
-#: `PARAM-COUNTS-race-candidates.json`; checkpoint config shas from the node-side
-#: cross-check of the same date (10/10 rows MATCH against the collection stamps).
+#: The five hub-law race candidates, revisions resolved at race time.
+#: Parameter totals and revisions from the race's own parameter-count artifact;
+#: checkpoint config shas from the race-time cross-check against the local
+#: checkpoints (10/10 rows MATCH against the collection stamps).
 RACE_CANDIDATE_REVISIONS: dict[str, PinnedRevision] = {
     p.key: p for p in (
         PinnedRevision(
@@ -1434,14 +1432,14 @@ def race_revision_problems() -> list[str]:
 
 
 def scan_grid_table() -> str:
-    """The desk-ratification table: model · row · arms · n_layers · grid."""
+    """The graduation-review table: model · row · arms · n_layers · grid."""
     w = max(len(k) for k in ROSTER)
     head = (f"{'model key':<{w}}  row  arms         n_layers  scan grid "
             f"({SCAN_N_SITES} sites, depth {SCAN_DEPTH_LO}–{SCAN_DEPTH_HI})")
     rows = [head, "-" * len(head)]
     for key, node in sorted(ROSTER.items()):
         g = node.scan_grid
-        # The computed grid is printed as the rule produced it; a ruled extension
+        # The computed grid is printed as the rule produced it; a registered extension
         # is printed SEPARATELY and labelled, so the instrument and the exception
         # are never mistaken for one another at a glance.
         rows.append(f"{key:<{w}}  {node.roster_row:>3}  "
@@ -1472,8 +1470,9 @@ def collectable(keys: tuple[str, ...] | None = None) -> tuple[str, ...]:
 
 
 def fiat_grid_problems(fixed_grids: Mapping[str, tuple[int, ...]]) -> list[str]:
-    """The ratification invariant: a graduated node's fixed fit grid is drawn
-    from its OWN scan grid (prereg §4, "sites from curves, never fiat").
+    """The graduation invariant: a graduated node's fixed fit grid is drawn
+    from its OWN scan grid ("sites from curves, never fiat", as the frozen
+    transport-campaign pre-registration puts it).
 
     A violation means one of two things, both fatal: the grid was typed in by
     fiat, or a DIFFERENT model is wearing this bank key. Cheap enough to run at
@@ -1482,10 +1481,10 @@ def fiat_grid_problems(fixed_grids: Mapping[str, tuple[int, ...]]) -> list[str]:
     problems: list[str] = []
     for key, node in ROSTER.items():
         fixed = fixed_grids.get(key)
-        # EFFECTIVE grid, not the computed one: a ruled extension (registry-
-        # recorded, ledger-backed) is part of the curve we actually scanned, so a
-        # peak found there is still "from the curve". Checking against the bare
-        # computed grid would flag a legitimately-ratified extension site as fiat.
+        # EFFECTIVE grid, not the computed one: a registered extension (recorded
+        # in this registry) is part of the curve we actually scanned, so a peak
+        # found there is still "from the curve". Checking against the bare
+        # computed grid would flag a legitimately registered extension site as fiat.
         scanned = node.effective_scan_grid
         if fixed is None or set(fixed).issubset(scanned):
             continue
@@ -1493,13 +1492,13 @@ def fiat_grid_problems(fixed_grids: Mapping[str, tuple[int, ...]]) -> list[str]:
         problems.append(
             f"{key}: fixed fit grid {tuple(fixed)} contains site(s) {stray} that "
             f"its own scan grid {scanned} never visited — either a FIAT "
-            f"grid (prereg §4 forbids it) or a different model reusing this key")
+            f"grid (sites come from curves, never fiat) or a different model reusing this key")
     return problems
 
 
 def unexplained_collisions(existing_keys: set[str],
                            ratified_grids: Mapping[str, tuple[int, ...]]) -> list[str]:
-    """EXACT bank-key collisions that ratification does not explain.
+    """EXACT bank-key collisions that graduation does not explain.
 
     The key IS the bank identity, so a roster key equal to a key already in use
     is only benign when the two are the SAME model — i.e. the node graduated
@@ -1512,7 +1511,7 @@ def unexplained_collisions(existing_keys: set[str],
 
 
 def prefix_hazards(existing_keys: set[str]) -> list[str]:
-    """Bank keys in a prefix relation — glob hazards, ratified or not.
+    """Bank keys in a prefix relation — glob hazards, graduated or not.
 
     Expected and permanent for the OLMo pair (`olmo2-7b` BASE beside
     `olmo2-7b-instruct`): exact-name loads are safe, `states_olmo2-7b*` is not.
@@ -1579,7 +1578,7 @@ def audit_registries(fixed_grids: Mapping[str, tuple[int, ...]]) -> RegistryAudi
         expected=tuple(prefix_hazards(keys)))
 
 
-if __name__ == "__main__":                                   # desk convenience
+if __name__ == "__main__":                                   # prints the review table
     from metabasis.scripts.fit_transport_maps import SITES
 
     print(scan_grid_table())
