@@ -1125,8 +1125,9 @@ class HubMapDir(BaseModel):
 V21_ROOT: Optional[Path] = None
 #: The sha of the manifest that verified `V21_ROOT`, recomputed at set time.
 #: Never assumed from the constant: a root that cannot prove its vintage is
-#: refused, so this and `CORPUS_SHA_V21` agree by construction (rake M26 —
-#: the constant is checked by value, not trusted by name).
+#: refused, so this and `CORPUS_SHA_V21` agree by construction (the constant
+#: is checked by value, not trusted by name: a version-pinned name can end up
+#: holding another vintage's sha, and only the value shows it).
 V21_CORPUS_SHA: Optional[str] = None
 
 
@@ -1136,11 +1137,12 @@ def set_v21_root(root: Optional[Path],
                  ) -> Optional[str]:
     """Point the resolvers at a corpus-v2.1 re-bank root, or clear it (None).
 
-    The root must prove its vintage: its own `corpus/corpus_manifest.json` is
-    hashed and must equal `expected_corpus_sha`. Addendum G §G2(a) requires the
-    corpus sha to ride every â — a root taken on the operator's word would
-    stamp predictions with a digest nobody verified, which is the failure rake
-    M26 describes at constant grain and rake M12 at bank grain.
+    The root must prove its vintage: its own corpus manifest (at
+    `manifest_relpath` under the root) is hashed and must equal
+    `expected_corpus_sha`. The corpus sha rides every â as a checked value — a
+    root taken on the operator's word would stamp predictions with a digest
+    nobody verified, the same silent wrong-vintage failure as a constant
+    trusted by its name or a readout fed vectors from another bank's tree.
 
     `expected_corpus_sha` is a parameter ONLY so the selftest can exercise the
     machinery against a synthetic root; every caller in the filing path takes
@@ -1169,14 +1171,14 @@ def set_v21_root(root: Optional[Path],
     if not manifest.is_file():
         raise CorpusVintageError(
             f"v2.1 root {root} carries no {manifest_relpath} — its vintage "
-            f"cannot be VERIFIED, and Addendum G §G2(a) requires every â to "
-            f"carry a corpus manifest sha that was checked, not asserted")
+            f"cannot be VERIFIED, and every â must carry a corpus manifest "
+            f"sha that was checked, not asserted")
     digest = sha256_of(manifest)
     if digest != expected_corpus_sha:
         raise CorpusVintageError(
             f"HALT — {manifest} hashes to {digest}, not the expected "
             f"{expected_corpus_sha}. This root is NOT the corpus-v2.1 basis of "
-            f"record (Addendum G §G1); refusing rather than stamping "
+            f"record; refusing rather than stamping "
             f"predictions with a vintage they do not have")
     V21_ROOT, V21_CORPUS_SHA = root, digest
     logger.info("corpus-v2.1 root set: %s (manifest sha %s… VERIFIED)",
@@ -1222,8 +1224,9 @@ def v21_hub_map_dir(model: str, root: Optional[Path] = None) -> Optional[HubMapD
 #  never point at the webtext-v3 wave: `set_v21_root` hashes the root's own
 #  manifest and REFUSES anything that is not the v2.1 digest. That refusal is
 #  correct and stays — a v3 root reached through the v2.1 flag would stamp v3
-#  numbers with a v2.1 vintage, which is rake M26's failure exactly. What was
-#  missing is a LANE OF ITS OWN, with the same discipline:
+#  numbers with a v2.1 vintage — a version-pinned name holding another
+#  vintage's content. The v3 wave gets a LANE OF ITS OWN, with the same
+#  discipline:
 #
 #    * one root, named by the operator, never discovered;
 #    * its vintage PROVED at set time against `CORPUS_SHA_WEBTEXT_V3`;
@@ -1245,8 +1248,9 @@ def set_v3_root(root: Optional[Path],
                 ) -> Optional[str]:
     """Point the resolvers at a webtext-v3 root, or clear it (None).
 
-    The root must prove its vintage: its own `webtext-v3-draft/
-    corpus_manifest.json` is hashed and must equal `expected_corpus_sha`. The
+    The root must prove its vintage: its own corpus manifest (at
+    `manifest_relpath` under the root) is hashed and must equal
+    `expected_corpus_sha`. The
     v2.1 lane's rule verbatim (`set_v21_root`), at the v3 digest.
 
     `expected_corpus_sha` is a parameter ONLY so the selftest can exercise the
@@ -1275,13 +1279,13 @@ def set_v3_root(root: Optional[Path],
             f"webtext-v3 root {root} carries no {manifest_relpath} — its "
             f"vintage cannot be VERIFIED. Every â quoted on this basis carries "
             f"the corpus manifest sha, and a sha that was asserted rather than "
-            f"checked is the rake M26 failure at basis grain")
+            f"checked would stamp numbers with a vintage nobody verified")
     digest = sha256_of(manifest)
     if digest != expected_corpus_sha:
         raise CorpusVintageError(
             f"HALT — {manifest} hashes to {digest}, not the expected "
             f"{expected_corpus_sha}. This root is NOT the webtext-v3 basis of "
-            f"record (freeze/webtext-v3 §2); refusing rather than stamping "
+            f"record; refusing rather than stamping "
             f"numbers with a vintage they do not have")
     V3_ROOT, V3_CORPUS_SHA = root, digest
     logger.info("webtext-v3 root set: %s (manifest sha %s… VERIFIED)",
@@ -1308,12 +1312,12 @@ def v3_hub_map_dir(model: str, site: int, arm: str,
                    root: Optional[Path] = None) -> Optional[HubMapDir]:
     """The webtext-v3 hub-leg dir for one (hub, model, arm), or None.
 
-    Layout of record for the 2026-08-04 hub-leg wave: ONE dir per
+    Layout of record for the webtext-v3 hub-leg wave: ONE dir per
     (hub, target, arm) — `<hub>L<hub_site>__<model>L<site>__<arm>/` — holding
     the same `fit_<hub>L<hs>__<model>L<site>_<arm>_<family>.npz` names
     `read_exchange_rates.fit_path_for` builds. Unlike the v2.1 mirror, the
     directory therefore depends on the SITE, THE ARM **and the hub**, which is
-    why the resolver's probe list had to learn those three.
+    why the resolver's probe list carries all three.
     """
     base = V3_ROOT if root is None else Path(root)
     if base is None:
@@ -1335,14 +1339,12 @@ def pair_fit_dirs_under(pairs_root: Path, source: str, source_site: int,
     caller: the per-pair subdirectory the hub-leg wave writes
     (`<src>L<s>__<tgt>L<t>__<arm>/`) and a flat pairs root. Nothing else — a
     probe that wandered into a hub-leg tree would silently score a LEG as a
-    pair, and §8 step 1 says outright that a hub leg is not a scoreable pair.
+    pair, and a hub leg is not a scoreable pair.
 
-    ⚠ FLAGGED, NOT RESOLVED: the pair-fit wave's own output layout is not
-    banked desk-side yet (`staging/webtext-v3-fits/pairs/` does not exist while
-    the wave runs), so these two are the conventions the campaign's fit tooling
-    writes rather than a convention read off the wave. If the wave lands a
-    third, this list is where it is added; the lane REFUSES on an absent tree
-    rather than guessing (`PairFitsAbsentError`).
+    ⚠ FLAGGED, NOT RESOLVED: these two are the conventions the campaign's fit
+    tooling writes, not a layout read off a banked pair-fit tree. If a wave
+    lands a third, this list is where it is added; the lane REFUSES on an
+    absent tree rather than guessing (`PairFitsAbsentError`).
     """
     pairs = Path(pairs_root)
     return [pairs / f"{source}L{source_site}__{target}L{target_site}__{arm}",
@@ -1370,20 +1372,20 @@ def pair_fit_probes_under(pairs_root: Path, source: str, source_site: int,
                           ) -> list[PairFitProbe]:
     """Every candidate fit FILE for a slot, ordered, with its direction.
 
-    THE UNORDERED-BANKING FACT (2026-08-04 pair-fit wave). A semi-orthogonal
-    Procrustes fit is ONE object per UNORDERED pair: the wave banked 120 fits
-    under the canonical direction (the lower-ordinal sealed slot's endpoints)
-    and both ordered slots are read from it — forward through
+    THE UNORDERED-BANKING FACT. A semi-orthogonal Procrustes fit is ONE object
+    per UNORDERED pair: the webtext-v3 pair-fit wave banks 120 fits under the
+    canonical direction (the lower-ordinal sealed slot's endpoints) and both
+    ordered slots are read from it — forward through
     `transport(..., 'fwd')`, reverse through `transport(..., 'rev')`. A resolver
-    that probed only the slot's own ordering therefore found half the wave and
-    reported the other half UNSCORED-NO-FIT, which is a RESOLUTION gap and not
-    a missing measurement (first §8.3 scoring run, 120/240).
+    that probed only the slot's own ordering would find half the wave (120 of
+    240 slots) and report the other half UNSCORED-NO-FIT, which is a
+    RESOLUTION gap and not a missing measurement.
 
-    ORDER IS LOAD-BEARING and is: EVERY ordered probe first (the existing
+    ORDER IS LOAD-BEARING and is: EVERY ordered probe first (the
     `pair_fit_dirs_under` list, untouched), THEN every reversed probe. A slot
-    whose own direction is on disk resolves exactly as it did before this
-    function existed — the reverse probe can only ever ADD a resolution, never
-    move one. Where both orderings happen to be banked, the slot's own wins.
+    whose own direction is on disk resolves from its own direction — the
+    reverse probe can only ever ADD a resolution, never move one. Where both
+    orderings happen to be banked, the slot's own wins.
     """
     probes: list[PairFitProbe] = []
     for direction, (a, a_site, b, b_site) in (
@@ -1415,8 +1417,8 @@ def hub_vector_entry(basis: Optional[str] = None,
     """The registry entry for `basis` (default: the ACTIVE one). Never searches.
 
     `root` relocates the SAME entry — the wave's stem is its identity and does
-    not move with it — so a filing lane can point at the node arm root or a
-    future banked location without editing a constant. It is an explicit
+    not move with it — so a filing lane can point at the collection's arm root
+    or another banked location without editing a constant. It is an explicit
     operator act naming ONE root, not a probe order.
     """
     if basis is None and root is None:
@@ -1428,7 +1430,7 @@ def hub_vector_entry(basis: Optional[str] = None,
         raise UnknownHubVectorBasisError(
             f"unknown hub-vector basis {key!r}. Registered bases: "
             f"{sorted(HUB_VECTOR_BASES)}. There is ONE hub-vector path per "
-            f"basis and no fallback (rake M12): an unregistered basis is "
+            f"basis and no fallback: an unregistered basis is "
             f"refused rather than resolved against another basis's column, "
             f"which would silently rotate every alpha") from exc
     if root is None:
@@ -1508,43 +1510,41 @@ def _vector_corpus(path: Optional[str | Path]) -> Optional[CorpusProvenance]:
     return None
 
 
-# ------------------------------------------- resolution provenance (E4 A1)
+# ------------------------------------------------- resolution provenance
 #  WHAT ANSWERED, AND FROM WHICH VINTAGE — recorded on EVERY resolve.
 #
-#  The E4 batch-4 enactment (REPORT-e4-nulls-batch4-2026-07-29, anomaly A1)
-#  found the shape of the gap exactly: with no `--v21-root` the probe order
-#  starts at the frozen collection tree, so 0/24 filed batch-4 legs resolved to
-#  the corpus-v2.1 maps their record was FILED from. The enactment had to load
-#  the filed `resolved` paths by hand — and was proven right by exact E1 parity
-#  (|Δ| = 0.0 ×12). Nothing in the resolver was wrong; the resolver simply never
-#  SAID which tree answered, so a caller could not tell a same-vintage hit from
-#  a cross-vintage one without reading the path by eye.
+#  The gap this closes: with no `--v21-root` the probe order starts at the
+#  frozen collection tree, so legs whose record was FILED from corpus-v2.1
+#  maps resolve to the frozen tree instead, and a caller scoring them must
+#  load the filed `resolved` paths by hand. The resolver is not wrong in that
+#  case; without a record of WHICH tree answered, a caller cannot tell a
+#  same-vintage hit from a cross-vintage one without reading the path by eye.
 #
 #  Two mechanisms close that, and NEITHER moves the default probe order (the
-#  E1 gate's resolution-parity leg depends on it, and `--v21-root` already
+#  E1 gate's resolution-parity check depends on it, and `--v21-root` already
 #  prepends the go-forward vintage when the operator asks for it):
 #
-#    1. THIS LEDGER. Every `resolve_hub_map` / `resolve_vector_bank` call
-#       appends a `ResolutionProvenance` naming the model, the artifact kind,
-#       WHICH TREE answered, that tree's corpus vintage, where in the probe
-#       order it sat, and what was probed and missed. It is data, always
+#    1. THIS PROVENANCE LOG. Every `resolve_hub_map` / `resolve_vector_bank`
+#       call appends a `ResolutionProvenance` naming the model, the artifact
+#       kind, WHICH TREE answered, that tree's corpus vintage, where in the
+#       probe order it sat, and what was probed and missed. It is data, always
 #       present, retrievable with `resolution_provenance()` and writable with
 #       `--provenance-out`.
 #    2. THE FILED-PATHS PIN (below): scoring and null tooling pins resolution
 #       to a record's OWN `resolved` paths instead of probing at all.
 #
-#  WHERE IT GETS LOUD. The ledger is written at DEBUG for an ordinary resolve —
+#  WHERE IT GETS LOUD. The log is written at DEBUG for an ordinary resolve —
 #  a routine v1 resolve in the v1 regime is not news, and stdout is a frozen
 #  surface here. It ESCALATES exactly where a vintage confusion can be born:
 #    * a v2.1 root is in force and a resolve fell through it to a pre-v2.1 tree
-#      (`cross_vintage_fallback`) -> WARNING, and the record says so. This is
-#      the silent half of A1: today such a slot only surfaces later, as
-#      MIXED-VINTAGE, and only if some OTHER side did resolve to v2.1. Where
-#      ALL sides fall through, nothing said anything at all.
+#      (`cross_vintage_fallback`) -> WARNING, and the record says so. Without
+#      the warning such a slot surfaces only later, as MIXED-VINTAGE, and only
+#      if some OTHER side did resolve to v2.1. Where ALL sides fall through,
+#      nothing else says anything at all.
 #    * a filed-paths pin is in force and the pinned artifact is gone, or the
 #      key is unpinned under the strict default -> HALT (`FiledPathsError`).
 #      Never a fallback: falling back from a pinned v2.1 artifact to a probed
-#      v1 one is rake M21b's lesson at map grain.
+#      v1 one silently swaps the vintage of one side of a prediction.
 ResolutionKind = Literal["hub map", "vector bank"]
 #: How a resolve was answered. `pin` = a filed-paths record named the artifact;
 #: `probe` = the preference-ordered candidate list answered; `absent` = every
@@ -1556,10 +1556,10 @@ class ResolutionProvenance(BaseModel):
     """One resolve, and which tree answered it. DESCRIPTIVE — never a verdict.
 
     Nothing in the prediction path reads this back: `compose_pair` computes
-    â_comp from the `HubMapRef`/`VectorBankRef` exactly as before, and this
-    ledger only records what those resolvers did. It exists so the question the
-    E4 enactment had to answer by eye — "is this the vintage the record was
-    filed from?" — is answerable mechanically.
+    â_comp from the `HubMapRef`/`VectorBankRef` alone, and this provenance
+    log only records what those resolvers did. It exists so the question "is
+    this the vintage the record was filed from?" is answerable mechanically
+    rather than by reading paths by eye.
     """
     kind: ResolutionKind
     model: str
@@ -1578,8 +1578,7 @@ class ResolutionProvenance(BaseModel):
                     "is entitled to claim a vintage there")
     tree: str = Field(
         description="WHICH TREE answered, in words — the candidate dir's own "
-                    "note, or the pin's record path. The field the A1 read "
-                    "needed and did not have")
+                    "note, or the pin's record path")
     probe_index: Optional[int] = Field(
         default=None, description="0-based position in the probe order that "
                                   "answered; None for a pin or an absence")
@@ -1599,12 +1598,12 @@ class ResolutionProvenance(BaseModel):
     cross_vintage_fallback: bool = Field(
         default=False,
         description="a v2.1 root was in force and this resolve fell THROUGH it "
-                    "to a pre-v2.1 tree. Computable before, sayable now")
+                    "to a pre-v2.1 tree")
     notes: list[str] = []
 
 
 class ResolutionProvenanceReadout(BaseModel):
-    """The ledger as an artifact (`--provenance-out`). Writes nothing itself."""
+    """The provenance log as an artifact (`--provenance-out`). Writes nothing itself."""
     STATUS: str = (
         "DESCRIPTIVE — a record of which tree answered each resolve. Computes "
         "no â, moves no band, writes nothing under outputs/.")
@@ -1620,7 +1619,7 @@ class ResolutionProvenanceReadout(BaseModel):
     records: list[ResolutionProvenance] = []
 
 
-#: The append-only resolution ledger for this process. MODULE-LEVEL for the same
+#: The append-only resolution log for this process. MODULE-LEVEL for the same
 #: reason `V21_ROOT` is: the resolvers are called from deep inside the predictor
 #: through fixed signatures. It grows with every resolve — a long-lived process
 #: should scope it (`provenance_scope()`) or clear it
@@ -1629,13 +1628,13 @@ _RESOLUTION_PROVENANCE: list[ResolutionProvenance] = []
 
 
 def resolution_provenance() -> tuple[ResolutionProvenance, ...]:
-    """Every resolve recorded so far, in call order. A COPY — the ledger is
+    """Every resolve recorded so far, in call order. A COPY — the log is
     appended to by the resolvers and must not be mutated from outside."""
     return tuple(_RESOLUTION_PROVENANCE)
 
 
 def clear_resolution_provenance() -> int:
-    """Empty the ledger; returns how many records were dropped."""
+    """Empty the provenance log; returns how many records were dropped."""
     n = len(_RESOLUTION_PROVENANCE)
     _RESOLUTION_PROVENANCE.clear()
     return n
@@ -1643,7 +1642,7 @@ def clear_resolution_provenance() -> int:
 
 @contextmanager
 def provenance_scope() -> Iterator[list[ResolutionProvenance]]:
-    """Record provenance for the duration of a block, restoring the ledger after.
+    """Record provenance for the duration of a block, restoring the log after.
 
     Yields the list the block's own records land in, so a caller can read them
     without having to diff a global.
@@ -1659,7 +1658,7 @@ def provenance_scope() -> Iterator[list[ResolutionProvenance]]:
 
 
 def _record_provenance(record: ResolutionProvenance) -> ResolutionProvenance:
-    """Append one resolve to the ledger, at the volume its content deserves."""
+    """Append one resolve to the provenance log, at the volume its content deserves."""
     _RESOLUTION_PROVENANCE.append(record)
     if record.cross_vintage_fallback:
         logger.warning(
@@ -1678,7 +1677,7 @@ def _record_provenance(record: ResolutionProvenance) -> ResolutionProvenance:
 
 
 def provenance_readout() -> ResolutionProvenanceReadout:
-    """The ledger, summarized, as the `--provenance-out` artifact."""
+    """The provenance log, summarized, as the `--provenance-out` artifact."""
     records = list(_RESOLUTION_PROVENANCE)
     by_source: dict[str, int] = {}
     by_corpus: dict[str, int] = {}
@@ -1697,7 +1696,7 @@ def provenance_readout() -> ResolutionProvenanceReadout:
         records=records)
 
 
-# ------------------------------------------------- the filed-paths pin (E4 A1)
+# ------------------------------------------------------- the filed-paths pin
 class FiledPathsError(ComposedPathError):
     """A filed-paths pin cannot answer a resolve, and MUST NOT fall back.
 
@@ -1746,7 +1745,8 @@ class FiledPaths(BaseModel):
 
 
 def hub_map_pin_key(model: str, site: int, arm: str, family: str) -> str:
-    """The pin key for a hub map — the resolver's full identity (rake M18)."""
+    """The pin key for a hub map — the resolver's full identity, never a partial key
+    that two distinct artifacts could share."""
     return f"{model}L{site}/{arm}-{family}"
 
 
@@ -1899,7 +1899,7 @@ def _pinned_path(kind: ResolutionKind, key: str, model: str,
 
     Raises rather than returning None when a pin IS in force and cannot answer:
     a strict pin that does not cover the key, always; and — in either mode — a
-    pinned path that is no longer on disk. Falling back would silently swap the
+    pinned path that is not on disk. Falling back would silently swap the
     vintage the record was filed from for whatever the probe order finds.
     """
     if FILED_PATHS is None:
@@ -1962,9 +1962,8 @@ def hub_map_dirs(model: str, site: Optional[int] = None,
     """Ordered candidate directories for the banked hub→`model` map.
 
     `site`/`arm`/`hub`/`hub_site` are OPTIONAL AND DEFAULT-NONE, and with all
-    four unset the returned list is byte-identical to what it was before the
-    webtext-v3 lane existed — for every model, root state and pin state. They
-    exist because the v3 hub-leg wave banks ONE DIR PER (hub, target, arm)
+    four unset the returned list carries no webtext-v3 candidate at all — for
+    every model, root state and pin state. They exist because the v3 hub-leg wave banks ONE DIR PER (hub, target, arm)
     rather than one per model, so a v3 candidate cannot be named without them;
     a v3 root set while they are unset therefore contributes NOTHING to the
     list rather than guessing a site or an arm.
@@ -1979,9 +1978,9 @@ def hub_map_dirs(model: str, site: Optional[int] = None,
     When a VERIFIED corpus-v2.1 root is set (`set_v21_root`; off by default) its
     `fits_v21_<model>/` dir is PREPENDED — the go-forward vintage wins, and a
     node with no v2.1 fit falls through to exactly the list below rather than to
-    N/A. With no root set the list is byte-identical to what it was before the
-    option existed: selftest 13 proves that path-by-path for every registered
-    model, and the E1 gate proves it on the data.
+    N/A. With no root set the list is exactly the frozen-first list below:
+    selftest 13 proves that path-by-path for every registered model, and the
+    E1 gate proves it on the data.
     """
     dirs: list[HubMapDir] = []
     if V3_ROOT is not None and site is not None and arm is not None:
@@ -1999,36 +1998,40 @@ def hub_map_dirs(model: str, site: Optional[int] = None,
                           note="collection-phase convention"))
     a8 = BANK_ROOT / "arms" / "A8_conjugation"
     if model == "3b":
-        # Hub→3B maps were fit by the desk onto the frozen-corpus A8-smalls
-        # banks and integrated to the pair-tree convention (LEDGER, hub-3b-maps
-        # 2026-07-27) — not to a collection node, because 3B is a carried node
-        # with no collection tree of its own.
+        # Hub→3B maps are fit onto the frozen-corpus conjugation-battery
+        # `smalls` banks and integrated to the pair-tree convention — not to a
+        # collection tree, because 3B is a carried node with no collection
+        # tree of its own.
         dirs.append(HubMapDir(path=Path("outputs") / "pairs" / "8b__3b"
                                    / "fits_8bL16__3bL14",
                               corpus="frozen",
                               note="carried node; desk-fit on the frozen-corpus "
                                    "A8-smalls banks, integrated to the pair tree"))
     if model == "dsv2-lite":
-        # leg2 holds the shared corpus; the dsv2-lite bank is leg2/states and
-        # was gate-verified frozen-corpus and clean (LEDGER, bank gate 4/4).
+        # `A8_conjugation/leg2` holds the shared corpus; the dsv2-lite bank
+        # is its `states/` dir, gate-verified frozen-corpus and clean (all four
+        # bank-gate checks pass).
         # `fits_modefree` beside it is a DIFFERENT fit lineage and is never the
         # map of record — it is deliberately not probed.
         dirs.append(HubMapDir(path=a8 / "leg2" / "fits", corpus="frozen",
                               note="carried node; battery leg2 (shared frozen corpus)"))
     if model == "qwen-7b":
-        # leg1 fits are LEGACY-CORPUS (LEDGER 2026-07-28 desk pre-check). They
-        # are the only banked hub→qwen-7b maps today, so composed predictions
-        # on qwen-7b pairs carry the flag until the frozen-corpus qwen-7b banks
-        # land and the collection dir above starts resolving.
+        # `A8_conjugation/leg1` fits are LEGACY-CORPUS (their bank's corpus
+        # manifest is not the frozen one). Where they are the only banked
+        # hub→qwen-7b maps, composed predictions on qwen-7b pairs carry the
+        # flag; a frozen-corpus qwen-7b bank in the collection dir above
+        # resolves first and supersedes them.
         dirs.append(HubMapDir(path=a8 / "leg1" / "fits", corpus="legacy",
                               note="carried node; battery leg1 — LEGACY-corpus fits"))
     if model == "gemma3-27b":
-        # The banked hub→gemma maps live in the desk-smalls extension-pair tree.
-        # FROZEN-corpus, and that is checked rather than assumed: the smalls
-        # state banks both sides were fit against stamp
-        # `corpus_manifest_sha256 = a6712ca0…`, the frozen campaign corpus —
-        # the same bank family the hub→3b maps were desk-fit onto, and one of
-        # the two trees rake M12 names as matching the collection-phase corpus.
+        # The banked hub→gemma maps live in the battery's `smalls`
+        # extension-pair tree. FROZEN-corpus, and that is checked rather than
+        # assumed: the smalls state banks both sides were fit against stamp
+        # the frozen campaign corpus's `corpus_manifest_sha256` — the same
+        # bank family the hub→3b maps were fit onto, and one of the two 8B
+        # bank trees whose corpus matches the collection phase. (There are two
+        # 8B state banks on different corpora; a fit or readout must live
+        # entirely inside one of them.)
         # `fits_gemma_modefree` beside it is a DIFFERENT fit lineage (as
         # `fits_modefree` is for dsv2-lite) and is deliberately NOT probed.
         dirs.append(HubMapDir(path=a8 / "smalls" / "fits_gemma", corpus="frozen",
@@ -2041,7 +2044,7 @@ def vector_bank_paths(model: str, site: int) -> list[Path]:
     """Ordered candidate paths for `model`'s banked entropy-gradient vectors.
 
     Deliberately NARROW. `read_exchange_rates.target_vector_candidates` probes
-    `a5_vectors.npz` banks too, which is right for a tool that knows which key
+    `a5_vectors` banks too, which is right for a tool that knows which key
     it wants — but here a near-miss is worse than a miss: an `a5_vectors` bank
     holds the frozen-era object roster, NOT the entropy-gradient vector, and
     loading one would produce a plausible number for a different estimand. Only
@@ -2100,17 +2103,17 @@ def checkpoint_identity(model: str) -> Literal["instruct", "base"]:
             f"{model!r}: checkpoint identity unknown — it is in neither "
             f"metabasis.roster.ROSTER {sorted(ROSTER)} nor the carried-node "
             f"table {sorted(CARRIED_CHECKPOINT_IDENTITY)}. The applicable arm "
-            f"cannot be resolved without it (prereg §3), and guessing from the "
+            f"cannot be resolved without it, and guessing from the "
             f"bank key's spelling is exactly the mistake this refusal prevents")
     return identity
 
 
 def applicable_arm(model_a: str, model_b: str) -> tuple[str, str]:
-    """The pair's applicable arm and the rule that produced it (prereg §3).
+    """The pair's applicable arm and the rule that produced it.
 
     instruct↔instruct → native. Anything involving a base checkpoint → raw:
-    base models run raw ONLY (the arm-consistency rule, prereg §1 — their
-    constants live in the raw system, never native), so a mixed pair has raw
+    base models run raw ONLY (the arm-consistency rule — their constants live
+    in the raw system, never native), so a mixed pair has raw
     as its only system in common and a base↔base pair has raw as its only
     system at all.
     """
@@ -2159,8 +2162,8 @@ class VectorBankRef(BaseModel):
         default=None,
         description="`v21` iff the bank resolved inside a VERIFIED corpus-v2.1 "
                     "root. Left None otherwise ON PURPOSE: a vector build only "
-                    "re-derives when its own recipe consumes the corpus "
-                    "(Addendum F §3), so labelling a collection-tree bank with "
+                    "re-derives when its own recipe consumes the corpus, so "
+                    "labelling a collection-tree bank with "
                     "a corpus vintage would assert what its stamp, not this "
                     "resolver, is entitled to say")
     probed_paths: list[str] = []
@@ -2177,12 +2180,11 @@ class DescriptiveCompanions(BaseModel):
     depends on any field here. They are emitted beside the prediction because
     they are FREE — every quantity comes from the two hub maps and two vectors
     already loaded to compute â_comp — and because the decomposition is the
-    mechanism claim's own vocabulary (SURVIVAL-AUDIT §4: alpha is a pair-chart
-    overlap property, not a per-model constant).
+    mechanism claim's own vocabulary (alpha is a pair-chart overlap property,
+    not a per-model constant).
 
     Construction and algebra: see the `descriptive companions` section below
-    (`chart_companions`), whose convention is the chart-overlap preview's
-    verbatim. `â_comp = alpha_pair · ceiling_target` is an IDENTITY, so this is
+    (`chart_companions`), which states the convention in full. `â_comp = alpha_pair · ceiling_target` is an IDENTITY, so this is
     a decomposition of the filed number and never a second prediction.
     """
     STATUS: str = (
@@ -2301,7 +2303,8 @@ class NotFilable(BaseModel):
       * a missing VECTOR BANK is the same shape of fact — nothing is banked, so
         there is nothing to compute — but it is NOT an E1 clause. It is
         reported rather than raised so a roster-wide sweep can name the gap;
-        the desk rules on whether such a slot files under the same heading.
+        whether such a slot files under the same heading is a filing
+        decision this tool does not make.
     """
     pair_id: str
     source_model: str
@@ -2514,10 +2517,8 @@ def composed_exchange_rate(hub_to_source: TransportMap, hub_to_target: Transport
 
 
 # ------------------------------------------------- descriptive companions (c)
-#  THE HUB-FRAME DECOMPOSITION. Operationalization of record:
-#  `staging/chart-overlap-preview/chart_overlap_preview.py` (its module
-#  docstring derives the construction and its --selftest verifies it
-#  numerically). The convention is reused here EXACTLY, not re-derived:
+#  THE HUB-FRAME DECOMPOSITION. The construction, stated in full (the
+#  selftest verifies it numerically):
 #
 #      m_M    := vb_M @ v_M        model M's banked vector in its own map basis
 #      zeta_M := omega_M @ m_M     the SAME vector in HUB coordinates
@@ -2535,8 +2536,8 @@ def composed_exchange_rate(hub_to_source: TransportMap, hub_to_target: Transport
 #  rho = delta / (sin_A · sin_B) measure the off-axis chart overlap.
 #
 #  Both consequences hold only over ONE common hub-side basis, which is checked
-#  rather than assumed. And per rake M19 — instrumentation that only DESCRIBES a
-#  run must never be able to FAIL it — every failure mode here degrades to
+#  rather than assumed. And instrumentation that only DESCRIBES a run must
+#  never be able to FAIL it, so every failure mode here degrades to
 #  `None` + a named note, and the prediction files regardless.
 
 
@@ -2631,8 +2632,9 @@ def chart_companions(tm_source: TransportMap, tm_target: TransportMap,
             f"the predictor's own arithmetic); the DECOMPOSITION is what is "
             f"suspect and must not be read.")
 
-    #  M19: an unregistered basis must not be able to fail a prediction that was
-    #  already computed, so the refusal is caught here and reported as a note.
+    #  Instrumentation must never fail the run it describes: an unregistered
+    #  basis must not be able to fail a prediction that was already computed,
+    #  so the refusal is caught here and reported as a note.
     try:
         if hub_vector_path is None:
             resolved_hub_vector = resolve_hub_vector_path()
@@ -2689,13 +2691,13 @@ def resolve_hub_map(model: str, site: int, arm: str, family: str,
     """Find the banked hub→`model` map, or report it absent as data.
 
     Absent is NOT an error here — draft E1 makes it the N/A-AT-FILING verdict,
-    and the returned record carries every path probed so the desk can see what
+    and the returned record carries every path probed so a reader can see what
     was looked for. Use `require_hub_map` when a caller must have the map.
 
     A FILED-PATHS PIN, when one is set, answers BEFORE any probe and never falls
-    back to one (`_pinned_path`). With no pin the probe order is exactly what it
-    was — and either way the resolve is recorded in the provenance ledger, which
-    names the tree that answered and its vintage.
+    back to one (`_pinned_path`). With no pin the probe order of `hub_map_dirs`
+    answers — and either way the resolve is recorded in the provenance log,
+    which names the tree that answered and its vintage.
     """
     pinned = _pinned_path("hub map", hub_map_pin_key(model, site, arm, family),
                           model, site)
@@ -2797,12 +2799,12 @@ def resolve_vector_bank(model: str, site: int) -> VectorBankRef:
     """Find `model`'s banked entropy-gradient vectors, or report them absent.
 
     Absent is data, not an exception: a node whose hub map is banked but whose
-    target build has not run yet (gemma3-27b today) must produce a NAMED gap
+    target build has not run yet must produce a NAMED gap
     rather than a `FileNotFoundError` from inside the predictor.
 
     Pinned and recorded exactly as `resolve_hub_map` is: a filed-paths pin
     answers first and never falls back, and every resolve lands in the
-    provenance ledger naming the tree that answered.
+    provenance log naming the tree that answered.
     """
     pinned = _pinned_path("vector bank", vector_bank_pin_key(model, site),
                           model, site)
@@ -2908,15 +2910,16 @@ def compose_pair(source_model: str, target_model: str,
     """â_comp for one candidate slot, or the N/A-AT-FILING record for it.
 
     Sites default to each model's site of record (grid-validated); `arm`
-    defaults to the pair's applicable arm (prereg §3). Overriding either is
-    allowed for diagnostics and is echoed into the record — draft E1's filing
-    path never overrides.
+    defaults to the pair's applicable arm (`applicable_arm`). Overriding either
+    is allowed for diagnostics and is echoed into the record — draft E1's
+    filing path never overrides.
 
     `hub`/`hub_site` default to the ACTIVE hub, which is the incumbent 8bL16
-    unless a caller set another explicitly (§8 files five hub columns). `basis`
-    selects the PREDICTION-ID convention only — `corpus-v2.1` is the frozen
-    `-k128` filing convention of record, `webtext-v3` is §8's `<arm>-k<rank>`
-    read off the family — and moves nothing else. Every default here reproduces
+    unless a caller set another explicitly (the webtext-v3 filing carries five
+    hub columns). `basis` selects the PREDICTION-ID convention only —
+    `corpus-v2.1` is the frozen `-k128` filing convention of record,
+    `webtext-v3` is the `<arm>-k<rank>` convention read off the family — and
+    moves nothing else. Every default here reproduces
     the v2.1 lane exactly.
     """
     s_site = site_of_record(source_model) if source_site is None \
@@ -2967,7 +2970,7 @@ def compose_pair(source_model: str, target_model: str,
 
     #  DESCRIPTIVE COMPANIONS — computed AFTER â_comp, from the objects already
     #  loaded, and passed the finished â_comp so they can only describe it.
-    #  Rake M19: instrumentation that only describes a run must never be able to
+    #  Instrumentation that only describes a run must never be able to
     #  fail it, so any failure here degrades to a note-bearing block (or None)
     #  and the prediction files unchanged.
     try:
@@ -3009,11 +3012,11 @@ def compose_pair(source_model: str, target_model: str,
             f"probed. corpus_manifest_sha256 is populated only from a root "
             f"VERIFIED this run, which a pin does not perform.")
 
-    #  Addendum G §G2(a): the corpus sha rides the â — but only when the WHOLE
-    #  computation rode one vintage. All four artifacts, or none. The webtext-v3
-    #  basis is answered by the SAME rule at its own root and digest, in its own
-    #  branch: with no v3 root in force the arithmetic below is bit-for-bit what
-    #  it was before this lane existed.
+    #  The corpus sha rides the â — but only when the WHOLE computation rode
+    #  one vintage. All four artifacts, or none. The webtext-v3 basis is
+    #  answered by the SAME rule at its own root and digest, in its own branch:
+    #  with no v3 root in force that branch is skipped and the v2.1 arithmetic
+    #  below runs untouched.
     sides = ("source hub map", "target hub map", "source vector",
              "target vector")
     refs = (ref_src, ref_tgt, vec_src, vec_tgt)
@@ -3183,21 +3186,21 @@ def run_candidates(family: str = FAMILY_OF_RECORD,
     return readout
 
 
-# --------------------------------------------- the directional star (ADD. H)
-#  ADDENDUM 2026-07-29-H, item 3: â(A→B) = c_A^out · c_B^in files as a THIRD
-#  predictor column beside the symmetric star and the composed path, on
-#  structurally identical terms. Item 2: the symmetric star column is UNTOUCHED
-#  — nothing below reads, recomputes or moves it.
+# ------------------------------------------------------ the directional star
+#  â(A→B) = c_A^out · c_B^in files as a THIRD predictor column beside the
+#  symmetric star and the composed path, on structurally identical terms. The
+#  symmetric star column is UNTOUCHED — nothing below reads, recomputes or
+#  moves it.
 #
 #  THE SCHEMA OF RECORD — `directional-constants-readout/v1`
 #  ─────────────────────────────────────────────────────────────────────────────
-#  Produced by the derivation lane (H item 5: c^out and c^in hub-derived on
-#  corpus-v2.1 from BOTH fit directions, anchored per the §3 hub protocol).
+#  Produced by the derivation lane (c^out and c^in hub-derived on corpus-v2.1
+#  from BOTH fit directions, anchored by the hub protocol's gauge anchor).
 #  Consumed here, never derived here.
 #
 #    {
 #      "schema": "directional-constants-readout/v1",   REQUIRED, exact string
-#      "corpus_manifest_sha256": "<64 lowercase hex>", REQUIRED  (G2(a))
+#      "corpus_manifest_sha256": "<64 lowercase hex>", REQUIRED  (vintage tag)
 #      "gauge": "<the anchor/gauge of record, free text>",  REQUIRED
 #      "generated":  "YYYY-MM-DD",                     optional
 #      "derivation": "<free text>",                    optional
@@ -3224,15 +3227,15 @@ def run_candidates(family: str = FAMILY_OF_RECORD,
 #  WHAT IS CHECKED, AND WHY EACH CHECK IS A HALT
 #    * `schema` exact-match — a v2 readout parsed as v1 would file numbers whose
 #      meaning moved underneath their names;
-#    * doc-level corpus sha, 64 lowercase hex — G2(a) makes the vintage tag part
-#      of the â, and a tag that is not a digest is not a tag;
+#    * doc-level corpus sha, 64 lowercase hex — the vintage tag is part of
+#      the â, and a tag that is not a digest is not a tag;
 #    * every model resolvable through `site_of_record` — an unknown or DEFERRED
 #      key (gpt2-xl) has no candidate slot, so a constant for it is a lane
 #      disagreement, not a bonus row;
 #    * a row's `site`, when present, must EQUAL the site registry's — the same
 #      halt `load_candidate_slots` makes, for the same reason: two artifacts
 #      describing different objects under one name;
-#    * (model, arm, family) unique — rake M18: key by the FULL identity and
+#    * (model, arm, family) unique — key by the FULL identity and
 #      assert no duplicates, because "which c^out is of record" cannot be
 #      guessed;
 #    * c_out / c_in finite. |c| > 1 is FLAGGED on the slot (a gauge-divided
@@ -3269,7 +3272,8 @@ class DirectionalConstants(BaseModel):
     Holds the readout's own provenance beside the rows: which file, which sha,
     which gauge, which corpus vintage. Every directional prediction quotes it,
     so a filed slot can be traced to the constants table it rode without
-    consulting a ledger row (the same discipline `HubMapRef` applies to maps).
+    consulting any record outside it (the same discipline `HubMapRef` applies
+    to maps).
     """
     schema_name: str = SCHEMA_DIRECTIONAL_CONSTANTS_V1
     path: str
@@ -3287,7 +3291,7 @@ class DirectionalConstants(BaseModel):
             ) -> Optional[DirectionalConstantRow]:
         """The row for this model IN THIS ARM, or None. NEVER cross-arm.
 
-        Addendum H item 3 scores the directional column on E1's terms; E1's
+        The directional column is scored on E1's terms; E1's
         arm-availability rule forbids proxying a quantity from another arm, and
         a scalar constant is no more proxiable than a map.
         """
@@ -3351,7 +3355,7 @@ def load_directional_constants(path: Path) -> DirectionalConstants:
     """
     if not path.is_file():
         raise _directional_schema_halt(
-            path, "directional-constants readout absent. Addendum H's third "
+            path, "directional-constants readout absent. The directional "
                   "column cannot file without one, and no constant is ever "
                   "defaulted, inferred or carried from another readout")
     try:
@@ -3375,9 +3379,8 @@ def load_directional_constants(path: Path) -> DirectionalConstants:
     if not _is_sha256_hex(corpus_sha):
         raise _directional_schema_halt(
             path, f"`corpus_manifest_sha256` is {corpus_sha!r}, not 64 "
-                  f"lowercase hex. Addendum G §G2(a) rides a corpus manifest "
-                  f"sha on every quoted â; an unverifiable tag is worse than a "
-                  f"missing one")
+                  f"lowercase hex. A corpus manifest sha rides every quoted "
+                  f"â; an unverifiable tag is worse than a missing one")
     gauge = doc.get("gauge")
     if not isinstance(gauge, str) or not gauge.strip():
         raise _directional_schema_halt(
@@ -3488,8 +3491,8 @@ def load_directional_constants(path: Path) -> DirectionalConstants:
         if row.key in seen:
             raise _directional_schema_halt(
                 path, f"duplicate constants row for {row.key} (entries "
-                      f"{seen[row.key]} and {i}) — rake M18: key by the FULL "
-                      f"identity and assert no duplicates; which c^out is of "
+                      f"{seen[row.key]} and {i}) — rows are keyed by the FULL "
+                      f"identity and duplicates refused; which c^out is of "
                       f"record cannot be guessed")
         seen[row.key] = i
         rows.append(row)
@@ -3522,10 +3525,10 @@ def load_directional_constants(path: Path) -> DirectionalConstants:
 
 
 class DirectionalPrediction(BaseModel):
-    """One â(A→B) = c_A^out · c_B^in, filable under Addendum H item 3.
+    """One â(A→B) = c_A^out · c_B^in, filable as the directional column.
 
-    Carries its OWN frozen band, because H item 3 freezes the ±.05 band at
-    filing: the value that files and the band that files are computed together,
+    Carries its OWN frozen band, because the directional column's ±.05 band is
+    frozen at filing: the value that files and the band that files are computed together,
     from the same rounding, so no downstream glue can pair a rounded prediction
     with an unrounded band.
     """
@@ -3624,8 +3627,8 @@ class DirectionalReadout(BaseModel):
     A SEPARATE artifact from `ComposedReadout` on purpose: the composed readout
     is the record of an existing, already-filed-against column, and bolting a
     new column into its shape would move a document other tools read. The
-    directional column arrives beside it, in its own file, and the desk's
-    filing glue lays the two side by side in one filing record.
+    directional column arrives beside it, in its own file, and filing lays
+    the two side by side in one filing record.
     """
     STATUS: str = (
         "UNSTAMPED — computation only. Fits nothing, refits nothing, FILES NO "
@@ -3669,8 +3672,8 @@ def directional_pair(source_model: str, target_model: str,
                      ) -> DirectionalPrediction | DirectionalNotFilable:
     """â(A→B) = c_A^out · c_B^in for one slot, or its N/A-AT-FILING record.
 
-    `arm` defaults to the pair's applicable arm (prereg §3); overriding it is a
-    diagnostic and is echoed into the record with a flag, exactly as
+    `arm` defaults to the pair's applicable arm (`applicable_arm`); overriding
+    it is a diagnostic and is echoed into the record with a flag, exactly as
     `compose_pair` does. The filing path never overrides.
     """
     s_site = site_of_record(source_model)
@@ -3717,8 +3720,8 @@ def directional_pair(source_model: str, target_model: str,
     if arm is not None and arm != resolved_arm:
         flags.append("ARM OVERRIDDEN — diagnostic only; not a filable slot.")
 
-    #  Addendum G §G2(a): the sha rides the â, and only when the WHOLE
-    #  computation rode one vintage. Two constants, both or neither.
+    #  The corpus sha rides the â, and only when the WHOLE computation rode
+    #  one vintage. Two constants, both or neither.
     if row_src.corpus_manifest_sha256 == row_tgt.corpus_manifest_sha256:
         corpus_sha = row_src.corpus_manifest_sha256
         vintage: PredictionVintage = (
@@ -3787,30 +3790,26 @@ def run_directional(constants: DirectionalConstants,
     return readout
 
 
-# ------------------------------------ the SYMMETRIC star column (prereg §3)
-#  THE NAMED GAP, CLOSED. Every racing filing record since batch 4 carried a
-#  `star_prediction` block that this module did not produce: the per-batch
-#  staging glue read the desk's constants artifact by hand and assembled c_A·c_B
-#  itself, and each emitter's own `emission.named_gap` said so — "the symmetric
-#  star is the one column it does not produce (there is no star producer in
-#  it)". Three generations of that glue agreed today; nothing made them agree
-#  tomorrow, and rake M33(b) wants filing records emitted THROUGH the tool that
-#  consumes them, which means every column comes from the tool.
+# ------------------------------------------------ the SYMMETRIC star column
+#  THE SYMMETRIC STAR, PRODUCED BY THE TOOL THAT SCORES IT. Every racing filing
+#  record carries a `star_prediction` block, and this module produces it: a
+#  column hand-assembled from a constants artifact by filing glue agrees with
+#  the scorer only by luck, while a filing record emitted THROUGH the tool that
+#  consumes it conforms to the scorer's contract by construction.
 #
-#  Addendum H item 2 leaves the symmetric column's TERMS untouched, and so does
-#  this: c_A·c_B, the 4-dp filing convention (`FILED_DECIMALS`, of record since
-#  the canary batch), the frozen ±.05 band OF THE FILED VALUE, and
-#  `NEAR_ZERO_CARVE_OUT` evaluated on the filed value — which is exactly what
-#  the consumer's own `_check_filed_band` / `_check_carve_out` re-derive. What
-#  moves is only where the arithmetic lives.
+#  The symmetric column's TERMS are fixed, and this producer keeps them:
+#  c_A·c_B, the 4-dp filing convention (`FILED_DECIMALS`), the frozen ±.05 band
+#  OF THE FILED VALUE, and `NEAR_ZERO_CARVE_OUT` evaluated on the filed value —
+#  which is exactly what the consumer's own `_check_filed_band` /
+#  `_check_carve_out` re-derive.
 #
 #  THE SCHEMA OF RECORD — `symmetric-constants-extension/v1`
 #  ─────────────────────────────────────────────────────────────────────────────
-#  Produced by the DESK's constants-extension lane (the hub-derived c-column on
+#  Produced by the constants-extension lane (the hub-derived c-column on
 #  corpus-v2.1); consumed here, never derived here — the same division of labour
 #  `load_directional_constants` keeps with its own lane. The shape is the one the
-#  batch-5/6/7 artifacts already carry, so the contract DESCRIBES the artifacts
-#  of record rather than asking them to move:
+#  artifacts of record carry, so the contract DESCRIBES them rather than asking
+#  them to move:
 #
 #    {
 #      "schema": "symmetric-constants-extension/v1",   OPTIONAL, exact if present
@@ -3830,25 +3829,24 @@ def run_directional(constants: DirectionalConstants,
 #      }
 #    }
 #
-#  `DERIVED: false` is DATA, not a failure: the batch-7 artifact carries
-#  `raw::proc_k32` that way because the banked anchor system did not solve for
-#  it. Such a column contributes no constant and every slot needing it is
+#  `DERIVED: false` is DATA, not a failure: an artifact carries a column (for
+#  example `raw::proc_k32`) that way when the banked anchor system does not
+#  solve for it. Such a column contributes no constant and every slot needing it is
 #  N/A-AT-FILING — the same first-class result the composed and directional
 #  columns report, never a silent zero.
 #
-#  WHY THE HUB IS AN ALLOWED COEFFICIENT KEY (rake M34). The coefficient tables
-#  of record carry `8b`: the gauge anchor c_8B is what every other constant is
-#  divided by, so it is IN the column by construction while having no candidate
-#  slot. `SITE_OF_RECORD` deliberately excludes the hub, so a model check that
-#  consulted only it would HALT on a legitimate artifact — M34's "structurally
-#  blind" failure, at registry grain. Both registries are consulted and which one
+#  WHY THE HUB IS AN ALLOWED COEFFICIENT KEY. The coefficient tables of record
+#  carry `8b`: the gauge anchor c_8B is what every other constant is divided
+#  by, so it is IN the column by construction while having no candidate slot.
+#  `SITE_OF_RECORD` deliberately excludes the hub, so a model check that
+#  consulted only it would HALT on a legitimate artifact — a registry that
+#  leaves out the hub is structurally blind to it. Both registries are consulted and which one
 #  answered is recorded on the row.
 
-#: prereg §3 / ADDENDUM 2026-07-28-E §E2 — the desk's symmetric hub-derived
-#: c-column artifact, by NAME and VERSION. Named WITH its version per rake M26 so
-#: a schema bump is visible to a mechanical sweep. The `schema` key itself is
-#: OPTIONAL because the three artifacts already filed against (batches 5/6/7)
-#: predate the name; present, it must match exactly, and a DIFFERENT name HALTs.
+#: The symmetric hub-derived c-column artifact, by NAME and VERSION. Named WITH
+#: its version so a schema bump is visible to a mechanical sweep. The `schema`
+#: key itself is OPTIONAL because artifacts of record carry no such key;
+#: present, it must match exactly, and a DIFFERENT name HALTs.
 SCHEMA_SYMMETRIC_CONSTANTS_V1 = "symmetric-constants-extension/v1"
 #: A portability coefficient is a cosine-scale quantity, so |c| > 1 is FLAGGED on
 #: the slot rather than refused — the same treatment, and the same threshold, the
@@ -3908,7 +3906,8 @@ class SymmetricConstants(BaseModel):
 
     Holds the artifact's own provenance beside the rows — which file, which sha,
     which corpus vintage, which derivation — so a filed star slot can be traced
-    to the table it rode without consulting a ledger row. The same discipline
+    to the table it rode without consulting any record outside it. The same
+    discipline
     `DirectionalConstants` and `HubMapRef` apply.
     """
     schema_name: str = SCHEMA_SYMMETRIC_CONSTANTS_V1
@@ -3930,10 +3929,9 @@ class SymmetricConstants(BaseModel):
             ) -> Optional[SymmetricConstantRow]:
         """The coefficient for this model IN THIS ARM, or None. NEVER cross-arm.
 
-        prereg §3's arm rule is no weaker for a scalar than for a map: a constant
-        fit in the raw system is not the native system's constant, and a per-role
-        N/A is never proxied from the other arm (the desk's standing order,
-        restated in every batch emitter).
+        The applicable-arm rule is no weaker for a scalar than for a map: a
+        constant fit in the raw system is not the native system's constant, and
+        a per-role N/A is never proxied from the other arm.
         """
         for candidate in self.rows:
             if (candidate.model == model and candidate.arm == arm
@@ -3972,16 +3970,16 @@ def _symmetric_schema_halt(path: Path, problem: str) -> SymmetricConstantsError:
         f"`anchor_c_8B`; a non-derived column is DATA (its slots file "
         f"N/A-AT-FILING) and may carry `why`.\n"
         f"  each model : a key of SITE_OF_RECORD, or the hub {HUB_MODEL!r} "
-        f"(rake M34 — the gauge anchor is in the column by construction and has "
+        f"(the gauge anchor is in the column by construction and has "
         f"no candidate slot, so the two registries are UNIONED here). Every "
         f"coefficient must be finite; (model, arm, family) must be UNIQUE.\n"
-        f"This module CONSUMES the artifact and never derives it: if the desk's "
+        f"This module CONSUMES the artifact and never derives it: if the "
         f"constants lane emits something different from the above, the contract "
         f"is what must be reconciled — not the parse.")
 
 
 def _symmetric_model_site(model: str) -> tuple[int, Literal["candidate", "hub"]]:
-    """The model's site, unioning the candidate registry with the hub (rake M34).
+    """The model's site, unioning the candidate registry with the hub.
 
     `SITE_OF_RECORD` deliberately omits the hub — the hub is the mediator, never
     a candidate side — while every coefficient table of record contains `8b`,
@@ -3998,14 +3996,14 @@ def load_symmetric_constants(path: Path) -> SymmetricConstants:
     """Read and VALIDATE a symmetric-constants artifact.
 
     Every failure raises `SymmetricConstantsError` quoting the whole expected
-    contract, so a mismatch with the desk's constants lane is legible from the
+    contract, so a mismatch with the constants lane's output is legible from the
     error alone. Nothing is defaulted, inferred, or carried from another
     artifact — a coefficient that is not in the file does not exist.
     """
     if not path.is_file():
         raise _symmetric_schema_halt(
-            path, "symmetric-constants artifact absent. prereg §3's star column "
-                  "cannot file without one, and no coefficient is ever "
+            path, "symmetric-constants artifact absent. The symmetric star "
+                  "column cannot file without one, and no coefficient is ever "
                   "defaulted, inferred or carried from another readout")
     try:
         doc = json.loads(path.read_text())
@@ -4031,8 +4029,8 @@ def load_symmetric_constants(path: Path) -> SymmetricConstants:
     if not _is_sha256_hex(corpus_sha):
         raise _symmetric_schema_halt(
             path, f"corpus manifest sha is {corpus_sha!r}, not 64 lowercase hex. "
-                  f"Addendum G §G2(a) rides a corpus manifest sha on every "
-                  f"quoted â; an unverifiable tag is worse than a missing one")
+                  f"A corpus manifest sha rides every quoted â; an "
+                  f"unverifiable tag is worse than a missing one")
     hub_block = doc.get("hub")
     if isinstance(hub_block, dict):
         if hub_block.get("model", HUB_MODEL) != HUB_MODEL:
@@ -4126,8 +4124,8 @@ def load_symmetric_constants(path: Path) -> SymmetricConstants:
                                        c=as_float, site=site, registry=registry)
             if row.key in seen:
                 raise _symmetric_schema_halt(
-                    path, f"duplicate coefficient for {row.key} — rake M18: key "
-                          f"by the FULL identity and assert no duplicates; which "
+                    path, f"duplicate coefficient for {row.key} — rows are "
+                          f"keyed by the FULL identity and duplicates refused; which "
                           f"c_M is of record cannot be guessed")
             seen[row.key] = column.label
             rows.append(row)
@@ -4155,14 +4153,15 @@ def load_symmetric_constants(path: Path) -> SymmetricConstants:
 
 
 class StarPrediction(BaseModel):
-    """One â(A→B) = c_A · c_B, filable under prereg §3 / Addendum E §E2.
+    """One â(A→B) = c_A · c_B, filable as the symmetric scalar star column.
 
     Carries the FILED value and the FILED band together, at the 4-dp convention
-    of record: the symmetric column has filed that way since the canary batch,
-    so the value that files and the band that files are rounded in ONE place and
-    no downstream glue can pair a rounded prediction with an unrounded band.
-    `predicted_full_precision` is a NAMED rounding echo (rake M33(c)), never a
-    second value of record.
+    of record the symmetric column files at, so the value that files and the
+    band that files are rounded in ONE place and no downstream glue can pair a
+    rounded prediction with an unrounded band. `predicted_full_precision` is a
+    NAMED rounding echo, never a second value of record: a checker that finds
+    two values must measure their difference against rounding before calling
+    it a conflict.
     """
     prediction_id: str = Field(
         description="E2's ID shape: star-prediction/<src>→<tgt>/<arm>-k128")
