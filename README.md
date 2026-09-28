@@ -10,9 +10,9 @@ toward formal register, toward French, toward refusing, toward higher output ent
 Metabasis builds a **hub-and-spoke atlas** of language models. Each model gets one
 **transport map** into a shared hub model's residual space, fit on nothing but mean residual
 states over a fixed web-text corpus. Any pair of models composes through two hub legs. Each
-pair's **exchange rate** (â, how much of a direction survives the transfer) is predicted
-before the pair is fit, and a steering vector crosses from one model to another by an
-explicit change of basis.
+pair's **exchange rate** (â: the cosine between a source model's vector carried through the
+map and the target model's own vector of the same kind) is predicted before the pair is
+fit directly. A steering vector crosses from one model to another through the composed map.
 
 ## Why
 
@@ -32,12 +32,11 @@ claim is certified against matched-norm random controls.
 [`RESULTS.md`](RESULTS.md) holds the full account, with each item marked established,
 exploratory, rejected, or in progress. In brief:
 
-- **Composed maps predict exchange rates ahead of observation.** On each of four hubs,
-  240/240 pre-filed predictions land within ±0.05 of the observed exchange rate, and
+- **Composed maps predict exchange rates ahead of the direct fit.** On each of four hubs,
+  240/240 pre-filed predictions land within ±0.05 of the directly fitted exchange rate, and
   92.9–96.3 % within ±0.025. A designated poor-hub control fails the tight band, as
-  pre-registered. One number per model does much worse: 163/240 in-sample and 143/240 held
-  out, against 240/240 filed in advance. The relational frame carries transport; a scalar
-  summary does not.
+  pre-registered. In a descriptive comparison, one coefficient per model lands 163/240
+  in-sample and 143/240 held out.
 - **The entropy-gradient vector steers from 3B to 405B.** It is dose-ordered and outside
   random controls in 20 of 21 models tested (Mixtral on a narrower dose ladder).
 - **Contrast vectors transfer visibly at small and mid scale.** At 70B, language behaves
@@ -55,18 +54,19 @@ from the repository root.
 uv venv && source .venv/bin/activate
 uv pip install -e .
 
-# Each module proves itself on synthetic data before it touches real inputs.
+# Selftests: each checks a module's algebra and refusals on synthetic data. They need a
+# writable temporary directory, and they do not run automatically before real inputs.
 python -m metabasis.scripts.fit_transport_maps --selftest       # map fitting and gates
 python -m metabasis.scripts.build_behavioral_banks --selftest   # carrying vectors across
 python -m metabasis.scripts.build_contrast_vectors --selftest   # contrast-vector construction
 ```
 
-Each prints its checks and exits 0. A check it cannot run in this environment is reported
-as a named skip, with the evidence that is missing. Some module output and `--help` text
+Each prints its checks and exits 0. A check that needs an artifact not in this repository
+is reported as a named skip. Some module output and `--help` text
 still carries internal record codes; [`CONTRIBUTING.md`](CONTRIBUTING.md) says where that
 stands.
 
-The core step is a semi-orthogonal change of basis. On synthetic data, with a hidden
+The core step is an orthogonal rotation with an isotropic scale between two PCA bases. On synthetic data, with a hidden
 rotation and scale between two "models" reading the same texts:
 
 ```python
@@ -90,27 +90,33 @@ basis per model, a rank limit, and nulls a map must beat before anyone trusts it
 ## The pipeline
 
 1. **Shared corpus.** A fixed corpus of generic web text, reconstructed byte for byte from
-   pinned public sources. It deliberately contains nothing being transferred, so the maps
-   learn shared geometry rather than task content.
+   pinned public sources. Map fitting uses no task-specific data: no contrast pairs and no
+   labels, only the same texts read by each model.
 2. **Per-text mean states.** Each model reads every text with its own tokenizer. At that
    model's site, a residual layer chosen from its alignment curve, the mean residual state
    over each text's completion is recorded. Matching rows by text rather than token is what
    makes them comparable across tokenizers.
 3. **Per-side PCA.** Each model's state matrix gets its own principal basis, fit on training
-   rows only, with rank k ≤ n_train / 1.2.
-4. **Procrustes to the hub.** A semi-orthogonal map (WᵀW = I, with an optional isotropic
-   scale) goes from each model's coordinates to the hub's: one map per model.
-5. **Gates.** A map is used only if its held-out state prediction beats both a
-   shuffled-pair null and a stratum-preserving shuffle.
+   rows only. The fitter caps rank at n_train − 1; results are read at ranks within
+   k ≤ n_train / 1.2, a guard the readers apply.
+4. **Procrustes to the hub.** An orthogonal rotation (with an optional isotropic scale)
+   between the two models' PCA coordinates: one map per model. In the full residual space
+   the map is rank-limited: directions outside the PCA spans are projected away, so it is
+   not an invertible change of basis.
+5. **Gates.** A map passes when its held-out state prediction beats both a shuffled-pair
+   null and a stratum-preserving shuffle (95th percentile of 20 permutations each). The
+   result is recorded with the saved map; loaders do not refuse a failing map, so a
+   consumer checks the recorded gate.
 6. **Compose, predict, transfer.** Pair A→B is A's hub leg composed with B's. Its exchange
-   rate is filed as a prediction with frozen bands before the pair is observed, and a vector
-   transfers by the same composition.
+   rate is filed as a prediction with frozen bands before the pair is fit directly, and a
+   vector transfers by the same composition.
 
 A model enters the atlas once: one site, one state bank, one hub leg. Every pair it joins
 afterwards is composition, with no per-pair fitting.
 
-Exchange rates are properties of (pair, corpus). Their ordering is robust across fitting
-corpora; their level depends on the corpus, so every quoted exchange rate names its corpus.
+An exchange rate depends on the model pair, the vector family, the sites, the corpus, the
+template arm and the map rank. Its ordering is robust across fitting corpora; its level
+depends on the corpus, so every quoted exchange rate names its corpus.
 
 ## Running it on models
 
@@ -126,7 +132,8 @@ python -m metabasis.scripts.build_webtext_corpus --seed 80 --n-per-stratum 300 \
 # 0b. The frozen train/holdout split the fits consume.
 python -m metabasis.scripts.derive_webtext_splits --help
 
-# 1–2. Per-text mean states at each model's site, with a bitwise replay check in the same pass.
+# 1–2. Per-text mean states at each model's site; a bitwise replay check runs as a second
+#      invocation in the same job (--collect and --spot-replay are separate runs).
 python -m metabasis.scripts.collect_mean_states --help
 
 # 3–5. Maps into the hub, gated against both nulls.
@@ -208,11 +215,11 @@ One name per object, used the same way in code, outputs and prose:
 | transport map | the linear map from one model's residual space into another's |
 | hub leg | a model's transport map into the hub |
 | composed map | two legs chained, A → hub → B |
-| exchange rate (â) | how much of a direction survives a transfer |
+| exchange rate (â) | cosine between a transported source vector and the target's own vector |
 | star factorization | predicting each pair's exchange rate as a product of one coefficient per model |
 | site | the residual layer a model's states are read at and its vectors written at |
 | dose (α) | the steering strength, as a fraction of the site's median residual norm |
-| random band | the spread of effects from random vectors of the same norm: the null a real effect must clear |
+| random band | the range of effects from three random vectors of the same norm, carried the same way: a descriptive null, not a statistical interval |
 | alignment | cosine between a transported vector and the target model's own native vector |
 | containment | the fraction of a direction the map's anchor frame can hold; an upper bound on alignment |
 | in-family leg | a map from a smaller model of the same family, as opposed to the hub leg |

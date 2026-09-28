@@ -14,20 +14,31 @@ Numbers carry their scope. An exchange rate is a property of (model pair, corpus
 behavioral effect is a property of the instrument that read it. Entropy effects name their
 channel (see "Two entropy channels").
 
-The two frozen contracts are in this repository, and each is byte-identical to its tag:
-[`docs/planning/PREREG-transport-campaign-2026-07-26.md`](docs/planning/PREREG-transport-campaign-2026-07-26.md)
-(tag `freeze/transport-campaign`; later addenda are appended below the frozen body) and
+The two frozen contracts are in this repository.
 [`docs/planning/PREREG-webtext-v3-2026-08-03.md`](docs/planning/PREREG-webtext-v3-2026-08-03.md)
-(tag `freeze/webtext-v3`). To check: `git show <tag>:<path> | sha256sum`.
+is byte-identical to its copy at tag `freeze/webtext-v3`.
+[`docs/planning/PREREG-transport-campaign-2026-07-26.md`](docs/planning/PREREG-transport-campaign-2026-07-26.md)
+begins with the exact bytes tagged `freeze/transport-campaign`, followed by appended
+addenda. To check: `git show <tag>:<path>`.
+
+**What is and is not verifiable from this repository.** The code, the corpus reconstruction,
+the frozen contracts and the manifests are here. The state banks, fitted maps, prediction
+artifacts and scored outputs behind the numbers below are not; they are available on
+request. Hashes let an obtained copy be checked; they do not show when an artifact was
+made. Pair predictions share models, hub legs and corpus rows, so hit counts are
+descriptive summaries, not independent trials.
 
 ## Established
 
 ### Composed transport predicts exchange rates ahead of observation
 
 Every model gets one linear map into a hub model. Any pair A→B is predicted by composing A's
-hub leg with B's, before the pair is fit. On the clean web-text corpus (webtext-v3), 240
-predictions were filed and hashed before any pair was observed. Here is how they landed
-against the observed exchange rates:
+hub leg with B's, before the pair's own direct map is fit. The prediction already uses both
+models' native vectors and their fitted hub legs; what it predicts is the direct fit. On the
+clean web-text corpus (webtext-v3), 240 predictions (ordered pairs; 120 unordered) were
+filed and hashed before the direct fits. All 240 cleared the pre-registered |â| ≥ 0.08
+floor, so none fell back to magnitude-only scoring. Against the directly fitted exchange
+rates:
 
 | hub | within ±0.05 | within ±0.025 |
 |---|---|---|
@@ -38,12 +49,14 @@ against the observed exchange rates:
 | Gemma-3-27B (designated poor-hub control) | 238/240 | 190/240 (79.2 %, fails) |
 
 The one failure is the control failing the tight band, which the pre-registration named in
-advance. 84 further predictions, for pairs where neither model's map was fit on the texts
-being scored, land 84/84 on every hub.
+advance. Of the 240, the 84 predictions involving at least one of the three models added
+last land 84/84 on every hub.
 
-**The frame carries transport; a single number per model does not.** The star factorization
+**A descriptive comparison: the frame against a single number per model.** The
+pre-registration scores this comparison descriptively, not as a gate. The star factorization
 predicts each pair as a product of one coefficient per model. It lands 163/240 in-sample and
-143/240 held out, against 240/240 for composition filed in advance. On identical
+143/240 held out (leave one unordered pair out), against 240/240 for composition filed in
+advance. On identical
 predictions, 77 land for composition only and 0 for the star only. The star breaks
 one-sidedly on same-family pairs, which it under-predicts in 16/16 cases. Whether any
 scalar summary is adopted as the law is decided once the last model (DeepSeek-V3) is in.
@@ -68,7 +81,7 @@ the construction, and the one model that did not calibrate (Gemma-3-27B, whose r
 controls swing too widely at the sites tested) are in the
 [entropy-gradient repository](https://github.com/LuxiaSL/entropy-gradient).
 
-### What transport carries is the perpendicular component
+### At 405B, the perpendicular component decided transfer between two legs
 
 At Llama-3.1-405B, entropy vectors transported from two source models align almost equally
 with the target's native vector (cos .234 vs .264). Yet their effects differ by about 50×
@@ -82,7 +95,8 @@ decides it:
 - **Hub leg (from Qwen2.5-3B):** its perpendicular part does not carry (ρ −0.66,
   sign-inconsistent).
 
-The carry and no-carry verdicts hold in both channels. The prediction was fixed before the
+The carry and no-carry verdicts hold in both channels. This is two legs at one target: it
+shows the perpendicular component's contribution there, not a general law of transport. The prediction was fixed before the
 run in a pre-statement that is not yet published in this repository (sha256
 `a92644b343c7e1a3719e27cdb283306203d8e5b54990dce294e42391ae83df03`).
 
@@ -218,16 +232,16 @@ spans many layers needs a correspondence rule, not depth matching.
 
 ## Rejected
 
-- **Cosine to the native vector predicts transferred effect** (local channel). Two legs 13 %
-  apart in cos differ about 50× in local effect, 1.65× in the total. The perpendicular
-  result replaces this reading.
+- **Cosine to the native vector as a sufficient predictor of transferred effect** (local
+  channel). Two legs 13 % apart in cos differ about 50× in local effect, 1.65× in the total.
+  This rules out cosine as sufficient, not every relationship between cosine and effect.
 - **"Large models are intolerant of imperfect directions."** An angular-efficiency reading
   predicted 405B would reject any transported vector below an alignment bar. At 405B, on the
   same model, instrument and GPU split, the in-family leg carried at efficiency 0.92 against
   the hub leg's 0.021 (local channel).
-- **The machine, its software, or the measurement tool as the source of the
-  tensor-parallel effect.** A single-GPU run reproduced another machine's column to six
-  decimals.
+- **The machine as the source of the tensor-parallel effect.** A single-GPU run on one
+  machine reproduced another machine's column to six decimals. That rules out the machine,
+  not a shared software implementation.
 - **Reweighting the anchor spectrum as a 405B rescue.** The direction is near chance in the
   generic span even at full rank: .272 against a chance level of .218 (fitting-v21). The
   information is missing, not down-weighted.

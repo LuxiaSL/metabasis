@@ -16,21 +16,21 @@ cites as `corpus_manifest_sha256`, unchanged. A copy of the full
 manifest verifies against that sha; each of its texts verifies against
 its entry's `text_sha256` here.
 
-## Composition — 777 texts, three strata
+## Composition — 775 texts, three strata
 
 | stratum | n | what |
 |---|---|---|
 | S1 | 320 | Model-generated prose: two voices (Llama-3.1-8B-Instruct, DeepSeek-V2-Lite) writing on 20 fixed topics × 4 task modes ("Write about: …", bare system prompt); per (topic × mode) cell, the 2 lowest-repetition non-empty generations |
 | S2 | 160 | **WikiText-103** (`wikitext-103-raw-v1`, validation split): greedy paragraph chunks of 150–500 tokens (close at 250), fixed-seed sample; headings/empty lines dropped |
-| S3 | 297 | Model-generated prose, same two voices: per mode, repetition 0 of topics 0–19 plus repetition 1 of topics 0–9 |
+| S3 | 295 | Model-generated prose, same two voices: per mode, repetition 0 of topics 0–19 plus repetition 1 of topics 0–9 |
 
 Each entry carries its full provenance: `text_id`, stratum, voice,
 mode, topic, repetition, source run/generation/seed, and the exact
 prompts used.
 
-Fit splits consume **775 of the 777** entries: a topic-grouped split
-(5/20 topics + 40/160 S2 chunks held out; seed 80) yielding
-n_train = 598, n_test = 177, recorded per fit in `cp2_summary.json`.
+Fit splits use all 775 entries: a topic-grouped split (5/20 topics +
+40/160 S2 chunks held out; seed 80) yielding n_train = 598,
+n_test = 177, recorded per fit in `cp2_summary.json`.
 
 ## Licenses
 
@@ -45,7 +45,7 @@ n_train = 598, n_test = 177, recorded per fit in `cp2_summary.json`.
 
 ## Why a successor exists
 
-The model-generated strata (S1/S3, 617 of 777 texts) make this corpus
+The model-generated strata (S1/S3, 615 of 775 texts) make this corpus
 partly on-policy for models in the roster. Fits restricted to the 160
 WikiText chunks — text no model authored — show the transport structure
 survives off-policy while exchange-rate *levels* shift. The successor,
