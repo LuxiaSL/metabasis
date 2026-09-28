@@ -12,15 +12,16 @@ DIVERSITY on shared contrast data, not a second experiment.
                                is a different object, so the centering is
                                asserted here rather than assumed)
 
-RULINGS THIS MODULE IS BUILT AGAINST (all ledgered 2026-08-04/05, session 12)
+THE DECISIONS THIS MODULE IS BUILT AGAINST
 
   * **Construction of record: TEXT-CONTRAST CAA** — "mean states over contrastive
     raw text pairs — no system prompt needed" → base models get native
     comparators and the instruct-only constraint dissolves for
     language/sentiment/formality. Refusal's base-absence is a fact about the
     behavior, stated, not engineered around.
-  * **FRESH public contrast sets published in-repo with shas** — which kills the
-    V1 topic-leakage caveat. The banked V1 formality vectors
+  * **FRESH public contrast sets published in-repo with shas** — which removes the
+    topic-leakage caveat the earlier formality contrast carried. The banked formality
+    vectors
     (`build_formality_contrast.py`) are quotable only as fresh-vs-banked cosine
     ANCHORS; this module never consumes them.
   * **repeng METHOD ROW on SENTIMENT**, construction verbatim, **single-site
@@ -28,7 +29,7 @@ RULINGS THIS MODULE IS BUILT AGAINST (all ledgered 2026-08-04/05, session 12)
     publishes a MULTI-SITE actuator and our harness writes at ONE site. The stamp
     says so in a field, not in a footnote (`application_scope`).
   * **SCOPE GUARD** — the behavioral slate is frozen at {EGV column + 4 needle
-    axes + repeng row + L1 panel + §10 tier contrast}. `AXES_OF_RECORD` is that
+    axes + repeng row + L1 panel + tier contrast}. `AXES_OF_RECORD` is that
     guard as arithmetic: a fifth axis cannot be spelled here at all.
 
 THE REFUSAL THAT MAKES THIS SAFE TO RUN OVERNIGHT
@@ -37,10 +38,10 @@ THE REFUSAL THAT MAKES THIS SAFE TO RUN OVERNIGHT
 pin file.** It mirrors `build_behavioral_banks.py`'s band-recipe guard exactly in
 shape: there, the refusal lifts for one ruled recipe string and no other; here, it
 lifts for one ruled sha and no other. A `PROPOSED` row is refused BY STATUS with
-its own message, because on 2026-08-05 every draft set is PROPOSED and the set
-freeze is Luxia's morning word — so tonight's drafts provably cannot become a
-vector, no matter what a later command line asks for. Six independent ways to be
-refused, each with its own exception class:
+its own message, because every draft set starts PROPOSED and freezing a set is a
+named person's dated decision — so a draft provably cannot become a vector, no
+matter what a later command line asks for. Six independent ways to be refused,
+each with its own exception class:
 
     no pin file · unrecognized pin schema · set sha absent from the pins ·
     pin row still PROPOSED · pin row's axis ≠ the set's axis ·
@@ -48,11 +49,12 @@ refused, each with its own exception class:
 
 WHAT THIS MODULE DOES NOT DO. It does not score, does not transport (transport is
 `fit_transport_maps` + the readouts), does not judge, and never self-stamps: every
-stamp carries `UNSTAMPED (C§8)`. It does not build a lesion recipe — the
-constructions are a CLOSED set (§5.4's law, same treatment as the staging module).
-It refuses to hand a MULTI-SITE family to anything that transports: multi-site
-transport is a NAMED FUTURE ARC with its own pre-registration (Luxia, 2026-08-04),
-and the multi-site build here exists ONLY for the source-side decomposition
+stamp carries the `GRADE_LINE` value, which says it is ungraded. It does not
+build a lesion recipe — no object built by projecting, orthogonalizing or ablating
+one direction out of another — so the constructions are a CLOSED set, the same
+treatment the staging module gives. It refuses to hand a MULTI-SITE family to
+anything that transports: multi-site transport is a NAMED FUTURE ARC with its own
+pre-registration, and the multi-site build here exists ONLY for the source-side decomposition
 control (native multi-site vs native single-site-at-record, no transport, which
 attributes a weak transported repeng row to application cost vs transport cost).
 
@@ -74,35 +76,34 @@ CPU self-test (no weights, no GPU, no data tree, no torch, no sklearn):
 
     python -m metabasis.scripts.build_contrast_vectors --selftest
 
-RAKE M44 — THE CONFIGURATION MATRIX IS THE MERGE BAR. Every fixture is built in a
-`TemporaryDirectory` and nothing resolves a banked path relative to cwd (the
-dcbe7d7 pattern), so the {data tree, no data tree} axis is vacuous and asserted
-vacuous. The axes that are NOT vacuous are {torch present, absent} — the
+THE CONFIGURATION MATRIX IS THE MERGE BAR. Every fixture is built in a
+`TemporaryDirectory` and nothing resolves a banked path relative to cwd, so the
+{data tree, no data tree} axis is vacuous and asserted vacuous. The axes that are NOT vacuous are {torch present, absent} — the
 extraction lane's convention proof — and {sklearn present, absent} — the
 independent cross-check of the PCA. Each degrades to a NAMED skip carrying its
 triggering condition, counted in the tail.
 
-RAKE M45 — `selftest()` RETURNS an int and never `sys.exit()`s, so an all-module
-sweep records a result instead of dying at this file. M25 — no `hash()`, no
-unseeded RNG; in fact neither construction draws a random number at all, which is
+`selftest()` RETURNS an int and never `sys.exit()`s, so an all-module sweep
+records a result instead of dying at this file. No `hash()` (it is salted per
+process), no unseeded RNG; in fact neither construction draws a random number at all, which is
 why build-twice here is an assertion about linear algebra rather than about seeds.
 
 Typical use (repo root):
 
-    python -m metabasis.scripts.build_contrast_vectors --example-pins > pins.json
+    python -m metabasis.scripts.build_contrast_vectors --example-pins > <PINS_JSON>
     python -m metabasis.scripts.build_contrast_vectors --verify-set SET.json
     python -m metabasis.scripts.build_contrast_vectors --extract \\
         --set SET.json --model-path <WEIGHTS_DIR> --node-key <MODEL_KEY> \\
         --arm native --sites 26 --states STATES.npz
     python -m metabasis.scripts.build_contrast_vectors \\
-        --set SET.json --pins pins.json --states STATES.npz \\
+        --set SET.json --pins <PINS_JSON> --states STATES.npz \\
         --construction caa --sites 26 --out-dir <VECTORS_DIR>
 """
 from __future__ import annotations
 
 import os
 
-os.environ.setdefault("OMP_NUM_THREADS", "8")     # the 2026-08-01 ruling, before numpy
+os.environ.setdefault("OMP_NUM_THREADS", "8")     # the standing default, before numpy
 
 import argparse                                                       # noqa: E402
 import hashlib                                                        # noqa: E402
@@ -126,7 +127,8 @@ logger = logging.getLogger("build_contrast_vectors")
 
 # ---------------------------------------------------------------- contracts
 
-#: The C§8 grade every stamp carries. Nothing here self-scores.
+#: The grade every stamp carries: ungraded. Nothing here self-scores. The value is
+#: wire format, compared verbatim by readers of the stamp.
 GRADE_LINE = "UNSTAMPED (C§8)"
 
 #: The contrast-set document contract. A document this module does not recognize is
@@ -141,13 +143,13 @@ CONTRAST_SET_PIN_SCHEMA_VERSION = "contrast-set-pins/1"
 #: The vector-bundle contract (what `--build` writes beside the npz).
 CONTRAST_VECTOR_SCHEMA_VERSION = "contrast-vectors/1"
 
-#: **THE SCOPE GUARD AS ARITHMETIC** (Luxia, 2026-08-04, in writing): the behavioral
-#: phase slate is FROZEN at four needle axes. An axis outside this tuple is refused
-#: by name at every entry point, so a fifth axis needs a dated ruling and a code
-#: change — it cannot arrive through a spec field.
+#: **THE SCOPE GUARD AS ARITHMETIC**: the behavioral phase slate is FROZEN at four
+#: needle axes. An axis outside this tuple is refused by name at every entry point,
+#: so a fifth axis needs a written, dated decision and a code change — it cannot
+#: arrive through a spec field.
 AXES_OF_RECORD: tuple[str, ...] = ("language", "sentiment", "formality", "refusal")
 
-#: Which axes have an induce-only framing (Luxia: refusal is induce-only — the
+#: Which axes have an induce-only framing (refusal is induce-only — the
 #: vector induces refusal; the suppression direction is a jailbreak object and is
 #: out of scope). Recorded on the set and asserted against the pin row.
 INDUCE_ONLY_AXES: tuple[str, ...] = ("refusal",)
@@ -177,7 +179,7 @@ REPENG_CONSTRUCTION_TEXT = (
     "pair to project LARGER than its negative on a majority of pairs. Components are "
     "unit by construction (SVD right-singular vector).")
 
-#: **The single-site NAME (Luxia's ruling, verbatim in force).** repeng publishes a
+#: **The single-site NAME, stated verbatim in every stamp.** repeng publishes a
 #: multi-site actuator: one direction per layer, all attached at once. Our harness
 #: writes at ONE site. That is a VARIANT, it is named as one in every stamp, and the
 #: expected consequence — attenuation relative to the published application — is
@@ -204,8 +206,8 @@ MULTI_SITE_SCOPE = (
 CAA_KEY_TEMPLATE = "caa_{axis}_L{site}"
 REPENG_KEY_TEMPLATE = "repengpca_{axis}_L{site}"
 
-#: The native arm's carrier prompt. Text-contrast CAA needs NO system prompt (the
-#: ruling), but a chat template needs a user turn, so the text rides as the
+#: The native arm's carrier prompt. Text-contrast CAA needs NO system prompt (it
+#: contrasts raw text), but a chat template needs a user turn, so the text rides as the
 #: completion under ONE axis-neutral carrier that is IDENTICAL on both sides of
 #: every pair — therefore it cancels in the difference. Recorded in every stamp so
 #: the cancellation argument is checkable rather than trusted.
@@ -216,11 +218,11 @@ NATIVE_CARRIER_PROMPT = "Write about: general knowledge"
 DATE_STRING_PIN = "26 Jul 2026"
 
 #: The closed set of constructions. Anything outside it is refused BY NAME, which is
-#: what makes §5.4's lesion-recipe law mechanical rather than a habit: a lesion
+#: what makes the no-lesion-recipe rule mechanical rather than a habit: a lesion
 #: recipe cannot be spelled here at all.
 ADMISSIBLE_CONSTRUCTIONS: tuple[str, ...] = ("caa", "repeng_pca")
 
-#: Substrings that name a lesion recipe (§5.4). Same list the staging module refuses.
+#: Substrings that name a lesion recipe. Same list the staging module refuses.
 LESION_MARKERS: tuple[str, ...] = (
     "project_out", "projectout", "orthogonalize", "residualize", "lesion",
     "subtract entropy", "entropy_gradient", "perp", "ablate")
@@ -257,13 +259,13 @@ class ContrastSetNotRuled(ContrastSetNotPinned):
 
     Kept distinct from `ContrastSetNotPinned` because the two failures mean
     different things to a reader: "I have never heard of this set" versus "this is
-    the set you meant, and nobody has ruled it yet." On 2026-08-05 every draft set
-    is in the second state by design.
+    the set you meant, and nobody has ruled it yet." Every draft set starts in the
+    second state by design.
     """
 
 
 class ConstructionRefused(ContrastBuildError):
-    """§5.4's law, or a construction outside the closed set."""
+    """A lesion recipe, or a construction outside the closed set."""
 
 
 class DimensionMismatch(ContrastBuildError):
@@ -284,7 +286,7 @@ class StatesError(ContrastBuildError):
 
 # ---------------------------------------------------------------- small utilities
 def sha256_file(path: Path) -> str:
-    """Full digest, never padded (rake M40)."""
+    """Full digest, never padded or abbreviated."""
     h = hashlib.sha256()
     with open(path, "rb") as f:
         for chunk in iter(lambda: f.read(1 << 20), b""):
@@ -315,21 +317,21 @@ def assert_axis_of_record(axis: str, *, what: str = "axis") -> str:
     if axis not in AXES_OF_RECORD:
         raise AxisNotOfRecord(
             f"{what}={axis!r} is not one of the four ruled needle axes "
-            f"{AXES_OF_RECORD}. The behavioral slate is FROZEN (Luxia, 2026-08-04, "
-            "in writing): no further axes without a dated ruling stating the "
-            "evidentiary purpose. REFUSED.")
+            f"{AXES_OF_RECORD}. The behavioral slate is FROZEN: no further axes "
+            "without a written, dated decision stating the evidentiary purpose. "
+            "REFUSED.")
     return axis
 
 
 def assert_construction_admissible(construction: str, *, key: str = "") -> str:
-    """The closed set + §5.4's lesion-recipe law, at the construction site."""
+    """The closed set + the no-lesion-recipe rule, at the construction site."""
     low = construction.lower()
     for marker in LESION_MARKERS:
         if marker in low:
             raise ConstructionRefused(
-                f"{key or construction!r}: §5.4's lesion-recipe law forbids building "
+                f"{key or construction!r}: the no-lesion-recipe rule forbids building "
                 f"any object whose construction contains {marker!r}. REFUSED at "
-                "construction, which is where the law binds.")
+                "construction, which is where the rule binds.")
     if construction not in ADMISSIBLE_CONSTRUCTIONS:
         raise ConstructionRefused(
             f"{key or ''}construction {construction!r} is outside the closed set "
@@ -413,7 +415,8 @@ class ContrastSet(BaseModel):
 
     `selection_rule` is prose ON PURPOSE and is load-bearing prose: it is the only
     thing that lets a reader rebuild the set from the pins without reading code, and
-    it is what Luxia reads when she rules the set. A set without one is refused.
+    it is what the person freezing the set reads before approving it. A set
+    without one is refused.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -447,15 +450,15 @@ class ContrastSet(BaseModel):
             raise ValueError(
                 f"{self.set_id}: declares n_pairs={self.n_pairs} but carries "
                 f"{len(self.pairs)} pairs — a vector built from a different count is "
-                "a different object (the 8-pairs-instead-of-40 rake)")
+                "a different object")
         ids = [p.pair_id for p in self.pairs]
         if len(set(ids)) != len(ids):
             dupes = sorted({i for i in ids if ids.count(i) > 1})
             raise ValueError(f"{self.set_id}: duplicate pair_id(s) {dupes[:5]}")
         if self.axis in INDUCE_ONLY_AXES and not self.induce_only:
             raise ValueError(
-                f"{self.set_id}: axis {self.axis!r} is INDUCE-ONLY by ruling "
-                "(Luxia, 2026-08-04) and the set must say so in a field")
+                f"{self.set_id}: axis {self.axis!r} is INDUCE-ONLY (its suppression "
+                "direction is out of scope) and the set must say so in a field")
         return self
 
     def pair_manifest(self) -> list[dict[str, str]]:
@@ -500,7 +503,7 @@ class ContrastSetPinRow(BaseModel):
     @classmethod
     def _is_a_digest(cls, v: str) -> str:
         if not all(c in "0123456789abcdef" for c in v.lower()):
-            raise ValueError(f"sha256={v!r} is not 64 hex characters (M40: never "
+            raise ValueError(f"sha256={v!r} is not 64 hex characters (never "
                              "pad, never abbreviate a digest in a pin)")
         return v.lower()
 
@@ -526,7 +529,7 @@ class ContrastSetPinFile(BaseModel):
             dupes = sorted({s for s in shas if shas.count(s) > 1})
             raise ValueError(
                 f"pin file carries the same sha twice ({[d[:12] for d in dupes]}) — "
-                "one digest, one ruling, or 'which row applied' has no answer")
+                "one digest, one row, or 'which row applied' has no answer")
         return self
 
 
@@ -534,7 +537,8 @@ def load_pin_file(path: Optional[Path]) -> ContrastSetPinFile:
     """Read the pin file. `None` is itself a refusal — there is no default path.
 
     A default would be the whole guard's failure mode: the point is that building
-    requires someone to have written a ruling down and to have said where it is.
+    requires someone to have written the approval down and to have said where it
+    is.
     """
     if path is None:
         raise PinFileError(
@@ -556,12 +560,12 @@ def load_pin_file(path: Optional[Path]) -> ContrastSetPinFile:
 def assert_contrast_set_pinned(set_path: Path, pins_path: Optional[Path], *,
                                contrast_set: Optional[ContrastSet] = None
                                ) -> tuple[str, ContrastSetPinRow]:
-    """THE GUARD. Returns (set sha256, the ruling row) or raises, six ways.
+    """THE GUARD. Returns (set sha256, the pin row) or raises, six ways.
 
     Mirrors `build_behavioral_banks.RandomBandRecipe._is_the_recipe_of_record`: there
     a refusal lifts for exactly one ruled recipe string; here it lifts for exactly
-    one ruled digest. Everything else — including a set this desk drafted an hour
-    ago — is refused, and the PROPOSED case is refused with its own message because
+    one ruled digest. Everything else — including a set drafted an hour ago — is
+    refused, and the PROPOSED case is refused with its own message because
     that is the case that will actually happen.
     """
     pins = load_pin_file(pins_path)
@@ -582,19 +586,19 @@ def assert_contrast_set_pinned(set_path: Path, pins_path: Optional[Path], *,
     if row.status != "RULED":
         raise ContrastSetNotRuled(
             f"{set_path} ({row.set_id}, sha {digest[:12]}…) is pinned but its status "
-            f"is {row.status!r}. The set freeze is LUXIA'S WORD — a drafted set is "
+            f"is {row.status!r}. Freezing a set is a named, dated decision — a drafted set is "
             "evidence for a decision, never an input to a build. REFUSED.")
     if row.axis != cset.axis:
         raise ContrastSetNotPinned(
-            f"{set_path}: the set declares axis {cset.axis!r} but its ruling row "
+            f"{set_path}: the set declares axis {cset.axis!r} but its pin row "
             f"{row.set_id!r} was ruled for axis {row.axis!r}. A set cannot change "
             "axis after it was ruled. REFUSED.")
     if not (row.ruled_by and row.ruled_on):
         raise ContrastSetNotPinned(
-            f"{set_path}: ruling row {row.set_id!r} is marked RULED with "
-            f"ruled_by={row.ruled_by!r} ruled_on={row.ruled_on!r}. A ruling with no "
-            "ruler and no date is a status field, not a ruling. REFUSED.")
-    logger.info("pin guard PASSED: %s sha %s ruled by %s on %s",
+            f"{set_path}: pin row {row.set_id!r} is marked RULED with "
+            f"ruled_by={row.ruled_by!r} ruled_on={row.ruled_on!r}. An approval with "
+            "no approver and no date is a status field, not an approval. REFUSED.")
+    logger.info("pin guard PASSED: %s sha %s, ruled_by=%s ruled_on=%s",
                 row.set_id, digest[:12] + "…", row.ruled_by, row.ruled_on)
     return digest, row
 
@@ -624,7 +628,7 @@ class CAARecipe(BaseModel):
 
 
 class RepengPCARecipe(BaseModel):
-    """The method row, pinned — including the single-site NAME the ruling requires."""
+    """The method row, pinned — including the single-site NAME every stamp carries."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -1137,7 +1141,7 @@ def bank(result_dir: Path, *, cset: ContrastSet, set_sha256: str,
 
     Nothing is written until every artifact has been produced, and each file is
     written to a temp name and `os.replace`d — a partial bank is worse than no bank
-    (the 405B lesson, `build_formality_contrast` §atomic banking).
+    (the same atomic-banking discipline `build_formality_contrast` follows).
     """
     stamp = build_stamp(cset=cset, set_sha256=set_sha256, pin_row=pin_row,
                         states=states, vectors=vectors, recipe=recipe)
@@ -1210,8 +1214,7 @@ def contrast_entries(cset: ContrastSet, side: Literal["positive", "negative"],
 
     Shaped for `collect_mean_states.build_ids`, which reads `text_id`, `text`,
     `user_prompt` and `system_prompt`. The carrier prompt is identical on both sides
-    and the system prompt is EMPTY (the ruling: text-contrast CAA needs no system
-    prompt), so the native arm's template contribution is common-mode.
+    and the system prompt is EMPTY (text-contrast CAA needs no system prompt), so the native arm's template contribution is common-mode.
     """
     out = []
     for p in cset.pairs:
@@ -1357,7 +1360,7 @@ def example_pin_file() -> dict:
     """A pin-file template. Deliberately PROPOSED, so copying it builds nothing."""
     return {
         "schema_version": CONTRAST_SET_PIN_SCHEMA_VERSION,
-        "note": ("Rows are RULED only by Luxia, with a date. A copied template is "
+        "note": ("Rows are RULED only by a named person, with a date. A copied template is "
                  "PROPOSED and this module refuses to build from it — which is the "
                  "template working, not the template failing."),
         "rulings": [
@@ -1382,7 +1385,7 @@ def _synthetic_states(n_pairs: int = 24, dim: int = 32, sites: Sequence[int] = (
     both constructions have a right answer to be checked against instead of only
     being checked against each other.
     """
-    rng = np.random.default_rng(seed)                # M25: seeded, never hash()
+    rng = np.random.default_rng(seed)                # seeded, never hash()
     base = rng.standard_normal((n_pairs, dim))
     pos, neg = {}, {}
     for k, s in enumerate(sites):
@@ -1493,7 +1496,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
         logger.info("%s %s %s", "PASS" if ok else "MISS", name, detail)
 
     def skip(name: str, why: str) -> None:
-        """A NAMED skip (rake M44): a third state, distinct from pass and fail."""
+        """A NAMED skip: a third state, distinct from pass and fail."""
         skips.append(name)
         checks.append((f"SKIPPED: {name}", True, why))
         logger.info("SKIP %s — %s", name, why)
@@ -1518,8 +1521,8 @@ def selftest() -> int:                                   # noqa: C901 — a chec
               _raises(lambda: _toy_set(axis="refusal", induce_only=False), Exception)
               and _ok(lambda: _toy_set(axis="refusal", induce_only=True)))
 
-        # ---- 2. the closed construction set + §5.4's law ----------------------
-        print("== selftest 2: constructions are a CLOSED set (§5.4's law) ==")
+        # ---- 2. the closed construction set + the no-lesion-recipe rule -------
+        print("== selftest 2: constructions are a CLOSED set (no lesion recipe) ==")
         check("both admissible constructions pass",
               all(_ok(lambda c=c: assert_construction_admissible(c))
                   for c in ADMISSIBLE_CONSTRUCTIONS))
@@ -1540,7 +1543,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
         cset = _toy_set()
         set_path = _write_set(root / "set.json", cset)
         set_sha = sha256_file(set_path)
-        check("a set file digests to a full 64-hex sha (M40: never padded)",
+        check("a set file digests to a full 64-hex sha (never padded)",
               len(set_sha) == 64 and all(c in "0123456789abcdef" for c in set_sha),
               set_sha[:12] + "…")
 
@@ -1563,15 +1566,16 @@ def selftest() -> int:                                   # noqa: C901 — a chec
         proposed = _write_pins(root / "pins_proposed.json", [
             {"set_id": cset.set_id, "axis": cset.axis, "sha256": set_sha,
              "status": "PROPOSED", "ruled_by": None, "ruled_on": None}])
-        check("(4) a PROPOSED row is refused BY STATUS — the 2026-08-05 case",
+        check("(4) a PROPOSED row is refused BY STATUS — every draft's case",
               _raises(lambda: assert_contrast_set_pinned(set_path, proposed),
                       ContrastSetNotRuled),
-              "the set freeze is Luxia's word; a drafted set cannot become a vector")
+              "freezing a set is a named, dated decision; a drafted set cannot "
+              "become a vector")
         check("    …and ContrastSetNotRuled is a ContrastSetNotPinned (one catch)",
               issubclass(ContrastSetNotRuled, ContrastSetNotPinned))
         wrong_axis = _write_pins(root / "pins_axis.json", [
             {"set_id": cset.set_id, "axis": "formality", "sha256": set_sha,
-             "status": "RULED", "ruled_by": "Luxia", "ruled_on": "2026-08-05"}])
+             "status": "RULED", "ruled_by": "fixture-approver", "ruled_on": "2026-08-05"}])
         check("(5) a ruling for a DIFFERENT axis is refused",
               _raises(lambda: assert_contrast_set_pinned(set_path, wrong_axis),
                       ContrastSetNotPinned))
@@ -1584,7 +1588,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
         dupe = root / "pins_dupe.json"
         _write_pins(dupe, [
             {"set_id": "a", "axis": "sentiment", "sha256": set_sha,
-             "status": "RULED", "ruled_by": "Luxia", "ruled_on": "2026-08-05"},
+             "status": "RULED", "ruled_by": "fixture-approver", "ruled_on": "2026-08-05"},
             {"set_id": "b", "axis": "sentiment", "sha256": set_sha,
              "status": "PROPOSED"}])
         check("(6b) the same sha ruled twice is refused (which row applied?)",
@@ -1593,19 +1597,19 @@ def selftest() -> int:                                   # noqa: C901 — a chec
         short_sha = root / "pins_short.json"
         _write_pins(short_sha, [
             {"set_id": "a", "axis": "sentiment", "sha256": set_sha[:12],
-             "status": "RULED", "ruled_by": "Luxia", "ruled_on": "2026-08-05"}])
-        check("(6c) an ABBREVIATED sha in a pin is refused (M40)",
+             "status": "RULED", "ruled_by": "fixture-approver", "ruled_on": "2026-08-05"}])
+        check("(6c) an ABBREVIATED sha in a pin is refused",
               _raises(lambda: assert_contrast_set_pinned(set_path, short_sha),
                       PinFileError))
 
         ruled = _write_pins(root / "pins_ruled.json", [
             {"set_id": cset.set_id, "axis": cset.axis, "sha256": set_sha,
-             "status": "RULED", "ruled_by": "Luxia", "ruled_on": "2026-08-05",
+             "status": "RULED", "ruled_by": "fixture-approver", "ruled_on": "2026-08-05",
              "note": "selftest fixture"}])
         got_sha, row = assert_contrast_set_pinned(set_path, ruled)
         check("a RULED, dated, axis-matching row PASSES the guard",
               got_sha == set_sha and row.status == "RULED"
-              and row.ruled_by == "Luxia")
+              and row.ruled_by == "fixture-approver")
         # the guard is about the BYTES, not the name
         tampered = root / "set_tampered.json"
         tampered.write_text(set_path.read_text() + "\n")
@@ -1625,7 +1629,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                   _write_set_raw(root / "s2.json",
                                  {"schema_version": "contrast-set/99"})),
                       ContrastSetError))
-        check("n_pairs that disagrees with len(pairs) is refused (the 8-vs-40 rake)",
+        check("n_pairs that disagrees with len(pairs) is refused",
               _raises(lambda: ContrastSet(**{**json.loads(cset.model_dump_json()),
                                              "n_pairs": 3}), Exception))
         check("duplicate pair_ids are refused",
@@ -1826,7 +1830,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
               "the overnight hard line, proved mechanically")
         pins_ruled2 = _write_pins(root / "pins2_ruled.json", [
             {"set_id": st_set.set_id, "axis": st_set.axis, "sha256": sha2,
-             "status": "RULED", "ruled_by": "Luxia", "ruled_on": "2026-08-05"}])
+             "status": "RULED", "ruled_by": "fixture-approver", "ruled_on": "2026-08-05"}])
         res, vecs = build_from_disk(set2, pins_ruled2, sp, construction="caa",
                                     out_dir=root / "out")
         check("END TO END: a RULED set builds and banks", len(res.wrote) == 2
@@ -1842,7 +1846,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
               stamp["grade"] == "UNSTAMPED (C§8)")
         check("the stamp carries the SET's full sha and the RULING that let it build",
               stamp["set"]["sha256"] == sha2
-              and stamp["ruling"]["ruled_by"] == "Luxia")
+              and stamp["ruling"]["ruled_by"] == "fixture-approver")
         check("the stamp records the native carrier prompt (so cancellation is "
               "checkable)",
               stamp["extraction"]["native_carrier_prompt"] == NATIVE_CARRIER_PROMPT)
@@ -1872,7 +1876,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                                   pin_row=ContrastSetPinRow(
                                       set_id=st_set.set_id, axis=st_set.axis,
                                       sha256=sha2, status="RULED",
-                                      ruled_by="Luxia", ruled_on="2026-08-05"),
+                                      ruled_by="fixture-approver", ruled_on="2026-08-05"),
                                   states=st, vectors=multi,
                                   recipe=RepengPCARecipe())
         check("a multi-site build is stamped multi_site_family=True",
@@ -1885,7 +1889,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                                    pin_row=ContrastSetPinRow(
                                        set_id=st_set.set_id, axis=st_set.axis,
                                        sha256=sha2, status="RULED",
-                                       ruled_by="Luxia", ruled_on="2026-08-05"),
+                                       ruled_by="fixture-approver", ruled_on="2026-08-05"),
                                    states=st, vectors=single,
                                    recipe=RepengPCARecipe())
         check("a single-site build IS transportable",
@@ -1945,8 +1949,8 @@ def selftest() -> int:                                   # noqa: C901 — a chec
                   callable(_cm), f"torch {torch_note}")
         _selftest_extract(root, check, skip)
 
-        # ---- 12. M44's configuration matrix, asserted vacuous where it is -----
-        print("== selftest 12: the configuration matrix (M44) ==")
+        # ---- 12. the configuration matrix, asserted vacuous where it is -------
+        print("== selftest 12: the configuration matrix ==")
         check("every fixture lived in a TemporaryDirectory (data-tree axis vacuous)",
               str(root).startswith(tempfile.gettempdir()), str(root))
         check("this module imports no torch and no sklearn at module scope",

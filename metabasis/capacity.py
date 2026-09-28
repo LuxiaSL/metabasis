@@ -1,12 +1,11 @@
 """ONE per-card VRAM estimator for every preflight that reserves capacity.
 
-WHY THIS MODULE EXISTS. Three node-side vector-build scripts carried an ad-hoc
-`weights × 1.6 / n_cards` heuristic that had diverged from the M19-derived
-estimator the big-model lane uses, and two mirrored scan scripts carried an older
-`× 1.25` of the same shape. Five copies of one arithmetic, in shell heredocs, none
-of them selftested, deciding whether a job runs. The desk's flag (ledgered
-2026-07-29) was "rule before a third rung"; the rung arrived, and the rule is that
-there is one estimator and it lives here.
+WHY THIS MODULE EXISTS. Job scripts that reserve GPU memory for a vector build
+need one answer to "does this checkpoint fit on N cards". A `weights × 1.6 /
+n_cards` heuristic, the structural per-layer estimator the big-model lane uses,
+and an older `× 1.25` of the flat shape answer that question three ways; an
+arithmetic copied into shell heredocs, unselftested, and deciding whether a job
+runs drifts. There is one estimator and it lives here.
 
 ────────────────────────────────────────────────────────────────────────────────
 THE TWO BOUNDS, AND WHY BOTH ARE COMPUTED
@@ -15,7 +14,7 @@ THE TWO BOUNDS, AND WHY BOTH ARE COMPUTED
 so: it needs nothing but the size of the checkpoint on disk, and its multiplier
 covers activations, workspace and allocator fragmentation in one number.
 
-**The STRUCTURAL bound** (M19-derived, the big-model lane's) — the worst CARD's
+**The STRUCTURAL bound** (the big-model lane's) — the worst CARD's
 resident weight from the ACTUAL per-layer sizes distributed over the shard
 fan-out, plus a load TRANSIENT that is measured where a measurement is available
 and a conservative analytic figure where it is not, plus an explicit margin. It
@@ -31,25 +30,26 @@ are skewed or the load transient is big. Taking the max is what "preserve the mo
 conservative behaviour where they disagree" means as code rather than as a habit.
 
 ────────────────────────────────────────────────────────────────────────────────
-WHICH ONE WAS MORE CONSERVATIVE, AND THE RULING THAT SETTLED IT
+WHICH ONE IS MORE CONSERVATIVE, AND WHY ×1.6 STANDS
 ────────────────────────────────────────────────────────────────────────────────
 On the case that raised the question — the 405B v2.1 re-bank's sharded collection
-— the FLAT ×1.6 bound was the STRICTER of the two, and the desk ruled
-(2026-07-29, ledgered): **KEEP ×1.6.** Its reasoning is preserved here because it
-is the reasoning, not the number, that generalizes:
+— the FLAT ×1.6 bound is the STRICTER of the two, so the flat multiplier stays at
+**×1.6**. The reasoning is stated here because it is the reasoning, not the
+number, that generalizes:
 
     a PASS under the stricter bound is sound (it reserved more than needed);
     a BLOCK under the stricter bound escalates to the structural estimator
     rather than to a lowered multiplier.
 
-So `FLAT_MULTIPLIER = 1.6` is the ruled value and `SUPERSEDED_FLAT_MULTIPLIER =
+So `FLAT_MULTIPLIER = 1.6` is the value of record and `SUPERSEDED_FLAT_MULTIPLIER =
 1.25` is recorded beside it — named, not deleted, because five deployed scripts
-carry one of the two and a mechanical sweep must be able to SEE both by value
-(rake M26). The 1.25 scripts are not "wrong"; they are less conservative, and a
+carry one of the two and a mechanical sweep must be able to SEE both by value:
+a constant that is deleted cannot be grepped for. The 1.25 scripts are not "wrong"; they are less conservative, and a
 job that passed under 1.25 and would block under 1.6 is a job whose margin was
 never verified.
 
-Rake M19 governs the transient. `TransientEstimate.measured is False` does not
+A degraded measurement never softens the transient.
+`TransientEstimate.measured is False` does not
 lower the bound: the ANALYTIC figure is used and the consumer BLOCKS on it,
 because a block is cheap and a silent risk is not. Instrumentation that only
 describes a run must never be able to fail it — so a caller that could not
@@ -85,24 +85,24 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger("capacity")
 
 # ---------------------------------------------------------------- constants
-#: bytes per GiB. Every figure in this module is GiB, never GB — the scheduler,
-#: `nvidia-smi` and `torch.cuda.mem_get_info` all speak GiB, and mixing the two
+#: bytes per GiB. Every figure in this module is GiB, never GB — `nvidia-smi`
+#: and `torch.cuda.mem_get_info` both speak GiB, and mixing the two
 #: units is a 7% error in the direction that matters.
 GIB = 1 << 30
 
-#: THE RULED FLAT MULTIPLIER (Luxia/desk ruling 2026-07-29, ledgered): weights ×
+#: THE FLAT MULTIPLIER OF RECORD: weights ×
 #: this, split across the fan-out, covers activations + workspace +
 #: fragmentation. Kept because it was the STRICTER bound on the case that raised
 #: the question; a block under it escalates to the structural estimator rather
 #: than to a smaller multiplier.
 FLAT_MULTIPLIER = 1.6
-#: The value the two mirrored scan scripts still carry. NAMED, not deleted (rake
-#: M26): a mechanical sweep must be able to see both multipliers BY VALUE, and a
+#: The value the two mirrored scan scripts still carry. NAMED, not deleted: a
+#: mechanical sweep must be able to see both multipliers BY VALUE, and a
 #: job that passed under 1.25 and would block under 1.6 never verified its margin.
 SUPERSEDED_FLAT_MULTIPLIER = 1.25
 #: The conservative load-transient reservation used when nothing was measured.
 #: Derived in the DSV3 lane from the largest single fused tensor transformers
-#: materializes (one `gate_up_proj` at 14.0 GiB) plus slack. Rake M19: a degraded
+#: materializes (one `gate_up_proj` at 14.0 GiB) plus slack. A degraded
 #: measurement uses THIS and the consumer blocks on it, rather than gambling.
 DEFAULT_TRANSIENT_ANALYTIC_GIB = 16.0
 #: Headroom above the computed need, for allocator behaviour nobody models.
@@ -167,7 +167,8 @@ class CheckpointFootprint(BaseModel):
 class TransientEstimate(BaseModel):
     """The load transient, and whether anybody actually measured it.
 
-    RAKE M19 in one object. `measured=False` does not soften the number — the
+    Degraded instrumentation in one object. `measured=False` does not soften
+    the number — the
     analytic figure is used and the consumer blocks on it. The distinction is
     reported so a log says "we reserved 16.0 GiB because we could not measure"
     rather than presenting a guess as a reading.
@@ -182,7 +183,7 @@ class TransientEstimate(BaseModel):
         return cls(gib=gib, measured=False,
                    note=("DEGRADED INSTRUMENTATION — nothing was measured, so "
                          "the conservative analytic bound is reserved and the "
-                         "consumer BLOCKS on it rather than gambling (rake M19). "
+                         "consumer BLOCKS on it rather than gambling. "
                          + why).strip())
 
     @classmethod
@@ -191,13 +192,14 @@ class TransientEstimate(BaseModel):
             raise CapacityError(
                 f"a measured transient cannot be negative (got {gib} GiB). A "
                 f"`peak - resident` reading below zero means the peak was taken "
-                f"before the load, or in a process that had already peaked "
-                f"(rake M29) — the measurement is invalid, not the model")
+                f"before the load, or in a process that had already peaked — a "
+                f"transient is measured once per fresh process, and this "
+                f"measurement is invalid, not the model")
         return cls(gib=gib, measured=True,
                    note="MEASURED in this process, artifact loaded first "
-                        "(rake M29: one transient measurement per fresh "
-                        "process; a second in the same process is an upper "
-                        "bound contaminated by the first)")
+                        "(one transient measurement per fresh process; a "
+                        "second in the same process is an upper bound "
+                        "contaminated by the first)")
 
 
 class CapacityEstimate(BaseModel):
@@ -255,9 +257,9 @@ def checkpoint_footprint(path: Path,
     safetensors set AND a legacy bin set describes ONE model twice, and adding
     them reserves double while looking like a careful over-estimate.
 
-    Symlinked weight files are followed (`Path.stat()` does, and rake M38's whole
-    lesson is that a store reached through a symlink is the normal case under the
-    /models placement rule). A symlink whose target is gone is a HALT: a
+    Symlinked weight files are followed (`Path.stat()` does): a checkpoint whose
+    weight files are symlinks into a shared store is the normal case, not an
+    exception. A symlink whose target is gone is a HALT: a
     checkpoint that cannot be measured must not be silently measured as smaller.
     """
     root = Path(path)
@@ -275,7 +277,8 @@ def checkpoint_footprint(path: Path,
             f"{root} holds no {' or '.join(WEIGHT_SUFFIXES)} files. A capacity "
             f"estimate over an empty directory would return a comfortable number "
             f"for a model that is not there — this is the case where 'cannot "
-            f"find' and 'does not match' must read differently (rake M31(b))")
+            f"find' and 'does not match' must read differently, because they "
+            f"demand opposite responses")
     if len(found) > 1:
         raise CapacityError(
             f"{root} holds BOTH "
@@ -287,11 +290,11 @@ def checkpoint_footprint(path: Path,
     total = 0
     for file in files:
         try:
-            total += file.stat().st_size          # follows symlinks (rake M38)
+            total += file.stat().st_size          # follows symlinks
         except OSError as exc:
             raise CapacityError(
-                f"{file} cannot be measured ({exc}). Under the /models placement "
-                f"rule a weight file is often a symlink into a store; a DANGLING "
+                f"{file} cannot be measured ({exc}). A weight file is often a "
+                f"symlink into a shared store; a DANGLING "
                 f"one must halt, because measuring the checkpoint as smaller "
                 f"than it is under-reserves silently") from exc
     if total <= 0:
@@ -303,9 +306,9 @@ def checkpoint_footprint(path: Path,
         raise CapacityError(
             f"{root}: the supplied layer table sums to {sum(layers) / GIB:.2f} "
             f"GiB but the checkpoint weighs {total / GIB:.2f} GiB. A layer table "
-            f"larger than its own checkpoint describes a different model — rake "
-            f"M23(c)'s rule at footprint grain: when two counts that should agree "
-            f"disagree, assert the identity rather than record the defect")
+            f"larger than its own checkpoint describes a different model — when "
+            f"two counts that should agree disagree, assert the identity rather "
+            f"than record the defect")
     return CheckpointFootprint(path=str(root), total_bytes=total,
                                n_files=len(files), suffix=suffix,
                                layer_bytes=layers)
@@ -379,7 +382,7 @@ def estimate_capacity(footprint: CheckpointFootprint, n_cards: int, *,
     flat = flat_bound_gib(footprint.total_gib, n_cards, multiplier)
     need = max(flat, structural, min_free_gib)
     #  A TIE is reported as `flat`, deliberately and in this order: the flat bound
-    #  is the RULED one, so when two bounds agree the ruling is what a reader
+    #  is the one of record, so when two bounds agree it is what a reader
     #  should see named rather than whichever branch happened to be tested first.
     binding: Literal["flat", "structural", "floor"] = (
         "flat" if need == flat
@@ -397,7 +400,7 @@ def estimate_capacity(footprint: CheckpointFootprint, n_cards: int, *,
     if not trans.measured:
         notes.append(
             f"TRANSIENT NOT MEASURED — reserving the conservative analytic "
-            f"{trans.gib} GiB. Rake M19: a degraded measurement sets "
+            f"{trans.gib} GiB. A degraded measurement sets "
             f"measured=false and the consumer BLOCKS on the bound rather than "
             f"gambling; a block is cheap, a silent risk is not")
     if binding == "structural" and shape == "measured":
@@ -405,13 +408,13 @@ def estimate_capacity(footprint: CheckpointFootprint, n_cards: int, *,
             f"THE STRUCTURAL BOUND BINDS at {structural} GiB against the flat "
             f"bound's {flat} GiB. The layer stack is skewed enough (or the "
             f"transient large enough) that weights/n_cards × {multiplier} "
-            f"under-describes the worst card — this is the case the M19-derived "
+            f"under-describes the worst card — this is the case the structural "
             f"estimator exists for")
     if binding == "flat":
         notes.append(
             f"THE FLAT BOUND BINDS at {flat} GiB against the structural bound's "
-            f"{structural} GiB — the ruled ×{multiplier} multiplier is the "
-            f"stricter reading here, which is the 2026-07-29 ruling's own case. A "
+            f"{structural} GiB — the ×{multiplier} multiplier of record is the "
+            f"stricter reading here, the case that keeps it at that value. A "
             f"PASS under it is sound; a BLOCK under it escalates to the "
             f"structural estimator, never to a smaller multiplier")
     if binding == "floor":
@@ -525,16 +528,16 @@ def selftest() -> int:                                   # noqa: C901 — a chec
             check(False, "a DANGLING weight symlink must HALT")
         except CapacityError as exc:
             check("cannot be measured" in str(exc),
-                  "a dangling weight symlink HALTs — under the /models placement "
-                  "rule a weight file is often a symlink into a store, and "
+                  "a dangling weight symlink HALTs — a weight file is often a "
+                  "symlink into a shared store, and "
                   "measuring the checkpoint as smaller under-reserves silently")
         try:
             checkpoint_footprint(ck, layer_bytes=[fp.total_bytes * 2])
             check(False, "a layer table bigger than its checkpoint must HALT")
         except CapacityError as exc:
             check("describes a different model" in str(exc),
-                  "a layer table that sums ABOVE its own checkpoint HALTs (rake "
-                  "M23(c): assert the identity, never record the defect)")
+                  "a layer table that sums ABOVE its own checkpoint HALTs (assert "
+                  "the identity, never record the defect)")
 
     print("== selftest 2: the flat bound is the deployed arithmetic, exactly ==")
     check(flat_bound_gib(755.96, 8) == round(755.96 * 1.6 / 8, 1) == 151.2,
@@ -546,8 +549,8 @@ def selftest() -> int:                                   # noqa: C901 — a chec
           f"GiB — 33.1 GiB per card less, which is what 'stricter' means in "
           f"figures")
     check(FLAT_MULTIPLIER > SUPERSEDED_FLAT_MULTIPLIER,
-          f"the RULED multiplier is the larger one ({FLAT_MULTIPLIER} > "
-          f"{SUPERSEDED_FLAT_MULTIPLIER}) — the ruling kept the more "
+          f"the multiplier of record is the larger one ({FLAT_MULTIPLIER} > "
+          f"{SUPERSEDED_FLAT_MULTIPLIER}) — the record keeps the more "
           f"conservative bound, and this asserts the direction rather than "
           f"trusting the comment")
     for bad_n, bad_m in ((0, FLAT_MULTIPLIER), (-1, FLAT_MULTIPLIER), (8, 0.0)):
@@ -561,7 +564,7 @@ def selftest() -> int:                                   # noqa: C901 — a chec
     print("== selftest 3: the structural bound splits LAYERS, not bytes ==")
     #  The DSV3 shape, scaled: 3 small layers + 58 large ones over 8 cards. An
     #  even BYTE split says total/8; the real layout forces some cards to hold 8
-    #  large layers. This is the case the M19-derived estimator exists for.
+    #  large layers. This is the case the structural estimator exists for.
     small, large = 1.09, 21.43
     sizes = [small] * 3 + [large] * 58
     layer_bytes = [int(g * GIB) for g in sizes]
@@ -599,24 +602,24 @@ def selftest() -> int:                                   # noqa: C901 — a chec
           f"need = max(flat {est3.flat_bound_gib}, structural "
           f"{est3.structural_bound_gib}, floor {est3.min_free_gib}) = "
           f"{est3.need_per_card_gib} GiB")
-    #  THE RULING, MEASURED. On the campaign's largest and most heterogeneous
+    #  WHY ×1.6 STANDS, MEASURED. On the campaign's largest and most heterogeneous
     #  checkpoint — the one whose skew motivated the structural estimator at all —
-    #  the RULED flat ×1.6 bound is still the STRICTER of the two, by 60 GiB per
-    #  card. That is the 2026-07-29 ruling's own claim ("×1.6 is stricter than
-    #  v3's"), and it is asserted here rather than believed.
+    #  the flat ×1.6 bound of record is still the STRICTER of the two, by 60 GiB
+    #  per card. That is the claim the multiplier rests on ("×1.6 is stricter
+    #  than the structural bound"), and it is asserted here rather than believed.
     check(est3.binding_bound == "flat"
           and est3.flat_bound_gib > est3.structural_bound_gib,
-          f"on the DSV3 shape the RULED FLAT bound is the stricter one: flat "
+          f"on the DSV3 shape the FLAT bound of record is the stricter one: flat "
           f"{est3.flat_bound_gib} > structural {est3.structural_bound_gib} GiB "
-          f"(they differ by {est3.disagreement_gib:.1f} GiB) — the ruling's claim, "
+          f"(they differ by {est3.disagreement_gib:.1f} GiB) — the multiplier's claim, "
           f"measured on the case that raised it")
     check(any("FLAT BOUND BINDS" in n and "escalates to the structural" in n
               for n in est3.notes),
-          "and its note carries the ruling's reasoning: a PASS under the stricter "
+          "and its note carries the reasoning: a PASS under the stricter "
           "bound is sound, a BLOCK escalates to the structural estimator rather "
           "than to a smaller multiplier")
     #  THE STRUCTURAL BOUND MUST ALSO BE ABLE TO BIND, or "take the max" is a
-    #  branch nobody has run (rake M19(c)). Two mechanisms, both real:
+    #  branch nobody has run. Two mechanisms, both real:
     #  (a) a load TRANSIENT large relative to the per-card weight — the small-model
     #      case, where 0.6 × weights/n_cards does not cover one fused tensor;
     even_layers = [int(1.0 * GIB)] * 80
@@ -662,22 +665,23 @@ def selftest() -> int:                                   # noqa: C901 — a chec
     check(len({est3.binding_bound, est4.binding_bound, est5.binding_bound}) == 3,
           f"all THREE binding branches are exercised — flat, structural, floor — "
           f"because a max whose branches nobody ran is not known to take the "
-          f"larger (rake M19(c))")
+          f"larger")
     check(est5.transient.measured
           and "MEASURED in this process" in est5.transient.note,
-          "a measured transient is recorded AS measured, with rake M29's "
+          "a measured transient is recorded AS measured, with the "
           "one-measurement-per-fresh-process rule named on it")
     check(not est3.transient.measured
           and "BLOCKS on it rather than gambling" in est3.transient.note
           and any("TRANSIENT NOT MEASURED" in n for n in est3.notes),
-          "and an unmeasured one is recorded as DEGRADED with rake M19's rule — "
+          "and an unmeasured one is recorded as DEGRADED — "
           "the number is not softened, the consumer blocks on it")
     try:
         TransientEstimate.from_measurement(-0.1)
         check(False, "a negative measured transient must be refused")
     except CapacityError as exc:
-        check("rake M29" in str(exc),
-              "a negative `peak - resident` is refused and named as rake M29 (a "
+        check("once per fresh process" in str(exc),
+              "a negative `peak - resident` is refused and names the "
+              "once-per-fresh-process rule (a "
               "peak taken before the load, or in an already-peaked process)")
     for kwargs in ({"margin_gib": -1.0}, {"min_free_gib": -1.0}):
         try:
@@ -736,7 +740,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     help="CPU-only verification of the arithmetic and every "
                          "refusal; no weights, no GPU")
     ap.add_argument("--checkpoint", type=Path, default=None,
-                    help="local weights directory (node-side)")
+                    help="local weights directory")
     ap.add_argument("--n-cards", type=int, default=None,
                     help="the shard fan-out this job will use")
     ap.add_argument("--layer-gib", default=None,
@@ -747,16 +751,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--transient-gib", type=float, default=None,
                     help="a MEASURED load transient (peak - resident, one "
                          "measurement per fresh process with the artifact loaded "
-                         "FIRST — rake M29). Omit it and the conservative "
+                         "FIRST). Omit it and the conservative "
                          f"analytic {DEFAULT_TRANSIENT_ANALYTIC_GIB} GiB is "
-                         f"reserved and the verdict BLOCKS on that (rake M19)")
+                         f"reserved and the verdict BLOCKS on that")
     ap.add_argument("--margin-gib", type=float, default=DEFAULT_MARGIN_GIB)
     ap.add_argument("--min-free-gib", type=float, default=DEFAULT_MIN_FREE_GIB,
                     help="per-card free-VRAM floor, so a tiny model still "
                          "refuses a starved card")
     ap.add_argument("--multiplier", type=float, default=FLAT_MULTIPLIER,
-                    help=f"the flat bound's multiplier (ruled {FLAT_MULTIPLIER} "
-                         f"2026-07-29; the superseded value is "
+                    help=f"the flat bound's multiplier (of record "
+                         f"{FLAT_MULTIPLIER}; the superseded value is "
                          f"{SUPERSEDED_FLAT_MULTIPLIER}). Lowering it is NOT the "
                          f"response to a block — escalating to the structural "
                          f"bound is")
@@ -791,7 +795,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     except (CapacityError, ValueError) as exc:
         #  An EXPECTED halt with a meaningful message: the question was malformed.
         #  A preflight must be able to tell "cannot find / cannot measure" from
-        #  "does not fit" — they demand opposite responses (rake M31(b)).
+        #  "does not fit" — they demand opposite responses.
         print(f"CAPACITY-QUESTION-MALFORMED: {exc}", file=sys.stderr)
         return 2
 
