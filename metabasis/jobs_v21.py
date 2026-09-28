@@ -1,13 +1,13 @@
 """ONE parameterized jobs-v21 template family, and the harness that proves it.
 
 WHY THIS MODULE EXISTS. Every collection wave hand-writes a header variant of
-the same node-side job script: the four FD-gated vector builds under
-`jobs-v21/` share ~120 lines of paths, gates, markers, build invocation, sha
+the same GPU job script: the four FD-gated vector builds in the
+jobs-v21 family share ~120 lines of paths, gates, markers, build invocation, sha
 manifest and exit discipline, and differ in their per-model EVIDENCE — which
 checkpoint, which sibling it is confusable with, which site the registries
-ratified, which memory shape it loads under. The ledger's signal was "a
-header-only variant ×3"; the rung arrived (a fourth), and the rule is that the
-skeleton lives here and the evidence stays data.
+record, which memory shape it loads under. Once the same header-only variant
+exists more than three times, the skeleton lives here and the evidence stays
+data.
 
 ────────────────────────────────────────────────────────────────────────────────
 THE DIVISION OF LABOUR, AND WHY IT IS DRAWN HERE
@@ -28,8 +28,8 @@ script the wave would have hand-written.
 That division is what makes the byte-comparison harness meaningful. `compare()`
 renders a spec and diffs it against the DEPLOYED script of record; equality is
 the claim, and a difference is a defect to adjudicate rather than a diff to
-eyeball. Rendering is CPU-only — no torch, no GPU, no node — so the proof runs
-at the desk before anything is deployed.
+eyeball. Rendering is CPU-only — no torch, no GPU, no cluster — so the proof
+runs locally before anything is deployed.
 
 ────────────────────────────────────────────────────────────────────────────────
 THE CORPUS IS A PARAMETER, DELIBERATELY
@@ -37,7 +37,7 @@ THE CORPUS IS A PARAMETER, DELIBERATELY
 Nothing here hardcodes corpus v2.1. The manifest RELPATH, its SHA, the shell
 variable that holds it, the label that names it in a log line and the `corpus=`
 tag in the success marker are five separate spec fields, because the deployed
-v2 and v2.1 ancestors differ in all five and the v3 basis ruling is open. The
+v2 and v2.1 ancestors differ in all five and the v3 basis is not fixed here. The
 selftest proves this the only way that proves anything: it renders the v2
 ancestor and the v2.1 script of record FROM THE SAME TEMPLATE and requires both
 to come out byte-exact.
@@ -63,45 +63,48 @@ than as a claim.
 ────────────────────────────────────────────────────────────────────────────────
 THE THREAD COUNT, AND WHY IT IS A SECOND FIDELITY AXIS
 ────────────────────────────────────────────────────────────────────────────────
-By Luxia's ruling of 2026-08-01 `OMP_NUM_THREADS=8` is the standing default
-everywhere, because eigh is bitwise-deterministic at a FIXED thread count and
-its bytes differ ACROSS counts — so the number a job exports is part of what
-its vectors ARE, and every builder now stamps the count it actually ran at.
+`OMP_NUM_THREADS=8` is the standing default everywhere, because eigh is
+bitwise-deterministic at a FIXED thread count and its bytes differ ACROSS
+counts — so the number a job exports is part of what its vectors ARE, and every
+builder stamps the count it actually ran at.
 
 Every DEPLOYED script of record exports `OMP_NUM_THREADS=1`, and the 7/7
-byte-identity proof against those scripts is of record. So the ruled default
+byte-identity proof against those scripts is of record. So the standing default
 enters as a PARAMETER on the line that already existed (`ThreadPolicy.ruled`
 vs `ThreadPolicy.deployed`), plus a named comment that only a NEW-STYLE render
 emits. `render(..., fidelity=True)` — which is what `compare()` uses — emits
 the ancestor's own number and not one new line, so the proof is untouched.
 `fidelity` is a separate switch from `memory_check` on purpose: they answer
 different questions, and folding one into the other would mean every future
-ruling that touches a shared line had to be smuggled through the memory mode.
+policy change that touches a shared line had to be smuggled through the memory
+mode.
 
 ────────────────────────────────────────────────────────────────────────────────
 MIRRORED ANCESTRY, AND WHAT IS NOT MIRRORED
 ────────────────────────────────────────────────────────────────────────────────
 A lane is TRUSTED when a deployed script of record exists to diff against.
-`vector-generic`, `vector-model` and `vector-wrapper` are mirrored under
-`staging/node-jobs-mirror/` and are proved byte-exact. `collect` and `fits` are
+`vector-generic`, `vector-model` and `vector-wrapper` have local mirrors of
+their deployed scripts (outside git; see `--mirror-dir`) and are proved
+byte-exact. `collect` and `fits` are
 NOT: their skeletons are derived from the CLIs of record
 (`collect_mean_states`, `fit_transport_maps`) and the documented job
 conventions, and they are refused by `render()` unless the caller passes
 `allow_unmirrored=True` — a rendered script carries a banner saying so. An
 unproved lane that renders silently is worse than no lane at all.
 
-NO SUBMISSION HAPPENS HERE. The `submit` lane emits the `heimdall submit` line
-in the CLI form the deployed scripts use, to a file, for a human to read and
-fire. This module never shells out, never touches a node, and never submits.
+NO SUBMISSION HAPPENS HERE. The `submit` lane emits the scheduler's submit
+command line in the CLI form the deployed scripts use, to a file, for a human to
+read and fire. This module never shells out, never touches the cluster, and
+never submits.
 
 WHERE THE FIDELITY FIXTURES LIVE
 ────────────────────────────────────────────────────────────────────────────────
 The specs that reproduce the deployed scripts embed their VERBATIM prose, and
 that prose names a cluster — not only in paths (which tokenize) but in
-vocabulary, which does not (rake M46: filenames AND content are the
-sanitization surface). By desk ruling 2026-08-01 the whole fidelity set lives
-OUTSIDE this repo, in the gitignored `staging/jobs-v21-specs/`, and only the
-synthetic examples are tracked. Everything that needs it takes `--spec-dir`,
+vocabulary, which does not (filenames AND content are both surfaces a
+sanitization sweep must cover). So the whole fidelity set lives OUTSIDE this
+repo, in a gitignored spec directory, and only the synthetic examples are
+tracked. Everything that needs it takes `--spec-dir`,
 and every check that cannot run without it says so BY NAME rather than passing
 quietly.
 
@@ -199,13 +202,13 @@ class Deployment(BaseModel):
     """The cluster-shaped values a spec holds out of the repo, as `<<TOKEN>>`.
 
     A spec in this repo says `<<SHARED_WEIGHTS>>/Llama-3.3-70B-Instruct`, and
-    the store's real path lives in a gitignored overlay beside the node mirror.
+    the store's real path lives in a gitignored overlay beside the script mirror.
     That is not obfuscation — it is the same reason the mirror itself is
     gitignored: the campaign's code is meant to travel and its cluster is not.
 
     A MISSING token is a REFUSAL, never an empty string. A job script that
-    silently rendered `/Llama-3.3-70B-Instruct` would fail on the node, in a
-    queue slot, with a path error that reads like a staging mistake.
+    silently rendered `/Llama-3.3-70B-Instruct` would fail on the cluster, in
+    a queue slot, with a path error that reads like a staging mistake.
     """
     tokens: dict[str, str]
 
@@ -219,7 +222,7 @@ class Deployment(BaseModel):
             if not value:
                 raise ValueError(
                     f"{name}: empty. An empty deployment value renders a path "
-                    f"with a hole in it and fails on the node rather than here")
+                    f"with a hole in it and fails on the cluster rather than here")
             if PLACEHOLDER.search(value):
                 raise ValueError(
                     f"{name}={value!r} contains a placeholder itself; "
@@ -376,7 +379,7 @@ class CorpusBasis(BaseModel):
     """WHICH corpus a job asserts, as five separable facts.
 
     They are separate because the deployed v2 and v2.1 ancestors differ in all
-    five, and the v3 basis ruling is OPEN. A single `corpus="v2.1"` field would
+    five, and the v3 basis is not fixed here. A single `corpus="v2.1"` field would
     have to grow a decoder ring the moment v3 lands; five plain fields never do.
     """
     manifest_relpath: str = Field(
@@ -405,17 +408,17 @@ class CorpusBasis(BaseModel):
             raise ValueError(
                 f"corpus sha256 {self.sha256!r} is not 64 lowercase hex. A "
                 f"TRUNCATED digest in a preflight is worse than none: it "
-                f"passes on more checkpoints than the operator thinks (rake "
-                f"M40 — full digests only, never a padded prefix)")
+                f"passes on more checkpoints than the operator thinks (full "
+                f"digests only, never a padded prefix)")
         if not re.fullmatch(r"[A-Z_][A-Z0-9_]*", self.shell_var):
             raise ValueError(f"{self.shell_var!r} is not a shell variable name")
         return self
 
 
 class NodePaths(BaseModel):
-    """Where the job stands on the node.
+    """Where the job stands on the cluster.
 
-    NO DEFAULTS, deliberately. This module ships no node-side path at all: the
+    NO DEFAULTS, deliberately. This module ships no cluster path at all: the
     project tree, the venv and the bank root are DEPLOYMENT facts and they live
     in the spec, which is the artifact the sanitization sweep looks at. A
     default here would put a cluster's directory layout into shared code, where
@@ -431,8 +434,8 @@ class NodePaths(BaseModel):
     venv_activate: str = Field(description="the venv activate script to source")
     bankroot: str = Field(
         default="",
-        description="the RAID tree this wave writes under (standing placement "
-                    "rule 2026-07-29). Empty => logs live under the arm tree, "
+        description="the RAID tree this wave writes under (all new cluster "
+                    "data goes on the RAID). Empty => logs live under the arm tree, "
                     "which is what the generic lane does")
 
     @model_validator(mode="after")
@@ -456,7 +459,7 @@ class MemoryPolicy(BaseModel):
 
     `inline-flat` reproduces the arithmetic the deployed scripts carry inline;
     `capacity-module` delegates to `metabasis.capacity`, which computes the flat
-    bound AND the M19-derived structural bound and takes the max. The two agree
+    bound AND the per-layer structural bound and takes the max. The two agree
     on every deployed case (the flat bound was the stricter one), which is why
     the conversion is a diff and not a re-derivation.
     """
@@ -479,15 +482,15 @@ class MemoryPolicy(BaseModel):
 class ThreadPolicy(BaseModel):
     """How many BLAS/OpenMP threads a rendered job exports — and which number.
 
-    THE RULING (Luxia, 2026-08-01): `OMP_NUM_THREADS=8` is the standing default
-    everywhere, and the effective count is recorded in every build stamp as
+    THE STANDING DEFAULT: `OMP_NUM_THREADS=8` everywhere, and the effective
+    count is recorded in every build stamp as
     part of instrument identity. eigh is bitwise-deterministic at a FIXED
     thread count and its bytes differ ACROSS counts, so the exported number is
     not a performance knob — it is part of what an artifact IS.
 
     TWO NUMBERS, DELIBERATELY. Every deployed script of record exports
     `OMP_NUM_THREADS=1`, and the 7/7 byte-identity proof against those scripts
-    is of record. If the ruled default simply replaced the literal, that proof
+    is of record. If the standing default simply replaced the literal, that proof
     would break for a reason that is not a defect. So `deployed` is what
     FIDELITY renders (the ancestor's own number, plus nothing) and `ruled` is
     what a NEW-STYLE render exports — one template, both scripts, the same
@@ -513,7 +516,7 @@ class ThreadPolicy(BaseModel):
                     "exactly what a byte-comparison exists to refuse")
 
 
-#: The ruling comment a NEW-STYLE render carries above its export. Held here
+#: The comment a NEW-STYLE render carries above its export. Held here
 #: rather than in the templates so the four lanes cannot drift apart in the one
 #: block whose whole job is to say the same thing everywhere.
 THREAD_RULING_NOTE: tuple[str, ...] = (
@@ -555,7 +558,7 @@ class _LaneBase(BaseModel):
 
 
 class VectorGenericSpec(_LaneBase):
-    """The env-driven instrument of record: `jobs-v21/build-vec-v21.sh`.
+    """The env-driven instrument of record: the generic build-vec-v21 script.
 
     Takes MB_MODEL/MB_MODEL_PATH/MB_SITE/MB_ARM from the environment and knows
     nothing about any particular checkpoint — which is why one template renders
@@ -575,7 +578,7 @@ class VectorWrapperSpec(_LaneBase):
     """A checkpoint-identity gate that execs the unchanged generic instrument.
 
     The mixtral shape. It exists because a checkpoint on the SHARED store can be
-    mutated under the job (rake M9), so identity is asserted immediately before
+    mutated under the job, so identity is asserted immediately before
     the load rather than assumed — and because the build itself must stay
     byte-for-byte the path its siblings took, the wrapper adds a gate and
     changes nothing else.
@@ -622,13 +625,12 @@ class VectorModelSpec(_LaneBase):
     and an exit that distinguishes "no vector because the gate did not pass"
     from "no vector because something broke".
 
-    WHY `preflight_body` IS DATA AND NOT TEMPLATE. Rake M17 is explicit that the
-    checkpoint discriminator is CHOSEN PER LINEAGE and SHOWN to separate the
-    confusable pair before it is trusted — mixtral's config.json is byte-
-    identical between base and instruct, gemma's config IS the discriminator,
+    WHY `preflight_body` IS DATA AND NOT TEMPLATE. The checkpoint discriminator
+    is CHOSEN PER LINEAGE and SHOWN to separate the confusable pair before it is
+    trusted — mixtral's config.json is byte-identical between base and instruct, gemma's config IS the discriminator,
     DSV3 degenerates on every metadata field and only the weights separate. A
     template that manufactured an identity block would manufacture exactly the
-    reflex M17 exists to forbid, and the generated check would be one nobody
+    unverified check that per-lineage rule exists to forbid, and the generated check would be one nobody
     verified against a checkpoint. So the per-lineage assertions stay verbatim
     evidence, and this model asserts their LOAD-BEARING PROPERTIES mechanically
     instead: the site must come from the registries, the positive config digest
@@ -696,13 +698,13 @@ class VectorModelSpec(_LaneBase):
             raise ValueError(
                 f"{self.model}: expect_site {self.expect_site!r} is not a "
                 f"decoder-layer index. Site L is a forward_pre_hook on "
-                f"decoder_layers[L]; a non-integer there is a ruling nobody "
-                f"transcribed")
+                f"decoder_layers[L]; a non-integer there is a site of record "
+                f"nobody transcribed")
         if not re.fullmatch(r"[0-9a-f]{64}", self.expect_config_sha):
             raise ValueError(
                 f"{self.model}: expect_config_sha is not 64 lowercase hex. The "
                 f"POSITIVE config assertion is the guard that excludes every "
-                f"other checkpoint on its own; a truncated one does not (M40)")
+                f"other checkpoint on its own; a truncated one does not")
         if self.memory.is_sharded and self.memory.mode == "none":
             raise ValueError(
                 f"{self.model}: a sharded build with no memory check. The fan-"
@@ -745,8 +747,8 @@ class VectorModelSpec(_LaneBase):
 class CollectSpec(_LaneBase):
     """Collect + fresh-process bitwise spot-replay in ONE job — the standing gate.
 
-    ⚠ UNMIRRORED. The deployed `scan-*.sh` family has not been pulled back into
-    `staging/node-jobs-mirror/`, so this lane has no script of record to be
+    ⚠ UNMIRRORED. The deployed scan script family has no local mirror, so this
+    lane has no script of record to be
     diffed against and `render()` refuses it without `allow_unmirrored=True`.
     Its flags come from `collect_mean_states`'s own argparse, which is the CLI
     of record; its shape comes from the documented convention. That is enough to
@@ -785,10 +787,10 @@ class CollectSpec(_LaneBase):
 class FitSpec(_LaneBase):
     """A pair fit over banked states. 0 GPU, CPU spine.
 
-    ⚠ UNMIRRORED, for the same reason as `CollectSpec`: `fit-pair-v21.sh` is
-    deployed but not mirrored. The env-variable convention below
-    (MB_SRC/MB_SRC_SITE/MB_TGT/MB_TGT_SITE/MB_ARMS) is the one the batch-4 chain
-    recorded; the flags are `fit_transport_maps`'s own.
+    ⚠ UNMIRRORED, for the same reason as `CollectSpec`: the fit-pair-v21 script
+    is deployed but not mirrored. The env-variable convention below
+    (MB_SRC/MB_SRC_SITE/MB_TGT/MB_TGT_SITE/MB_ARMS) is the one the deployed fit
+    chains use; the flags are `fit_transport_maps`'s own.
     """
     lane: Literal["fits"] = "fits"
     paths: NodePaths
@@ -800,16 +802,16 @@ class FitSpec(_LaneBase):
     n_null: Optional[int] = None
     k_grid: str = ""
     fits_dirname: str
-    #  ── THE SPLIT LANE (`ced99f7`, prereg §2 / §6-I1) ────────────────────────
-    #  The webtext-v3 membership is FROZEN by `derive_webtext_splits.py` and
+    #  ── THE SPLIT LANE (webtext-v3 pre-registration, sections 2 and 6) ──────
+    #  The webtext-v3 membership is FROZEN by `derive_webtext_splits` and
     #  CONSUMED by the fitter; it is never re-derived at fit time. Three lanes,
     #  no fallback between them, and this spec carries whichever one the job
     #  means so the CHOICE is reviewable in the spec rather than only in a shell
     #  history:
     #      splits_artifact          the frozen main split (920/280)
-    #      half + halves_artifact   one frozen §6-I1 half, on its OWN internal split
+    #      half + halves_artifact   one frozen half, on its OWN internal split
     #      neither                  the legacy v2.1 in-code derivation
-    #  Left as strings (not Path) for the same reason every other node-side path
+    #  Left as strings (not Path) for the same reason every other cluster path
     #  here is: they are DEPLOYMENT facts, so they carry `<<TOKEN>>` placeholders
     #  and are resolved by the overlay at render time.
     splits_artifact: str = Field(
@@ -842,7 +844,7 @@ class FitSpec(_LaneBase):
         if self.half and not self.halves_artifact:
             raise ValueError(
                 f"{pair}: half={self.half!r} needs `halves_artifact` "
-                f"(…/halves.json) — the §6-I1 halving is FROZEN and is never "
+                f"(the frozen halves artifact) — the halving is FROZEN and is never "
                 f"recomputed at fit time")
         if self.half and self.splits_artifact:
             raise ValueError(
@@ -869,10 +871,10 @@ class _SpecEnvelope(BaseModel):
 
 # ---------------------------------------------------------------- submission
 class SubmissionSpec(BaseModel):
-    """The `heimdall submit` line for a rendered job — EMITTED, never run.
+    """The scheduler's submit command line for a rendered job — EMITTED, never run.
 
-    The CLI is the submission interface of record (Luxia ruling 2026-07-29); the
-    HTTP API is read-only verification. This module builds the argv in the exact
+    The CLI is the submission interface of record; the scheduler's HTTP
+    interface is for read-only verification. This module builds the argv in the exact
     shape the deployed fire scripts use and hands it back as text. It has no
     network code and no `subprocess` import, so "never invent new submission
     mechanics" is a property of the file rather than a promise in a docstring.
@@ -904,15 +906,15 @@ class SubmissionSpec(BaseModel):
         joined = [d for d in self.after if "," in d]
         if joined:
             raise ValueError(
-                f"--after {joined[0]!r} is comma-joined. Heimdall stores that "
-                f"literal string as ONE dependency id, `_dependencies_met` "
-                f"never finds it, and the job sits queued INDEFINITELY (guide "
-                f"§4.1). Pass one --after per dependency")
+                f"--after {joined[0]!r} is comma-joined. The scheduler stores "
+                f"that literal string as ONE dependency id, its dependency check "
+                f"never finds it, and the job sits queued INDEFINITELY. Pass one "
+                f"--after per dependency")
         if "CUDA_VISIBLE_DEVICES" in self.env:
             raise ValueError(
                 "--env CUDA_VISIBLE_DEVICES is silently overwritten by the "
                 "scheduler, which assigns physical indices itself and would "
-                "still count those GPUs as free (guide §4.5). Use --gpu-ids")
+                "still count those GPUs as free. Use --gpu-ids")
         return self
 
     def command_line(self) -> list[str]:
@@ -956,7 +958,7 @@ def _memory_context(memory: MemoryPolicy) -> RenderContext:
 
 
 def _thread_context(threads: ThreadPolicy, *, fidelity: bool) -> RenderContext:
-    """The exported thread count, and whether the ruling note travels with it.
+    """The exported thread count, and whether the explanatory note travels with it.
 
     FIDELITY renders the ancestor's own number and NOTHING else: the deployed
     scripts of record are the claim under test, and any new line — even a
@@ -1097,10 +1099,10 @@ def render(spec: JobSpec, *, deployment: Deployment,
     `fidelity` is a SEPARATE switch from `memory_check`, deliberately. The two
     answer different questions — "which memory arithmetic" and "is this render
     claiming to reproduce a deployed script" — and folding the second into the
-    first would mean every future ruling that touches a shared line had to be
-    smuggled through the memory mode. With `fidelity=True` a render emits the
-    deployed ancestor's thread count and no ruling note; with it False the
-    ruled default of record (2026-08-01) goes out instead.
+    first would mean every future policy change that touches a shared line had
+    to be smuggled through the memory mode. With `fidelity=True` a render emits
+    the deployed ancestor's thread count and no explanatory note; with it False
+    the standing default goes out instead.
 
     An unmirrored lane REFUSES rather than warning. A warning in a log is not a
     gate, and the failure it guards against — firing a job whose skeleton nobody
@@ -1108,8 +1110,8 @@ def render(spec: JobSpec, *, deployment: Deployment,
     """
     if spec.lane not in MIRRORED_LANES and not allow_unmirrored:
         raise SpecError(
-            f"lane {spec.lane!r} has no deployed script of record under "
-            f"staging/node-jobs-mirror/, so a render of it has never been "
+            f"lane {spec.lane!r} has no deployed script of record in the "
+            f"local script mirror, so a render of it has never been "
             f"byte-compared against anything that ran. Pass "
             f"allow_unmirrored=True (CLI: --allow-unmirrored) to render it for "
             f"REVIEW, and pull the deployed script back into the mirror before "
@@ -1182,14 +1184,14 @@ def compare(spec: JobSpec, mirror_root: Path, *, deployment: Deployment,
 
     A MISSING mirror is a difference, not an exception: "cannot find" and "does
     not match" demand opposite responses, and both have to be reportable
-    together when a whole family is swept (rake M31(b)).
+    together when a whole family is swept.
     """
     rel = mirror_relpath or spec.name
     path = Path(mirror_root) / rel
     #  FIDELITY on BOTH axes: the deployed script carries the inline heuristic
     #  AND `export OMP_NUM_THREADS=1`, and the claim under test is that this
-    #  template reproduces THAT file. The 2026-08-01 thread ruling therefore
-    #  cannot reach this render — its default is a NEW-STYLE fact.
+    #  template reproduces THAT file. The standing thread default therefore
+    #  cannot reach this render — it is a NEW-STYLE fact.
     rendered = render(spec, deployment=deployment, memory_check="inline-flat",
                       allow_unmirrored=True, fidelity=True)
     result: dict[str, Any] = {
@@ -1226,7 +1228,7 @@ def compare(spec: JobSpec, mirror_root: Path, *, deployment: Deployment,
 PREFLIGHT_OK_SENTINEL = 'print("preflight ok")'
 
 #: The line the exported ENV BLOCK opens with, in all four exporting templates.
-#: The 2026-08-01 thread ruling may touch what lies between this line and the
+#: The thread policy may touch what lies between this line and the
 #: `export OMP_NUM_THREADS=` line and nothing else; the selftest splits both
 #: renders here and requires the two ends to compare equal.
 ENV_BLOCK_HEAD_MARKER = "export PYTHONUNBUFFERED=1"
@@ -1248,7 +1250,7 @@ def conversion_is_confined(spec: VectorModelSpec,
     head_marker = spec.memory_section_comment[-1]
     #  `fidelity` is left at its default on BOTH sides on purpose: the question
     #  here is what the MEMORY switch moves, so every other axis must be held
-    #  fixed or the split would attribute a thread-ruling line to the estimator
+    #  fixed or the split would attribute a thread-policy line to the estimator
     #  conversion. One variable at a time, in a check whose whole value is that.
     inline = render(spec, deployment=deployment, memory_check="inline-flat",
                     allow_unmirrored=True)
@@ -1344,12 +1346,12 @@ def _synthetic_vector_model_spec() -> VectorModelSpec:
 
     It exists because the fidelity fixtures — the ones that reproduce the
     deployed scripts byte for byte — carry verbatim deployed prose and therefore
-    live outside this repo (desk ruling 2026-08-01, rake M46: filenames AND
-    content are the sanitization surface, and tokenizing paths does not tokenize
+    live outside this repo (filenames AND content are both surfaces a
+    sanitization sweep must cover, and tokenizing paths does not tokenize
     vocabulary). Without something to work on, the per-model lane's validators,
     its estimator conversion and the comparison harness would all degrade to
-    named skips in a clean checkout, and a check that only ever runs on the
-    desk's machine is a check the repo does not have.
+    named skips in a clean checkout, and a check that only ever runs on one
+    maintainer's machine is a check the repo does not have.
 
     Nothing here is real: `demo-7b` is not a roster key, the digests are
     constants, and the paths are tokens. It is shaped like the deployed family
@@ -1387,12 +1389,12 @@ def _synthetic_vector_model_spec() -> VectorModelSpec:
 def selftest(mirror_root: Optional[Path] = None,
              deployment: Optional[Deployment] = None,
              spec_dir: Optional[Path] = None) -> int:            # noqa: C901
-    """CPU-only, no torch, no node: the renderer, the spec, and the sweep.
+    """CPU-only, no torch, no cluster: the renderer, the spec, and the sweep.
 
     Named configurations, so a count in a log says which cases ran rather than
-    how many assertions happened to fire (rake M44). The mirror sweep is a NAMED
+    how many assertions happened to fire. The mirror sweep is a NAMED
     SKIP when no mirror tree is supplied — the fixtures travel with the repo,
-    the pulled-back node scripts do not, and a skip that says its own name is
+    the mirrored deployed scripts do not, and a skip that says its own name is
     the difference between "not run" and "not needed".
     """
     failures: list[str] = []
@@ -1406,7 +1408,7 @@ def selftest(mirror_root: Optional[Path] = None,
     real_deployment = deployment is not None
     #  The FIDELITY SET — the fixtures that reproduce the deployed scripts byte
     #  for byte — carries verbatim deployed prose and lives outside this repo
-    #  (desk ruling 2026-08-01). Its absence is the NORMAL clean-checkout state
+    #  (it names the cluster). Its absence is the NORMAL clean-checkout state
     #  and must read as a named skip, not as a pass and not as a failure.
     synthetic = _synthetic_vector_model_spec()
 
@@ -1541,7 +1543,7 @@ def selftest(mirror_root: Optional[Path] = None,
           "estimate, not a hint")
     for kwargs, why in (
             ({"after": ["a,b"]},
-             "a comma-joined --after is refused: Heimdall stores that literal "
+             "a comma-joined --after is refused: the scheduler stores that literal "
              "string as ONE unknown dependency and the job queues forever"),
             ({"env": {"CUDA_VISIBLE_DEVICES": "0"}},
              "--env CUDA_VISIBLE_DEVICES is refused: the scheduler overwrites "
@@ -1581,9 +1583,9 @@ def selftest(mirror_root: Optional[Path] = None,
               f"{sha256_text(text)[:12]}…)")
         check("{{" not in text,
               f"{name}: no unrendered placeholder survives into the output")
-        #  Heimdall guide §4.9: on an exit-0 job the monitor greps the last 50
-        #  log lines for these and marks the job FAILED anyway — then §4.3
-        #  auto-retries it. A job script must not be able to fail itself with
+        #  On an exit-0 job the scheduler's monitor greps the last 50 log
+        #  lines for these and marks the job FAILED anyway — then auto-retries
+        #  it. A job script must not be able to fail itself with
         #  its own vocabulary.
         tripwires = [w for w in ("Traceback (most recent call last)",
                                  "CUDA error", "OutOfMemoryError", "FAILED",
@@ -1665,7 +1667,7 @@ def selftest(mirror_root: Optional[Path] = None,
         skip("NAMED SKIP — two-bases proof: the FIDELITY SET is absent. The "
              "specs that render the corpus-v2 ancestor and the corpus-v2.1 "
              "instrument from one template carry verbatim deployed prose and "
-             "live outside this repo (desk ruling 2026-08-01); without them "
+             "live outside this repo (they name the cluster); without them "
              "there is only one corpus basis on hand and 'one template, two "
              "frozen corpora' cannot be shown. Run with --spec-dir "
              "<STAGING>/jobs-v21-specs")
@@ -1698,7 +1700,7 @@ def selftest(mirror_root: Optional[Path] = None,
                      if isinstance(s, VectorModelSpec)]
     if not loaded_models:
         skip("NAMED SKIP — the four DEPLOYED rungs: the fidelity set is absent "
-             "(desk ruling 2026-08-01), so the conversion is proved on the "
+             "(it lives outside this repo), so the conversion is proved on the "
              "synthetic rung below and not on gemma3-27b / qwen3-30b-a3b / "
              "llama-3.3-70b / llama-3.1-405b. Run with --spec-dir "
              "<STAGING>/jobs-v21-specs to prove it on those")
@@ -1736,7 +1738,7 @@ def selftest(mirror_root: Optional[Path] = None,
               f"default that could drift from the ruling")
 
     print("== selftest 6b: the OMP_NUM_THREADS=8 default, and what FIDELITY "
-          "must not emit (Luxia ruling 2026-08-01) ==")
+          "must not emit ==")
     check(RULED_OMP_NUM_THREADS == 8 == ThreadPolicy().ruled
           and ThreadPolicy().deployed == 1,
           "the ruled default is 8 and the DEPLOYED ancestor's number is 1, so "
@@ -1771,7 +1773,7 @@ def selftest(mirror_root: Optional[Path] = None,
         #  `export PYTHONUNBUFFERED=1` — present in all four exporting
         #  templates, and spec-independent — and below by the export line's own
         #  newline. Everything outside those bounds must compare EQUAL: that is
-        #  the whole claim, that the ruling touched the env block and nothing
+        #  the whole claim, that the thread policy touched the env block and nothing
         #  that decides what the job runs.
         cut: list[tuple[str, str]] = []
         for text in (fid, new):
@@ -1808,7 +1810,7 @@ def selftest(mirror_root: Optional[Path] = None,
                        if s.lane in MIRRORED_LANES), synthetic)
         #  The fake mirror must be written in the mode `compare()` renders in —
         #  FIDELITY on both axes — or this harness check would fail on the
-        #  thread ruling rather than on the harness, which is the one thing it
+        #  thread policy rather than on the harness, which is the one thing it
         #  must never do.
         text = render(sample, deployment=dep, memory_check="inline-flat",
                       allow_unmirrored=True, fidelity=True)
@@ -1890,9 +1892,9 @@ def selftest(mirror_root: Optional[Path] = None,
         skip("NAMED SKIP — mirror sweep: the FIDELITY SET is absent, which is "
              "the normal clean-checkout state. The specs that reproduce the "
              "deployed scripts embed their verbatim prose and therefore live "
-             "outside this repo (desk ruling 2026-08-01, rake M46: filenames "
-             "AND content are the sanitization surface). Nothing here is "
-             "unproved — it is UNRUN, and it runs at the desk with: python -m "
+             "outside this repo (filenames AND content are both surfaces a "
+             "sanitization sweep must cover). Nothing here is "
+             "unproved — it is UNRUN, and it runs locally with: python -m "
              "metabasis.jobs_v21 --selftest --spec-dir <STAGING>/jobs-v21-specs "
              "--mirror-dir <MIRROR_ROOT> --deployment <STAGING>/"
              "jobs-v21-deployment.json")
@@ -1947,21 +1949,21 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     help="CPU-only verification of the renderer, the spec, the "
                          "conversion and the comparison harness; no torch")
     ap.add_argument("--mirror-dir", type=Path, default=None,
-                    help="the pulled-back node job tree under the gitignored "
-                         "staging mirror. With --selftest it turns the "
+                    help="the local mirror of the deployed job scripts "
+                         "(gitignored). With --selftest it turns the "
                          "named-skipped mirror sweep into a real one")
     ap.add_argument("--deployment", type=Path, default=DEPLOYMENT_DEFAULT,
                     help="the gitignored overlay that answers the specs' "
                          "<<TOKEN>> placeholders (project root, venv, weights "
-                         "store, RAID, node). Defaults beside the node mirror "
-                         "under staging/; its absence is a named refusal")
+                         "store, RAID, machine). Defaults beside the script "
+                         "mirror; its absence is a named refusal")
     ap.add_argument("--spec-dir", type=Path, default=SPEC_ROOT,
                     help="where the spec fixtures live. The tracked default "
                          "holds only the SYNTHETIC examples; the FIDELITY set "
                          "(the specs that reproduce the deployed scripts, prose "
-                         "and all) lives in the gitignored "
-                         "staging/jobs-v21-specs/ per the 2026-08-01 desk "
-                         "ruling. Point this there to run the byte-comparison")
+                         "and all) lives in a gitignored local directory "
+                         "because it names the cluster. Point this there to "
+                         "run the byte-comparison")
     ap.add_argument("--list", action="store_true",
                     help="the shipped specs, their lanes and their mirrors")
     ap.add_argument("--render", metavar="SPEC", default=None,
@@ -1979,9 +1981,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--fidelity", action="store_true",
                     help="render the DEPLOYED ancestor rather than a new-style "
                          "job: the ancestor's own OMP_NUM_THREADS and no "
-                         "ruling note. Without it a render carries the ruled "
-                         f"default of record (OMP_NUM_THREADS="
-                         f"{RULED_OMP_NUM_THREADS}, Luxia 2026-08-01). "
+                         "explanatory note. Without it a render carries the "
+                         f"standing default (OMP_NUM_THREADS="
+                         f"{RULED_OMP_NUM_THREADS}). "
                          "--compare-mirror always renders in fidelity mode; "
                          "this flag is for reproducing a deployed script by hand")
     ap.add_argument("--allow-unmirrored", action="store_true",
@@ -1991,31 +1993,31 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     help="the inline-×1.6 -> metabasis.capacity diff for one "
                          "per-model spec")
     ap.add_argument("--fire-line", metavar="SPEC", default=None,
-                    help="PRINT the `heimdall submit` line for one shipped "
+                    help="PRINT the scheduler's submit line for one shipped "
                          "spec. Nothing is submitted: this module has no "
                          "network code and no subprocess import, and the CLI is "
                          "the submission interface of record")
     ap.add_argument("--node", default=None,
-                    help="--fire-line: the node to pin. NO DEFAULT — a node "
-                         "name is a deployment fact and a wrong one is a job "
-                         "that runs against the wrong trees (for a GPU job "
+                    help="--fire-line: the machine to pin. NO DEFAULT — a "
+                         "machine name is a deployment fact and a wrong one is a "
+                         "job that runs against the wrong trees (for a GPU job "
                          "--node is a hard constraint; for a 0-GPU job it is "
-                         "only a preference, guide §4.7)")
+                         "only a preference)")
     ap.add_argument("--gpus", type=int, default=None,
                     help="--fire-line: GPU count. Defaults to the lane's shape "
                          "— the fan-out for a sharded vector build, 1 for a "
                          "single-card one, 0 for a fit")
     ap.add_argument("--jobs-dir", default=None,
-                    help="--fire-line: the node-side directory the rendered "
+                    help="--fire-line: the cluster directory the rendered "
                          "script is deployed into. NO DEFAULT, for the same "
                          "reason NodePaths has none")
     ap.add_argument("--after", action="append", default=[], metavar="JOB_ID",
                     help="--fire-line: one flag PER dependency (never "
-                         "comma-joined — Heimdall would store the literal "
+                         "comma-joined — the scheduler would store the literal "
                          "string as one unknown id and queue forever)")
     ap.add_argument("--compare-mirror", type=Path, default=None, metavar="ROOT",
                     help="byte-compare every mirrored spec against a "
-                         "pulled-back node job tree; nonzero exit on any "
+                         "local mirror of the deployed job scripts; nonzero exit on any "
                          "mismatch. Needs --spec-dir <STAGING>/jobs-v21-specs "
                          "and --deployment: the tracked spec dir holds only "
                          "synthetic examples, which have no deployed ancestor")
@@ -2024,7 +2026,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     args = ap.parse_args(argv)
 
     if args.selftest:
-        #  RAKE M45: a sweep must catch SystemExit and must always reach its
+        #  A sweep must catch SystemExit and must always reach its
         #  terminal TOTAL line. A `sys.exit()` raised out of any checked code
         #  path would otherwise truncate the log at whatever check happened to
         #  be running, and a truncated sweep log reads exactly like a short one.
@@ -2086,7 +2088,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         for name, spec in sorted(specs.items()):
             if spec.lane not in MIRRORED_LANES:
                 continue
-            #  RAKE M45: one spec that raises (or calls sys.exit) must not eat
+            #  One spec that raises (or calls sys.exit) must not eat
             #  the rest of the sweep or its TOTAL line — an interrupted sweep
             #  log is indistinguishable from a short one.
             try:
@@ -2123,8 +2125,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             #  case, and it reads exactly like a clean sweep unless it is said.
             print(f"COMPARE-REFUSED: no spec in {args.spec_dir} belongs to a "
                   f"mirrored lane, so nothing was compared. The fidelity set "
-                  f"lives in the gitignored staging/jobs-v21-specs/ (desk "
-                  f"ruling 2026-08-01) — pass --spec-dir", file=sys.stderr)
+                  f"lives in a gitignored local spec directory — pass "
+                  f"--spec-dir", file=sys.stderr)
             return 2
         return 3 if (bad or errored) else 0
 
