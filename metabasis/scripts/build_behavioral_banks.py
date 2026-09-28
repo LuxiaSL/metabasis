@@ -1378,8 +1378,8 @@ def assert_sigma_beside_designated(recipe: SigmaBandRecipe) -> tuple[str, str, i
     want = SIGMA_BESIDE_DESIGNATIONS.get(recipe.designation)
     if want is None:
         raise ConstructionRefused(
-            f"Σ-beside designation {recipe.designation!r} is not one of the two Luxia "
-            f"designated (O-2): {sorted(SIGMA_BESIDE_DESIGNATIONS)}. The Σ band is a "
+            f"Σ-beside designation {recipe.designation!r} is not one of the two "
+            f"designated cells: {sorted(SIGMA_BESIDE_DESIGNATIONS)}. The Σ band is a "
             "BESIDE on two cells, not an instrument of the column.")
     got = (recipe.node_key, recipe.arm, recipe.site, recipe.beside_band_kind)
     if got != want:
@@ -4698,7 +4698,7 @@ def load_cells_document(path: Path) -> CellsDocument:
 # ---------------------------------------------------------------- CLI
 def main(argv: Optional[list[str]] = None) -> int:
     ap = argparse.ArgumentParser(
-        description="CPU staging for the behavioral column (BRIEF §2). Builds no "
+        description="CPU staging for the behavioral column. Builds no "
                     "bank contents without an explicit spec and flag; the basis is a "
                     "SPEC field, never a module constant.")
     ap.add_argument("--selftest", action="store_true",
@@ -4707,7 +4707,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                     help="print a spec template (no basis baked in) and exit")
     ap.add_argument("--spec", type=Path, default=None, help="the build spec (JSON)")
     ap.add_argument("--census", action="store_true",
-                    help="M10: a first-class exit-early readiness census, NEVER output "
+                    help="a first-class exit-early readiness census, NEVER output "
                          "truncation. Reports owed artifacts; builds nothing.")
     ap.add_argument("--build", action="store_true",
                     help="stage the column (refuses on a non-READY census)")
@@ -4715,15 +4715,15 @@ def main(argv: Optional[list[str]] = None) -> int:
                     help="build the random band(s) from the spec's named recipe — a "
                          "BANK-CONTENT act, required in writing twice")
     ap.add_argument("--ladder-spec", type=Path, default=None,
-                    help="THE AMENDED LADDER (re-freeze #2, 2026-08-09): the desk's "
-                         "ratified re-calibration document for THIS column's node and "
+                    help="THE AMENDED LADDER: the approved "
+                         "re-calibration document for THIS column's node and "
                          "site (schema behavioral-ladder-spec/1). Read by the ENGINE's "
                          "own loader and validated to name this column; its sha256 "
                          "becomes the authorization every staged SCIENCE cell carries, "
                          "and the engine's --run demands the same pair against the same "
                          "document. Requires --amended-ladder beside it. WITHOUT BOTH, "
                          "the FROZEN dose ladder is in force and every staged byte is "
-                         "what it was.")
+                         "the frozen-ladder byte.")
     ap.add_argument("--amended-ladder", action="store_true",
                     help="THE AMENDED LADDER's second key: the operator's explicit "
                          "assertion that THIS column is staged on a re-calibrated "

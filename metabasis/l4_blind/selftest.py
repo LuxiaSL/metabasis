@@ -518,7 +518,7 @@ def run_all(repo: Path, out_dir: Path) -> bool:
     # The synthetic bank proves the tool cannot leak. Only the real deck
     # can prove the actual session is clean, because a generation may name
     # its own model in its own text — a content question, not a tool bug,
-    # but one Luxia would see.
+    # but one the judge would see.
     real_deck_path = out_dir / "BLIND-DECK-l4-microgold-v2.1-2026-08-07.json"
     if not real_deck_path.is_file():
         real_deck_path = out_dir / "BLIND-DECK-l4-microgold-2026-08-07.json"

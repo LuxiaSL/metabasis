@@ -226,7 +226,7 @@ class BuildRequest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     model_key: str = Field(description="bank key; keys the npz filename and the stamp")
-    model_path: str = Field(description="local weights dir (node-side)")
+    model_path: str = Field(description="local weights dir on the machine that runs the model")
     arm_root: Path = Field(description="collection root holding corpus/corpus_manifest.json")
     out_dir: Path
     site: int = Field(ge=0, description="decoder-layer index; residual ENTERING this layer")
@@ -1175,8 +1175,8 @@ class PeakDeviceMemory(BaseModel):
 
     measured: bool = Field(
         default=False,
-        description="did any device answer? False with a note is the M19 "
-                    "degradation; False with no devices and a named reason is "
+        description="did any device answer? False with a note is the named "
+                    "degradation (a probe never raises); False with no devices and a named reason is "
                     "the honest no-CUDA case")
     n_devices: int = 0
     devices: list[DevicePeakMemory] = Field(
@@ -2271,7 +2271,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--selftest", action="store_true",
                     help="CPU end-to-end verification (no weights, no GPU)")
     ap.add_argument("--model", help="bank key (keys the npz filename and the stamp)")
-    ap.add_argument("--model-path", help="local weights dir (node-side)")
+    ap.add_argument("--model-path", help="local weights dir on the machine that runs the model")
     ap.add_argument("--arm-root", type=Path,
                     help="collection root holding corpus/corpus_manifest.json")
     ap.add_argument("--out-dir", type=Path,
@@ -2305,9 +2305,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--shard-across", default=None,
                     help="comma list of devices (e.g. '0,1') to split the decoder stack "
                          "across, via the COLLECTOR's certified sharded loader. Same "
-                         "layout the >=70B rungs collected under (prereg §4; sharding "
-                         "gate PASSED 2026-07-27 — forced 8-way sharding was byte-"
-                         "identical to fresh single-device). Use when the weights plus "
+                         "layout the >=70B rungs collected under (its sharding gate "
+                         "proves forced 8-way sharding byte-identical to fresh "
+                         "single-device). Use when the weights plus "
                          "the retained autograd graph do not fit one card")
     ap.add_argument("--entropy-chunk", type=int, default=0,
                     help="OOM fallback: compute the entropy in position blocks of this "

@@ -8,7 +8,7 @@ them apart:
   * `BlindPair`   — the OPEN side. Opaque pair id, opaque set label, the
                     judged trait, and two texts in presentation order.
                     This is the ONLY shape the page ever sees.
-  * `VerdictRow`  — what Luxia's keystrokes append. Blind-side vocabulary
+  * `VerdictRow`  — what the judge's keystrokes append. Blind-side vocabulary
                     only ("text_1"/"text_2"/"unsure").
 
 A `BlindPair` carries no field that could name a source; that is enforced
@@ -158,7 +158,7 @@ class BlindPair(Frozen):
     text_2: str
 
     #: REVEALED pairs only (the calibration block). Names which panel was
-    #: steered, and by how much the on-axis score moved, so Luxia anchors
+    #: steered, and by how much the on-axis score moved, so the judge anchors
     #: on what a real effect looks like before judging anything blind.
     #: None on every blind pair — and the leak selftest asserts that the
     #: blind pairs carry no such field in the rendered page.

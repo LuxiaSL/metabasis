@@ -1838,14 +1838,14 @@ def main() -> int:
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--sites", default=None,
                     help="comma-separated site override (default = the model's SITES grid); "
-                         "used by Leg-4F to bank Qwen L18, where Vdiverge lives")
+                         "e.g. to bank Qwen L18, where Vdiverge lives")
     ap.add_argument("--max-seq-len", type=int, default=None, metavar="N",
-                    help="prereg ADDENDUM 2026-07-27-B position-ceiling deviation: "
+                    help="pre-registered position-ceiling deviation: "
                          "truncate every text to its FIRST N tokens. Required for "
                          "architectures with learned absolute position embeddings "
                          "(gpt2-xl: 1024). MUST be passed identically to --collect and "
                          "--spot-replay, or the replay compares different objects and "
-                         "the bitwise gate fails. Unset = the historical untruncated "
+                         "the bitwise gate fails. Unset = the untruncated "
                          "path, byte for byte.")
     ap.add_argument("--collect", action="store_true")
     ap.add_argument("--spot-replay", type=int, metavar="K", default=None)
@@ -1882,9 +1882,9 @@ def main() -> int:
     # --- dtype regime (pre-registered for roster row 21); OPT-IN --------------------
     ap.add_argument("--dequantize-fp8", action="store_true",
                     help="load a block-wise-FP8 checkpoint as bf16 via "
-                         "FineGrainedFP8Config(dequantize=True) — prereg ADDENDUM "
-                         "2026-07-26-A, BINDING for roster row 21 (DeepSeek-V3). Unset "
-                         "= the historical call, byte for byte, and an FP8 checkpoint "
+                         "FineGrainedFP8Config(dequantize=True) — the pre-registered "
+                         "dtype regime, BINDING for roster row 21 (DeepSeek-V3). Unset "
+                         "= the plain call, byte for byte, and an FP8 checkpoint "
                          "would load its NATIVE FP8 forward instead (a different object, "
                          "and not differentiable). MUST be passed identically to "
                          "--collect and --spot-replay, or the replay compares different "

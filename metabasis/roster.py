@@ -1031,7 +1031,7 @@ V3_SCALE_ADD: tuple[RosterNode, ...] = (
 # `read_composed_predictions.SITE_OF_RECORD`, and each carries a
 # `scan_grid_extension` of ONE site — the registered SAME-SITE pair-read site that
 # the computed 12 never visited. The per-row notes below carry the evidence; the
-# extension field is what keeps the graduation invariant honest about it (a
+# extension field is what keeps the scan-grid invariant (`fiat_grid_problems`) honest about it (a
 # site registered off the effective scan grid is a fiat grid by construction, and
 # `fiat_grid_problems` would fail the import). Row 24 above has had its own
 # ceremony too (sites (58, 63) ⋆ L58) — so all three webtext-v3 CORE adds are
@@ -1066,7 +1066,7 @@ V3_BASE_SIBLINGS: tuple[RosterNode, ...] = (
         # L16 is the hub law's C4 SAME-SITE pair-read site, matched to instruct
         # `8b`'s L16, and the computed [0.15,0.85] grid (odd sites only on a
         # 32-layer stack) never visits it. Recorded HERE, as the registered
-        # deviation, because `fit_transport_maps.SITES` registers it and the graduation invariant
+        # deviation, because `fit_transport_maps.SITES` registers it and the scan-grid invariant
         # checks registrations against the EFFECTIVE scan grid — see the notes.
         scan_grid_extension=(16,),
         notes="WEBTEXT-V3 CORE ADD (frozen prereg §5): the pretrain PARENT of the "
@@ -1276,7 +1276,7 @@ class PinnedRevision(BaseModel):
     revision: str = Field(description="40-hex commit sha on the repo")
     total_parameters: int = Field(
         description="config/safetensors-derived total at THIS revision; the "
-                    "§7 clause-5 tiebreak reads this and nothing else")
+                    "hub-law selection tiebreak reads this and nothing else")
     hub_config_sha256: str | None = Field(
         default=None,
         description="sha256 of the hub's config.json AT `revision`. None means "
@@ -1285,7 +1285,7 @@ class PinnedRevision(BaseModel):
     checkpoint_config_sha256: str = Field(
         description="sha256 of the COLLECTED local checkpoint's config.json, "
                     "cross-checked by value against the webtext-v3 collection "
-                    "stamp's trunk.config_sha256 on 2026-08-04")
+                    "stamp's trunk.config_sha256 at race time")
     binding: Literal["config-sha-identity", "snapshot-path-identity", "unbound"] = (
         Field(description="how (or whether) the revision is tied to the collected "
                           "checkpoint. `unbound` is a real state and is quoted as "
@@ -1432,7 +1432,7 @@ def race_revision_problems() -> list[str]:
 
 
 def scan_grid_table() -> str:
-    """The graduation-review table: model · row · arms · n_layers · grid."""
+    """The scan-grid review table: model · row · arms · n_layers · grid."""
     w = max(len(k) for k in ROSTER)
     head = (f"{'model key':<{w}}  row  arms         n_layers  scan grid "
             f"({SCAN_N_SITES} sites, depth {SCAN_DEPTH_LO}–{SCAN_DEPTH_HI})")
@@ -1470,7 +1470,7 @@ def collectable(keys: tuple[str, ...] | None = None) -> tuple[str, ...]:
 
 
 def fiat_grid_problems(fixed_grids: Mapping[str, tuple[int, ...]]) -> list[str]:
-    """The graduation invariant: a graduated node's fixed fit grid is drawn
+    """The scan-grid invariant: a graduated node's fixed fit grid is drawn
     from its OWN scan grid ("sites from curves, never fiat", as the frozen
     transport-campaign pre-registration puts it).
 
@@ -1543,11 +1543,11 @@ class RegistryAudit(BaseModel):
 
     graduated: dict[str, tuple[int, ...]] = Field(
         default_factory=dict,
-        description="roster key -> ratified fixed fit grid (in BOTH registries)")
+        description="roster key -> registered fixed fit grid (in BOTH registries)")
     still_scanning: tuple[str, ...] = Field(
         default=(), description="roster keys with no fixed fit grid yet")
     fatal: tuple[str, ...] = Field(
-        default=(), description="fiat grids + exact collisions ratification cannot "
+        default=(), description="fiat grids + exact collisions graduation cannot "
                                 "explain — a build/naming bug, fix before fitting")
     expected: tuple[str, ...] = Field(
         default=(), description="prefix hazards — permanent facts about the bank "
