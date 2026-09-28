@@ -2989,10 +2989,10 @@ def resolve_norms(*, site: int, measured: float, measured_provenance: str,
         delta_fraction_vs_banked=delta)
 
 
-# ---------------------------------------------------------------- entropy probe (§2.6)
+# ---------------------------------------------------------------- entropy probe
 def probe_groups(records: Sequence[GenerationRecord],
                  max_group: int = PROBE_BATCH_SIZE) -> list[list[int]]:
-    """§2.6's probe batching under `PROBE_GROUPING_READING`.
+    """The entropy probe's batching under `PROBE_GROUPING_READING`.
 
     Rows of EQUAL `prompt_length` group together (ascending length; gen_id order
     within a length), chunked to `max_group`. Equal prompt length is what makes ONE
@@ -3017,7 +3017,7 @@ def probe_groups(records: Sequence[GenerationRecord],
 
 def per_position_entropy_and_nll(logits: Any, ids: Any, prompt_length: int,
                                  n_generated: int) -> tuple[np.ndarray, np.ndarray]:
-    """§2.6's per-position next-token entropy + NLL over ONE row's generated span.
+    """The probe's per-position next-token entropy + NLL over ONE row's generated span.
 
     The same algebra as `entropy_write_probe._ent_nll_over_gen` (one source of
     truth for the convention): entropy = state of the distribution; NLL =
@@ -3026,7 +3026,7 @@ def per_position_entropy_and_nll(logits: Any, ids: Any, prompt_length: int,
     `logits` is that row's [T, vocab] float32; the slice is
     `[P-1, P+n_generated-1)` — the distributions that PRODUCED the generated
     tokens. Padding cannot enter, because the slice is bounded by this row's own
-    `prompt_length` and its own generated count (§2.6: padding must never enter a
+    `prompt_length` and its own generated count (padding must never enter a
     mean).
     """
     import torch
@@ -3046,7 +3046,7 @@ def per_position_entropy_and_nll(logits: Any, ids: Any, prompt_length: int,
 
 
 def entropy_rise_from_rows(rows: Sequence[ProbeRow]) -> dict[str, float]:
-    """§2.6's cell-level read: mean over generations, 4-dp filing convention.
+    """The probe's cell-level read: mean over generations, 4-dp filing convention.
 
     Aggregation order matches `entropy_write_probe` exactly (per-generation mean,
     then mean over generations), so a cross-harness comparison is a comparison of
@@ -3065,7 +3065,7 @@ def entropy_rise_from_rows(rows: Sequence[ProbeRow]) -> dict[str, float]:
 
 
 def entropy_array_digest(arrays: Sequence[np.ndarray]) -> str:
-    """§2.7: sha256 over the probe's per-position float32 arrays, `.tobytes()`.
+    """Replay-gate digest: sha256 over the probe's per-position float32 arrays, `.tobytes()`.
 
     float32 is asserted rather than cast: a silent float64 promotion would change
     the digest for a reason that has nothing to do with the model, and the gate must
@@ -3076,7 +3076,7 @@ def entropy_array_digest(arrays: Sequence[np.ndarray]) -> str:
         arr = np.asarray(a)
         if arr.dtype != np.float32:
             raise ReplayGateNotBitwise(
-                f"entropy array has dtype {arr.dtype}, expected float32 — the §2.7 "
+                f"entropy array has dtype {arr.dtype}, expected float32 — the replay-gate "
                 "digest is defined over float32 .tobytes() and a promoted array "
                 "would digest differently for a non-model reason")
         h.update(np.ascontiguousarray(arr).tobytes())
@@ -3084,7 +3084,7 @@ def entropy_array_digest(arrays: Sequence[np.ndarray]) -> str:
 
 
 def token_id_digest(records: Sequence[GenerationRecord]) -> str:
-    """§2.7: sha256 over the generated token-id arrays, in gen_id order."""
+    """Replay-gate digest: sha256 over the generated token-id arrays, in gen_id order."""
     h = hashlib.sha256()
     for r in sorted(records, key=lambda x: x.generation_id):
         h.update(np.asarray(r.generated_ids, dtype=np.int64).tobytes())
@@ -3097,12 +3097,13 @@ def characterize_probe_batch_invariance(
     reference_batch_size: int,
     measured: bool = True,
 ) -> BatchInvarianceCharacterization:
-    """§2.7's DESCRIPTIVE batch-invariance record. M19: it cannot fail a gate.
+    """The DESCRIPTIVE batch-invariance record. Instrumentation: it cannot fail a gate.
 
-    §2.6 says the job "asserts" bit-exactness of a single-row probe against the
-    batched row AND that the delta is instrumentation that "cannot fail the gate".
-    Those cannot both hold, and M19 decides it: this function returns a record.
-    Only §2.7's replay gate — same process, same canonical layout — can HALT.
+    The probe specification both "asserts" bit-exactness of a single-row probe
+    against the batched row AND calls the delta instrumentation that "cannot fail
+    the gate". Those cannot both hold, and instrumentation never failing a gate
+    decides it: this function returns a record. Only the in-job replay gate — same
+    process, same canonical layout — can HALT.
     """
     bitwise: dict[str, bool] = {}
     first_div: dict[str, Optional[int]] = {}
@@ -3135,17 +3136,17 @@ def characterize_probe_batch_invariance(
              "layout. M19: descriptive only — this record cannot fail a gate.")
 
 
-# ---------------------------------------------------------------- replay gate (§2.7)
+# ---------------------------------------------------------------- in-job replay gate
 def _stratum_of(cell: CellSpec, *, calibration_only: bool = False,
                 mapping_only: bool = False,
                 mapping_signal_magnitude: Optional[float] = None,
                 scoring_magnitude: float = SCORING_DOSE_MAGNITUDE) -> Optional[str]:
-    # B4: a BESIDE cell holds NO stratum. Written as the first test rather than left
+    # A BESIDE cell holds NO stratum. Written as the first test rather than left
     # to fall through the family comparisons below, so that adding a stratum later
     # cannot accidentally admit one. It is the first test under ALL role mappings.
     if cell.is_beside:
         return None
-    # THE MAPPING MODE (2026-08-08), written as the SECOND test for the same reason.
+    # THE MAPPING MODE, written as the SECOND test for the same reason.
     # A mapping cell holds a stratum under the mapping-only mapping and under NO other
     # — without this line a mapping Rband would fall through to the calibration-only
     # band role below and enter a science column's gate population.
@@ -3161,9 +3162,9 @@ def _stratum_of(cell: CellSpec, *, calibration_only: bool = False,
         return "calibration" if cell.kind == "calibration" else None
     if cell.band_family == "gRband":
         return "random_band"
-    # THE AMENDED LADDER (2026-08-09): "the extreme dose", read on the ladder in force.
+    # THE AMENDED LADDER: "the extreme dose", read on the ladder in force.
     # `scoring_magnitude` defaults to `SCORING_DOSE_MAGNITUDE` and IS 0.3 for every
-    # frozen-ladder column, so this line is the line it was. See
+    # frozen-ladder column, so a frozen-ladder column selects at |0.3|. See
     # `AMENDED_LADDER_SIGNAL_ROLE_READING`.
     if (cell.kind in ("transported", "bridge")
             and abs(cell.alpha_frac) == scoring_magnitude):
@@ -3174,19 +3175,19 @@ def _stratum_of(cell: CellSpec, *, calibration_only: bool = False,
 def _stratum_of_calibration_only(cell: CellSpec, *,
                                  scoring_magnitude: float = SCORING_DOSE_MAGNITUDE
                                  ) -> Optional[str]:
-    """B-1's RULED role mapping (`CALIBRATION_ONLY_ROLE_READING`), for one cell.
+    """The calibration-only role mapping (`CALIBRATION_ONLY_ROLE_READING`), for one cell.
 
     Reached ONLY through `_stratum_of(..., calibration_only=True)`, which
     `select_replay_cells` engages only for a column that has no transported cells AND
     cannot constitute the gate under the mapping of record — so a transported column's
-    selection is byte-identical to its selection before this ruling was implemented.
+    selection never passes through this function.
     """
     if cell.band_family == "Rband":              # band role: the node's OWN band
         return "random_band"
     if cell.kind == "calibration":               # the native lever, split by dose
-        # `scoring_magnitude` is the ladder in force's EXTREME (2026-08-09) and is
-        # `SCORING_DOSE_MAGNITUDE` for every frozen-ladder column, so B-1's mapping is
-        # unmoved for every column it was ruled over.
+        # `scoring_magnitude` is the ladder in force's EXTREME and is
+        # `SCORING_DOSE_MAGNITUDE` for every frozen-ladder column, so on the frozen
+        # ladder the signal role sits at |0.3|.
         if abs(cell.alpha_frac) == scoring_magnitude:
             return "signal_at_0.3"               # signal role: native EGV at |0.3|
         if 0.0 < abs(cell.alpha_frac) < scoring_magnitude:
@@ -3222,7 +3223,7 @@ def _stratum_of_mapping_only(cell: CellSpec, *, signal_magnitude: float
 def mapping_signal_magnitude(cells: Sequence[CellSpec]) -> Optional[float]:
     """The largest mapped |dose| among a column's non-band mapping levers, or None.
 
-    A function of the cell SET alone (like the §2.7 selection digest itself), so the
+    A function of the cell SET alone (like the replay-gate selection digest itself), so the
     signal role is presence-independent of the order a cells-json listed them in.
     """
     magnitudes = [abs(c.alpha_frac) for c in cells
@@ -3234,8 +3235,8 @@ def _bucket_by_stratum(cells: Sequence[CellSpec], *, calibration_only: bool,
                        mapping_only: bool = False) -> dict[str, list[str]]:
     """The per-stratum cell_id buckets under one role mapping (never sorted here)."""
     signal = mapping_signal_magnitude(cells) if mapping_only else None
-    # The extreme of THE LADDER IN FORCE — 0.3 for every frozen-ladder column, so every
-    # bucket a science column ever produced is the bucket it produced (2026-08-09).
+    # The extreme of THE LADDER IN FORCE — 0.3 for every frozen-ladder column, so a
+    # frozen-ladder science column buckets its signal cells at |0.3|.
     extreme = scoring_dose_magnitude(cells)
     buckets: dict[str, list[str]] = {s: [] for s in REPLAY_GATE_STRATA}
     for c in cells:
@@ -3248,21 +3249,21 @@ def _bucket_by_stratum(cells: Sequence[CellSpec], *, calibration_only: bool,
 
 
 def column_has_transported_cells(cells: Sequence[CellSpec]) -> bool:
-    """True iff ANY cell in the set is transported-family (B-1's trigger, negated)."""
+    """True iff ANY cell in the set is transported-family (the calibration-only trigger, negated)."""
     return any(c.kind in TRANSPORTED_CELL_KINDS or c.band_family == "gRband"
                for c in cells)
 
 
 def replay_gate_role_mapping(cells: Sequence[CellSpec]) -> str:
-    """Which §2.7 role mapping this cell SET falls under (B-1, ruled 2026-08-05).
+    """Which replay-gate role mapping this cell SET falls under.
 
     The mapping of record wins whenever it CAN constitute the gate, so every column
-    that worked before this ruling selects exactly what it selected before — the
-    calibration-only mapping is unreachable for them by construction, not by care.
+    the mapping of record can serve is selected under it — the calibration-only
+    mapping is unreachable for such columns by construction, not by care.
     A column that is short a stratum AND holds transported cells also keeps the
     mapping of record, so its shortfall still HALTs instead of being re-roled.
 
-    THE MAPPING MODE (2026-08-08) is tested FIRST and on presence alone. A mapping
+    THE MAPPING MODE is tested FIRST and on presence alone. A mapping
     column cannot constitute the gate under either science mapping (it has no cell at
     |0.3| and no `calibration`-kind cell), so "prefer the mapping of record whenever
     it can constitute the gate" would silently hand it a shortfall; and a science
@@ -3281,7 +3282,7 @@ def replay_gate_role_mapping(cells: Sequence[CellSpec]) -> str:
 
 def select_replay_cells(cells: Sequence[CellSpec], node_key: str, corpus_sha: str
                         ) -> tuple[list[str], dict[str, str], str]:
-    """§2.7's deterministic gate-cell selection.
+    """The in-job replay gate's deterministic gate-cell selection.
 
     "selection deterministic from `sha256(node_key|corpus_sha)`, constrained to
     include one signal cell at |0.3|, one random-band cell, and one calibration
@@ -3290,7 +3291,7 @@ def select_replay_cells(cells: Sequence[CellSpec], node_key: str, corpus_sha: st
     Cells are sorted by cell_id first, so the choice depends on the cell SET and the
     digest, never on the order a cells-json happened to list them in.
 
-    B-1 (ruled 2026-08-05): a column with NO transported cells fills the same three
+    A column with NO transported cells fills the same three
     frozen roles from its own work-types (`CALIBRATION_ONLY_ROLE_READING`). The
     mapping is chosen by `replay_gate_role_mapping`, which prefers the mapping of
     record whenever it can constitute the gate — so nothing about a transported
@@ -3304,7 +3305,7 @@ def select_replay_cells(cells: Sequence[CellSpec], node_key: str, corpus_sha: st
         # science mapping this population must be mapping-free, and the assertion is
         # here rather than implied so a future caller that assembles a population by
         # hand cannot slip one in.
-        assert_no_mapping_cells(cells, where="the §2.7 replay-gate population")
+        assert_no_mapping_cells(cells, where="the in-job replay-gate population")
     buckets = _bucket_by_stratum(
         cells, calibration_only=(mapping == REPLAY_ROLE_MAPPING_CALIBRATION_ONLY),
         mapping_only=(mapping == REPLAY_ROLE_MAPPING_MAPPING_ONLY))
@@ -3313,8 +3314,8 @@ def select_replay_cells(cells: Sequence[CellSpec], node_key: str, corpus_sha: st
         cid for ids in buckets.values() for cid in ids))
     if leaked:                                                    # pragma: no cover
         raise BesideCellInGatePopulation(
-            f"{node_key}: BESIDE cell(s) {leaked} entered a §2.7 replay-gate stratum. "
-            "B4 admits Σ-shaped bands as besides ONLY; a beside inside the blocking "
+            f"{node_key}: BESIDE cell(s) {leaked} entered an in-job replay-gate stratum. "
+            "Σ-shaped bands are admitted as besides ONLY; a beside inside the blocking "
             "gate would make the gate's population depend on a designation.")
     chosen: dict[str, str] = {}
     missing = []
@@ -3330,7 +3331,7 @@ def select_replay_cells(cells: Sequence[CellSpec], node_key: str, corpus_sha: st
         chosen[stratum] = options[(seed ^ window) % len(options)]
     if missing:
         raise ExpectedNShortfall(
-            f"§2.7 replay gate cannot be constituted on {node_key}: no cell for "
+            f"in-job replay gate cannot be constituted on {node_key}: no cell for "
             f"stratum(a) {missing}. The gate is BLOCKING and its composition is "
             f"frozen ({list(REPLAY_GATE_STRATA)}), so a column that cannot supply "
             f"one of each is incomplete, not exempt. "
@@ -3349,7 +3350,7 @@ def evaluate_replay_gate(*, selection: list[str], strata: dict[str, str],
                          entropy_replay: dict[str, str],
                          role_mapping: str = REPLAY_ROLE_MAPPING_OF_RECORD
                          ) -> ReplayGateResult:
-    """§2.7's blocking comparison. Any mismatch → HALT; no cell is quotable."""
+    """The in-job replay gate's blocking comparison. Any mismatch → HALT; no cell is quotable."""
     mismatches = []
     for cell in selection:
         for label, a, b in (("token_ids", token_first, token_replay),
@@ -3377,8 +3378,8 @@ def evaluate_replay_gate(*, selection: list[str], strata: dict[str, str],
         passed=not mismatches, mismatches=mismatches)
     if mismatches:
         raise ReplayGateNotBitwise(
-            "§2.7 in-job replay gate FAILED in the canonical layout — no cell from "
-            f"this node is quotable (§9 item 6). Mismatches: {mismatches}")
+            "in-job replay gate FAILED in the canonical layout — no cell from "
+            f"this node is quotable (ReplayGateNotBitwise). Mismatches: {mismatches}")
     return result
 
 
@@ -3387,10 +3388,10 @@ def choose_batch_size(vram_probe: Optional[Callable[[int], float]] = None,
                       ladder: Sequence[int] = BATCH_LADDER,
                       headroom: float = VRAM_HEADROOM_FRACTION
                       ) -> tuple[int, bool, str]:
-    """§2.2's preflight: the largest ladder rung that fits with ≥15% headroom.
+    """The batch-size preflight: the largest ladder rung that fits with ≥15% headroom.
 
     `vram_probe(B)` returns the FRACTION of device memory a measured probe at max
-    sequence length uses at batch size B. M19: every instrumentation call is
+    sequence length uses at batch size B. Every instrumentation call is
     wrapped, and a degraded probe does not gamble — it takes the CONSERVATIVE
     bound (the smallest rung) and says `measured=False`, so the consumer blocks on
     the bound rather than on a hope.
@@ -3402,8 +3403,8 @@ def choose_batch_size(vram_probe: Optional[Callable[[int], float]] = None,
     for B in sorted(ladder, reverse=True):
         try:
             used = float(vram_probe(int(B)))
-        except Exception as exc:                       # noqa: BLE001 — M19(a)
-            logger.warning("VRAM probe at B=%d failed (%s: %s) — M19: taking the "
+        except Exception as exc:                       # noqa: BLE001 — instrumentation; named below
+            logger.warning("VRAM probe at B=%d failed (%s: %s) — a failed probe takes the "
                            "conservative bound", B, type(exc).__name__, exc)
             return (min(ladder), False,
                     f"probe raised {type(exc).__name__} at B={B}; conservative "
@@ -3424,7 +3425,7 @@ def choose_batch_size(vram_probe: Optional[Callable[[int], float]] = None,
 def freeze_layout(batch_size: int, *, dtype: str, measured: bool = True,
                   headroom_note: str = "",
                   max_new_tokens: int = MAX_NEW_TOKENS) -> CanonicalLayout:
-    """§2.2: B is FROZEN in the node's stamp before any cell fires."""
+    """B is FROZEN in the node's stamp before any cell fires (the canonical layout)."""
     return CanonicalLayout(batch_size=batch_size, dtype=dtype,
                            max_new_tokens=max_new_tokens, frozen=True,
                            measured=measured, headroom_note=headroom_note)
@@ -3432,11 +3433,11 @@ def freeze_layout(batch_size: int, *, dtype: str, measured: bool = True,
 
 def assert_position_budget(max_prompt_tokens: int, max_new_tokens: int,
                            ceiling: Optional[int], node_key: str = "") -> None:
-    """§9 item 12: a node with a learned-position ceiling must fit prompt + span.
+    """A node with a learned-position ceiling must fit prompt + span, or HALT.
 
-    Addendum B's `truncation: first-1024` covers CORPUS texts, not behavioral
-    prompts, so an over-budget behavioral pool is a DESK RULING, not an enactor's
-    truncation.
+    The corpus pipeline's `truncation: first-1024` covers CORPUS texts, not
+    behavioral prompts, so an over-budget behavioral pool needs a deliberate
+    decision about the pool, never a truncation made here.
     """
     if ceiling is None:
         return
@@ -3445,40 +3446,41 @@ def assert_position_budget(max_prompt_tokens: int, max_new_tokens: int,
         raise PositionCeilingExceeded(
             f"{node_key or 'node'}: max(prompt_tokens)={max_prompt_tokens} + "
             f"max_new_tokens={max_new_tokens} = {need} > position ceiling "
-            f"{ceiling} (§9 item 12). Addendum B's first-{ceiling} truncation "
-            f"covers corpus texts, NOT behavioral prompts — the extension is a "
-            f"desk ruling, not an enactor call.")
+            f"{ceiling} (PositionCeilingExceeded). The corpus first-{ceiling} truncation "
+            f"covers corpus texts, NOT behavioral prompts — extending it to prompts is "
+            f"a decision about the pool, never a truncation made at run time.")
 
 
 def assert_alpha_zero_is_no_hook(logits_hooked_alpha0: Any,
                                  logits_unhooked: Any) -> None:
-    """§2.4's cheap once-per-node correctness check.
+    """The α=0-is-bitwise-no-hook check: cheap, once per node.
 
     The hook short-circuits on `alpha == 0.0` and returns its args untouched, so the
     α=0 baseline WITH the hook attached must be bitwise identical to no hook. If it
     is not, the injection machinery is not what the stamp says it is, and every cell
-    on the node is suspect.
+    this model produced is suspect.
     """
     a = np.asarray(logits_hooked_alpha0)
     b = np.asarray(logits_unhooked)
     if a.shape != b.shape or not np.array_equal(a, b):
         raise ReplayGateNotBitwise(
-            "§2.4: α=0 WITH the hook attached is not bitwise identical to the "
+            "α=0 WITH the hook attached is not bitwise identical to the "
             "unhooked forward. The hook's alpha==0.0 short-circuit is the whole "
-            "reason the baseline cell is shared between §4 and §5 — HALT.")
+            "reason the baseline cell is shared between the actuation calibration "
+            "and the transported cells — HALT.")
 
 
 def ssm_hook_admissibility_preflight(model: Any, *, node_key: str, site: int,
                                      vector: Any, n_tokens: int = 8,
                                      prompt_ids: Optional[Sequence[int]] = None
                                      ) -> HookAdmissibility:
-    """§4.4's named technical preflight — HALT-gated, run BEFORE any SSM cell is budgeted.
+    """The SSM hook-admissibility preflight — HALT-gated, run BEFORE any SSM cell is budgeted.
 
     Resolve `decoder_layers` on the LOADED model, attach a spec, generate `n_tokens`
     tokens, and assert `stats["saw_cache_position"] is True` and that
-    `stats["positions"]` equals expectation. On failure the SSM tier HALTs to the
-    desk: the remedy (a positional-gating shim for that architecture) is a code
-    change with its own gate, never something an enactor improvises mid-column.
+    `stats["positions"]` equals expectation. On failure the SSM tier HALTs: the
+    remedy (a positional-gating shim for that architecture) is a code change with
+    its own gate, never something improvised mid-column.
 
     Not SSM-specific in the code — it is a fact about an ARCHITECTURE's kwarg
     plumbing, so it is safe (and cheap) to run on any node whose blocks are not
@@ -3495,7 +3497,7 @@ def ssm_hook_admissibility_preflight(model: Any, *, node_key: str, site: int,
         raise HookAdmissibilityError(
             f"{node_key}: decoder_layers() cannot resolve the decoder stack on "
             f"{type(model).__name__} ({exc}) — the site cannot be hooked at all. "
-            "HALT to the desk (§4.4): extending decoder_layers for an architecture "
+            "HALT: extending decoder_layers for an architecture "
             "is a code change with its own gate.") from exc
     n_layers = len(layers)
     if not 0 <= site < n_layers:
@@ -3518,13 +3520,14 @@ def ssm_hook_admissibility_preflight(model: Any, *, node_key: str, site: int,
         stats = dict(handle.stats)
         n_new = int(out.shape[1] - ids.shape[1])
     except RuntimeError as exc:
-        # hooks.py L193-199 raises BY DESIGN on an ambiguous incremental step; that
-        # is the admissibility failure this preflight exists to surface early.
+        # The residual-write hook in `metabasis.extraction.hooks` raises BY DESIGN on
+        # an ambiguous incremental step; that is the admissibility failure this
+        # preflight exists to surface early.
         raise HookAdmissibilityError(
             f"{node_key}: the residual-write hook refused an incremental step at "
-            f"L{site} ({exc}). hooks.py raises rather than mis-injecting when a "
-            "block does not receive `cache_position` as a kwarg. HALT to the desk "
-            "(§4.4) — the remedy is a positional-gating shim with its own gate.") from exc
+            f"L{site} ({exc}). The hook raises rather than mis-injecting when a "
+            "block does not receive `cache_position` as a kwarg. HALT "
+            "— the remedy is a positional-gating shim with its own gate.") from exc
     finally:
         handle.remove()
     saw = bool(stats.get("saw_cache_position", False))
@@ -3548,9 +3551,9 @@ def ssm_hook_admissibility_preflight(model: Any, *, node_key: str, site: int,
     if not admissible:
         raise HookAdmissibilityError(
             f"{node_key}: SSM hook-admissibility preflight FAILED at L{site} — "
-            f"{detail}. §4.4/§9 item 11: the tier HALTs to the desk; a positional-"
+            f"{detail}. The tier HALTs (HookAdmissibilityError); a positional-"
             "gating shim for this architecture is a code change with its own gate, "
-            "not an enactor improvisation mid-column.")
+            "not an improvisation mid-column.")
     logger.info("hook-admissibility preflight PASSED on %s L%d: %s",
                 node_key, site, detail)
     return record
@@ -3559,7 +3562,7 @@ def ssm_hook_admissibility_preflight(model: Any, *, node_key: str, site: int,
 # ---------------------------------------------------------------- corpus / pool
 def assert_corpus_vintage(*shas: Optional[str],
                           expected: str = CORPUS_SHA_V21) -> str:
-    """§9 item 2: v2.1 everywhere in a cell's resolution chain, and never MIXED.
+    """Corpus v2.1 everywhere in a cell's resolution chain, and never MIXED.
 
     Every argument is one link of the chain (corpus manifest, vector build stamp,
     state bank, map fit). A None is a HOLE, and a hole is reported as a hole — it is
@@ -3569,26 +3572,26 @@ def assert_corpus_vintage(*shas: Optional[str],
     if not present:
         raise CorpusVintageError(
             "no corpus sha resolved anywhere in the chain — a cell cannot fire "
-            "against an unknown corpus vintage (§9 item 2)")
+            "against an unknown corpus vintage (CorpusVintageError)")
     if len(shas) != len(present):
         raise CorpusVintageError(
             f"corpus vintage chain has {len(shas) - len(present)} UNRESOLVED "
             f"link(s) of {len(shas)}; an absent link is a hole, not an agreement "
-            "(§9 item 2)")
+            "(CorpusVintageError)")
     distinct = sorted(set(present))
     if len(distinct) > 1:
         raise CorpusVintageError(
             f"MIXED corpus vintage across the resolution chain: {distinct} "
-            "(§9 item 2)")
+            "(CorpusVintageError)")
     if distinct[0] != expected:
         raise CorpusVintageError(
             f"corpus vintage {distinct[0][:12]}… is not v2.1 ({expected[:12]}…) "
-            "(§9 item 2)")
+            "(CorpusVintageError)")
     return distinct[0]
 
 
 def load_prompt_pool(path: Path) -> PromptPool:
-    """Ruling 10's banked stage-0 pool, sha-frozen, from disk.
+    """The banked stage-0 prompt pool of record, sha-frozen, from disk.
 
     Tolerant on KEY NAMES (banked pools predate this module and carry the corpus
     builder's own field names) and INTOLERANT on SHAPE: an unrecognized record
@@ -3597,7 +3600,7 @@ def load_prompt_pool(path: Path) -> PromptPool:
     """
     if not path.exists():
         raise PromptPoolError(
-            f"behavioral prompt pool not found: {path} (ruling 10: the banked "
+            f"behavioral prompt pool not found: {path} (the banked "
             "stage-0 pool is the pool of record and its sha rides every stamp)")
     raw = path.read_bytes()
     sha = hashlib.sha256(raw).hexdigest()
@@ -3638,27 +3641,25 @@ def load_prompt_pool(path: Path) -> PromptPool:
 
 def render_prompt(prompt: BehavioralPrompt, tok: Any, arm: str,
                   date_string: str = "12 Jul 2026") -> list[int]:
-    """Ruling 10's "rendered per-arm": native = chat template, raw = plain.
+    """The prompt "rendered per-arm": native = chat template, raw = plain.
 
     Mirrors `collect_mean_states.build_ids`'s arm semantics (the same
     `date_string` pin, the same TypeError fall-back for templates that take no
     `date_string`, and the same MAPPING unwrap) so a behavioral prompt and a
-    collected text are tokenized under the same arm rules. §5.1's frame is the
-    BARE SYSTEM PROMPT — the standard entropy frame, frozen — so nothing is added
+    collected text are tokenized under the same arm rules. The transported cells'
+    frame is the BARE SYSTEM PROMPT — the standard entropy frame, frozen — so nothing is added
     here that the pool does not carry.
 
     ⚠ THE MAPPING UNWRAP IS NOT COSMETIC. `apply_chat_template` returns a bare id
     list for some tokenizers and a `BatchEncoding` for others — on transformers
     5.3.0 the Llama-3.2-3B tokenizer returns the mapping and the Qwen2.5-3B one
     returns the list, so the two shapes appear on ONE roster at ONE version.
-    Iterating the mapping yields its KEYS, and `int("input_ids")` is where that
-    surfaced (3B certification, 2026-08-05). `build_ids` — the collection lane of
-    record — has always carried
+    Iterating the mapping yields its KEYS, which fails as `int("input_ids")`.
+    `build_ids` — the collection lane of record — carries
         `list(res["input_ids"] if hasattr(res, "keys") else res)`
-    and this function's own docstring claimed to mirror it while omitting exactly
-    that line. The unwrap is restored here in the ancestor's form, so a behavioral
-    prompt and a collected text tokenize identically on every tokenizer in the
-    roster rather than on the subset that happens to return a list.
+    and this function carries the same unwrap, so a behavioral prompt and a
+    collected text tokenize identically on every tokenizer in the roster rather
+    than on the subset that happens to return a list.
     """
     if arm not in ("native", "raw"):
         raise ValueError(f"unknown arm {arm!r} (valid: native, raw)")
@@ -3684,9 +3685,9 @@ def render_prompt(prompt: BehavioralPrompt, tok: Any, arm: str,
     return [int(i) for i in ids]
 
 
-# ---------------------------------------------------------------- stamps (§2.8)
-#: §2.8's checklist, as data. Every field is non-negotiable per node, per cell; the
-#: checker asserts presence AND non-nullness, because §10 makes absence a
+# ---------------------------------------------------------------- per-cell stamps
+#: The per-cell stamp checklist, as data. Every field is non-negotiable per node, per
+#: cell; the checker asserts presence AND non-nullness, because absence is a
 #: first-class reportable state (OWED) rather than a silent "absent".
 STAMP_REQUIRED_FIELDS: tuple[str, ...] = (
     "corpus_manifest_sha256",
@@ -3724,7 +3725,7 @@ STAMP_REQUIRED_FIELDS: tuple[str, ...] = (
 
 #: Fields that are legitimately null on a CALIBRATION cell — a native lever at the
 #: node's own site rides no transport map and has no naive-transplant row, because
-#: there is no (source, target) pair. Named explicitly so "null" is a RULED state
+#: there is no (source, target) pair. Named explicitly so "null" is a DECLARED state
 #: for these and only these, and the checker still refuses every other null.
 CALIBRATION_NULLABLE_FIELDS: frozenset[str] = frozenset({
     "transport_map_fit_sha256", "transport_map_family", "transport_map_arm",
@@ -3732,22 +3733,21 @@ CALIBRATION_NULLABLE_FIELDS: frozenset[str] = frozenset({
     "naive_transplant_verdict",
 })
 
-#: B-2, RULED (Luxia, 2026-08-05 ~03:00, session 12), quoted verbatim from the ledger
-#: row: "**B-2 = ADOPTED**: `naive` joins the nullable-kind set for EXACTLY the four
-#: transport_map_* stamp fields; the naive gate row/verdict fields stay required; a
-#: selftest must prove a naive cell missing its gate row still HALTs."
+#: `naive` is nullable for EXACTLY the four transport_map_* stamp fields; the naive
+#: gate row/verdict fields stay required, and the selftest proves a naive cell missing
+#: its gate row still HALTs.
 #:
-#: WHY the four and only the four: a naive cell is the ruling-5 null — the SOURCE's
-#: object dropped into the target's site with NO map applied — so there is no fit sha,
-#: no family, no arm and no map vintage to name, by construction. The naive-transplant
-#: gate row and its verdict are the opposite case: a naive cell is exactly the cell
-#: that gate was written for (§5.3 item 1 / §9 item 7), so they stay REQUIRED and a
-#: naive cell that lost them still HALTs.
+#: WHY the four and only the four: a naive cell is the naive-transplant null — the
+#: SOURCE's object dropped into the target's site with NO map applied — so there is no
+#: fit sha, no family, no arm and no map vintage to name, by construction. The
+#: naive-transplant gate row and its verdict are the opposite case: a naive cell is
+#: exactly the cell that gate was written for (`NaiveTransplantRowMissing`), so they
+#: stay REQUIRED and a naive cell that lost them still HALTs.
 NAIVE_NULLABLE_FIELDS: frozenset[str] = frozenset({
     "transport_map_fit_sha256", "transport_map_family", "transport_map_arm",
     "transport_map_corpus_vintage",
 })
-#: THE MAPPING MODE (2026-08-08). A mapping cell is a NATIVE-lever cell at an
+#: THE MAPPING MODE. A mapping cell is a NATIVE-lever cell at an
 #: off-ladder dose: it rides the node's own object at the node's own site, so it has
 #: no (source, target) pair and therefore no map and no naive-transplant row — the
 #: calibration case exactly. The widening is the calibration six and NOT one field
@@ -3756,7 +3756,7 @@ NAIVE_NULLABLE_FIELDS: frozenset[str] = frozenset({
 #: measurement of a window is worth no more than an unauditable science read.
 MAPPING_NULLABLE_FIELDS: frozenset[str] = CALIBRATION_NULLABLE_FIELDS
 #: The nullable-kind table, read by `assert_stamp_complete`. Every other kind gets the
-#: empty set — "null" stays a RULED state for named (kind, field) pairs and nothing
+#: empty set — "null" stays a DECLARED state for named (kind, field) pairs and nothing
 #: else, which is the property the whole checklist rests on.
 NULLABLE_FIELDS_BY_KIND: dict[str, frozenset[str]] = {
     "calibration": CALIBRATION_NULLABLE_FIELDS,
@@ -3766,21 +3766,21 @@ NULLABLE_FIELDS_BY_KIND: dict[str, frozenset[str]] = {
     MAPPING_CELL_KIND: MAPPING_NULLABLE_FIELDS,
 }
 
-#: HALT D, RULED (Luxia, 2026-08-05 morning, session 12) — option A, bundled:
-#: "`vector_class` declaration: fd_gate_not_applicable honoured by census AND stamp
-#: nullable table (EGV objects still REQUIRE their gate, selftest-proven);
-#: class-vintage = the ruled contrast-set sha, each stamp naming its basis."
+#: The vector-class contract: a declared `vector_class` other than the entropy
+#: gradient makes `fd_gate_not_applicable` honoured by the census AND by the stamp
+#: nullable table (EGV objects still REQUIRE their gate, selftest-proven); a class
+#: object's vintage is its contrast-set sha, and each stamp names its basis.
 #:
 #: WHY exactly one field: a CAA/PCA class object has no finite-difference gate
 #: analogue — `build_contrast_vectors`'s own stamp says so ("no FD-gate analogue
 #: exists for a CAA object — build acceptance is stamp completeness + the pair-count
-#: assertion + the anchor cosines"). Every OTHER §2.8 field means the same thing for
+#: assertion + the anchor cosines"). Every OTHER stamp field means the same thing for
 #: a class cell as for an EGV cell and stays required. The widening is keyed on the
 #: VECTOR CLASS, not on the cell kind, because the two are orthogonal: a class column
 #: has calibration, band and transported cells like any other.
 CLASS_VECTOR_NULLABLE_FIELDS: frozenset[str] = frozenset({"vector_fd_gate"})
 #: The vector class of record — the campaign's entropy-gradient object. A stamp that
-#: does not say otherwise IS this, which is why every column banked before the ruling
+#: does not say otherwise IS this, which is why a stamp with no `vector_class` key
 #: keeps its exact meaning (and its exact bytes).
 EGV_VECTOR_CLASS = "entropy_gradient"
 #: The closed vocabulary. `build_behavioral_banks.VectorClass` is the typed twin; the
@@ -3794,19 +3794,18 @@ VECTOR_BASIS_KINDS: tuple[str, ...] = ("corpus-manifest", "contrast-set")
 
 def assert_stamp_complete(stamp: dict, *, cell_kind: Optional[CellKind] = None,
                           vector_class: Optional[str] = None) -> None:
-    """§2.8 as a checklist assertion; §9 item 9 as its HALT.
+    """The per-cell stamp checklist as an assertion; `StampIncompleteError` as its HALT.
 
     Two ways to fail, kept apart in the message because they demand different
-    responses: a MISSING/NULL field is an OWED artifact (§10), and an unset CVD is
-    the M10 rogue-run tell (a scheduler job carries a card index; a rogue carries
-    the sentinel).
+    responses: a MISSING/NULL field is an OWED artifact, and an unset CVD is the
+    rogue-run tell (a scheduler job carries a card index; a process started outside
+    the scheduler carries the sentinel).
 
     A null is legitimate only for a (kind, field) pair named in
     `NULLABLE_FIELDS_BY_KIND` — the calibration half's six (no pair, so no map and no
-    naive row) and, since B-2 was ruled 2026-08-05, a `naive` cell's four
-    `transport_map_*` fields and NOTHING else — or for a (class, field) pair named in
-    `CLASS_VECTOR_NULLABLE_FIELDS`, which since HALT D was ruled the same day is
-    `vector_fd_gate` on a CLASS cell and nothing else. A MISSING field is refused for
+    naive row) and a `naive` cell's four `transport_map_*` fields and NOTHING
+    else — or for a (class, field) pair named in `CLASS_VECTOR_NULLABLE_FIELDS`,
+    which is `vector_fd_gate` on a CLASS cell and nothing else. A MISSING field is refused for
     every kind and every class: `nullable` widens what may be null, never what may be
     absent.
 
@@ -3820,7 +3819,7 @@ def assert_stamp_complete(stamp: dict, *, cell_kind: Optional[CellKind] = None,
     if declared not in VECTOR_CLASSES:
         raise VectorClassMisdeclared(
             f"vector_class={declared!r} is not one of {list(VECTOR_CLASSES)}. The "
-            "class vocabulary is closed (HALT D); an unrecognized class is refused "
+            "class vocabulary is closed; an unrecognized class is refused "
             "rather than defaulted to the object of record.")
     nullable = NULLABLE_FIELDS_BY_KIND.get(cell_kind or "", frozenset())
     if declared != EGV_VECTOR_CLASS:
@@ -3831,15 +3830,15 @@ def assert_stamp_complete(stamp: dict, *, cell_kind: Optional[CellKind] = None,
             and f not in nullable]
     if missing or null:
         raise StampIncompleteError(
-            f"§2.8 stamp incomplete (§9 item 9): missing={missing} null={null}. "
-            "Absence is a first-class reportable state (OWED, §10), never a silent "
-            "'absent' — the desk's stamp-completeness checker reads exactly this.")
+            f"per-cell stamp incomplete: missing={missing} null={null}. "
+            "Absence is a first-class reportable state (OWED), never a silent "
+            "'absent' — a stamp-completeness checker reads exactly this.")
     cvd = stamp.get("cuda_visible_devices")
     if cvd == CVD_UNSET_SENTINEL or not cvd:
         raise StampIncompleteError(
-            f"§9 item 9: cuda_visible_devices is {cvd!r}. M10: a SCHEDULER job "
+            f"stamp field cuda_visible_devices is {cvd!r}. A SCHEDULER job "
             "carries a card index and a ROGUE carries the sentinel — this is the "
-            "field that caught the rogue run, so it can never be absent.")
+            "field that tells a scheduled run from a rogue one, so it can never be absent.")
     assert_mapping_stamp_contract(stamp, cell_kind=cell_kind)
     assert_amended_ladder_stamp_contract(stamp, cell_kind=cell_kind)
     assert_vector_class_contract(stamp, vector_class=declared)
@@ -3847,7 +3846,7 @@ def assert_stamp_complete(stamp: dict, *, cell_kind: Optional[CellKind] = None,
 
 def assert_mapping_stamp_contract(stamp: dict, *, cell_kind: Optional[CellKind]
                                   ) -> None:
-    """The mapping mode's stamp contract, in both directions (2026-08-08).
+    """The mapping mode's stamp contract, in both directions.
 
     A MAPPING cell's stamp must carry `mapping_mode.licenses_nothing is True` — the
     completeness checker is the one place every stamp passes, at build time and again
@@ -3857,7 +3856,7 @@ def assert_mapping_stamp_contract(stamp: dict, *, cell_kind: Optional[CellKind]
     And the mirror: a stamp of any OTHER kind carrying a `mapping_mode` block is
     refused, because a science cell that could wear the mapping badge could also be
     quietly excused from a gate by a consumer that filters on it. `cell_kind=None` —
-    the desk's checker reading a stamp with no kind in hand — falls back to the
+    an external checker reading a stamp with no kind in hand — falls back to the
     stamp's own `cell_kind`, so a stamp is checked as the thing it says it is.
     """
     kind = cell_kind or stamp.get("cell_kind")
@@ -3879,7 +3878,7 @@ def assert_mapping_stamp_contract(stamp: dict, *, cell_kind: Optional[CellKind]
 
 def assert_amended_ladder_stamp_contract(stamp: dict, *, cell_kind: Optional[CellKind]
                                          ) -> None:
-    """The amended ladder's stamp contract (2026-08-09), in both directions.
+    """The amended ladder's stamp contract, in both directions.
 
     A stamp carrying an `amended_ladder` block must carry a WELL-FORMED one — amended
     is True, the spec sha is a sha, the ladder in force is a non-empty list, and
@@ -3887,14 +3886,13 @@ def assert_amended_ladder_stamp_contract(stamp: dict, *, cell_kind: Optional[Cel
     That last equality is the load-bearing one: a stamp whose badge says ±0.15 while
     its `dose_ladder` says the frozen six would be a stamp that presents as
     frozen-ladder to every consumer that does not know the badge exists, which is the
-    exact failure the block was added to prevent.
+    exact failure the block exists to prevent.
 
     And the mirror: a MAPPING cell's stamp may never carry the block. The two
     mechanisms are separate, and a mapping cell wearing a science re-calibration's
     badge would be a window measurement claiming a ladder.
 
-    A stamp with no block is a frozen-ladder cell and is checked as it always was —
-    nothing is asserted, which is every stamp banked before this ruling.
+    A stamp with no block is a frozen-ladder cell and nothing here is asserted of it.
     """
     block = stamp.get("amended_ladder")
     kind = cell_kind or stamp.get("cell_kind")
@@ -3925,11 +3923,11 @@ def assert_amended_ladder_stamp_contract(stamp: dict, *, cell_kind: Optional[Cel
 
 
 def assert_vector_class_contract(stamp: dict, *, vector_class: str) -> None:
-    """HALT D's stamp contract: BOTH bases named, and neither readable as the other.
+    """The vector-class stamp contract: BOTH bases named, and neither readable as the other.
 
     Four refusals, in the order a mistake is most likely to be made:
 
-      1. a CLASS cell with no `vector_basis` — the hole the pilot HALTed on;
+      1. a CLASS cell with no `vector_basis` — an object with no auditable vintage;
       2. a CLASS cell whose vector basis is not a `contrast-set` — the conflation
          itself (writing the corpus sha as the class object's vintage);
       3. a CLASS cell that does not also name its GENERATION basis — the mirror
@@ -3937,10 +3935,10 @@ def assert_vector_class_contract(stamp: dict, *, vector_class: str) -> None:
          its generations came from;
       4. an ENTROPY-GRADIENT cell carrying either key — an EGV's basis is the corpus
          manifest, already stamped under `corpus_manifest_sha256`, and a second name
-         for it is exactly how the two bases blurred in the first place.
+         for it is exactly how the two bases blur into one.
 
     Called from `assert_stamp_complete`, so it holds wherever a stamp is checked —
-    at build time, on a stamp read back from disk, and in the desk's own checker.
+    at build time, on a stamp read back from disk, and in any external checker.
     """
     basis = stamp.get("vector_basis")
     generation = stamp.get("generation_basis")
@@ -3951,28 +3949,28 @@ def assert_vector_class_contract(stamp: dict, *, vector_class: str) -> None:
                 f"an entropy-gradient cell's stamp carries {offending}. The EGV's "
                 "basis IS the corpus manifest and is stamped once, under "
                 "`corpus_manifest_sha256`; a second name for the same basis is the "
-                "two-bases defect (HALT D). Declare `vector_class` if this is a "
+                "two-bases defect. Declare `vector_class` if this is a "
                 "class object.")
         if stamp.get("fd_gate_not_applicable"):
             classes = ", ".join(c for c in VECTOR_CLASSES if c != EGV_VECTOR_CLASS)
             raise VectorClassMisdeclared(
                 "an entropy-gradient cell's stamp claims fd_gate_not_applicable. "
-                "The FD gate is the EGV's OWN acceptance test (§9 item 3) and only "
+                "The FD gate is the EGV's OWN acceptance test and only "
                 f"a class object ({classes}) may say it has no analogue.")
         return
     if not isinstance(basis, dict) or not basis.get("sha256"):
         raise VectorBasisMissing(
             f"vector_class={vector_class!r} but the stamp names no `vector_basis` "
-            "with a sha256. A class object's VECTOR basis is the RULED CONTRAST SET "
+            "with a sha256. A class object's VECTOR basis is the CONTRAST SET "
             "it was built from — the sha `build_contrast_vectors` refuses to build "
             "without — and a stamp that omits it makes the object unauditable "
-            "(§9 item 2: a hole is a hole, not an agreement).")
+            "(a hole is a hole, not an agreement).")
     if basis.get("kind") != "contrast-set":
         raise VectorClassMisdeclared(
             f"vector_class={vector_class!r} with vector_basis.kind="
             f"{basis.get('kind')!r}. A class object's vector basis is the "
             "contrast set; `corpus-manifest` is the GENERATION basis and rides "
-            "`generation_basis`. The two are never the same field (HALT D).")
+            "`generation_basis`. The two are never the same field.")
     if not isinstance(generation, dict) or not generation.get("sha256"):
         raise VectorBasisMissing(
             f"vector_class={vector_class!r} names its contrast set but no "
@@ -3999,23 +3997,23 @@ def build_stamp(*, cell: CellSpec, alpha: float, layout: CanonicalLayout,
                 vector_basis: Optional[dict] = None,
                 site_role: Optional[str] = None,
                 extra: Optional[dict] = None) -> dict:
-    """§2.8's per-cell custody stamp, built so the checklist cannot be half-met.
+    """The per-cell custody stamp, built so the checklist cannot be half-met.
 
-    Every §2.8 field is written here explicitly — nothing is `.get`-defaulted into
-    existence — and `assert_stamp_complete` runs before the stamp is returned, so a
-    caller can never receive a stamp that would fail the desk's own checker.
+    Every required stamp field is written here explicitly — nothing is `.get`-defaulted
+    into existence — and `assert_stamp_complete` runs before the stamp is returned, so
+    a caller can never receive a stamp that would fail an external completeness checker.
 
-    HALT C and HALT D add three keys, and all three are written ONLY when the caller
-    declares them. `site_role` appears when the column was staged in a declared role
-    (§4.2's remedy (i)); `vector_class`/`vector_basis`/`generation_basis` appear when
-    the cell rides a CLASS object. An entropy-gradient cell staged at its site of
-    record therefore produces the byte-identical stamp it produced before both
-    rulings — the flag-absent condition, in the one function that writes stamps.
+    Three optional keys are written ONLY when the caller declares them. `site_role`
+    appears when the column was staged in a declared role (the actuation-calibration
+    remedy of calibrating at a robustness site); `vector_class`/`vector_basis`/
+    `generation_basis` appear when the cell rides a CLASS object. An entropy-gradient
+    cell staged at its site of record therefore carries none of the three — the
+    flag-absent condition, in the one function that writes stamps.
     """
     tmap = transport_map or {}
-    # THE MAPPING MODE (2026-08-08): a mapping cell's §4.2 slot is a NON-VERDICT.
-    # §4.2's closing line binds every §5 cell to name its site's calibration; a mapping
-    # cell is not a §5 cell, and a PASS transcribed onto it would be a licence sitting
+    # THE MAPPING MODE: a mapping cell's actuation-calibration slot is a NON-VERDICT.
+    # Every transported cell must name its site's calibration; a mapping cell is not a
+    # transported cell, and a PASS transcribed onto it would be a licence sitting
     # on a cell that licenses nothing. Whatever verdict the RUN carries is preserved —
     # under `site_calibration_beside`, where it reads as a fact about the site rather
     # than about this cell. Every other kind takes the caller's block unchanged, so no
@@ -4036,7 +4034,7 @@ def build_stamp(*, cell: CellSpec, alpha: float, layout: CanonicalLayout,
         "vector_key": cell.vector_key,
         "band_family": cell.band_family,
         "is_null": cell.is_null,
-        # B4, written into every stamp so a beside can never be read back as the null
+        # Written into every stamp so a beside can never be read back as the null
         # of record by anything downstream that only has the stamp.
         "is_null_of_record": cell.is_null_of_record,
         "is_beside_only": cell.is_beside,
@@ -4055,10 +4053,9 @@ def build_stamp(*, cell: CellSpec, alpha: float, layout: CanonicalLayout,
         "site_cross_check": site_cross_check,
         "arm": arm,
         "node_key": node_key,
-        # THE LADDER THIS CELL RAN (2026-08-09). `cell.ladder_in_force` is `DOSE_LADDER`
-        # for every cell with no ratified amendment — which is every cell banked before
-        # re-freeze #2 — so this field is byte-for-byte what it was. For an amended cell
-        # it states the ladder actually run, and the `amended_ladder` block below names
+        # THE LADDER THIS CELL RAN. `cell.ladder_in_force` is `DOSE_LADDER` for every
+        # cell with no authorized amendment, so on a frozen-ladder cell this field is
+        # the frozen ladder. For an amended cell it states the ladder actually run, and the `amended_ladder` block below names
         # the frozen one beside it: a stamp never says "frozen" about an amended column.
         "dose_ladder": list(cell.ladder_in_force),
         "alpha_frac": cell.alpha_frac,
@@ -4102,14 +4099,14 @@ def build_stamp(*, cell: CellSpec, alpha: float, layout: CanonicalLayout,
             "direction known to produce the behavior; asserted on the vector's "
             "construction provenance at cell build time"),
     }
-    # E4.1's pre-written clause, attached at the cell's stamp for a FLAGGED pair
-    # (§5.3 item 2). A flagged pair still runs and still scores.
+    # The pre-written artifact-exposure clause, attached at the cell's stamp for a
+    # FLAGGED pair. A flagged pair still runs and still scores.
     if naive_row and naive_row.get("verdict") == "ARTIFACT-EXPOSED":
         stamp["naive_transplant_clause"] = (
             "shared residual coordinate frame; a hit on this pair is not evidence "
             "of transport beyond frame-sharing; excluded from mechanism aggregates, "
             "retained in scored aggregates.")
-    # HALT C: the DECLARED site role, on the cell stamp as well as inside the
+    # The DECLARED site role, on the cell stamp as well as inside the
     # cross-check block, so a reader with one cell's stamp can tell a robustness-site
     # column from a site-of-record one without re-deriving anything.
     if site_role is not None:
@@ -4131,7 +4128,7 @@ def build_stamp(*, cell: CellSpec, alpha: float, layout: CanonicalLayout,
             "note": MAPPING_LICENSES_NOTHING,
         }
     # THE AMENDED LADDER: the cell says which ladder produced it, with the document
-    # that ratified the replacement named by id and by sha, and the FROZEN ladder
+    # that authorized the replacement named by id and by sha, and the FROZEN ladder
     # quoted beside so the substitution is legible from this stamp alone. This is the
     # block that makes the comparability rider enforceable downstream — a reader
     # pooling rows can tell, per row, which ladder it is holding.
@@ -4145,15 +4142,16 @@ def build_stamp(*, cell: CellSpec, alpha: float, layout: CanonicalLayout,
             "replaces_frozen_ladder": True,
             "extreme_magnitude": cell.ladder_authorization.extreme_magnitude,
             "signal_role_reading": AMENDED_LADDER_SIGNAL_ROLE_READING,
-            # §4.2 is DESK-SIDE: the reading rule lives in the document named above and
-            # is not executed, paraphrased or scored here. The sha is the pointer to it.
+            # Scoring happens outside this module: the reading rule lives in the
+            # document named above and is not executed, paraphrased or scored here.
+            # The sha is the pointer to it.
             "gate_reading_rule": (
                 "read §4.2's extreme-dose references on the ladder in force; the "
                 "ratified wording is in the ladder spec named by the sha above "
                 "(desk policy — the engine runs and records, it does not score)"),
             "note": AMENDED_LADDER_NOTE,
         }
-    # HALT D: the two bases, both named, only on a class cell.
+    # The vector-class contract: the two bases, both named, only on a class cell.
     if vector_class != EGV_VECTOR_CLASS:
         stamp["vector_class"] = vector_class
         stamp["vector_basis"] = vector_basis
@@ -4176,10 +4174,10 @@ def build_stamp(*, cell: CellSpec, alpha: float, layout: CanonicalLayout,
 
 
 def assert_naive_row_banked(pair: str, gate: Optional[dict]) -> dict:
-    """§5.3 item 1 / §9 item 7: no cell fires for a pair whose naive row is unbanked.
+    """No cell fires for a pair whose naive-transplant row is unbanked.
 
-    A pair absent from the banked 66 + 36 rows HALTs to the desk for a gate
-    extension BEFORE the cell is built — the gate is not something a cell can
+    A pair absent from the banked 66 + 36 rows HALTs (`NaiveTransplantRowMissing`)
+    until the gate is extended, BEFORE the cell is built — the gate is not something a cell can
     proceed without and then have added afterwards.
     """
     rows = (gate or {}).get("rows") or (gate or {}).get("pairs") or {}
@@ -4188,20 +4186,19 @@ def assert_naive_row_banked(pair: str, gate: Optional[dict]) -> dict:
     row = rows.get(pair)
     if not row:
         raise NaiveTransplantRowMissing(
-            f"no banked naive-transplant row for pair {pair!r} (§5.3 item 1 / §9 "
-            "item 7). The banked gate is 66 candidate pairs + 36 gpt2-xl supplement "
-            "rows; a new pair HALTs to the desk for a gate extension BEFORE its cell "
-            "is built.")
+            f"no banked naive-transplant row for pair {pair!r}. The banked gate is "
+            "66 candidate pairs + 36 gpt2-xl supplement rows; a new pair HALTs until "
+            "the gate is extended, BEFORE its cell is built.")
     return row
 
 
-# ------------------------------------------------- §4.2's verdict, as a document
+# ------------------------------------ the actuation-calibration verdict, as a document
 class ActuationCalibrationVerdict(BaseModel):
-    """§4.2's closing requirement as a typed document the desk files and the CLI reads.
+    """The actuation-calibration verdict as a typed document the scorer files and the CLI reads.
 
-    "Every behavioral cell in §5 NAMES its site's actuation calibration in its stamp,
-    by job id + verdict + the three criterion values." The three values are §4.2's
-    own: (a) Spearman ρ(dose, entropy_rise) over the full signed ladder, (b) how many
+    Every transported behavioral cell NAMES its site's actuation calibration in its
+    stamp, by job id + verdict + the three criterion values. The three values are the
+    calibration criteria: (a) Spearman ρ(dose, entropy_rise) over the full signed ladder, (b) how many
     of the ladder's doses sit outside the node's OWN native random band — and whether
     BOTH |0.3| doses do, because (b) is one criterion with two parts and a stamp that
     dropped the second could not re-apply the threshold — and (c) the mean
@@ -4209,18 +4206,19 @@ class ActuationCalibrationVerdict(BaseModel):
 
     THE ROLE BOUNDARY, IN THE TYPE. `verdict` is a field, not a computation. No
     validator here re-derives PASS/FAIL/DEGENERATE from the criterion values, and a
-    document whose verdict disagrees with its own numbers still loads verbatim: the
-    desk is the scorer (C§8), this module transcribes. The engine's job is to refuse a
-    document that is not a §4.2 document at all, and to refuse one that is about some
-    OTHER column.
+    document whose verdict disagrees with its own numbers still loads verbatim:
+    scoring happens elsewhere and this module never self-scores, it transcribes. The
+    engine's job is to refuse a document that is not an actuation-calibration verdict
+    at all, and to refuse one that is about some OTHER column.
 
     `extra="forbid"`: an unrecognized key is a refusal, because a mistyped criterion
     name that silently defaulted would put a number in a stamp that no one filed.
 
     Field names deliberately echo `actuation_calibration.stamp_fragment`'s keys
     (`job_id`, `verdict`, `spearman_rho`, `outside_band_doses`,
-    `coherence_at_scoring_dose`) so a reader of a §5 stamp meets ONE vocabulary
-    whether the block came from a desk-scored document or from that module's own
+    `coherence_at_scoring_dose`) so a reader of a transported cell's stamp meets ONE
+    vocabulary whether the block came from an externally scored document or from that
+    module's own
     evaluation. The two modules are NOT wired together — `actuation_calibration`
     imports this one, so importing it back would be a cycle — and the alignment is by
     name, on purpose, with this sentence as the record of it.
@@ -4233,48 +4231,48 @@ class ActuationCalibrationVerdict(BaseModel):
     node_key: str = Field(min_length=1)
     site: int = Field(ge=0)
     arm: Literal["native", "raw"]
-    #: the scheduler job that produced the calibration cells (§4.2's "job id").
+    #: the scheduler job that produced the calibration cells (the verdict's "job id").
     job_id: str = Field(min_length=1)
-    #: the desk's verdict string, VERBATIM. DEGENERATE is its own state and is never
-    #: folded into PASS (§4.2), so it is a member of the literal rather than a note.
+    #: the scorer's verdict string, VERBATIM. DEGENERATE is its own state and is never
+    #: folded into PASS, so it is a member of the literal rather than a note.
     verdict: Literal["PASS", "FAIL", "DEGENERATE"]
     #: (a) dose-ordering across the full signed 6-dose ladder.
     spearman_rho_dose_vs_rise: float = Field(ge=-1.0, le=1.0)
     #: (b) band separation vs the node's OWN native Rband, as VALUES: the count, its
     #: denominator (the ladder's arity, so the fraction is self-describing) and
-    #: §4.2(b)'s second half.
+    #: criterion (b)'s second half (both extremes outside).
     outside_band_doses: int = Field(ge=0, le=len(DOSE_LADDER))
     outside_band_of: int = Field(default=len(DOSE_LADDER), ge=1, le=len(DOSE_LADDER))
     outside_band_at_both_extremes: bool
     #: (c) the coherence floor's measurement at the scoring dose — the POSITIVE extreme
-    #: of the ladder in force (+0.3 frozen; +0.15 on the ratified mixtral amendment).
+    #: of the ladder in force (+0.3 frozen; +0.15 on the authorized mixtral amendment).
     coherence_at_scoring_dose: float = Field(ge=0.0, le=1.0)
-    #: where the desk's scoring arithmetic is on the record, and the ledger day it
-    #: was ruled — the two pointers that make the verdict auditable from the stamp.
+    #: where the scorer's arithmetic is on the record, and the day the verdict was
+    #: filed — the two pointers that make the verdict auditable from the stamp.
     scoring_log_path: str = Field(min_length=1)
     ledger_date: date
-    #: the site's role, for the §4.2 remedy ladder (a robustness-site calibration is
+    #: the site's role, for the calibration remedy ladder (a robustness-site calibration is
     #: a different statement from a site-of-record one). Defaulted, never inferred.
     site_role: Literal["site_of_record", "robustness_site"] = "site_of_record"
-    #: THE LADDER IN FORCE (re-freeze #3, 2026-08-13). §4.2 is scored on the ladder the
-    #: column ACTUALLY RAN, and on an amended-ladder column that is not the frozen one.
-    #: The desk states it HERE, in the document, because policy lives in documents —
-    #: this module still carries no per-node ladder, only the machinery to record one.
+    #: THE LADDER IN FORCE. The calibration is scored on the ladder the column
+    #: ACTUALLY RAN, and on an amended-ladder column that is not the frozen one. The
+    #: scorer states it HERE, in the document, because policy lives in documents —
+    #: this module carries no per-node ladder, only the machinery to record one.
     #:
-    #: ABSENT BOTH, `stamp_block` emits the frozen constants exactly as it always has,
-    #: so every document filed before this field existed stamps BYTE-IDENTICALLY. There
+    #: ABSENT BOTH, `stamp_block` emits the frozen constants, so a document without
+    #: the pair stamps BYTE-IDENTICALLY to one that states the frozen ladder. There
     #: is deliberately no "which branch produced this" marker in the block: a frozen
     #: ladder stated explicitly and a frozen ladder taken by default are the same claim.
     #:
     #: BOTH OR NEITHER. A scoring pair without its ladder cannot be checked against it,
-    #: and a ladder without its scoring pair leaves §4.2(b)'s extremes to be inferred by
+    #: and a ladder without its scoring pair leaves criterion (b)'s extremes to be inferred by
     #: a reader — the inference this whole mechanism exists to stop.
     dose_ladder: Optional[list[float]] = None
     scoring_doses: Optional[list[float]] = None
 
     @model_validator(mode="after")
     def _counts_are_consistent(self) -> "ActuationCalibrationVerdict":
-        """Arithmetic self-consistency ONLY — never a re-reading of §4.2.
+        """Arithmetic self-consistency ONLY — never a re-reading of the calibration criteria.
 
         A count cannot exceed its own denominator, and "outside at both extreme doses"
         cannot be true when fewer than two doses are outside at all. Both are
@@ -4284,16 +4282,16 @@ class ActuationCalibrationVerdict(BaseModel):
         The ladder-in-force pair is checked the same way and no further: present
         together, distinct and non-empty, arity agreeing with the band denominator, and
         a scoring pair that IS the ladder's two extremes — `(min, max)`, not
-        ±magnitude, so an asymmetric ratified ladder reads correctly and every
-        symmetric one is unchanged. Whether ±0.15 was the RIGHT window is Luxia's
-        ruling in the ladder spec, never this validator's.
+        ±magnitude, so an asymmetric authorized ladder reads correctly and every
+        symmetric one is unchanged. Whether ±0.15 was the RIGHT window is decided in
+        the ladder spec, never by this validator.
         """
         if (self.dose_ladder is None) != (self.scoring_doses is None):
             raise ValueError(
                 "dose_ladder and scoring_doses are BOTH-OR-NEITHER: this document "
                 f"states {'dose_ladder' if self.dose_ladder is not None else 'scoring_doses'} "
                 "alone. A scoring pair without its ladder cannot be checked against it, "
-                "and a ladder without its pair leaves §4.2(b)'s extremes to inference.")
+                "and a ladder without its pair leaves criterion (b)'s extremes to inference.")
         if self.dose_ladder is not None:
             if not self.dose_ladder:
                 raise ValueError("dose_ladder is present but empty — a column runs a "
@@ -4301,17 +4299,17 @@ class ActuationCalibrationVerdict(BaseModel):
             if len(set(self.dose_ladder)) != len(self.dose_ladder):
                 raise ValueError(
                     f"dose_ladder {self.dose_ladder} repeats a dose — a ladder's rungs "
-                    "are distinct, and §4.2(a)'s Spearman is over the signed ladder")
+                    "are distinct, and criterion (a)'s Spearman is over the signed ladder")
             if len(self.dose_ladder) != self.outside_band_of:
                 raise ValueError(
                     f"dose_ladder has {len(self.dose_ladder)} rungs but "
-                    f"outside_band_of is {self.outside_band_of} — §4.2(b)'s denominator "
+                    f"outside_band_of is {self.outside_band_of} — criterion (b)'s denominator "
                     "IS the ladder's arity, so these two cannot disagree")
             want = [min(self.dose_ladder), max(self.dose_ladder)]
             if list(self.scoring_doses) != want:
                 raise ValueError(
                     f"scoring_doses {list(self.scoring_doses)} are not the ladder's two "
-                    f"extremes {want}. The ratified reading is (min, max) of THE LADDER "
+                    f"extremes {want}. The reading of record is (min, max) of THE LADDER "
                     "IN FORCE — not ±magnitude, so an asymmetric ladder reads correctly.")
         if self.outside_band_doses > self.outside_band_of:
             raise ValueError(
@@ -4321,16 +4319,16 @@ class ActuationCalibrationVerdict(BaseModel):
         if self.outside_band_at_both_extremes and self.outside_band_doses < 2:
             raise ValueError(
                 f"outside_band_at_both_extremes is true but only "
-                f"{self.outside_band_doses} dose(s) are outside the band — §4.2(b)'s "
+                f"{self.outside_band_doses} dose(s) are outside the band — criterion (b)'s "
                 "two halves contradict each other in this document")
         return self
 
     def stamp_block(self, *, document_path: str, document_sha256: str) -> dict:
-        """The object a §5 stamp embeds, under `actuation_calibration`.
+        """The object a transported cell's stamp embeds, under `actuation_calibration`.
 
-        Values, not booleans, so a downstream reader re-applies §4.2's thresholds by
-        hand without re-running anything — and the document's own sha, so the stamp
-        is M4-checkable against the file the desk filed.
+        Values, not booleans, so a downstream reader re-applies the calibration
+        thresholds by hand without re-running anything — and the document's own sha,
+        so the stamp can be checked byte-for-byte against the file the scorer filed.
         """
         return {
             "verdict": self.verdict,
@@ -4345,9 +4343,9 @@ class ActuationCalibrationVerdict(BaseModel):
                 f"{self.outside_band_doses}/{self.outside_band_of}",
             "outside_band_at_both_extremes": self.outside_band_at_both_extremes,
             "coherence_at_scoring_dose": self.coherence_at_scoring_dose,
-            # THE LADDER IN FORCE (re-freeze #3): the document's own pair when it
-            # states one, the frozen constants otherwise. The fallback is what makes
-            # every pre-existing verdict document stamp byte-identically.
+            # THE LADDER IN FORCE: the document's own pair when it states one, the
+            # frozen constants otherwise. The fallback is what makes a verdict
+            # document without the pair stamp byte-identically.
             "dose_ladder": (list(self.dose_ladder) if self.dose_ladder is not None
                             else list(DOSE_LADDER)),
             "scoring_doses": (list(self.scoring_doses) if self.scoring_doses is not None
@@ -4368,20 +4366,20 @@ def load_actuation_calibration(path: Path, *, node_key: str, arm: str, site: int
 
     Three refusals, each its own exception because each has its own remedy:
     `ActuationCalibrationNotFound` (no readable file at that path),
-    `ActuationCalibrationSchemaError` (not a §4.2 verdict document) and
+    `ActuationCalibrationSchemaError` (not an actuation-calibration verdict document) and
     `ActuationCalibrationMismatch` (a verdict about some other column). All three are
     `BehavioralHarnessError`, so the CLI's existing HALT path reports them and exits
-    2 — an enactor never adjudicates a live HALT.
+    2 — a live HALT is never adjudicated by the process that hit it.
 
     There is no fourth outcome. In particular there is no degrade-to-OWED: a named
     verdict that cannot be read stops the job, because OWED means "no verdict has
     been filed" and stamping it while one exists is the false provenance statement
-    this whole flag was ruled to fix.
+    this whole flag exists to prevent.
     """
     if not path.is_file():
         raise ActuationCalibrationNotFound(
             f"no actuation-calibration verdict document at {path} "
-            f"({ACTUATION_CALIBRATION_FLAG}). §4.2 requires every §5 cell to NAME its "
+            f"({ACTUATION_CALIBRATION_FLAG}). Every transported cell must NAME its "
             "site's calibration by job id + verdict + the three criterion values; "
             "this job named a document that is not a readable file. It does NOT fall "
             "back to OWED — OWED means no verdict exists, and that would be a false "
@@ -4397,17 +4395,17 @@ def load_actuation_calibration(path: Path, *, node_key: str, arm: str, site: int
         body = json.loads(raw)
     except json.JSONDecodeError as exc:
         raise ActuationCalibrationSchemaError(
-            f"{path}: not JSON ({exc}) — a §4.2 verdict document is a JSON "
+            f"{path}: not JSON ({exc}) — an actuation-calibration verdict document is a JSON "
             "object") from exc
     if not isinstance(body, dict):
         raise ActuationCalibrationSchemaError(
-            f"{path}: a §4.2 verdict document is a JSON object, got "
+            f"{path}: an actuation-calibration verdict document is a JSON object, got "
             f"{type(body).__name__}")
     try:
         verdict = ActuationCalibrationVerdict(**body)
     except ValidationError as exc:
         raise ActuationCalibrationSchemaError(
-            f"{path}: not a §4.2 verdict document ({exc}). Required: node_key, site, "
+            f"{path}: not an actuation-calibration verdict document ({exc}). Required: node_key, site, "
             "arm, job_id, verdict, spearman_rho_dose_vs_rise, outside_band_doses, "
             "outside_band_at_both_extremes, coherence_at_scoring_dose, "
             "scoring_log_path, ledger_date. Unknown keys are REFUSED, never "
@@ -4424,7 +4422,7 @@ def load_actuation_calibration(path: Path, *, node_key: str, arm: str, site: int
         raise ActuationCalibrationMismatch(
             f"{path}: this verdict is about another column — " +
             "; ".join(disagreements) +
-            ". §4 gates a SITE, so a verdict is a statement about exactly one "
+            ". The actuation calibration gates a SITE, so a verdict is a statement about exactly one "
             "(node, site, arm); stamping this column with it would name a "
             "calibration that never ran here.")
     return verdict.stamp_block(document_path=str(path),
@@ -4433,9 +4431,9 @@ def load_actuation_calibration(path: Path, *, node_key: str, arm: str, site: int
 
 # ---------------------------------------------------------------- HF stepper
 class HFStepper:
-    """`Stepper` over a real HF causal LM with a KV cache (§2.2's generation path).
+    """`Stepper` over a real HF causal LM with a KV cache (the generation path).
 
-    `use_cache=True` for generation (§2.2). Logits are returned as the LAST
+    `use_cache=True` for generation. Logits are returned as the LAST
     position's row block, float32 on CPU, because the sampling step does its
     arithmetic in float64 numpy on one row — which is what makes it layout-invariant
     (see `sample_token`).
@@ -4495,9 +4493,9 @@ class HFStepper:
         self._past = None
 
 
-# ---------------------------------------------------------------- the column job (§2.1)
-#: §2.1's fire order, as data. Calibration runs BEFORE anything transported because §4
-#: is a GATE and not a warm-up: a node whose site fails it gets no transported-write
+# ---------------------------------------------------------------- the column job
+#: The column job's fire order, as data. Calibration runs BEFORE anything transported
+#: because the actuation calibration is a GATE and not a warm-up: a node whose site fails it gets no transported-write
 #: cell there, and a column that fired the transported half first would have spent the
 #: budget before the gate could refuse it.
 #: `mapping` is last and alone, which costs nothing (a mapping column is pure, so it
@@ -4507,12 +4505,12 @@ CELL_KIND_ORDER: tuple[CellKind, ...] = (
     "baseline", "calibration", "calibration_band", "transported", "transported_band",
     "naive", "bridge", "judged", "mapping")
 
-#: §2.7's descriptive batch-invariance sizes. Both are OFF the frozen ladder, on
+#: The descriptive batch-invariance sizes. Both are OFF the frozen batch ladder, on
 #: purpose — see `CanonicalLayout.characterization_only`.
 CHARACTERIZATION_BATCH_SIZES: tuple[int, ...] = (8, 1)
 
-#: How a cell's entropy digest is composed (§2.7 says "the probe's per-position
-#: float32 entropy arrays" without fixing an order; an unnamed order would make the
+#: How a cell's entropy digest is composed (the replay gate is specified over "the
+#: probe's per-position float32 entropy arrays" without a fixed order; an unnamed order would make the
 #: digest unreproducible by anyone but this file).
 ENTROPY_DIGEST_ORDER = (
     "sha256 over float32 .tobytes() of: every generation's STEERED per-position entropy "
@@ -4520,8 +4518,8 @@ ENTROPY_DIGEST_ORDER = (
     "order. Both halves are in the digest because the rise is their difference and a "
     "gate on only one half could pass while the read moved.")
 
-#: §6(1)/§6(2): the battery's own injection span. The brief fixes the hook, the α and
-#: the site but not the SPAN, and the span is what makes the read a capability-under-
+#: The capability battery's own injection span (likelihood and format halves). The
+#: specification fixes the hook, the α and the site but not the SPAN, and the span is what makes the read a capability-under-
 #: dose rather than a model fact — so it is named here rather than assumed.
 BATTERY_INJECTION_SPAN = (
     "the battery injects over the SCORED span only — the continuation positions of a "
@@ -4530,7 +4528,7 @@ BATTERY_INJECTION_SPAN = (
     "the item's prompt would measure a different intervention from the one the cell's "
     "entropy read measures.")
 
-#: The battery's format probe is GREEDY. §6 wants the battery deterministic ("no
+#: The battery's format probe is GREEDY. The battery is specified deterministic ("no
 #: sampling noise on top of the effect being measured") and only the likelihood half is
 #: deterministic by construction, so the generated half is pinned rather than sampled.
 BATTERY_SAMPLING = SamplingConfig(
@@ -4547,15 +4545,15 @@ class NodeRuntime(Protocol):
     The orchestration (`run_column`) is the part that has to be right and the part no
     GPU can be spared to test, so it is written against this narrow surface: the SAME
     orchestration runs under `HFNodeRuntime` on a node and under a numpy-only stub in
-    `--selftest`, which is how the §2.1 order, the stamps, the completeness guard and
+    `--selftest`, which is how the fire order, the stamps, the completeness guard and
     the replay gate stay proven in a configuration with no deep-learning stack at all.
     """
 
     def trunk(self) -> dict:
-        """§2.8's trunk facts: transformers/torch versions, node, GPU model, driver."""
+        """The stamp's trunk facts: transformers/torch versions, node, GPU model, driver."""
 
     def model_config_sha256(self) -> Optional[str]:
-        """§2.8's M9 drift anchor."""
+        """The stamp's drift anchor: a changed model config shows up as a changed sha."""
 
     def tokenize(self, prompt: BehavioralPrompt) -> list[int]:
         ...
@@ -4574,7 +4572,7 @@ class NodeRuntime(Protocol):
 
     def measure_per_token_median_resid_norm(
             self, *, site: int, prompt_ids: Sequence[Sequence[int]]) -> float:
-        """§2.5's in-job measurement — the convention that sets α."""
+        """The in-job norm measurement — the convention that sets α."""
 
     def begin_cell(self, *, cell: CellSpec, alpha: float) -> None:
         """Attach/point the injection for one cell (one hook, mutated per cell)."""
@@ -4587,22 +4585,22 @@ class NodeRuntime(Protocol):
 
     def probe(self, records: Sequence[GenerationRecord], *, steered: bool
               ) -> list[tuple[np.ndarray, np.ndarray]]:
-        """(entropy, nll) float32 arrays per record, right-padded and masked (§2.6)."""
+        """(entropy, nll) float32 arrays per record, right-padded and masked (the entropy probe)."""
 
     def decode(self, ids: Sequence[int]) -> str:
         ...
 
     def likelihood_nll(self) -> Callable[[str, str], float]:
-        """NLL(prompt, continuation) UNDER the current cell's injection (§6(1))."""
+        """NLL(prompt, continuation) UNDER the current cell's injection (battery likelihood half)."""
 
     def format_probe_texts(self) -> dict[str, str]:
-        """item_id → generated text under the current cell's injection (§6(2))."""
+        """item_id → generated text under the current cell's injection (battery format half)."""
 
     def alpha_zero_equivalence(self) -> Optional[tuple[Any, Any]]:
         """(hooked-at-α0 logits, unhooked logits), or None if not measurable."""
 
     def hook_admissibility(self, site: int) -> Optional[HookAdmissibility]:
-        """§4.4's preflight, or None on an architecture already known to pass."""
+        """The SSM hook-admissibility preflight, or None on an architecture already known to pass."""
 
     def end_cell(self) -> None:
         ...
@@ -4634,7 +4632,7 @@ class CellOutcome(BaseModel):
 
 
 class ColumnResult(BaseModel):
-    """The whole node job: layout, norms, cells, gate, table, custody (§2.1)."""
+    """The whole node job: layout, norms, cells, gate, table, custody."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -4662,10 +4660,10 @@ class ColumnResult(BaseModel):
 
 
 def trunk_stamp(runtime: NodeRuntime) -> dict:
-    """§2.8's trunk facts with M19 framing: a degraded read is described, not dropped."""
+    """The stamp's trunk facts, as instrumentation: a degraded read is described, not dropped."""
     try:
         trunk = dict(runtime.trunk())
-    except Exception as exc:                             # noqa: BLE001 — M19(a)
+    except Exception as exc:                             # noqa: BLE001 — named and recorded below
         logger.warning("trunk facts unavailable (%s: %s) — recorded as degraded",
                        type(exc).__name__, exc)
         return {"measured": False,
@@ -4677,15 +4675,15 @@ def trunk_stamp(runtime: NodeRuntime) -> dict:
 
 def site_cross_check(node_key: str, site: int, *,
                      site_role: Optional[str] = None) -> dict:
-    """§2.8's `SITES` ∧ `SITE_OF_RECORD` cross-check, re-derived at run time.
+    """The stamp's `SITES` ∧ `SITE_OF_RECORD` cross-check, re-derived at run time.
 
     Delegates to the staging module so the two halves of the campaign cannot disagree
     about what "the site of record" means. Imported inside the function because the
     staging module imports THIS one (the engine owns the primitives, the staging module
-    owns the composition), and because §4.3 forbids trusting a module-level snapshot of
-    registries that change nightly.
+    owns the composition), and because a module-level snapshot of registries that
+    change between runs cannot be trusted.
 
-    HALT C: `site_role` is the DECLARATION the staged document carries, passed through
+    `site_role` is the DECLARATION the staged document carries, passed through
     unchanged. The engine re-derives the ANSWER from the live registries — it does not
     trust the staging module's answer — but the QUESTION ("in what role is this site
     being used?") is the spec's to ask, and a job that dropped it would re-HALT on
@@ -4696,7 +4694,7 @@ def site_cross_check(node_key: str, site: int, *,
 
 
 def order_cells(cells: Sequence[CellSpec]) -> list[CellSpec]:
-    """§2.1's fire order: calibration first, then transported, naive last of the reads."""
+    """The fire order: calibration first, then transported, naive last of the reads."""
     rank = {k: i for i, k in enumerate(CELL_KIND_ORDER)}
     return sorted(cells, key=lambda c: (rank.get(c.kind, len(rank)),
                                         c.alpha_frac, c.cell_id))
@@ -4705,9 +4703,9 @@ def order_cells(cells: Sequence[CellSpec]) -> list[CellSpec]:
 def assert_column_complete(outcomes: Sequence[CellOutcome], expected_cells: int,
                            *, n_per_cell: int, node_key: str = "",
                            beside_cell_ids: Collection[str] = ()) -> None:
-    """§7's completeness guard / §9 item 10 — a count one short is a rake (M23).
+    """The expected-N completeness guard — a count one short is a defect, not a rounding.
 
-    `beside_cell_ids` names the BESIDE cells (Σ-shaped bands, B4) among the planned
+    `beside_cell_ids` names the BESIDE cells (Σ-shaped bands) among the planned
     set. Expected-N is then asserted TWICE — on the whole column and on the column
     MINUS its besides — so a Σ cell can never stand in for a missing cell of record.
     Without the second assertion a designated row could lose a gRband dose and still
@@ -4716,7 +4714,7 @@ def assert_column_complete(outcomes: Sequence[CellOutcome], expected_cells: int,
     if len(outcomes) != expected_cells:
         raise ExpectedNShortfall(
             f"{node_key or 'column'}: {len(outcomes)} cells completed, {expected_cells} "
-            "planned (§9 item 10 / M23: a count one short is a rake, not a rounding)")
+            "planned (ExpectedNShortfall: a count one short is a defect, not a rounding)")
     beside = set(beside_cell_ids)
     completed = {o.cell_id for o in outcomes}
     missing_beside = sorted(beside - completed)
@@ -4724,7 +4722,7 @@ def assert_column_complete(outcomes: Sequence[CellOutcome], expected_cells: int,
         raise ExpectedNShortfall(
             f"{node_key or 'column'}: BESIDE cell(s) {missing_beside} were planned "
             "and did not complete, yet the total came out right — which means a cell "
-            "of record ran in a beside's place. B4: the two populations are counted "
+            "of record ran in a beside's place. The two populations are counted "
             "separately precisely so that substitution cannot pass.")
     # A cell that STAMPED itself a beside but was never planned as one is the same
     # substitution from the other side, and the stamp is the only place the fact
@@ -4736,20 +4734,20 @@ def assert_column_complete(outcomes: Sequence[CellOutcome], expected_cells: int,
         raise ExpectedNShortfall(
             f"{node_key or 'column'}: cell(s) {undeclared} stamped themselves BESIDE "
             "but are not in the planned beside set — an undeclared beside inside the "
-            "expected-N of record (B4).")
+            "expected-N of record.")
     of_record, expected_of_record = len(outcomes) - len(beside), (
         expected_cells - len(beside))
     if of_record != expected_of_record:                           # pragma: no cover
         raise ExpectedNShortfall(
             f"{node_key or 'column'}: {of_record} cells OF RECORD completed, "
             f"{expected_of_record} planned ({len(beside)} BESIDE cells declared). "
-            "B4: a Σ-beside cell never counts toward the expected-N of the column "
+            "A Σ-beside cell never counts toward the expected-N of the column "
             "of record.")
     short = [o.cell_id for o in outcomes if o.n != n_per_cell]
     if short:
         raise ExpectedNShortfall(
             f"{node_key or 'column'}: cell(s) {short} are short of n={n_per_cell} "
-            "(§7's expected-N completeness guard)")
+            "(the expected-N completeness guard)")
 
 
 def cell_entropy_arrays(rows: Sequence[GenerationRecord],
@@ -4764,7 +4762,7 @@ def probe_cell(runtime: NodeRuntime, records: Sequence[GenerationRecord], *,
                layout: CanonicalLayout
                ) -> tuple[list[ProbeRow], dict[int, np.ndarray],
                           dict[int, np.ndarray]]:
-    """§2.6's batched two-forward probe over one cell, under `PROBE_GROUPING_READING`.
+    """The batched two-forward entropy probe over one cell, under `PROBE_GROUPING_READING`.
 
     Steered and unsteered run over the SAME token ids by construction (the records'
     `input_ids`), so the rise is a difference of two reads of one text, never of two
@@ -4784,7 +4782,7 @@ def probe_cell(runtime: NodeRuntime, records: Sequence[GenerationRecord], *,
             raise BehavioralHarnessError(
                 f"probe returned {len(steered)}/{len(unsteered)} rows for a group of "
                 f"{len(subset)} — a probe that drops rows would silently shorten a "
-                "cell's read (§9 item 10)")
+                "cell's read (the expected-N guard)")
         for rec, (es, _), (eu, nu) in zip(subset, steered, unsteered):
             es = np.asarray(es, dtype=np.float32)
             eu = np.asarray(eu, dtype=np.float32)
@@ -4838,7 +4836,7 @@ def run_cell(runtime: NodeRuntime, cell: CellSpec, *, alpha: float, pool: Prompt
         block = None
         panel = None
         if with_battery:
-            # §6 rides EVERY dose cell, including the bands — that is the point: the
+            # The battery rides EVERY dose cell, including the bands — that is the point: the
             # band rows at the same dose are the dose-matched capability floor.
             texts = [runtime.decode(r.generated_ids) for r in records]
             panel = coherence_panel(texts, [r.finished_with_eos for r in records])
@@ -4853,8 +4851,8 @@ def run_cell(runtime: NodeRuntime, cell: CellSpec, *, alpha: float, pool: Prompt
         runtime.end_cell()
     elapsed = time.monotonic() - t0
     tokens = sum(len(r.generated_ids) for r in records)
-    # M22: "the job is running" is not evidence of progress — the per-cell line IS the
-    # progress record, and it carries rc/tokens/elapsed exactly as §8 requires.
+    # "The job is running" is not evidence of progress — the per-cell line IS the
+    # progress record, and it carries rc/tokens/elapsed for every cell.
     logger.info("CELL %s rc=0 tokens_generated=%d elapsed=%.1fs n=%d",
                 cell.cell_id, tokens, elapsed, len(records))
     return records, rows, ent_s, ent_u, block, panel, elapsed, tokens
@@ -4865,7 +4863,7 @@ def characterize_layout_invariance(runtime: NodeRuntime, cell: CellSpec, *,
                                    layout: CanonicalLayout, corpus_sha: str,
                                    node_key: str, arm: str, n: int
                                    ) -> BatchInvarianceCharacterization:
-    """§2.7's DESCRIPTIVE B=8/B=1 re-run. M19: it cannot fail a gate.
+    """The DESCRIPTIVE B=8/B=1 re-run. Instrumentation: it cannot fail a gate.
 
     GPU reductions are not batch-size invariant; a divergence here is EXPECTED and is
     documented once per node so nobody later reads it as a defect. Any failure of the
@@ -4890,9 +4888,9 @@ def characterize_layout_invariance(runtime: NodeRuntime, cell: CellSpec, *,
                                node_key=node_key, arm=arm, n=n, with_battery=False)
             comparisons[B] = [np.asarray(r.generated_ids, dtype=np.int64)
                               for r in sorted(alt, key=lambda x: x.generation_id)]
-    except Exception as exc:                             # noqa: BLE001 — M19(a)
+    except Exception as exc:                             # noqa: BLE001 — named and recorded below
         logger.warning("batch-invariance characterization degraded (%s: %s) — "
-                       "recorded as measured=false; it cannot fail a gate (M19)",
+                       "recorded as measured=false; instrumentation cannot fail a gate",
                        type(exc).__name__, exc)
         measured = False
     return characterize_probe_batch_invariance(
@@ -4913,7 +4911,7 @@ def run_column(runtime: NodeRuntime, *, doc: Any, pool: PromptPool,
                mapping_authorization: Optional[MappingAuthorization] = None,
                ladder_authorization: Optional[LadderAuthorization] = None,
                take_attempt_lock: bool = True) -> ColumnResult:
-    """§2.1's one-load-per-node job, in order, with every §9 HALT live.
+    """The one-load-per-node column job, in order, with every `BehavioralHarnessError` HALT live.
 
     preflight → norm calibration → canonical-layout determination → all calibration
     cells → all transported cells → battery → entropy probe → in-job replay gate →
@@ -4926,26 +4924,25 @@ def run_column(runtime: NodeRuntime, *, doc: Any, pool: PromptPool,
     `corpus_sha_of_record` is the expectation the chain is asserted AGAINST and is a
     parameter, not a constant read from this module.
 
-    DURABILITY AND RESUMPTION (2026-08-05, Luxia's ruling; see the amendment note
-    above `RESUME_SUBTREE`). Every cell is banked ATOMICALLY the moment it completes,
+    DURABILITY AND RESUMPTION (see the note above `RESUME_SUBTREE`). Every cell is banked ATOMICALLY the moment it completes,
     so a killed column keeps everything it finished. `resume=True` re-verifies what is
     banked, requires this process to be the SAME RUN by every input that decides a
-    cell's contents, skips what it can prove, and runs the rest; §2.7's replay gate
-    then runs at the end over the FULL population as always. Neither path moves a byte
+    cell's contents, skips what it can prove, and runs the rest; the in-job replay
+    gate then runs at the end over the FULL population. Neither path moves a byte
     of the column of record: the manifest walk skips the bookkeeping subtree, and a
     skipped cell's outcome is rebuilt exactly — `elapsed_s` included — from its
     receipt and its files.
 
-    THE MAPPING MODE (2026-08-08). `mapping_authorization` is the run's half of the
-    two-key admission and defaults to None, which is every column that ever ran: with
-    it None and no mapping cell staged, `assert_mapping_column` asserts nothing and
-    this job is byte-for-byte the job it was. With it set, the column must be a PURE
+    THE MAPPING MODE. `mapping_authorization` is the run's half of the two-key
+    admission and defaults to None: with it None and no mapping cell staged,
+    `assert_mapping_column` asserts nothing and the mapping mode touches no byte of
+    the job. With it set, the column must be a PURE
     mapping column whose every cell names this exact spec.
 
-    THE AMENDED LADDER (2026-08-09). `ladder_authorization` is the run's half of the
-    second two-key admission and defaults to None, which is every column that ever ran:
-    with it None and no amended cell staged, `assert_amended_ladder_column` asserts
-    nothing and every dose validates against the frozen ladder as before. With it set,
+    THE AMENDED LADDER. `ladder_authorization` is the run's half of the second
+    two-key admission and defaults to None: with it None and no amended cell staged,
+    `assert_amended_ladder_column` asserts nothing and every dose validates against
+    the frozen ladder. With it set,
     every science cell in the column must name this exact spec — the amendment is
     whole-column, so a mixture is refused.
     """
