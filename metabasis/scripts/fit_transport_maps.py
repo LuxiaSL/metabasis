@@ -48,7 +48,26 @@ by `derive_webtext_splits.py` per prereg §2 / §6-I1 and CONSUMED here.
 A webtext-v3 manifest with no artifact REFUSES (never an empty test set, never a
 re-derivation); an artifact that does not belong to the loaded corpus REFUSES.
 
-Run (from pipeline/):
+CONSUMING A MAP. Every fitted map is banked, including maps that fail the null
+gate and Procrustes ranks above the rank guard k <= n_train / 1.2. The gate and
+the guard bind where a map is used: `load_checked_transport_map` (and
+`check_map_for_consumption`) read the map's record in `cp2_summary.json` and
+refuse a map whose `valid` is false or whose rank exceeds n_train / 1.2, unless
+the caller passes the named override (`--allow-failed-gate-map`,
+`--allow-over-rank-map` on the consuming tools), which is then recorded in that
+tool's output stamp. A summary or record that lacks `valid` or `n_train` is
+refused by name.
+
+PREDICTION AUTHORIZATION. `--require-prediction-stamp ARTIFACT` verifies a sealed
+prediction artifact (its stamp, its digest, its internal consistency) and refuses
+the run unless every (source site, target site, arm) it would fit is filed in the
+artifact. Direct-pair fits whose composed predictions were filed beforehand —
+the direct-pair fits of docs/planning/PREREG-webtext-v3-2026-08-03.md — must
+pass it, so the fit cannot precede the filing.
+Hub-leg fits are the inputs of those predictions, not predictions themselves,
+and run without it; the default behaviour is unchanged.
+
+Run (from the repository root):
   python -m metabasis.scripts.fit_transport_maps --selftest          # synthetic validation
   python -m metabasis.scripts.fit_transport_maps                      # real grid (post CP-1)
   python -m metabasis.scripts.fit_transport_maps \\
@@ -63,6 +82,7 @@ import argparse
 import hashlib
 import json
 import logging
+import re
 import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -2090,6 +2110,268 @@ def load_transport_map(path: Path) -> TransportMap:
                         left=get("left"), right=get("right"))
 
 
+# ---------------------------------------------------------------- consumption checks
+#: The rank guard: a Procrustes map of rank k is usable only where
+#: k <= n_train / RANK_GUARD_DIVISOR, with n_train the fit's own training-row count.
+RANK_GUARD_DIVISOR: float = 1.2
+
+#: The run summary `run_grid` writes beside the maps it banks; it holds one record
+#: per fit, and each record carries the null-gate verdict (`valid`) and `n_train`.
+FIT_SUMMARY_NAME = "cp2_summary.json"
+
+#: Command-line spellings of the two overrides, shared by every consumer so the
+#: flag a user types is the same in every tool.
+ALLOW_FAILED_GATE_FLAG = "--allow-failed-gate-map"
+ALLOW_OVER_RANK_FLAG = "--allow-over-rank-map"
+
+_FIT_NAME_RE = re.compile(
+    r"^fit_(?P<pair>.+)_(?P<arm>" + "|".join(ARMS) + r")_(?P<family>proc_k\d+|ridge)$")
+
+
+class MapGateError(RuntimeError):
+    """A saved transport map was refused for downstream use."""
+
+
+class MapGateRecordMissing(MapGateError):
+    """The fit record that vouches for a map is absent, incomplete or inconsistent."""
+
+
+class MapGateFailed(MapGateError):
+    """The map's recorded null-gate result is not a pass."""
+
+
+class MapRankForbidden(MapGateError):
+    """The map's rank exceeds the rank guard k <= n_train / 1.2."""
+
+
+class MapGateOverrides(BaseModel):
+    """Explicit, named permissions to consume a map the checks would refuse.
+
+    Each field corresponds to one command-line flag; a consumer that honours an
+    override records it in its output stamp through `MapGateCheck.stamp()`.
+    """
+
+    model_config = {"frozen": True, "extra": "forbid"}
+
+    allow_failed_gate: bool = False
+    allow_over_rank: bool = False
+
+    @property
+    def flags(self) -> list[str]:
+        return ([ALLOW_FAILED_GATE_FLAG] if self.allow_failed_gate else []) + \
+               ([ALLOW_OVER_RANK_FLAG] if self.allow_over_rank else [])
+
+
+class MapGateCheck(BaseModel):
+    """What the consumption check read for one map, and what it let through."""
+
+    model_config = {"frozen": True, "extra": "forbid"}
+
+    fit_path: str
+    summary_path: str
+    site_pair: str
+    arm: str
+    family: str
+    gate_valid: bool
+    n_train: int
+    #: The map's rank (rows of its PCA bases). None for ridge, whose rank is not
+    #: truncated and to which the Procrustes rank guard does not apply.
+    rank: Optional[int]
+    max_rank: float
+    rank_guard_ok: Optional[bool]
+    overrides_used: list[str] = Field(default_factory=list)
+
+    def stamp(self) -> dict[str, Any]:
+        """The block a consumer writes into its output stamp."""
+        return {"fit_path": self.fit_path, "summary_path": self.summary_path,
+                "site_pair": self.site_pair, "arm": self.arm, "family": self.family,
+                "null_gate_valid": self.gate_valid, "n_train": self.n_train,
+                "rank": self.rank, "rank_guard_max": round(self.max_rank, 3),
+                "rank_guard_ok": self.rank_guard_ok,
+                "rank_guard_rule": f"k <= n_train / {RANK_GUARD_DIVISOR} "
+                                   "(Procrustes only)",
+                "overrides_used": list(self.overrides_used)}
+
+
+def parse_fit_name(fit_path: Path) -> tuple[str, str, str]:
+    """(site_pair, arm, family) from a `save_transport_map` file name."""
+    m = _FIT_NAME_RE.match(fit_path.stem)
+    if m is None:
+        raise MapGateRecordMissing(
+            f"{fit_path.name}: not a transport-map file name of the form "
+            f"fit_<src>L<s>__<tgt>L<t>_<arm>_<family>.npz, so no fit record can be "
+            "matched to it")
+    return m["pair"].replace("__", "->"), m["arm"], m["family"]
+
+
+def check_map_for_consumption(fit_path: Path, *, tm: Optional[TransportMap] = None,
+                              summary_path: Optional[Path] = None,
+                              overrides: Optional[MapGateOverrides] = None
+                              ) -> MapGateCheck:
+    """Refuse a map whose fit failed its null gate or exceeds the rank guard.
+
+    The verdict is read from the fit record in the run summary beside the map (or
+    `summary_path`), matched by (site_pair, arm, family) from the file name. A
+    missing summary, a missing record, or a record without `valid` or `n_train` is
+    refused by name — never defaulted. `overrides` lets a caller consume a map the
+    gate or the guard would refuse; the returned check lists every override used.
+    """
+    overrides = overrides or MapGateOverrides()
+    fit_path = Path(fit_path)
+    site_pair, arm, family = parse_fit_name(fit_path)
+    summary = Path(summary_path) if summary_path else fit_path.parent / FIT_SUMMARY_NAME
+    if not summary.exists():
+        raise MapGateRecordMissing(
+            f"{fit_path.name}: no {FIT_SUMMARY_NAME} at {summary}. The null-gate "
+            "result and n_train live in that file; without it the map cannot be "
+            "shown to have passed its gate or to respect the rank guard")
+    try:
+        doc = json.loads(summary.read_text())
+    except (OSError, ValueError) as exc:
+        raise MapGateRecordMissing(f"{summary}: unreadable ({exc})") from exc
+    records = doc.get("records") if isinstance(doc, dict) else None
+    if not isinstance(records, list):
+        raise MapGateRecordMissing(f"{summary}: missing field `records`")
+    hits = [r for r in records if isinstance(r, dict)
+            and r.get("site_pair") == site_pair and r.get("arm") == arm
+            and r.get("family") == family]
+    if not hits:
+        raise MapGateRecordMissing(
+            f"{summary}: no record for site_pair={site_pair!r} arm={arm!r} "
+            f"family={family!r}, so {fit_path.name} has no recorded gate result")
+    for key in ("valid", "n_train"):
+        missing = [i for i, r in enumerate(hits) if key not in r]
+        if missing:
+            raise MapGateRecordMissing(
+                f"{summary}: the record for {site_pair} {arm} {family} lacks the "
+                f"field `{key}` — refusing rather than assuming a value")
+    if len({(bool(r["valid"]), int(r["n_train"])) for r in hits}) > 1:
+        raise MapGateRecordMissing(
+            f"{summary}: {len(hits)} disagreeing records for {site_pair} {arm} "
+            f"{family}; which one describes {fit_path.name} is undecidable")
+    rec = hits[0]
+    gate_valid, n_train = bool(rec["valid"]), int(rec["n_train"])
+    if n_train <= 0:
+        raise MapGateRecordMissing(f"{summary}: n_train={n_train} for {site_pair} "
+                                   f"{arm} {family} is not a training-row count")
+    max_rank = n_train / RANK_GUARD_DIVISOR
+    rank: Optional[int] = None
+    rank_ok: Optional[bool] = None
+    if family.startswith("proc_k"):
+        tm = tm if tm is not None else load_transport_map(fit_path)
+        if tm.va is None:
+            raise MapGateRecordMissing(f"{fit_path.name}: a proc family with no `va`")
+        rank = int(tm.va.shape[0])
+        k_eff = (rec.get("detail") or {}).get("k_effective")
+        if k_eff is not None and int(k_eff) != rank:
+            raise MapGateRecordMissing(
+                f"{summary}: the record says k_effective={k_eff} but {fit_path.name} "
+                f"has rank {rank} — the summary does not describe this map")
+        rank_ok = rank <= max_rank
+
+    used: list[str] = []
+    if not gate_valid:
+        if not overrides.allow_failed_gate:
+            raise MapGateFailed(
+                f"{fit_path.name}: the fit FAILED its null gate (valid=false in "
+                f"{summary}). A failing map is not used downstream; pass "
+                f"{ALLOW_FAILED_GATE_FLAG} to consume it anyway, which is recorded "
+                "in the output stamp")
+        used.append(ALLOW_FAILED_GATE_FLAG)
+    if rank_ok is False:
+        if not overrides.allow_over_rank:
+            raise MapRankForbidden(
+                f"{fit_path.name}: rank {rank} exceeds the rank guard k <= n_train/"
+                f"{RANK_GUARD_DIVISOR} = {max_rank:.1f} (n_train={n_train}). Pass "
+                f"{ALLOW_OVER_RANK_FLAG} to consume it anyway, which is recorded in "
+                "the output stamp")
+        used.append(ALLOW_OVER_RANK_FLAG)
+    if used:
+        logger.warning("map consumption OVERRIDE %s on %s", used, fit_path)
+    return MapGateCheck(fit_path=str(fit_path), summary_path=str(summary),
+                        site_pair=site_pair, arm=arm, family=family,
+                        gate_valid=gate_valid, n_train=n_train, rank=rank,
+                        max_rank=max_rank, rank_guard_ok=rank_ok,
+                        overrides_used=used)
+
+
+def load_checked_transport_map(fit_path: Path, *,
+                               summary_path: Optional[Path] = None,
+                               overrides: Optional[MapGateOverrides] = None
+                               ) -> tuple[TransportMap, MapGateCheck]:
+    """`load_transport_map` behind `check_map_for_consumption`: the downstream loader."""
+    tm = load_transport_map(Path(fit_path))
+    return tm, check_map_for_consumption(Path(fit_path), tm=tm,
+                                         summary_path=summary_path,
+                                         overrides=overrides)
+
+
+def write_fit_summary_fixture(fits_dir: Path, rows: Sequence[Mapping[str, Any]]) -> Path:
+    """Write a minimal run summary beside synthetic maps (self-test fixtures only).
+
+    Each row needs `site_pair`, `arm`, `family`, `valid` and `n_train`; the file
+    carries only the fields `check_map_for_consumption` reads.
+    """
+    path = Path(fits_dir) / FIT_SUMMARY_NAME
+    path.write_text(json.dumps({"records": [dict(r) for r in rows]}, indent=1))
+    return path
+
+
+# ---------------------------------------------------------------- prediction authorization
+class PredictionAuthorizationError(RuntimeError):
+    """A direct-pair fit was asked for without a verified, filed prediction."""
+
+
+def authorize_fit_against_predictions(
+        artifact: Path, *, src_model: str, src_sites: Sequence[int],
+        tgt_model: str, tgt_sites: Sequence[int], arms: Sequence[str],
+        stamp: Optional[Path] = None) -> dict[str, Any]:
+    """Verify a sealed prediction artifact and require every requested pair in it.
+
+    The artifact's stamp is verified first (`read_composed_predictions.
+    load_v3_prediction_artifact`, which also checks the artifact's internal
+    consistency). Then every (source site, target site, arm) the fit would bank
+    must match a slot of the artifact — in either direction, because one fit
+    object serves both ordered slots of a pair — with at least one filed column.
+    Any pair that is not filed refuses the whole run before anything is fitted.
+    Returns the block the run summary records.
+    """
+    from metabasis.scripts.read_composed_predictions import (
+        V3ArtifactError, load_v3_prediction_artifact)
+
+    try:
+        art, verification = load_v3_prediction_artifact(Path(artifact), stamp)
+    except V3ArtifactError as exc:
+        raise PredictionAuthorizationError(
+            f"the prediction artifact did not verify, so no direct-pair fit is "
+            f"authorized: {exc}") from exc
+    filed: set[tuple[str, int, str, int, str]] = set()
+    for slot in art.slots:
+        if any(col.filed for col in slot.columns.values()):
+            filed.add((slot.source_model, slot.source_site, slot.target_model,
+                       slot.target_site, slot.arm))
+    unfiled: list[str] = []
+    authorized: list[str] = []
+    for s_site in src_sites:
+        for t_site in tgt_sites:
+            for arm in arms:
+                fwd = (src_model, int(s_site), tgt_model, int(t_site), arm)
+                rev = (tgt_model, int(t_site), src_model, int(s_site), arm)
+                label = f"{src_model}L{s_site}->{tgt_model}L{t_site} ({arm})"
+                (authorized if (fwd in filed or rev in filed) else unfiled).append(label)
+    if unfiled:
+        raise PredictionAuthorizationError(
+            f"{len(unfiled)} requested pair(s) have no filed prediction in "
+            f"{artifact}: {unfiled}. A direct-pair fit under a sealed prediction "
+            "artifact fits only pairs filed in it; nothing was fitted")
+    return {"artifact_path": str(artifact),
+            "artifact_sha256": verification.sha256_recomputed,
+            "stamp_path": verification.stamp_path,
+            "stamp_sealed_utc": verification.stamp_sealed_utc,
+            "frozen_count_N": verification.frozen_count_N,
+            "authorized_pairs": authorized}
+
+
 def subset_bank(bank: StateBank, keep: np.ndarray) -> StateBank:
     """Row-subset a bank. median_norms stay the COLLECTION values (stamped)."""
     return StateBank(model=bank.model, arm=bank.arm,
@@ -2121,7 +2403,8 @@ def run_grid(arm_root: Path, src_model: str, tgt_model: str,
              splits_artifact: Optional[Path] = None,
              halves_artifact: Optional[Path] = None,
              half: Optional[HalfName] = None,
-             exclude_train_ids: Optional[Path] = None) -> dict:
+             exclude_train_ids: Optional[Path] = None,
+             prediction_authorization: Optional[Mapping[str, Any]] = None) -> dict:
     states_dir = arm_root / "states"
     fits_dir = arm_root / fits_dirname
     fits_dir.mkdir(parents=True, exist_ok=True)
@@ -2296,6 +2579,10 @@ def run_grid(arm_root: Path, src_model: str, tgt_model: str,
         # `metabasis.threads.stamp_thread_config` is the reader that says so.
         THREAD_STAMP_KEY: thread_config_stamp(),
     }
+    if prediction_authorization is not None:
+        # Present only on runs that passed --require-prediction-stamp, so every
+        # other run's summary keeps exactly its prior keys.
+        summary["prediction_authorization"] = dict(prediction_authorization)
     out = fits_dir / "cp2_summary.json"
     with open(out, "w") as f:
         json.dump(summary, f, indent=1)
@@ -3105,6 +3392,11 @@ def selftest(splits_artifact: Optional[Path] = None,
         skip("the FROZEN halves.json block",
              "no --halves-artifact path was given (desk-side staging, never git)")
 
+    with tempfile.TemporaryDirectory(prefix="a8_consume_") as td7:
+        _selftest_consumption(Path(td7), recs, maps, check)
+    with tempfile.TemporaryDirectory(prefix="a8_predauth_") as td8:
+        _selftest_prediction_authorization(Path(td8), check)
+
     print(f"\nselftest: {len(failures)} failure(s)")
     #  RAKE M44: coverage is part of the verdict, and per configuration — a bare
     #  pass count cannot be read without knowing which cell produced it.
@@ -3118,8 +3410,200 @@ def selftest(splits_artifact: Optional[Path] = None,
     return 1 if failures else 0
 
 
+def _selftest_consumption(root: Path, recs: Sequence[FitRecord],
+                          maps: Mapping[str, TransportMap], check) -> None:
+    """Map consumption checks on maps fitted by selftest 1 and planted records."""
+    print("== selftest 7: a saved map is CHECKED before it is consumed ==")
+    rows = [r.model_dump() for r in recs]
+    site_pair = rows[0]["site_pair"]
+
+    def plant(sub: str, mutate=None, *, summary: bool = True) -> Path:
+        d = root / sub
+        d.mkdir(parents=True, exist_ok=True)
+        for fam, tm in maps.items():
+            save_transport_map(d, site_pair, "native", fam, tm)
+        if summary:
+            planted = [dict(r, detail=dict(r.get("detail") or {})) for r in rows]
+            if mutate is not None:
+                for r in planted:
+                    mutate(r)
+            write_fit_summary_fixture(d, planted)
+        return d
+
+    def fit(d: Path, fam: str) -> Path:
+        return d / f"fit_{site_pair.replace('->', '__')}_native_{fam}.npz"
+
+    ok_dir = plant("ok")
+    tm_ok, chk = load_checked_transport_map(fit(ok_dir, "proc_k16"))
+    check(chk.gate_valid and chk.rank == 16 and chk.rank_guard_ok is True
+          and not chk.overrides_used and tm_ok.va is not None,
+          f"a VALID map within the guard loads (rank {chk.rank} <= "
+          f"{chk.max_rank:.1f} = n_train {chk.n_train}/1.2)")
+    check(set(chk.stamp()) >= {"null_gate_valid", "n_train", "rank",
+                               "rank_guard_ok", "overrides_used"},
+          "the check's stamp block carries the gate, n_train, rank and overrides")
+    _, chk_r = load_checked_transport_map(fit(ok_dir, "ridge"))
+    check(chk_r.rank is None and chk_r.rank_guard_ok is None,
+          "ridge is gate-checked; the Procrustes rank guard does not apply to it")
+
+    bad_gate = plant("bad_gate", lambda r: r.update(valid=False))
+    check(_raises(lambda: load_checked_transport_map(fit(bad_gate, "proc_k16")),
+                  MapGateFailed),
+          "a map whose recorded null gate FAILED is refused (planted valid=false)")
+    _, chk_g = load_checked_transport_map(
+        fit(bad_gate, "proc_k16"),
+        overrides=MapGateOverrides(allow_failed_gate=True))
+    check(chk_g.overrides_used == [ALLOW_FAILED_GATE_FLAG]
+          and chk_g.stamp()["overrides_used"] == [ALLOW_FAILED_GATE_FLAG],
+          f"…and loads only under {ALLOW_FAILED_GATE_FLAG}, which the stamp records")
+    check(_raises(lambda: load_checked_transport_map(
+        fit(bad_gate, "proc_k16"), overrides=MapGateOverrides(allow_over_rank=True)),
+        MapGateFailed),
+          "the rank override does not lift the gate refusal")
+
+    over = plant("over_rank", lambda r: r.update(n_train=12))
+    check(_raises(lambda: load_checked_transport_map(fit(over, "proc_k16")),
+                  MapRankForbidden),
+          "an OVER-RANK map is refused (rank 16 > n_train 12 / 1.2 = 10)")
+    check(_ok(lambda: load_checked_transport_map(fit(over, "proc_k8"))),
+          "…while rank 8 <= 10 in the same summary loads")
+    _, chk_o = load_checked_transport_map(
+        fit(over, "proc_k16"), overrides=MapGateOverrides(allow_over_rank=True))
+    check(chk_o.overrides_used == [ALLOW_OVER_RANK_FLAG]
+          and chk_o.rank_guard_ok is False,
+          f"…and loads only under {ALLOW_OVER_RANK_FLAG}, recorded with "
+          "rank_guard_ok=false")
+
+    for key in ("valid", "n_train"):
+        d = plant(f"no_{key}", lambda r, _k=key: r.pop(_k))
+        try:
+            load_checked_transport_map(fit(d, "proc_k16"))
+            check(False, f"a record without `{key}` must be refused")
+        except MapGateRecordMissing as exc:
+            check(f"`{key}`" in str(exc),
+                  f"a record MISSING `{key}` is refused by name, never defaulted")
+    no_sum = plant("no_summary", summary=False)
+    check(_raises(lambda: load_checked_transport_map(fit(no_sum, "proc_k16")),
+                  MapGateRecordMissing),
+          f"a map with no {FIT_SUMMARY_NAME} beside it is refused")
+    other = plant("other_pair", lambda r: r.update(site_pair="xL1->yL2"))
+    check(_raises(lambda: load_checked_transport_map(fit(other, "proc_k16")),
+                  MapGateRecordMissing),
+          "a summary with no record for this map is refused")
+    keff = plant("k_eff", lambda r: r["detail"].update(k_effective=99)
+                 if r["family"] == "proc_k16" else None)
+    check(_raises(lambda: load_checked_transport_map(fit(keff, "proc_k16")),
+                  MapGateRecordMissing),
+          "a record whose k_effective disagrees with the map's rank is refused")
+    odd = ok_dir / "some_map.npz"
+    odd.write_bytes(fit(ok_dir, "proc_k16").read_bytes())
+    check(_raises(lambda: load_checked_transport_map(odd), MapGateRecordMissing),
+          "a map file whose name cannot be matched to a record is refused")
+    check(_ok(lambda: load_checked_transport_map(
+        fit(no_sum, "proc_k16"), summary_path=ok_dir / FIT_SUMMARY_NAME)),
+          "an explicit summary_path is honoured for a map with no summary beside it")
+
+
+def _selftest_prediction_authorization(root: Path, check) -> None:
+    """--require-prediction-stamp: verified artifact, filed pairs only."""
+    print("== selftest 8: --require-prediction-stamp refuses unfiled pairs ==")
+    from metabasis.scripts.read_composed_predictions import (
+        SCHEMA_V3_PREDICTION_ARTIFACT_V1, V3_STAMP_FILENAME, V3_STAMP_TEXT)
+
+    def column(filed: Optional[float]) -> dict[str, Any]:
+        return {"hub": "8b", "hub_site": 16, "of_record": True,
+                "status": "FILED" if filed is not None else "NOT-FILABLE",
+                "a_comp": filed, "filed_a_comp": filed}
+
+    def slot(i: int, src: str, s: int, tgt: str, t: int, arm: str,
+             filed: Optional[float]) -> dict[str, Any]:
+        return {"ordinal": i, "prediction_id": f"p{i}",
+                "pair_id": f"{src}L{s}->{tgt}L{t}", "source_model": src,
+                "source_site": s, "target_model": tgt, "target_site": t,
+                "arm": arm, "arm_rule": "fixture", "family": "proc_k128",
+                "pair_class": "fixture", "status": "FILED", "columns":
+                    {"8b": column(filed)}}
+
+    slots = [slot(1, "3b", 14, "qwen-7b", 21, "native", 0.3),
+             slot(2, "3b", 14, "dsv2-lite", 22, "native", None)]
+    art = root / "predictions.json"
+    art.write_text(json.dumps({
+        "artifact": SCHEMA_V3_PREDICTION_ARTIFACT_V1, "frozen_count_N": len(slots),
+        "slots": slots, "hub_columns": [{"hub": "8b", "hub_site": 16,
+                                         "of_record": True}]}))
+
+    def seal(sha: Optional[str] = None) -> None:
+        (root / V3_STAMP_FILENAME).write_text(json.dumps({
+            "stamp": V3_STAMP_TEXT, "sealed_utc": "2000-01-01T00:00:00Z",
+            "artifact": art.name,
+            "artifact_sha256": sha or hashlib.sha256(art.read_bytes()).hexdigest(),
+            "prereg": "fixture", "frozen_count_N": len(slots),
+            "fully_filed": 1}))
+
+    seal()
+
+    def authorize(src: str, ss: Sequence[int], tgt: str, ts: Sequence[int],
+                  arms: Sequence[str] = ("native",)) -> dict[str, Any]:
+        return authorize_fit_against_predictions(
+            art, src_model=src, src_sites=ss, tgt_model=tgt, tgt_sites=ts, arms=arms)
+
+    got = authorize("3b", (14,), "qwen-7b", (21,))
+    check(got["authorized_pairs"] == ["3bL14->qwen-7bL21 (native)"]
+          and len(got["artifact_sha256"]) == 64,
+          "a pair FILED in a verified artifact is authorized, and the block "
+          "records the artifact sha")
+    check(_ok(lambda: authorize("qwen-7b", (21,), "3b", (14,))),
+          "the reverse ordering of a filed pair is authorized (one fit object "
+          "serves both ordered slots)")
+    for why, call in (
+            ("a pair with NO slot", lambda: authorize("3b", (14,), "8b", (16,))),
+            ("a slot whose columns are not FILED",
+             lambda: authorize("3b", (14,), "dsv2-lite", (22,))),
+            ("a filed pair at another site", lambda: authorize("3b", (15,),
+                                                              "qwen-7b", (21,))),
+            ("a filed pair in another arm", lambda: authorize(
+                "3b", (14,), "qwen-7b", (21,), arms=("native", "raw")))):
+        check(_raises(call, PredictionAuthorizationError),
+              f"UNFILED: {why} is refused")
+    seal(sha="0" * 64)
+    check(_raises(lambda: authorize("3b", (14,), "qwen-7b", (21,)),
+                  PredictionAuthorizationError),
+          "an artifact whose sha disagrees with its stamp is refused")
+    (root / V3_STAMP_FILENAME).unlink()
+    check(_raises(lambda: authorize("3b", (14,), "qwen-7b", (21,)),
+                  PredictionAuthorizationError),
+          "an artifact with no stamp is refused")
+    seal()
+    arm_root = root / "arm_root_never_created"
+    rc = main(["--require-prediction-stamp", str(art), "--arm-root", str(arm_root),
+               "--source-model", "3b", "--target-model", "8b",
+               "--src-sites", "14", "--tgt-sites", "16"])
+    check(rc == 2 and not arm_root.exists(),
+          "the CLI refuses an unfiled pair with exit 2 before touching the arm root")
+
+    def usage_error(argv: list[str]) -> bool:
+        import contextlib
+        import io
+        try:
+            with contextlib.redirect_stderr(io.StringIO()):
+                main(argv)
+        except SystemExit as exc:
+            return exc.code == 2
+        return False
+
+    check(usage_error(["--selftest", "--no-such-flag"]),
+          "an unknown flag is a usage error, never ignored")
+    try:
+        main(["--prediction-stamp", str(root / V3_STAMP_FILENAME),
+              "--arm-root", str(arm_root)])
+        check(False, "--prediction-stamp without its artifact must refuse")
+    except SystemExit:
+        check(not arm_root.exists(),
+              "--prediction-stamp without --require-prediction-stamp is refused")
+
+
 # ---------------------------------------------------------------- main
-def main() -> int:
+def main(argv: Optional[list[str]] = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--arm-root", type=Path, default=DEFAULT_ARM_ROOT)
     ap.add_argument("--source-model", default="3b", choices=MODEL_KEYS,
@@ -3135,8 +3619,10 @@ def main() -> int:
     ap.add_argument("--src-sites", default=None, help="comma-separated source-site override")
     ap.add_argument("--tgt-sites", default=None, help="comma-separated target-site override")
     ap.add_argument("--k-grid", default=None,
-                    help="comma-separated PC ranks (default 32,128,512). The add-3 rank "
-                         "guard binds small-n fits: k <= n_train/1.2, k512 forbidden at n<620.")
+                    help="comma-separated PC ranks (default 32,128,512). Every rank is "
+                         "fitted and banked; the rank guard k <= n_train/1.2 binds "
+                         "where a map is CONSUMED (check_map_for_consumption), so "
+                         "k512 at n_train < 615 is banked but refused downstream.")
     ap.add_argument("--fits-dirname", default="fits",
                     help="output subdir under arm-root (use fits_modefree for the "
                          "beside column — never overwrite the primary)")
@@ -3167,11 +3653,26 @@ def main() -> int:
                          "on the test side REFUSES. The artifact's sha stamps every "
                          "object and joins the split identity, so a beside object "
                          "can never overwrite or be read as a primary one.")
+    ap.add_argument("--require-prediction-stamp", type=Path, default=None,
+                    metavar="ARTIFACT",
+                    help="a sealed prediction artifact (schema "
+                         "webtext-v3-prediction-artifact/v1). Its stamp is verified "
+                         "and every (source site, target site, arm) this run would "
+                         "fit must be filed in it, or the run refuses before "
+                         "fitting anything. Required for direct-pair fits made "
+                         "under a sealed prediction; hub-leg fits do not pass it.")
+    ap.add_argument("--prediction-stamp", type=Path, default=None, metavar="STAMP",
+                    help="the stamp over --require-prediction-stamp's artifact "
+                         "(default: ARTIFACT-STAMP-PREDICTIONS-webtext-v3.json "
+                         "beside the artifact)")
     ap.add_argument("--selftest", action="store_true")
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
     if args.selftest:
         return selftest(splits_artifact=args.splits_artifact,
                         halves_artifact=args.halves_artifact)
+    if args.prediction_stamp is not None and args.require_prediction_stamp is None:
+        raise SystemExit("--prediction-stamp names the stamp over a prediction "
+                         "artifact; pass the artifact with --require-prediction-stamp")
     if args.half and not args.halves_artifact:
         raise SystemExit(
             f"--half {args.half} needs --halves-artifact <…/halves.json>: the "
@@ -3207,6 +3708,28 @@ def main() -> int:
                 f"model; its 12-site scan grid is {SCAN_GRIDS.get(model)}). Pass "
                 f"{'--src-sites' if role.startswith('--source') else '--tgt-sites'} "
                 f"explicitly — sites from curves, never fiat.")
+    sites_override = {
+        **({args.source_model: tuple(int(x) for x in args.src_sites.split(","))}
+           if args.src_sites else {}),
+        **({args.target_model: tuple(int(x) for x in args.tgt_sites.split(","))}
+           if args.tgt_sites else {})} or None
+    authorization: Optional[dict[str, Any]] = None
+    if args.require_prediction_stamp is not None:
+        sites_map = {**SITES, **(sites_override or {})}
+        try:
+            authorization = authorize_fit_against_predictions(
+                args.require_prediction_stamp, stamp=args.prediction_stamp,
+                src_model=args.source_model,
+                src_sites=sites_for(args.source_model, sites_map),
+                tgt_model=args.target_model,
+                tgt_sites=sites_for(args.target_model, sites_map), arms=arms)
+        except PredictionAuthorizationError as exc:
+            logger.error("REFUSED: %s", exc)
+            return 2
+        logger.info("prediction authorization: %d pair(s) filed in %s (sha %s…)",
+                    len(authorization["authorized_pairs"]),
+                    args.require_prediction_stamp,
+                    authorization["artifact_sha256"][:12])
     run_grid(args.arm_root, args.source_model, args.target_model, n_null=args.n_null,
              fit_strata=strata, fits_dirname=args.fits_dirname, arms=arms,
              splits_artifact=args.splits_artifact,
@@ -3214,11 +3737,8 @@ def main() -> int:
              exclude_train_ids=args.exclude_train_ids,
              k_grid=(tuple(int(k) for k in args.k_grid.split(","))
                      if args.k_grid else K_GRID),
-             sites_override={
-                 **({args.source_model: tuple(int(x) for x in args.src_sites.split(","))}
-                    if args.src_sites else {}),
-                 **({args.target_model: tuple(int(x) for x in args.tgt_sites.split(","))}
-                    if args.tgt_sites else {})} or None)
+             sites_override=sites_override,
+             prediction_authorization=authorization)
     return 0
 
 
