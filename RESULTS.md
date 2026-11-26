@@ -279,6 +279,37 @@ sees still lift language from .05 to .79.
 - **Composition survives seeding.** Composing two seeded legs through an intermediate model
   (Qwen2.5-3B → Llama-3.1-70B → 405B) matches the direct seeded map within 0.011 cos.
 
+### Seeding restores behavior at 405B, not just geometry
+
+This run uses the webtext-v3 corpus. The generic hub leg (Qwen2.5-3B → Llama-3.1-405B) was
+refit and matched the leg of record. Then 32 contrast pairs were added to its anchor set,
+8 for each of four axes. Each seed pair was left out of the source vector it would carry.
+
+On language, the transported vector's alignment with the 405B's own vector rises from .095
+to .813. The fraction of the 405B's vector inside the map's frame rises from .25 to .90.
+Two outcomes were predicted from these numbers before the runs: the seeded vector writes
+French, and random vectors through the same seeded map do not.
+
+| at dose +0.3 | P(French), language classifier |
+|---|---|
+| the 405B's own language vector | .422 |
+| **transported through the seeded map** | **.113** |
+| transported through the generic map | .0006 |
+| 18 random vectors through the same seeded map | .0006–.0007 |
+| unsteered baseline | .0007 |
+
+- **The seeded vector writes French.** It reaches 0.27 of the native effect, inside the
+  stated range of 0.1–1.0. The generations are fluent French, and every other dose stays at
+  the floor.
+- **The seeded map does not steer by itself.** Random vectors sent through it stay at the
+  floor at every dose, as predicted.
+- **Formality is not diagnostic at this site.** The 405B's own formality vector moves the
+  formality classifier only marginally at these doses. With no native effect to match, a
+  transported formality vector can neither show transfer nor fail it.
+
+The native and baseline generations in this run are byte-identical to an earlier run of the
+same cells on a different machine, so the steering instrument reproduces exactly.
+
 Seeded maps are a separate instrument from the generic-only maps. Their numbers never enter
 the composed-prediction results above.
 
@@ -340,11 +371,12 @@ would tie a map to the models that wrote its anchors.
 
 ## In progress
 
-- **The 405B class demonstration.** One of eight vector × leg runs is complete. Native
-  language fires: the French rate goes from .0007 to .42 at +0.3, with every generation still
-  scorable. Hub-transported language stays at the floor. Predictions for the remaining seven
-  are stated in advance, from geometry alone: in-family language writes **no** French, and
-  in-family formality carries the most.
+- **The 405B class demonstration on generic maps.** Two of eight vector × leg runs are
+  complete. Native language fires: the French rate goes from .0007 to .42 at +0.3, with every
+  generation still scorable. Hub-transported language stays at the floor. Formality barely
+  moves at this site, native vector included. Predictions for the remaining six are stated
+  in advance, from geometry alone: in-family language writes **no** French, and in-family
+  formality carries the most. The seeded counterpart is reported under Exploratory.
 - **An untargeted-diversity test.** 100 texts are drawn blind from a Common Crawl segment,
   in three independent draws. The prediction, frozen before any draw: language lifts
   substantially, formality moderately, sentiment weakly-to-moderately, and refusal not at

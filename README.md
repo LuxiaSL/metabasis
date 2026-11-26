@@ -46,6 +46,11 @@ exploratory, rejected, or in progress. In brief:
 - **At the largest model, the generic-text anchor frame stops holding the class
   directions.** *(Exploratory.)* Eight axis-relevant contrast pairs restore it, one seeded
   map serves many vectors, and composing two seeded legs costs almost nothing.
+- **Seeding restores behavior at 405B.** *(Exploratory.)* A Qwen2.5-3B language vector,
+  carried into Llama-3.1-405B through a map seeded with 32 contrast pairs, makes it write
+  French at 0.27 of its own vector's effect. Through the generic-only map, and as random
+  vectors through the seeded map, it does nothing. Both outcomes were predicted from
+  geometry before the run.
 
 ## Quickstart
 
@@ -235,6 +240,16 @@ One name per object, used the same way in code, outputs and prose:
   metabasis's transport stack builds on.
 - [repeng](https://github.com/vgel/repeng): multi-layer control vectors, one of the
   vector families RESULTS.md discusses.
+- [Plato's Key](https://hazyresearch.stanford.edu/blog/2026-11-25-platos-key) (Hazy
+  Research): the same map family, an orthogonal rotation plus one global scale, fit between
+  models' factual-recall keys on paired facts. Its fitted maps carry facts across 12 base
+  models up to 27B, and chaining two maps keeps a median 99 % of the direct map's accuracy.
+  It proposes a shared space as a hypothesis. metabasis fits on unlabeled web text, carries
+  steering vectors, builds the hub-and-spoke atlas, and goes up to 405B.
+- [The Platonic Representation Hypothesis](https://arxiv.org/abs/2405.07987): the
+  convergence claim this work tests functionally.
+- [Revisiting Model Stitching to Compare Neural Representations](https://arxiv.org/abs/2106.07682):
+  functional compatibility between networks, as distinct from representational similarity.
 
 ## Contributing
 
